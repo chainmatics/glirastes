@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import { GLIRASTES_NAVIGATE_ACTION_ID } from '../../browser/navigation.js';
@@ -17,15 +18,25 @@ import { getDefaultUiActionBus, type UiActionBus } from '../../browser/ui-action
 import { MentionChip as DefaultMentionChip } from '../components/mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import type { Mention } from '../types.js';
+import type { EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
+import { hasPendingChatInteractionsLoad, subscribeChatInteractionsLoads } from '../interactions/use-chat-interactions-data.js';
+
+const noSubscription = () => () => {};
+const noPendingLoad = () => false;
 import {
   collectKnownEntities,
   collectSeenReferenceKeys,
+  declaredOutputTypes,
+  indexSeenReferences,
+  isSeenBy,
   entityNavigationHref,
   isSeenReference,
+  isUnresolvedMentionPolicy,
   splitEntityText,
   type ChatEntityLinksConfig,
   type ChatEntityReference,
   type ChatEntityTextSegment,
+  type ChatUnresolvedMentionPolicy,
 } from './entity-links.js';
 
 export interface ChatEntityLinks {
@@ -51,6 +62,13 @@ export interface ChatEntityLinks {
   readonly mentionMarkers?: 'plain' | 'markdown';
   /** Whether a marker of the assistant becomes a chip (`entityLinks.verifyMentions`). */
   showsMention(mention: Mention): boolean;
+  /**
+   * `entityLinks.unresolvedMentions` (and its hook) for a marker
+   * of `message`: `'keep'` for a user's marker, a marker of a turn whose
+   * declarations this page does not know, one whose id the conversation
+   * showed, of an undeclared type, a command, or without the option.
+   */
+  unresolvedMention?(mention: Mention, message?: MentionMarkerMessage): ChatUnresolvedMentionPolicy;
 }
 
 const ChatEntityLinksContext = createContext<ChatEntityLinks | null>(null);
@@ -66,13 +84,33 @@ export function WithoutEntityLinks({ children }: { children: ReactNode }) {
   return <ChatEntityLinksContext.Provider value={DISABLED_LINKS}>{children}</ChatEntityLinksContext.Provider>;
 }
 
+/**
+ * The declarations `unresolvedMentions` reads a message by: the app's own
+ * `entityDeclarations` (live), merged over the server's declarations of the
+ * turn that streamed the message in this page life, when it has them. An
+ * entry of another `generation` (a left history) does not count.
+ */
+export interface MentionDeclarationCoverage {
+  readonly app?: EntityDeclarationsByTool;
+  readonly byMessage: ReadonlyMap<string, { readonly declarations: EntityDeclarationsByTool; readonly generation: number }>;
+  readonly generation: number;
+}
+
+/** The message a marker belongs to: its id and role. */
+export interface MentionMarkerMessage {
+  readonly id: string;
+  readonly role: string;
+}
+
 export function ChatEntityLinksProvider({
   config,
   uiActionBus,
+  declarationCoverage,
   children,
 }: {
   config?: ChatEntityLinksConfig;
   uiActionBus?: UiActionBus;
+  declarationCoverage?: MentionDeclarationCoverage;
   children: ReactNode;
 }) {
   const { messages, interactions, locale, entityDeclarations } = useChatContext();
@@ -108,6 +146,42 @@ export function ChatEntityLinksProvider({
     () => (verify ? collectSeenReferenceKeys(messages, searches ?? [], entityDeclarations) : undefined),
     [verify, messages, searches, entityDeclarations],
   );
+  // Only an app that sets `unresolvedMentions` (other than `keep`) or its hook judges markers.
+  const unresolvedOn = !!config && ((config.unresolvedMentions !== undefined && config.unresolvedMentions !== 'keep')
+    || typeof config.unresolvedMention === 'function');
+  // Without the option the links do not depend on these (as before).
+  const coverage = unresolvedOn ? declarationCoverage : undefined;
+  const markerMessages = unresolvedOn ? messages : undefined;
+  const outputTypesOf = useRef(new WeakMap<EntityDeclarationsByTool, Set<string>>());
+  /** The server's declarations of a turn merged with the app's, one object per pair (so caches can compare them). */
+  const mergedOf = useRef(new WeakMap<EntityDeclarationsByTool, { app: EntityDeclarationsByTool | undefined; merged: EntityDeclarationsByTool }>());
+  /** What each message object contributes, while its declarations and searches stay the same (weak: a left chat goes). */
+  const messageKeys = useRef(new WeakMap<object, never>());
+  const declarationsOf = useCallback((message: { id?: string } | undefined): EntityDeclarationsByTool | undefined => {
+    if (!coverage || !message || typeof message.id !== 'string') return undefined;
+    const entry = coverage.byMessage.get(message.id);
+    const server = entry && entry.generation === coverage.generation ? entry.declarations : undefined;
+    if (!server) return coverage.app;
+    if (!coverage.app) return server;
+    let found = mergedOf.current.get(server);
+    // The app's own win per tool, as in the declarations the chat uses.
+    if (!found || found.app !== coverage.app) mergedOf.current.set(server, found = { app: coverage.app, merged: { ...server, ...coverage.app } });
+    return found.merged;
+  }, [coverage]);
+  // One pass per conversation: where each reference was first shown, each tool result read by its own message's declarations.
+  const seenIndex = useMemo(
+    () => (coverage && markerMessages
+      ? indexSeenReferences(markerMessages, searches ?? [], (index) => declarationsOf(markerMessages[index]), messageKeys.current as WeakMap<object, never>)
+      : undefined),
+    [coverage, markerMessages, searches, declarationsOf],
+  );
+  // Default of `chatInteractions.loading`: `data` given as `undefined` while a load of it still waits.
+  const loadPending = useSyncExternalStore(
+    unresolvedOn ? subscribeChatInteractionsLoads : noSubscription,
+    unresolvedOn ? hasPendingChatInteractionsLoad : noPendingLoad,
+    noPendingLoad,
+  );
+  const interactionsLoading = interactions?.loading ?? (!!interactions?.awaitsData && loadPending);
 
   const canOpen = useCallback((type: string) => {
     const current = configRef.current;
@@ -128,6 +202,35 @@ export function ChatEntityLinksProvider({
   }, [interactions]);
 
   const value = useMemo<ChatEntityLinks>(() => {
+    /** `unresolvedMentions`: the policy of a marker, by the declarations and messages of its own turn. */
+    const unresolvedMention = (mention: Mention, message?: MentionMarkerMessage): ChatUnresolvedMentionPolicy => {
+      if (!config || !seenIndex || !markerMessages || mention.type === 'command') return 'keep';
+      // An assistant's marker, of a message with declarations to read it by.
+      if (!message || message.role !== 'assistant') return 'keep';
+      const index = seenIndex.indexOf.get(message.id);
+      if (index === undefined) return 'keep';
+      const declarations = declarationsOf(markerMessages[index]);
+      if (!declarations) return 'keep';
+      // A tool result up to this message that nothing can read might have shown the id: not judged.
+      if (seenIndex.firstUnreadable <= index) return 'keep';
+      // Only what the conversation showed up to this message: a later turn never changes the decision.
+      if (isSeenBy(seenIndex, index, mention.type, mention.id)) return 'keep';
+      // Entity and declaration types are lower-case: the marker's type is compared case-insensitively, as the seen check does.
+      const type = mention.type.toLowerCase();
+      let outputTypes = outputTypesOf.current.get(declarations);
+      if (!outputTypes) outputTypesOf.current.set(declarations, outputTypes = declaredOutputTypes(declarations));
+      const declared = interactions?.entity(type) !== undefined || outputTypes.has(type);
+      // Undeclared: as before, unless the declared types are still loading (then never a chip that later goes).
+      if (!declared) return interactionsLoading ? 'text' : 'keep';
+      let decided: unknown;
+      try {
+        decided = config.unresolvedMention?.({ type: mention.type, id: mention.id, label: mention.displayName });
+      } catch {
+        decided = undefined;
+      }
+      if (isUnresolvedMentionPolicy(decided)) return decided;
+      return isUnresolvedMentionPolicy(config.unresolvedMentions) ? config.unresolvedMentions : 'keep';
+    };
     const matchers = config?.matchers ?? [];
     const keyOf = (segment: { matcher: number; text: string; match?: string }) => `${segment.matcher}\u0000${segment.match ?? segment.text}`;
     const links: ChatEntityLinks = {
@@ -180,13 +283,14 @@ export function ChatEntityLinksProvider({
         if (mention.type === 'command') return true;
         return !seenKeys || isSeenReference(seenKeys, mention.type, mention.id);
       },
+      ...(unresolvedOn ? { unresolvedMention } : {}),
     };
     (links as { markdownComponents: ChatEntityLinks['markdownComponents'] }).markdownComponents = Object.fromEntries(
       LINKIFIED_TAGS.map((tag) => [tag, ({ node: _node, children, ...props }: Record<string, unknown>) =>
         createElement(tag, props, linkifyChildren(children as ReactNode, links))]),
     );
     return links;
-  }, [config, known, seenKeys, canOpen, open, locale.openEntityLabel]);
+  }, [config, known, seenKeys, unresolvedOn, interactions, seenIndex, markerMessages, declarationsOf, interactionsLoading, canOpen, open, locale.openEntityLabel]);
 
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
 }
@@ -296,8 +400,8 @@ function markerIndexOf(text: string): number {
 }
 const MARKDOWN_PUNCTUATION = /[\\`*_{}[\]()#+\-.!<>|~]/g;
 
-/** The markers of one text part, in the order they occur. */
-const MentionMarkersContext = createContext<ReadonlyArray<Mention> | null>(null);
+/** The markers of one text part, in the order they occur, and the message they belong to. */
+const MentionMarkersContext = createContext<{ mentions: ReadonlyArray<Mention>; message?: MentionMarkerMessage } | null>(null);
 
 /**
  * The text of a part with markers for Markdown (`mentionMarkers:
@@ -322,15 +426,25 @@ export function markdownWithMentionMarkers(
   return { content, mentions };
 }
 
-/** Gives the markers of a text part to the chips Markdown renders inside it. */
-export function MentionMarkers({ mentions, children }: { mentions: ReadonlyArray<Mention>; children: ReactNode }) {
-  return <MentionMarkersContext.Provider value={mentions}>{children}</MentionMarkersContext.Provider>;
+/**
+ * Gives the markers of a text part to the chips Markdown renders inside it.
+ * `message` (its id and role) lets `entityLinks.unresolvedMentions` judge
+ * them; without it they render as before.
+ */
+export function MentionMarkers({ mentions, message, children }: {
+  mentions: ReadonlyArray<Mention>;
+  message?: MentionMarkerMessage;
+  children: ReactNode;
+}) {
+  const value = useMemo(() => ({ mentions, ...(message ? { message } : {}) }), [mentions, message?.id, message?.role]);
+  return <MentionMarkersContext.Provider value={value}>{children}</MentionMarkersContext.Provider>;
 }
 
 /** A Markdown text with marker labels: each one a chip (when shown), the rest linked as before. */
 function MarkerText({ text }: { text: string }) {
   const links = useChatEntityLinks();
-  const mentions = useContext(MentionMarkersContext) ?? [];
+  const markers = useContext(MentionMarkersContext);
+  const mentions = markers?.mentions ?? [];
   const nodes: ReactNode[] = [];
   let cursor = 0;
   const plain = (value: string, key: string) => {
@@ -344,9 +458,12 @@ function MarkerText({ text }: { text: string }) {
     plain(text.slice(cursor, found.index), `t${cursor}`);
     const label = found[2] ?? '';
     const mention = mentions[markerIndexOf(found[1] ?? '')];
-    nodes.push(mention && links.showsMention(mention)
-      ? <MarkerChip key={`m${found.index}`} mention={mention} />
-      : <Fragment key={`m${found.index}`}>{label}</Fragment>);
+    const policy = mention ? links.unresolvedMention?.(mention, markers?.message) ?? 'keep' : 'keep';
+    nodes.push(mention && policy === 'text'
+      ? <Fragment key={`m${found.index}`}>{label}</Fragment>
+      : mention && links.showsMention(mention)
+        ? <MarkerChip key={`m${found.index}`} mention={mention} />
+        : <Fragment key={`m${found.index}`}>{label}</Fragment>);
     cursor = found.index + found[0].length;
   }
   plain(text.slice(cursor), `t${cursor}`);

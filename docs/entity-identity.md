@@ -134,3 +134,92 @@ per tool), e.g. for a server that is not `createAiChatHandler`.
 | `ChatEntityReference.data` | none | Free data from `resolve`, `knownEntities` or `resolveAmbiguous`, passed to `open` |
 | `mentionMarkers` | `'plain'` | `{{mention:type:id:label}}` markers in an assistant's text: `plain` renders such a text part without Markdown, each marker a chip (as before); `markdown` keeps the Markdown and puts each marker as an inline chip inside it (a custom `Markdown` keeps them through `markdownComponents`; without them it shows the label) |
 | `verifyMentions` | `true` | With `mentionMarkers: 'markdown'`: a marker becomes a chip only for an id the conversation showed as a record by declaration (`outputEntities` of a tool result, a `@` mention the user picked, a hit of an entity search tool), never by a field-name guess; otherwise its label stays text. `false` turns the check off |
+| `unresolvedMentions` | `'keep'` | An assistant's marker whose id the conversation never showed, see below. `'keep'` (as before) or `'text'` |
+| `unresolvedMention(marker)` | none | Decides `'keep'` or `'text'` per such marker; `undefined` (or a throw) leaves it to `unresolvedMentions` |
+
+### A marker with a wrong id
+
+A model sometimes writes a `{{mention:type:id:label}}` marker whose name is
+right but whose id is not (one character off, cut short, invented). The id
+is "unresolved" when the conversation up to and including the marker's
+message never showed that `type`/`id` pair as a record, by the same check as
+`verifyMentions`: a declared record of a tool result (`outputEntities`), a
+`@` mention the user picked, or a hit of an entity search tool. The id is
+compared as text, exactly; nothing assumes a shape (UUID, integer and slug
+ids are treated alike; an integer `42` in a result and `42` in a marker are
+one id). The type is compared case-insensitively, as in that check.
+
+What happens without the option (`'keep'`, the default):
+
+| `mentionMarkers` | Unresolved marker |
+| --- | --- |
+| `'plain'` (default) | A chip with the marker's id; clickable when the type can be opened, and opens that (wrong) id |
+| `'markdown'` with `verifyMentions` (default) | Its name as plain text |
+| `'markdown'` with `verifyMentions: false` | A chip with the marker's id |
+
+`unresolvedMentions: 'text'` shows such a marker's name as plain text (no
+chip, no link), in both modes. The rule: a marker in an assistant message is
+judged only if that message and every assistant message before it that holds
+a tool result have declarations to be read by; otherwise it stays as without
+the option. A judged marker becomes text only if its type is declared and
+no message up to and including its own showed its `type`/`id` (each tool
+result read with the declarations of its own message, a `read_result` with
+those of the message that produced the result), and it is no `command`.
+
+Declarations of a message:
+
+- an assistant message streamed in this page life by a turn that received
+  the server's declarations (`data-tool-entities`): those, with the app's
+  current `entityDeclarations` merged over them (the app's win per tool).
+  A later turn or a retry never changes them; an approval continuation of
+  the message keeps those of its first request;
+- otherwise the app's own `entityDeclarations` prop, when it passes one;
+- otherwise none.
+
+A message without declarations is not judged, and neither is any later
+message once an earlier assistant message holds a tool result nobody can
+read (it might have shown the id). Limits: the server's declarations are
+sent only while a turn runs and are not stored, so a history loaded from the
+session store or set by the host, and every turn after a stored tool result,
+is not judged without the `entityDeclarations` prop; a stored marker with a
+wrong id then shows as before (with `'plain'` a chip to the wrong id).
+Another history (another chat, `clear()`, a host's `setMessages` whose
+messages up to the latest user message are not the same objects) drops the
+turn declarations of the left one, also when message ids repeat across
+chats; back in a left chat its markers are judged only by the prop. A
+transport that hands new objects for unchanged messages therefore never
+keeps turn declarations.
+
+A user's markers come from the `@` list and never change. A **declared**
+type is an entity of `chatInteractions` or a `type` the message's
+declarations give in `outputEntities`; a type neither declares stays as
+before. While `chatInteractions` data is still loading a type that is not
+declared yet shows as text, never as a chip that disappears after the load;
+once loaded it is judged again. "Loading" is `chatInteractions.loading` when
+given; by default it is true while `data` is given as `undefined` and a
+`useChatInteractionsData` load of the page still waits for its answer (not
+after a failed request, not with its endpoint off: then the types known so
+far count). `<glirastes-chat>` sets it while its own GET of the
+interactions waits.
+
+The decision for a message depends only on the declarations and messages
+up to it and on the declared entity types, so it does not change when later
+turns run.
+
+`unresolvedMention(marker)` gets `{ type, id, label }` for each marker the
+option applies to and returns `'keep'` or `'text'` for it. Keep it pure: it
+may be called on every render, also while a turn streams, and its answers
+are not cached. A `:` in a name
+is fine; a `:` in an id or a `}` in a name do not parse as a marker.
+
+A custom bubble honours the option through
+`useChatEntityLinks().unresolvedMention(mention, { id, role })` (type
+`MentionMarkerMessage`): where it returns `'text'`, render
+`mention.displayName` as plain text instead of a chip. With
+`mentionMarkers: 'markdown'`, pass `message={{ id, role }}` to
+`MentionMarkers`; without it the markers render as before.
+
+Existing, unchanged: `verifyMentions` (markdown mode) checks against the
+current declarations of the whole conversation, which the server replaces
+each turn; a later turn whose tools declare other types can turn an earlier
+correct chip into text there.

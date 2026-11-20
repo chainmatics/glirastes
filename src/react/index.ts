@@ -355,6 +355,7 @@ export {
   type ChatEntityMatcher,
   type ChatEntityReference,
   type ChatEntityTextSegment,
+  type ChatUnresolvedMentionPolicy,
 } from './entity-links/entity-links.js';
 export {
   EntityLinkChip,
@@ -363,6 +364,7 @@ export {
   markdownWithMentionMarkers,
   useChatEntityLinks,
   type ChatEntityLinks,
+  type MentionMarkerMessage,
 } from './entity-links/entity-links-react.js';
 export {
   useChatInteractionsData,

@@ -92,6 +92,27 @@ export interface ChatEntityLinksConfig {
    */
   readonly verifyMentions?: boolean;
   /**
+   * An assistant's `{{mention:type:id:label}}` marker of a declared type
+   * (an entity of `chatInteractions` or a type the tools' `outputEntities`
+   * declare) whose `type`/`id` the conversation up to its message never
+   * showed as a record, by the same check as `verifyMentions` (e.g. a model
+   * that got one character of the id wrong). Applies with either
+   * `mentionMarkers`, and only to messages whose turn's declarations this
+   * page knows (see docs/entity-identity.md, "A marker with a wrong id").
+   * - `'keep'` (default): as before; with `mentionMarkers: 'plain'` a chip by
+   *   the marker's id, with `'markdown'` as `verifyMentions` says.
+   * - `'text'`: the marker's name as plain text, no chip, no link.
+   * Markers of the user, of `command` and of undeclared types stay as before.
+   */
+  readonly unresolvedMentions?: ChatUnresolvedMentionPolicy;
+  /**
+   * Decides for one such marker (only those `unresolvedMentions` applies
+   * to); `undefined` (or a throw) leaves it to `unresolvedMentions`. Keep it
+   * pure: it may be called on every render, also while a turn streams, and
+   * its answers are not cached.
+   */
+  unresolvedMention?(marker: ChatEntityReference): ChatUnresolvedMentionPolicy | undefined;
+  /**
    * Opens a reference. Return `false` to fall through to the default: the
    * entity's action that runs `ui.navigate` (a page like `/tasks/:taskId`),
    * through the app's navigation bridge. Without either a chip is not clickable.
@@ -99,6 +120,16 @@ export interface ChatEntityLinksConfig {
   open?(reference: ChatEntityReference): boolean | void;
   /** Whether `open` handles this type; default: every type. */
   canOpen?(type: string): boolean;
+}
+
+/** What happens to a marker whose id the conversation never showed (`unresolvedMentions`). */
+export type ChatUnresolvedMentionPolicy = 'keep' | 'text';
+
+const UNRESOLVED_POLICIES: ReadonlySet<unknown> = new Set(['keep', 'text']);
+
+/** Whether a value is a {@link ChatUnresolvedMentionPolicy}. */
+export function isUnresolvedMentionPolicy(value: unknown): value is ChatUnresolvedMentionPolicy {
+  return UNRESOLVED_POLICIES.has(value);
 }
 
 export type ChatEntityTextSegment =
@@ -375,6 +406,122 @@ export function collectSeenReferenceKeys(
     }
   }
   return keys;
+}
+
+/** What one message contributes to {@link indexSeenReferences}. */
+interface MessageSeenKeys {
+  readonly declarations: EntityDeclarationsByTool | undefined;
+  readonly searches: unknown;
+  readonly keys: ReadonlyArray<string>;
+  readonly hasToolResults: boolean;
+}
+
+/** Where each reference was first shown, and the first message whose tool results cannot be read. */
+export interface SeenReferenceIndex {
+  /** Per message id, its index in the conversation. */
+  readonly indexOf: ReadonlyMap<string, number>;
+  /** Per `referenceKey`, the index of the first message that showed it. */
+  readonly firstSeen: ReadonlyMap<string, number>;
+  /** The first assistant message with a tool result but no declarations to read it by; `Infinity` for none. */
+  readonly firstUnreadable: number;
+}
+
+/**
+ * The `type`/`id` pairs of `collectSeenReferenceKeys`, per message: each
+ * tool result read with the declarations of its own message
+ * (`declarationsAt`), a `read_result` with those of the message that
+ * produced the result it reads. One pass; a message object seen before with
+ * the same declarations and searches is reused from `cache` (except one
+ * with a `read_result`, which depends on earlier messages).
+ */
+export function indexSeenReferences(
+  messages: ReadonlyArray<{ readonly id?: string; readonly role?: string; readonly parts: ReadonlyArray<unknown> }>,
+  searches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }>,
+  declarationsAt: (index: number) => EntityDeclarationsByTool | undefined,
+  cache?: WeakMap<object, MessageSeenKeys>,
+): SeenReferenceIndex {
+  const byTool = new Map(searches.map((entry) => [toolKey(entry.search.tool), entry]));
+  /** Per result id: the producing tool, its output and its message. */
+  const produced = new Map<string, { tool: string; output: unknown; index: number }>();
+  const indexOf = new Map<string, number>();
+  const firstSeen = new Map<string, number>();
+  let firstUnreadable = Infinity;
+  messages.forEach((message, index) => {
+    if (typeof message.id === 'string' && !indexOf.has(message.id)) indexOf.set(message.id, index);
+    const declarations = declarationsAt(index);
+    for (const part of message.parts) {
+      const result = toolOutputOf(part);
+      const marker = result && isRecord(result.output) ? result.output._result : undefined;
+      if (result && result.tool !== READ_RESULT_TOOL_NAME && isRecord(marker) && typeof marker.id === 'string') {
+        produced.set(marker.id, { tool: result.tool, output: result.output, index });
+      }
+    }
+    let entry = cache?.get(message);
+    if (!entry || entry.declarations !== declarations || entry.searches !== searches) {
+      const keys: string[] = [];
+      let hasToolResults = false;
+      let reads = false;
+      for (const part of message.parts) {
+        if (isRecord(part) && part.type === 'text' && typeof part.text === 'string') {
+          if (message.role !== 'user') continue;
+          for (const segment of parseMentionSegments(part.text)) {
+            if (segment.kind === 'mention' && segment.mention.type !== 'command') keys.push(referenceKey(segment.mention.type, segment.mention.id));
+          }
+          continue;
+        }
+        const result = toolOutputOf(part);
+        if (!result) continue;
+        hasToolResults = true;
+        const readId = result.tool === READ_RESULT_TOOL_NAME && isRecord(part) && isRecord(part.input)
+          && typeof part.input.resultId === 'string' ? part.input.resultId : undefined;
+        const source = readId !== undefined ? produced.get(readId) : undefined;
+        if (readId !== undefined) reads = true;
+        const producer = source?.tool ?? result.tool;
+        const own = source ? declarationsAt(source.index) : declarations;
+        const list = own && Object.prototype.hasOwnProperty.call(own, producer) ? own[producer]!.output : undefined;
+        const declared = source && producer !== result.tool ? declarationsForRead(list, source.output) : list;
+        if (declared) {
+          for (const identity of declaredRecordsOf(result.output, declared).values()) {
+            keys.push(referenceKey(identity.declaration.type ?? '', entityIdText(identity.idValues)));
+          }
+        }
+        const search = byTool.get(toolKey(result.tool));
+        if (!search) continue;
+        for (const candidate of [result.output, at(result.output, ['data']), at(result.output, ['value'])]) {
+          const items = search.search.itemsPath.length ? at(candidate, search.search.itemsPath) : candidate;
+          if (!Array.isArray(items)) continue;
+          for (const item of items) {
+            const id = at(item, [search.search.idField]);
+            if (typeof id === 'string' || typeof id === 'number') keys.push(referenceKey(search.type, String(id)));
+          }
+          break;
+        }
+      }
+      entry = { declarations, searches, keys, hasToolResults };
+      if (cache && !reads) cache.set(message, entry);
+    }
+    for (const key of entry.keys) if (!firstSeen.has(key)) firstSeen.set(key, index);
+    if (message.role === 'assistant' && entry.hasToolResults && !declarations && firstUnreadable === Infinity) firstUnreadable = index;
+  });
+  return { indexOf, firstSeen, firstUnreadable };
+}
+
+/** Whether `index` showed this reference by its own message or an earlier one. */
+export function isSeenBy(index: SeenReferenceIndex, at: number, type: string, id: string): boolean {
+  const typed = index.firstSeen.get(referenceKey(type, id));
+  const untyped = index.firstSeen.get(referenceKey('', id));
+  return (typed !== undefined && typed <= at) || (untyped !== undefined && untyped <= at);
+}
+
+/** The lower-cased types the tools' `outputEntities` declare. */
+export function declaredOutputTypes(declarations: EntityDeclarationsByTool | undefined): Set<string> {
+  const types = new Set<string>();
+  for (const tool of Object.values(declarations ?? {})) {
+    for (const declaration of tool?.output ?? []) {
+      if (typeof declaration?.type === 'string') types.add(declaration.type.toLowerCase());
+    }
+  }
+  return types;
 }
 
 /** Key of `collectSeenReferenceKeys`; the type compares case-insensitively. */

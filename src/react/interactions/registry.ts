@@ -37,6 +37,15 @@ export interface ChatInteractionsConfig extends DerivedEntityOptions {
   readonly locale?: ChatLocaleCode;
   /** Passed to entity searches; set by the provider from `completionContext`. */
   readonly context?: CompletionPermissionContext;
+  /**
+   * True while `data` is still loading, so the declared entity types are not
+   * known yet (`entityLinks.unresolvedMentions` then shows a marker of a type
+   * it cannot judge as text); false: judge with what is known. Default: true
+   * while `data` is given as a key but `undefined` and a
+   * `useChatInteractionsData` load of this page is still waiting for its
+   * answer; not after a failed request or with its endpoint off.
+   */
+  readonly loading?: boolean;
 }
 
 /** A command or entity action that still needs arguments from the user. */
@@ -74,6 +83,10 @@ export interface ChatInteractionRegistry {
   readonly entitySearches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }>;
   /** Searches one entity type, e.g. for an argument field; failures yield no hits. */
   searchEntity(type: string, query: string, signal: AbortSignal): Promise<ChatEntityItem[]>;
+  /** `ChatInteractionsConfig.loading` as given (no default). */
+  readonly loading?: boolean;
+  /** `data` is given as a key but `undefined` (the default of `loading` reads it). */
+  readonly awaitsData?: boolean;
   /**
    * How to send a composed message: `undefined` for a normal model message
    * (no command, several commands, or a command mixed with free text).
@@ -279,6 +292,9 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     command: (id) => commands.get(id),
     entity: (type) => entities.get(type),
     completeCommand: complete,
+
+    ...(typeof config.loading === 'boolean' ? { loading: config.loading } : {}),
+    awaitsData: Object.prototype.hasOwnProperty.call(config, 'data') && config.data === undefined,
 
     async searchEntity(type, query, signal) {
       const entity = entities.get(type);

@@ -459,6 +459,8 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     if (!hasVisibleToolOutput) visible = false;
   }
 
+  /** The message `entityLinks.unresolvedMentions` judges its markers by. */
+  const markerMessage = { id: message.id, role: message.role };
   const textNodes = cleanTextParts.map((text, i) => {
     const segments = parseMentionSegments(text);
     const hasMention = segments.some((segment) => segment.kind === 'mention');
@@ -477,7 +479,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     if (linkText && links.mentionMarkers === 'markdown') {
       const { content, mentions } = markdownWithMentionMarkers(segments);
       return (
-        <MentionMarkers key={`text-${i}`} mentions={mentions}>
+        <MentionMarkers key={`text-${i}`} mentions={mentions} message={markerMessage}>
           <MarkdownComponent content={content} />
         </MentionMarkers>
       );
@@ -493,6 +495,12 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
                 {linkText ? <EntityText text={segment.text} /> : segment.text}
               </span>
             );
+          }
+
+          // `entityLinks.unresolvedMentions`: an assistant's marker with an id the conversation never showed.
+          const unresolved = linkText ? links.unresolvedMention?.(segment.mention, markerMessage) ?? 'keep' : 'keep';
+          if (unresolved === 'text') {
+            return <Fragment key={`segment-mention-${index}`}>{segment.mention.displayName}</Fragment>;
           }
 
           return (

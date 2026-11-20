@@ -595,6 +595,30 @@ function carriesUiOutcome(output: Record<string, unknown>): boolean {
  * regenerated answer is). Results of a history the host set while the
  * request ran (another chat, another tab) do not count as this request's.
  */
+/** The server's declarations of the turn that streamed a message, and the history generation they belong to. */
+interface TurnDeclarations {
+  readonly declarations: EntityDeclarationsByTool;
+  readonly generation: number;
+}
+
+/**
+ * Whether `next` continues the history `previous` showed: every message up to
+ * the latest user message of `previous` is still there as the same object (a
+ * retry or a new turn changes only what comes after it). Another chat with
+ * the same message ids is a new history.
+ */
+function continuesHistory(previous: ReadonlyArray<{ role: string }>, next: ReadonlyArray<{ role: string }>): boolean {
+  let lastUser = -1;
+  for (let index = previous.length - 1; index >= 0; index -= 1) {
+    if (previous[index]!.role === 'user') { lastUser = index; break; }
+  }
+  if (next.length <= lastUser) return false;
+  for (let index = 0; index <= lastUser; index += 1) {
+    if (next[index] !== previous[index]) return false;
+  }
+  return true;
+}
+
 function continuesRequestBase(
   messages: ReadonlyArray<{ id: string }>,
   base: ReadonlyArray<{ id: string; role: string }>,
@@ -721,6 +745,20 @@ export function AiChatProvider({
   }, [streamedEntities, entityDeclarations]);
   const declarationsRef = useRef(declarations);
   declarationsRef.current = declarations;
+  // `entityLinks.unresolvedMentions`: the declarations each assistant message's own turn received from
+  // the server in this page life. Tracked only with the option on, so nothing changes without it.
+  const unresolvedMentionsOn = !!entityLinks && ((entityLinks.unresolvedMentions !== undefined && entityLinks.unresolvedMentions !== 'keep')
+    || typeof entityLinks.unresolvedMention === 'function');
+  const unresolvedMentionsOnRef = useRef(unresolvedMentionsOn);
+  unresolvedMentionsOnRef.current = unresolvedMentionsOn;
+  /** Per assistant message id: the server's declarations of the turn that streamed it, and the history they belong to. */
+  const [turnDeclarations, setTurnDeclarations] = useState<ReadonlyMap<string, TurnDeclarations>>(() => new Map());
+  /** The messages a turn started from when its declarations arrived, those declarations and the history; `null` outside such a turn. */
+  const declaredTurnRef = useRef<{ base: Array<{ id: string; role: string }>; declarations: EntityDeclarationsByTool; generation: number } | null>(null);
+  const appDeclarations = useMemo(() => {
+    const own = sanitizeEntityDeclarations(entityDeclarations);
+    return Object.keys(own).length > 0 ? own : undefined;
+  }, [entityDeclarations]);
   const pageLanguage = usePageLanguage();
   // The app's stated language, else the page's (the UI the user reads), the server's tool wording only without one;
   // `languageSource: 'server'` keeps the order before 0.18.0.
@@ -1081,6 +1119,14 @@ export function AiChatProvider({
       const data = dataPart.data as { tools?: unknown } | null;
       const next = sanitizeEntityDeclarations(data?.tools);
       setStreamedEntities((current) => (JSON.stringify(current ?? {}) === JSON.stringify(next) ? current : next));
+      if (unresolvedMentionsOnRef.current) {
+        // The server's only: the app's own `entityDeclarations` are merged in live when a marker is judged.
+        declaredTurnRef.current = {
+          base: rawMessagesRef.current.map(({ id, role }) => ({ id, role })),
+          declarations: next,
+          generation: historyRef.current.generation,
+        };
+      }
       return;
     }
     if (dataPart.type === 'data-tool-presentation') {
@@ -1153,6 +1199,20 @@ export function AiChatProvider({
   transportRef.current = resolvedTransport;
   const rawMessagesRef = useRef(rawMessages);
   rawMessagesRef.current = rawMessages;
+  // `entityLinks.unresolvedMentions`: a new history (another chat, `clear()`, a host's `setMessages`)
+  // starts a new generation, so the turn declarations of the left one never judge its messages.
+  const historyRef = useRef<{ messages: ReadonlyArray<{ role: string }>; generation: number }>({ messages: rawMessages, generation: 0 });
+  if (unresolvedMentionsOn && historyRef.current.messages !== rawMessages) {
+    historyRef.current = {
+      messages: rawMessages,
+      generation: historyRef.current.generation + (continuesHistory(historyRef.current.messages, rawMessages) ? 0 : 1),
+    };
+  }
+  const historyGeneration = historyRef.current.generation;
+  const declarationCoverage = useMemo(
+    () => ({ ...(appDeclarations ? { app: appDeclarations } : {}), byMessage: turnDeclarations, generation: historyGeneration }),
+    [appDeclarations, turnDeclarations, historyGeneration],
+  );
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
   const attachmentStore = session?.attachments ?? null;
@@ -1619,6 +1679,40 @@ export function AiChatProvider({
       }
     });
   }, [reportUiOutcome, trackUiWork]);
+
+  // The assistant messages a turn with declarations streams (`entityLinks.unresolvedMentions`); entries of
+  // messages no longer shown or of a left history are dropped.
+  useEffect(() => {
+    if (!unresolvedMentionsOnRef.current) return;
+    let fresh: string[] = [];
+    const turn = declaredTurnRef.current;
+    if (turn) {
+      // Another history replaced the messages: its messages are not this turn's.
+      if (turn.generation !== historyGeneration || !continuesRequestBase(rawMessages, turn.base)) {
+        declaredTurnRef.current = null;
+      } else {
+        const before = new Set(turn.base.map(({ id }) => id));
+        fresh = rawMessages.filter(({ id, role }) => role === 'assistant' && !before.has(id)).map(({ id }) => id);
+        if (!isLoading) declaredTurnRef.current = null;
+      }
+    }
+    const shown = new Set(rawMessages.map(({ id }) => id));
+    setTurnDeclarations((current) => {
+      let changed = false;
+      const next = new Map<string, TurnDeclarations>();
+      for (const [id, entry] of current) {
+        if (entry.generation === historyGeneration && shown.has(id)) next.set(id, entry);
+        else changed = true;
+      }
+      // A message keeps the declarations of the turn that streamed it; a later turn never replaces them.
+      for (const id of fresh) {
+        if (next.has(id)) continue;
+        next.set(id, { declarations: turn!.declarations, generation: historyGeneration });
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [rawMessages, isLoading, historyGeneration]);
 
   // Process tool results and approvals from streaming messages
   useEffect(() => {
@@ -3000,7 +3094,11 @@ export function AiChatProvider({
   return (
     <ChatContext.Provider value={contextValue}>
       <ChatComposerQueueProvider onOpenRequest={onOpenRequest}>
-        <ChatEntityLinksProvider config={entityLinks} uiActionBus={uiActionBus}>
+        <ChatEntityLinksProvider
+          config={entityLinks}
+          uiActionBus={uiActionBus}
+          declarationCoverage={declarationCoverage}
+        >
           {children}
         </ChatEntityLinksProvider>
       </ChatComposerQueueProvider>
