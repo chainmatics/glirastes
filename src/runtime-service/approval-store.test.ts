@@ -69,7 +69,7 @@ const postgresUrl = process.env.GLIRASTES_TEST_POSTGRES_URL;
 describe.skipIf(!postgresUrl)(
   "Postgres approval store with a real database",
   () => {
-    let pool: Pool;
+    let pool: pg.Pool;
     const namespace = `runtime-test-${randomUUID()}`;
     beforeAll(async () => {
       pool = new Pool({ connectionString: postgresUrl, max: 12 });

@@ -144,8 +144,12 @@ export interface ChatContextValue {
   hasMore: boolean;
   pipelineSteps: PipelineStepReport[];
   pipelineState: PipelineState | null;
-  /** How each turn ended, keyed by the user message that started it (`useTurnOutcome`). */
-  turnOutcomes?: ReadonlyMap<string, TurnOutcome>;
+  /**
+   * How each turn ended, keyed by the user message that started it (`useTurnOutcome`). The provider
+   * always sets it (empty when nothing was recorded); the SDK's own readers also accept a hand-built
+   * context without it.
+   */
+  turnOutcomes: ReadonlyMap<string, TurnOutcome>;
 
   // Approvals
   pendingApprovals: PendingApproval[];

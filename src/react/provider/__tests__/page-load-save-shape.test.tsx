@@ -73,7 +73,7 @@ function Host({ config }: { config: AiChatProviderConfig & { session?: SessionCo
     continueTurn: () => {},
     setUiOutcomeReporting: () => {},
   }), [messages, status]);
-  return <AiChatProvider transport={transport} {...config} />;
+  return <AiChatProvider transport={transport} {...config}>{null}</AiChatProvider>;
 }
 
 const outcomeOf = (status: string) => ({ glirastesTurnOutcome: { status, reason: status === 'error' ? 'request-failed' : 'stopped', at: 'x' } });
