@@ -105,7 +105,8 @@ export interface ChatContextValue {
   /**
    * The latest refused `send`/`submit` (also from the built-in composers):
    * reason and time, no content. Null until one is refused, and again after
-   * the next accepted (sent or queued) message.
+   * the next accepted (sent or queued) `send`/`submit`; sending queued
+   * messages does not touch it. A refusal re-renders the context once.
    */
   lastRejection: ChatSubmitRejection | null;
   /**
