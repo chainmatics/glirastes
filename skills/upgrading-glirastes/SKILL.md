@@ -79,7 +79,7 @@ Run it:
 9. When the developer confirms the review is done, run `glirastes upgrade ack`,
    adding `--defer <id>` for every newly postponed item (earlier deferrals are
    kept). It refuses while a Must item (`status: "affected"` or `"unclear"`)
-   is not deferred. `--force` skips every blocking item, so use it only when
+   is not deferred. The force flag skips every blocking item, so use it only when
    each of them is already implemented and detection cannot tell: verify every
    one in the code (each place the evidence and `howTo` name), then run
    `glirastes upgrade ack --force` without asking and
