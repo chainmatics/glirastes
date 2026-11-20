@@ -145,7 +145,7 @@ export function collectSeenObjects(
 
 /**
  * `playlist: {"playlist_id":"…","displayName":"…"}`: the type outside, so no field can shadow it.
- * `<`, `>`, `&` and line separators in the JSON are escaped, so a value can never close the block.
+ * `<`, U+2028 and U+2029 in the JSON are escaped (`>` and `&` stay), so no value can close or open a tag.
  */
 function lineOf(object: SeenObject): string {
   const fields = object.label ? [...object.id, object.label] : object.id;

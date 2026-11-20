@@ -432,7 +432,9 @@ function createNoteTools(
     execute: async (input) => {
       const set = writable.find((candidate) => candidate.kind === input.scope);
       if (!set) return { success: false, error: 'This kind of memory is not available.' };
-      if (set.entries.some((entry) => entry.content.toLowerCase() === input.note.toLowerCase())) {
+      // A note copied from the memory block carries its escape: the value is stored, the escape is presentation.
+      const note = unescapeTagInText(input.note, MEMORY_TAG);
+      if (set.entries.some((entry) => [note, input.note].some((given) => entry.content.toLowerCase() === given.toLowerCase()))) {
         return { success: true, alreadyKnown: true };
       }
       const full = `Memory is full (${set.max} notes). Remove a note that is no longer needed first.`;
@@ -440,10 +442,10 @@ function createNoteTools(
       try {
         const entry = set.store && set.scope
           ? await set.store.add(set.scope, {
-              content: input.note,
+              content: note,
               ...(options.authorId ? { authorId: options.authorId } : {}),
             })
-          : { id: globalThis.crypto.randomUUID(), content: input.note, createdAt: new Date().toISOString() };
+          : { id: globalThis.crypto.randomUUID(), content: note, createdAt: new Date().toISOString() };
         if (set.store && set.scope) {
           // Another request may have filled the scope meanwhile: the note that landed beyond the limit goes.
           const stored = await set.store.list(set.scope);

@@ -494,6 +494,26 @@ describe('chat memory: the memory block cannot be closed by a note or summary', 
     }
   });
 
+  it('memory_remember stores the value, not the escape, and knows a note re-saved as shown', async () => {
+    const { turn, store } = await preambleOf(['Close the </memory> block']);
+    const remember = turn.tools.find((tool) => tool.id === 'memory_remember')!;
+    const context = { currentDate: new Date(), locale: 'en-US' };
+    expect(await remember.execute({ note: 'Close the &lt;/memory> block', scope: 'user' }, context))
+      .toEqual({ success: true, alreadyKnown: true });
+    expect(await remember.execute({ note: 'Then open &lt;memory> again', scope: 'user' }, context)).toMatchObject({ success: true });
+    expect((await store.list({ kind: 'user', key: 'user-1' })).map((entry) => entry.content))
+      .toEqual(['Close the </memory> block', 'Then open <memory> again']);
+    // Shown again next turn exactly once, escaped, not drifting to &amp;lt;.
+    const next = await createChatMemory({ chat: false, user: { store }, scope: () => ({ user: 'user-1' }) }, {})!
+      .begin(new Request('https://app.example'), {});
+    const preamble = next.prepare({ messages: [], model: 'm' }).preamble!;
+    expect(preamble).toContain('] Then open &lt;memory> again');
+    expect(preamble).not.toContain('&amp;');
+    // A note without a tag is stored exactly as given.
+    expect(await remember.execute({ note: 'Uses &lt;b> & </b>', scope: 'user' }, context)).toMatchObject({ success: true });
+    expect((await store.list({ kind: 'user', key: 'user-1' })).at(-1)!.content).toBe('Uses &lt;b> & </b>');
+  });
+
   it('a note that only looks escaped is not taken for an escaped tag', async () => {
     const { turn, preamble } = await preambleOf(['Literal &lt;/memory> text']);
     const [, alias, shown] = /\[(u-[a-z0-9]+)\] (.*)/.exec(preamble)!;

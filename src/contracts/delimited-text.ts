@@ -30,16 +30,23 @@ export function escapeJsonForBlock(json: string): string {
   return json.replace(/[<\u2028\u2029]/g, unicodeEscape);
 }
 
-// At most 64 whitespace characters between `<`, `/` and the name keep the scan linear.
+// Read like whitespace between `<`, `/` and the name (for the match only, never removed from
+// the text): whitespace, NUL, zero-width space/non-joiner/joiner, soft hyphen, word joiner, BOM.
+const IGNORABLE = '[\\s\\u0000\\u200b-\\u200d\\u00ad\\u2060\\ufeff]';
+// Bounded runs keep the scan linear; a run that reaches the bound counts as a tag (over-escaping).
 const tagPattern = (tag: string, prefix: string) =>
-  new RegExp(`${prefix}(?=\\s{0,64}\\/?\\s{0,64}${tag}(?!\\w))`, 'gi');
+  new RegExp(`${prefix}(?=${IGNORABLE}{0,64}\\/?(?:${IGNORABLE}{64}|${IGNORABLE}{0,64}${tag}(?!\\w)))`, 'gi');
 
 /**
- * Free text for a block delimited by `<tag>` ... `</tag>`: every `<` that opens
- * or closes that tag (any case, whitespace allowed) becomes `&lt;`, and an
- * `&` that already starts such an escape becomes `&amp;`, so the escape is
- * reversible (`unescapeTagInText`) and unambiguous. Text without the tag
- * stays byte-identical. `tag` must be a plain name (`[a-z-]`).
+ * Free text for a block delimited by `<tag>` ... `</tag>`: every `<` that may
+ * open or close a tag named `tag` or starting with `tag` and then a character
+ * other than a letter, digit or `_` (any case; `<tag-x>`, `<tag.x>`,
+ * `<tag:x>` too, not `<tagx>`; whitespace, NUL, zero-width characters or a soft
+ * hyphen around the `/`; a run of 64 or more such characters after `<` counts
+ * as a tag as well) becomes `&lt;`, and an `&` that already starts such an
+ * escape becomes `&amp;`, so the escape is reversible (`unescapeTagInText`)
+ * and unambiguous. Text without such a `<` stays byte-identical. `tag` must
+ * be a plain name (`[a-z-]`).
  */
 export function escapeTagInText(text: string, tag: string): string {
   return text.replace(tagPattern(tag, '(?:<|&(?:amp;)*lt;)'), (match) => (match === '<' ? '&lt;' : `&amp;${match.slice(1)}`));

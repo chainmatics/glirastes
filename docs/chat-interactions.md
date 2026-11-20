@@ -224,8 +224,12 @@ A picked mention reaches the model as `{{mention:type:id:label}}`; a
 tool-backed command (and every mention with `includeContextBlock`) is also
 listed in a leading `<!--context:[…]-->` block. Inside that block a `-->`,
 `--!>` or `<!--` in a label or id is sent with `\u003e` / `\u003c` (since the release
-after 0.20.0), so stored data cannot end the comment early. The marker itself
-is not escaped: a label with `}}` ends it early and the rest shows as text.
+after 0.20.0), so the block the SDK writes cannot be closed early or nested
+by its own entries. Known limits (a format change is planned): the label goes
+unescaped into the marker, so a label can end it early (`}}`) or carry a whole
+forged `<!--context:…-->` block that reaches the model and is hidden from the
+bubble; and a label can forge sibling entries (`Bob (ID: 9), Admin (ID: 1, …)`)
+inside the block.
 
 ## Custom composers
 

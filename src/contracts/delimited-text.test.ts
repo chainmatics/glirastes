@@ -82,8 +82,55 @@ describe('escapeTagInText / unescapeTagInText', () => {
   it('stays linear on many openers followed by long whitespace', () => {
     const hostile = `${'<'.repeat(10_000)}${' '.repeat(10_000)}`;
     const started = performance.now();
-    expect(escapeTagInText(hostile, 'memory')).toBe(hostile);
+    // Only the last `<` sees a run beyond the bound, and is escaped to be safe.
+    expect(escapeTagInText(hostile, 'memory')).toBe(`${'<'.repeat(9_999)}&lt;${' '.repeat(10_000)}`);
+    const mixed = `${'< ​/ '.repeat(5_000)}${'<­'.repeat(5_000)}`;
+    expect(unescapeTagInText(escapeTagInText(mixed, 'memory'), 'memory')).toBe(mixed);
     expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  const IGNORABLE = [' ', '\t', '\n', '\u0000', '​', '‌', '‍', '­', '⁠', '﻿'];
+  /** A model could read `<`, ignorable characters, an optional `/` and the name as the tag. */
+  const looksLikeTag = (text: string) =>
+    /<[\s\u0000​-‍­⁠﻿]*\/?[\s\u0000​-‍­⁠﻿]*memory(?!\w)/i.test(text);
+
+  it('neutralises a tag with whitespace beyond the bound or NUL, zero-width or soft hyphen before the name', () => {
+    const cases = [
+      `<${' '.repeat(65)}/memory>`,
+      `<${' '.repeat(200)}memory>`,
+      `<${' '.repeat(10)}/${'\n'.repeat(300)}memory>`,
+      ...IGNORABLE.flatMap((char) => [`x <${char}/memory> y`, `<${char}${char}memory>`, `</${char}MEMORY>`]),
+    ];
+    for (const text of cases) {
+      const escaped = escapeTagInText(text, 'memory');
+      expect(looksLikeTag(escaped), JSON.stringify(text)).toBe(false);
+      // The ignorable characters stay in the text.
+      expect(escaped.replace('&lt;', '<')).toBe(text);
+      expect(unescapeTagInText(escaped, 'memory')).toBe(text);
+    }
+  });
+
+  it('fuzz: random mixes of <, &lt;, &amp;, ignorable characters, / and the name round-trip and never show a tag', () => {
+    const pieces = ['<', '&lt;', '&amp;', '&', '/', 'memory', 'MEMORY', 'memo', '>', 'x', ' '.repeat(40), ...IGNORABLE];
+    let seed = 12345;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    for (let round = 0; round < 3_000; round++) {
+      const length = 1 + Math.floor(random() * 12);
+      const text = Array.from({ length }, () => pieces[Math.floor(random() * pieces.length)]!).join('');
+      const escaped = escapeTagInText(text, 'memory');
+      expect(looksLikeTag(escaped), JSON.stringify(text)).toBe(false);
+      expect(unescapeTagInText(escaped, 'memory'), JSON.stringify(text)).toBe(text);
+    }
+  });
+
+  it('a tag whose name starts with memory is escaped as well (safe side)', () => {
+    for (const tag of ['<memory-bank>', '<memory.x>', '<memory:foo>', '</memory_>'.replace('_', '')]) {
+      expect(escapeTagInText(tag, 'memory').startsWith('&lt;')).toBe(true);
+    }
+    expect(escapeTagInText('<memoryx>', 'memory')).toBe('<memoryx>');
   });
 });
 

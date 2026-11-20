@@ -107,9 +107,11 @@ createAiChatHandler({
   keeps their declared id and name in a `<seen-objects>` memo ahead of the
   history; see `docs/concepts.md`.
 - Notes and the summary reach the model in one user-role `<memory>` block.
-  A `<memory>` or `</memory>` tag inside a note or the summary is sent with
-  `&lt;` (since the release after 0.20.0), so a shared note cannot close the
-  block; `memory_forget` accepts the note as shown or as stored.
+  An opening or closing tag whose name starts with `memory` (`<memory>`,
+  `</memory>`, `<memory-bank>`, not `<memoryx>`) inside a note or the summary
+  is sent with `&lt;` (since the release after 0.20.0), so a shared note
+  cannot close the block; `memory_forget` accepts the note as shown or as
+  stored, `memory_remember` stores it unescaped.
 - `chat: false` turns the summary off, omitting `user` and `shared` turns
   notes off. `memory: {}` is the chat summary alone.
 - Roles: `shared.canWrite` decides per request who may add or remove shared

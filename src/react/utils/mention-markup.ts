@@ -198,7 +198,8 @@ function buildContextBlock(
   if (mentions.length === 0) return null;
   const summary = mentions
     .map((m) => {
-      // A label or id from stored data can never end the comment or open another one.
+      // A label or id cannot close this block early or nest a comment in it. Not covered (format
+      // change needed): the raw label in the marker, and sibling entries forged in this free text.
       const displayName = escapeCommentDelimiters(m.displayName ?? m.label ?? m.id);
       return `${displayName} (ID: ${escapeCommentDelimiters(m.id)}${m.toolReference ? `, ${m.toolReference}` : ''})`;
     })
