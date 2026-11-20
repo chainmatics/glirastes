@@ -97,6 +97,13 @@ replaced; `--dry-run --json` previews without writing anything.
 npm install glirastes @ai-sdk/openai @ai-sdk/react react-markdown
 ```
 
+The SDK depends on `zod` 4 (`^4.0.0`): an app on zod 4 shares its copy, an
+app on zod 3 gets a second zod 4 copy for the SDK. App schemas keep working
+either way because the SDK reads schemas by shape; the cost is disk and bundle
+size, and the zod 4 contract schemas the SDK exports cannot be nested inside
+zod 3 schemas. `pg` (`>=8.11 <9`) is used only by the `glirastes-runtime`
+binary, so any pg 8.11+ in the app is shared.
+
 **2. Initialize.** Run it inside your Codex or Claude Code session, or from a
 terminal with `--agent codex|claude`:
 

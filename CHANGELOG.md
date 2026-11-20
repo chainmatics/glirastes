@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The `pg` dependency range is now `>=8.11 <9` (was `^8.23.1`), so an app that already has pg 8.11 or newer shares its copy instead of getting a second pg under `node_modules/glirastes`. pg is used only by the `glirastes-runtime` binary; 8.11.0 with pg-pool 3.6.0 has every Pool option and client event it uses (`connectionTimeoutMillis`, `query_timeout`, `keepAlive`, `release(true)`, client `error`/`end`). The repository lockfile and the runtime container still resolve pg 8.23.1. The README and the `setting-up-glirastes` runtime-hosts reference now say how zod and pg are shared: an app on zod 4 shares the SDK's zod; an app on zod 3 gets a second zod 4 copy, its own schemas keep working because the SDK reads schemas by shape, and the SDK's zod 4 contract schemas cannot be nested in zod 3 schemas. A test pins the declared zod and pg ranges.
+
 ### Fixed
 
 - The package now ships the guides under `docs/` that the README, this changelog, the skills and the type comments point to (`docs/chat-queue.md`, `docs/approval-subjects.md`, `docs/tool-policy.md`, `docs/managed-runtime-sync.md`, `docs/support-matrix.md` and the other top-level guides); before, only `docs/README.md` was packed, so those references led nowhere in `node_modules/glirastes`. Acceptance records (`docs/acceptance/`) and design material stay in the repository. A pack test fails when a packed file names a `docs/` path the package does not carry.
