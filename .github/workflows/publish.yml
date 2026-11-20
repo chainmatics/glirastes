@@ -78,6 +78,10 @@ jobs:
       - name: Install the NestJS fixture API
         run: bun install --frozen-lockfile --cwd examples/react-nest-separate/api
 
+      # pg at the floor of the declared range, for the plain-Node import test.
+      - name: Install the pg floor fixture
+        run: bun install --frozen-lockfile --cwd tests/fixtures/pg-floor
+
       - name: Test
         run: bun run test
 

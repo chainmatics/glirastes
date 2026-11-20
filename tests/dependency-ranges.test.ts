@@ -12,11 +12,15 @@ import { describe, expect, it } from 'vitest';
  *
  * - zod `^4.0.0`: any zod 4 app shares the copy; a zod 3 app gets a nested
  *   zod 4 for the SDK (schemas are read by shape, so app schemas keep working).
- * - pg `>=8.11 <9`: only the `glirastes-runtime` binary imports pg. 8.11.0 (with
- *   pg-pool 3.6.0) is the verified floor for every Pool option and client event
- *   `src/runtime-service` uses (`connectionString`, `max`,
+ * - pg `>=8.11 <9`: only the `glirastes-runtime` binary imports pg, through the
+ *   default export (pg below 8.15.0 has no named ESM exports).
+ *   `tests/pg-import.test.ts` imports the built service under plain Node with
+ *   pg 8.11.0/pg-pool 3.6.0 (`tests/fixtures/pg-floor`) and the lockfile's pg;
+ *   moving the floor means moving that fixture too. The Pool options and client
+ *   events `src/runtime-service` uses (`connectionString`, `max`,
  *   `connectionTimeoutMillis`, `query_timeout`, `keepAlive`, pool `error`,
- *   `query`, `connect`, `end`, client `query`, `release(true)`, `error`/`end`).
+ *   `query`, `connect`, `end`, client `query`, `release(true)`, `error`/`end`)
+ *   exist in 8.11.0 (checked by hand against PostgreSQL, not in CI).
  */
 const SDK_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 

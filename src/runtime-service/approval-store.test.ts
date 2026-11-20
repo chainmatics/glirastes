@@ -1,12 +1,14 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { Pool } from "pg";
+import pg from "pg";
 import {
   acquireRuntimeLease,
   createPostgresApprovalStore,
   type ApprovalPgPool,
 } from "./approval-store.js";
+
+const { Pool } = pg;
 
 class FailingClient extends EventEmitter {
   released = false;
