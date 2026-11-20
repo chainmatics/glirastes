@@ -152,6 +152,14 @@ describe('public foundation subpaths', () => {
     expect(embedSource).not.toMatch(/from ['"]\.\.\/react\/index\.js['"]/);
   });
 
+  it('builds into an emptied dist/, so compiled files of removed sources are neither packed nor checked', async () => {
+    const parsed = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { scripts?: Record<string, string> };
+    const build = parsed.scripts?.build ?? '';
+    const clear = build.indexOf("rmSync('dist', { recursive: true, force: true })");
+    expect(clear).toBeGreaterThan(-1);
+    expect(clear).toBeLessThan(build.indexOf('tsc -p tsconfig.json'));
+  });
+
   it('ships glirastes/browser framework-neutral, with its legacy shim', async () => {
     const [packageJson, shims, ...sources] = await Promise.all([
       readFile(new URL('../package.json', import.meta.url), 'utf8'),
