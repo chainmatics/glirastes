@@ -48,7 +48,7 @@ import { resolveToolResultConfig } from '../utils/tool-result-config.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
-import { resolveChatTriggers } from '../completions/triggers.js';
+import { createMentionPrefixLookup, resolveChatTriggers } from '../completions/triggers.js';
 import { toChatEntityItem } from '../interactions/definitions.js';
 import {
   createChatInteractionRegistry,
@@ -1006,6 +1006,7 @@ export function AiChatProvider({
     [triggerDefinitions, allCompletionProviders],
   );
   const entityPrefix = triggers.find((trigger) => trigger.char === '@')?.prefix ?? '@';
+  const mentionPrefix = useMemo(() => createMentionPrefixLookup(triggers), [triggers]);
   const completionSearch = useMemo(
     () => (allCompletionProviders.length > 0
       ? createCompletionSearch(allCompletionProviders, {
@@ -2889,6 +2890,7 @@ export function AiChatProvider({
       completionSearch,
       hasCompletions: completionSearch !== undefined,
       triggers,
+      mentionPrefix,
       interactions: interactionRegistry,
       pendingCommand,
       submitPendingCommand,
@@ -2985,6 +2987,7 @@ export function AiChatProvider({
       isMentionSearching,
       completionSearch,
       triggers,
+      mentionPrefix,
       interactionRegistry,
       pendingCommand,
       submitPendingCommand,

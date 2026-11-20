@@ -200,6 +200,8 @@ export interface ChatContextValue {
   hasCompletions: boolean;
   /** The composer's trigger chars with prefix and pick behavior (`triggers` of the provider). */
   triggers?: ReadonlyArray<ResolvedChatTrigger>;
+  /** Visible prefix of a sent mention by type: a trigger's `types`, else `inferMentionPrefix`. */
+  mentionPrefix?: (type: string) => string;
 
   // Declarative chat interactions (`chatInteractions`)
   /** `@` entities and `/` commands; absent without `chatInteractions`. */

@@ -1,25 +1,31 @@
 {
   "id": "composer-triggers",
   "kind": "optional",
-  "summary": "Completion providers may use any single trigger character, e.g. `#` for tickets, not only `@` and `/`. The new provider option `triggers` sets a char's label, pill prefix and default pick behavior; `createCompletionSearch` takes a `source` filter per call.",
-  "howTo": "Set `trigger: '#'` on a `ChatCompletionProvider` to open its list with `#`; add `triggers={[{ char: '#', label, prefix }]}` (memoized) to AiChatProvider only to change the defaults. Nothing changes without it: `@` and `/` keep their behavior.",
+  "summary": "Completion providers may use any single trigger character, e.g. `#` for tickets, not only `@` and `/`. The new provider option `triggers` sets a char's label, pill prefix, default pick behavior and the mention types it owns; `createCompletionSearch` takes a `source` filter per call.",
+  "howTo": "Set `trigger: '#'` on a `ChatCompletionProvider` to open its list with `#`; add `triggers={[{ char: '#', label, prefix, types: ['ticket'] }]}` (memoized) to AiChatProvider to change the defaults, and pass the same array as `createLocalSessionStore({ triggers })` so sent messages, history and session titles show `#` for those types instead of `@`. Nothing changes without it: `@` and `/` keep their behavior. `RichMentionInputProps.triggers` widened to `ReadonlyArray<string | ChatTriggerDefinition>` and validates its entries; `composer.inputProps` from `useChatComposerInput` now always carries `triggers`, so spread it before your own `triggers` prop if you set one.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
-    "symbols": ["completionProviders", "ChatCompletionProvider"]
+    "symbols": [
+      "completionProviders",
+      "ChatCompletionProvider"
+    ]
   },
   "surface": [
     "glirastes/embed#GlirastesChatElementConfig.triggers",
     "glirastes/react#AiChatProviderConfig.triggers",
     "glirastes/react#AiChatProviderProps.triggers",
+    "glirastes/react#ChatContextValue.mentionPrefix",
     "glirastes/react#ChatContextValue.triggers",
     "glirastes/react#ChatTriggerDefinition",
     "glirastes/react#ChatTriggerDefinition.char",
     "glirastes/react#ChatTriggerDefinition.label",
     "glirastes/react#ChatTriggerDefinition.prefix",
     "glirastes/react#ChatTriggerDefinition.select",
+    "glirastes/react#ChatTriggerDefinition.types",
     "glirastes/react#CompletionSearchQueryOptions",
     "glirastes/react#CompletionSearchQueryOptions.source",
     "glirastes/react#CompletionSelectKind",
+    "glirastes/react#LocalSessionStoreOptions.triggers",
     "glirastes/react#ResolvedChatTrigger",
     "glirastes/react#resolveChatTriggers",
     "glirastes/react/vercel#VercelAiChatProps.triggers"

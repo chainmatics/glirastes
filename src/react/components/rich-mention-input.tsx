@@ -18,8 +18,8 @@ import type {
   MentionResult,
   RichMentionInputHandle,
   RichMentionInputProps,
-  ResolvedChatTrigger,
 } from '../types.js';
+import { normalizeTrigger } from '../completions/triggers.js';
 import {
   inferMentionPrefix,
   mentionDataFromResult,
@@ -191,15 +191,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
   ) {
     const [dragOver, setDragOver] = useState(false);
     // Each trigger char with its pill prefix; `select` is kept for the pick behavior.
+    // An invalid entry throws, as on the provider.
     const triggers = useMemo(
-      () => new Map<string, ResolvedChatTrigger>(triggerConfig.map((trigger) => (typeof trigger === 'string'
-        ? [trigger, { char: trigger, prefix: trigger, select: 'chip' }]
-        : [trigger.char, {
-            char: trigger.char,
-            prefix: trigger.prefix ?? trigger.char,
-            select: trigger.select ?? 'chip',
-            ...(trigger.label !== undefined ? { label: trigger.label } : {}),
-          }]))),
+      () => new Map(triggerConfig.map((trigger) => {
+        const resolved = normalizeTrigger(trigger);
+        return [resolved.char, resolved] as const;
+      })),
       [triggerConfig],
     );
     const hasMentionSupport = typeof onSearch === 'function';

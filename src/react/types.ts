@@ -446,11 +446,20 @@ export interface ChatTriggerDefinition {
   prefix?: string;
   /** Default pick behavior of the trigger's entries; default `chip`. */
   select?: CompletionSelectKind;
+  /**
+   * Mention item types this trigger owns, e.g. `['ticket']`. The wire format
+   * (`{{mention:type:id:label}}`) carries no prefix, so sent messages, restored
+   * history and session titles show a mention of these types with `prefix`;
+   * other types keep `@`. A type belongs to one trigger at most; `command`
+   * always stays `/`.
+   */
+  types?: ReadonlyArray<string>;
 }
 
 /** A trigger with its defaults applied (`resolveChatTriggers`). */
 export type ResolvedChatTrigger = Required<Pick<ChatTriggerDefinition, 'char' | 'prefix' | 'select'>> & {
   label?: string;
+  types?: ReadonlyArray<string>;
 };
 
 /** A catalog UI tool offered as a `/` command. */

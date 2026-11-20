@@ -2,10 +2,13 @@
 import React, { useMemo } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatCompletionProvider, ChatTransport, ChatTriggerDefinition } from '../../types.js';
+import type { ChatCompletionProvider, ChatMessage, ChatTransport, ChatTriggerDefinition } from '../../types.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import { MentionInput } from '../mention-input.js';
 import { RichMentionInput } from '../rich-mention-input.js';
+import { MessageBubble } from '../message-bubble.js';
+import { MentionChip } from '../mention-chip.js';
+import { createLocalSessionStore } from '../../utils/local-session-store.js';
 
 function transport(): ChatTransport {
   return {
@@ -146,5 +149,70 @@ describe('configurable composer triggers', () => {
     expect(onSearch).toHaveBeenCalledWith('ur', '#');
     fireEvent.keyDown(editor, { key: 'Enter' });
     await waitFor(() => expect(chipPrefix(editor, '1')).toBe('tag:'));
+  });
+
+  it('rejects an invalid trigger on a standalone editor', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => render(<RichMentionInput onSearch={() => []} triggers={['@', { char: '#', prefix: '' }]} />)).toThrow(
+      /`prefix` must be a non-empty string/,
+    );
+    expect(() => render(<RichMentionInput onSearch={() => []} triggers={['##']} />)).toThrow(/Invalid chat trigger "##"/);
+    error.mockRestore();
+  });
+});
+
+const SENT = '{{mention:ticket:7:Bug bug}} von {{mention:user:42:Alice Doe}} {{mention:command:done:Erledigte filtern}}';
+const sentMessage = { id: 'u1', role: 'user', parts: [{ type: 'text', text: SENT }] } as unknown as ChatMessage;
+const prefixes = () => Array.from(document.querySelectorAll('[data-component="mention-chip"] [data-element="prefix"]'))
+  .map((node) => node.textContent);
+
+describe('prefix of sent mentions', () => {
+  afterEach(() => cleanup());
+
+  it('shows a type claimed by a trigger with its prefix in the sent bubble', () => {
+    const triggers: ChatTriggerDefinition[] = [{ char: '#', types: ['ticket'] }];
+    render(
+      <AiChatProvider transport={transport()} triggers={triggers}>
+        <MessageBubble message={sentMessage} />
+      </AiChatProvider>,
+    );
+    expect(prefixes()).toEqual(['#', '@', '/']);
+  });
+
+  it('keeps @ and / without trigger types', () => {
+    render(
+      <AiChatProvider transport={transport()}>
+        <MessageBubble message={sentMessage} />
+      </AiChatProvider>,
+    );
+    expect(prefixes()).toEqual(['@', '@', '/']);
+  });
+
+  it('gives a MentionChip without prefix the claimed prefix', () => {
+    render(
+      <AiChatProvider transport={transport()} triggers={[{ char: '!', prefix: 'T-', types: ['ticket'] }]}>
+        <MentionChip mention={{ id: '7', type: 'ticket', displayName: 'Bug 7' }} />
+        <MentionChip mention={{ id: '8', type: 'user', displayName: 'Alice' }} />
+      </AiChatProvider>,
+    );
+    expect(prefixes()).toEqual(['T-', '@']);
+  });
+
+  it('names a stored chat with the claimed prefix', async () => {
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+      removeItem: (key: string) => { data.delete(key); },
+    };
+    const sessions = createLocalSessionStore({
+      storageKey: 'app:u1', storage, attachmentStore: null, triggers: [{ char: '#', types: ['ticket'] }],
+    });
+    await sessions.save!('default', [sentMessage]);
+    expect((await sessions.list!())[0]!.title).toMatch(/^#Bug bug von @Alice Doe \/Erledigte/);
+
+    const plain = createLocalSessionStore({ storageKey: 'app:u2', storage, attachmentStore: null });
+    await plain.save!('default', [sentMessage]);
+    expect((await plain.list!())[0]!.title).toMatch(/^@Bug bug von @Alice Doe \/Erledigte/);
   });
 });

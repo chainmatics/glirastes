@@ -306,6 +306,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     entityDeclarations,
     language,
     turnOutcomes,
+    mentionPrefix,
   } = useChatContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
@@ -466,7 +467,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   }
 
   const textNodes = cleanTextParts.map((text, i) => {
-    const segments = parseMentionSegments(text);
+    const segments = parseMentionSegments(text, mentionPrefix);
     const hasMention = segments.some((segment) => segment.kind === 'mention');
 
     if (!hasMention) {

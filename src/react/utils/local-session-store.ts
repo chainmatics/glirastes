@@ -1,9 +1,10 @@
-import type { ChatMessage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
+import type { ChatMessage, ChatTriggerDefinition, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
 import { attachmentIdOf } from '../../contracts/attachments.js';
 import { fileToDataUrl, omitAttachmentData } from './attachments.js';
 import { createIndexedDbAttachmentStore, dataUrlToBlob, type AttachmentBlobStore } from './attachment-blob-store.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
 import { parseMentionSegments } from './mention-markup.js';
+import { createMentionPrefixLookup } from '../completions/triggers.js';
 
 type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & Partial<Pick<Storage, 'length' | 'key'>>;
 
@@ -31,6 +32,11 @@ export interface LocalSessionStoreOptions {
    * is set; `null` keeps no files.
    */
   attachmentStore?: AttachmentBlobStore | null;
+  /**
+   * The provider's `triggers` (same array): a title shows a mention of a
+   * trigger's `types` with its prefix (`#Bug 7`) instead of `@`.
+   */
+  triggers?: ReadonlyArray<ChatTriggerDefinition>;
   now?: () => number;
   createId?: () => string;
 }
@@ -81,11 +87,14 @@ function tail<T extends ChatMessage | WireChatMessage>(messages: T[], max: numbe
 }
 
 /** The first question of a chat, cut at a word, as its name. */
-function titleFrom(messages: ReadonlyArray<ChatMessage | WireChatMessage>): string | null {
+function titleFrom(
+  messages: ReadonlyArray<ChatMessage | WireChatMessage>,
+  prefixOf: (type: string) => string,
+): string | null {
   const first = messages.find((message) => message.role === 'user');
   const raw = first ? textOf(first) : '';
   // Mentions read as `@Name` and `/Command`, not as their markup.
-  const text = parseMentionSegments(raw)
+  const text = parseMentionSegments(raw, prefixOf)
     .map((segment) => (segment.kind === 'text' ? segment.text : `${segment.mention.prefix ?? ''}${segment.mention.displayName}`))
     .join('')
     .replace(/\s+/g, ' ')
@@ -150,6 +159,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     ? Infinity : Math.max(1, Math.floor(options.maxMessagesPerSession));
   const now = options.now ?? (() => Date.now());
   const createId = options.createId ?? randomId;
+  const prefixOf = createMentionPrefixLookup(options.triggers);
   const files = options.attachmentStore === undefined
     ? (storage ? createIndexedDbAttachmentStore({ storageKey: options.storageKey }) : null)
     : options.attachmentStore;
@@ -283,7 +293,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       const list = entries();
       const existing = list.find((entry) => entry.id === conversationId) ?? fresh(conversationId);
       // Once a save has trimmed the chat, the first stored user message is no longer the first question.
-      const derived = existing.named || existing.trimmed ? null : titleFrom(allMessages);
+      const derived = existing.named || existing.trimmed ? null : titleFrom(allMessages, prefixOf);
       const entry: Entry = {
         ...existing,
         ...(messages.length < allMessages.length ? { trimmed: true } : {}),

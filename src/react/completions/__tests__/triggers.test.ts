@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveChatTriggers } from '../triggers.js';
+import { createMentionPrefixLookup, normalizeTrigger, resolveChatTriggers } from '../triggers.js';
 
 describe('resolveChatTriggers', () => {
   it('keeps @ and / with today\'s defaults without any config', () => {
@@ -54,5 +54,40 @@ describe('resolveChatTriggers', () => {
     expect(() => resolveChatTriggers([{ char: '#', select: 'open' as never }], [])).toThrow(
       'Invalid chat trigger "#": `select` must be one of chip, text, run, list',
     );
+  });
+});
+
+describe('trigger types', () => {
+  it('keeps the claimed types on the resolved trigger', () => {
+    expect(resolveChatTriggers([{ char: '#', types: ['ticket', 'bug'] }], [])[2]).toEqual(
+      { char: '#', prefix: '#', select: 'chip', types: ['ticket', 'bug'] },
+    );
+  });
+
+  it('rejects a type claimed by two triggers and the command type', () => {
+    expect(() => resolveChatTriggers([{ char: '#', types: ['ticket'] }, { char: '!', types: ['ticket'] }], [])).toThrow(
+      'Duplicate chat trigger type: "ticket" is claimed by "#" and "!"',
+    );
+    expect(() => resolveChatTriggers([{ char: '#', types: ['command'] }], [])).toThrow(
+      'Invalid chat trigger "#": `types` cannot contain `command`; commands always use `/`',
+    );
+    expect(() => resolveChatTriggers([{ char: '#', types: [''] }], [])).toThrow(/`types` must be a list/);
+  });
+
+  it('looks a sent mention\'s prefix up by type and falls back to @ and /', () => {
+    const prefixOf = createMentionPrefixLookup([{ char: '#', types: ['ticket'] }, { char: '!', prefix: 'T-', types: ['issue'] }]);
+    expect(['ticket', 'issue', 'user', 'command'].map(prefixOf)).toEqual(['#', 'T-', '@', '/']);
+    expect(['ticket', 'command'].map(createMentionPrefixLookup(undefined))).toEqual(['@', '/']);
+  });
+});
+
+describe('normalizeTrigger', () => {
+  it('fills the defaults of a char or a definition and validates both', () => {
+    expect(normalizeTrigger('#')).toEqual({ char: '#', prefix: '#', select: 'chip' });
+    expect(normalizeTrigger({ char: '#', prefix: 'tag:', label: 'Tags' })).toEqual(
+      { char: '#', prefix: 'tag:', select: 'chip', label: 'Tags' },
+    );
+    expect(() => normalizeTrigger('##')).toThrow(/Invalid chat trigger "##"/);
+    expect(() => normalizeTrigger({ char: '#', prefix: '' })).toThrow(/`prefix` must be/);
   });
 });
