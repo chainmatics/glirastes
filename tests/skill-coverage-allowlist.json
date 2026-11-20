@@ -640,7 +640,6 @@
   "createTurnSnapshot": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",
   "createTurnToolDiscovery": "Runtime building block behind createGlirastes().chatTurn(); a standard integration never touches it (see its JSDoc).",
   "createUiActionSchema": "Pre-Foundation root-barrel API (hand-written tool definitions, pipeline, PII); Foundation apps derive tools with glirastes tools refresh.",
-  "deChatLocale": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "defaultAssistantLayout": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "defineModule": "Legacy server-core building block (pre-Foundation pipeline, callers, PII); the Foundation path uses createAiChatHandler.",
   "deriveToolPolicyDefaults": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",

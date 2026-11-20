@@ -410,6 +410,7 @@ export {
   type ActivityStepStatus,
   type ActivityDetailSource,
 } from './utils/activity.js';
+export { stepFailureText, type StepFailure, type StepFailureCode } from './utils/step-failure.js';
 export type { PlanItem, PlanItemStatus } from '../contracts/plan.js';
 export { sanitizeStoredMessages } from './utils/sanitize-stored-messages.js';
 export { createLocalSessionStore, clearLocalSessionStore, type LocalSessionStoreOptions } from './utils/local-session-store.js';

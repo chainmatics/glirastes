@@ -2,6 +2,7 @@ import { useState, type SyntheticEvent } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import type { ChatLocale, TurnNoticeProps, TurnNoticeStatus, TurnOutcome } from '../types.js';
 import type { ActivityStep, ActivityStepStatus } from '../utils/activity.js';
+import { stepFailureText } from '../utils/step-failure.js';
 import { StatusIcon, type StatusIconKind } from './status-icon.js';
 
 export interface ActivityLogProps {
@@ -29,6 +30,12 @@ export function fillLocaleText(template: string, values: Readonly<Record<string,
 export function TurnNotice({ text, status, placement }: TurnNoticeProps) {
   if (placement === 'log') return <p data-element="activity-notice">{text}</p>;
   return <p data-component="turn-notice" data-status={status}>{text}</p>;
+}
+
+/** The detail line of a step: an SDK failure in the locale's words, else its own text, else a UI action's outcome. */
+function stepDetailText(step: ActivityStep, locale: ChatLocale, language: string | undefined): string | undefined {
+  if (step.failures && step.failures.length > 0) return stepFailureText(step.failures, locale, language);
+  return step.detail ?? uiOutcomeText(step, locale);
 }
 
 /** The locale text of a UI action's reported outcome, if any. */
@@ -88,7 +95,7 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
  * Keeps styling neutral via `data-*` attributes.
  */
 export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, noticeOutcome, className }: ActivityLogProps) {
-  const { locale, toolLabels, components, activityLog } = useChatContext();
+  const { locale, toolLabels, components, activityLog, language } = useChatContext();
   // Once the turn no longer runs: a UI action still waiting was never confirmed, a call still running was stopped
   // (a step waiting for approval stays waiting).
   const steps = active ? allSteps : allSteps.map((step) => (step.uiOutcome === 'pending'
@@ -172,8 +179,8 @@ export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, not
             {count > 1 && (
               <span data-element="count">{fillLocaleText(locale.activityStepCountLabel ?? '×{count}', { count })}</span>
             )}
-            {(step.detail ?? uiOutcomeText(step, locale)) && (
-              <span data-element="detail">{step.detail ?? uiOutcomeText(step, locale)}</span>
+            {stepDetailText(step, locale, language) && (
+              <span data-element="detail">{stepDetailText(step, locale, language)}</span>
             )}
           </li>
         ))}

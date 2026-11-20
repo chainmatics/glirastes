@@ -74,6 +74,7 @@ import { continuesAfterPageLoad, shouldContinueChat, waitingToolCallIds } from '
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
+import { STEP_FAILURE_TEXTS_EN } from '../utils/step-failure.js';
 import { latestUserMessageId, readStoredTurnOutcomes, withStoredTurnOutcomes } from '../utils/turn-outcomes.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
@@ -139,6 +140,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   activityStepCountLabel: '×{count}',
   activitySummarySeparator: ', ',
   activityApprovalNotUsedDetail: 'The approval could not be used',
+  // Word for word the texts the server and the SDK's tools write (`activityFailure…`).
+  ...STEP_FAILURE_TEXTS_EN,
   activityUiPendingLabel: 'Waiting for the app',
   activityUiRejectedContract: 'Rejected by the app (invalid input)',
   activityUiRejectedHandler: 'Not carried out by the app',
@@ -232,6 +235,44 @@ function withQueueApprovalHint(locale: ChatLocale, explicitHint: string | undefi
   if (hint !== undefined && hint === explicitHint && !ownApprovalHint) return locale;
   const followed = BUILT_IN_QUEUE_APPROVAL_HINTS.get(locale.approvalPendingHint) ?? locale.approvalPendingHint;
   return followed === hint ? locale : { ...locale, queueApprovalWaitingHint: followed };
+}
+
+const FAILURE_KEYS = Object.keys(STEP_FAILURE_TEXTS_EN) as Array<keyof typeof STEP_FAILURE_TEXTS_EN>;
+const isFailureKey = (key: string) => key.startsWith('activityFailure');
+
+/**
+ * The failure details of a step (`activityFailure…`) follow the built-in
+ * texts of the chat's language only where the app did not word the activity
+ * log itself: an app table (`locale`, or its `locales` for the language)
+ * that sets any other `activity…` key with a text that is not the built-in
+ * one of that language keeps the English texts these details showed before
+ * they had keys, unless the app states `language` or sets the key itself.
+ * A spread built-in table (`deChatLocale`) carries its own failure texts.
+ */
+function withFailureTextsOfOwnWording(
+  locale: ChatLocale,
+  userLocale: Partial<ChatLocale> | undefined,
+  userLocales: Readonly<Record<string, Partial<ChatLocale>>> | undefined,
+  language: string | null,
+  languageStated: boolean,
+): ChatLocale {
+  if (languageStated) return locale;
+  const builtIn = languageLocale(language) as Partial<Record<string, unknown>>;
+  const own = [
+    userLocale ?? {},
+    userLocales ? resolveTextTable<Partial<ChatLocale>>({ requested: language ?? undefined, builtIn: { en: {} }, app: userLocales }) : {},
+  ] as Array<Partial<Record<string, unknown>>>;
+  const ownWording = own.some((table) => Object.entries(table).some(([key, text]) => (
+    key.startsWith('activity') && !isFailureKey(key) && text !== undefined && text !== builtIn[key]
+  )));
+  if (!ownWording) return locale;
+  let changed: ChatLocale | undefined;
+  for (const key of FAILURE_KEYS) {
+    if (own.some((table) => table[key] !== undefined) || locale[key] === STEP_FAILURE_TEXTS_EN[key]) continue;
+    changed ??= { ...locale };
+    changed[key] = STEP_FAILURE_TEXTS_EN[key];
+  }
+  return changed ?? locale;
 }
 
 /** The app's own value of `queueApprovalWaitingHint` (`locale`, else its `locales` tables), without built-ins. */
@@ -689,7 +730,7 @@ export function AiChatProvider({
     : pageLanguage ?? toolPresentation?.locale ?? null);
   // English defaults, then the built-in texts of the app's language, then the caller's overrides.
   // With `locales`, per key in the language's fallback order (the app's table before the built-in one).
-  const locale = useMemo<ChatLocale>(() => withQueueApprovalHint(
+  const locale = useMemo<ChatLocale>(() => withFailureTextsOfOwnWording(withQueueApprovalHint(
     userLocales
       ? {
         ...resolveTextTable<ChatLocale>({
@@ -701,7 +742,7 @@ export function AiChatProvider({
       }
       : { ...DEFAULT_LOCALE, ...languageLocale(language), ...(userLocale ?? {}) },
     explicitQueueApprovalHint(userLocale, userLocales, language),
-  ), [userLocale, userLocales, language]);
+  ), userLocale, userLocales, language, statedLanguage !== null), [userLocale, userLocales, language, statedLanguage]);
   // Resolve `theme` prop → CSS variables spread onto widget roots.
   const themeVars = useMemo<CSSProperties>(
     () => (themeScope === 'inherit' || unstyled ? {} : getThemeVars(userTheme)) as CSSProperties,
