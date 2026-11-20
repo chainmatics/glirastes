@@ -143,6 +143,25 @@ describe('composer plus menu', () => {
     expect(plusButton().getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('closes when a turn starts streaming, so the focus never lands on the disabled button', () => {
+    function Streaming({ status }: { status: ChatTransport['status'] }) {
+      const chat = useMemo(() => transport(), []);
+      const current = useMemo(() => ({ ...chat, status }), [chat, status]);
+      return (
+        <AiChatProvider transport={current} attachments composer={plusAtStart}>
+          <MentionInput />
+        </AiChatProvider>
+      );
+    }
+    const { rerender } = render(<Streaming status="ready" />);
+    openMenu();
+    rerender(<Streaming status="streaming" />);
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(plusButton().getAttribute('aria-expanded')).toBe('false');
+    rerender(<Streaming status="ready" />);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
   it('closes on Tab', () => {
     render(<Setup composer={plusAtStart}><MentionInput /></Setup>);
     const menu = openMenu();
@@ -249,7 +268,8 @@ describe('composer plus menu', () => {
       plusMenu: { items: [], source: { trigger: '@' } },
     };
     render(<Setup composer={composer}><MentionInput /></Setup>);
-    openMenu();
+    // The menu shows once the source rows are in (no empty box while it searches).
+    fireEvent.click(plusButton());
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Müller' }));
     const editor = screen.getByRole('textbox');
     const chip = editor.querySelector('[data-component="mention-chip"]');
@@ -277,7 +297,8 @@ describe('composer plus menu', () => {
       );
     }
     render(<WithGroups />);
-    openMenu();
+    // The menu shows once the source rows are in (no empty box while it searches).
+    fireEvent.click(plusButton());
     fireEvent.click(await screen.findByRole('menuitem', { name: 'All templates' }));
     const editor = screen.getByRole('textbox');
     expect(editor.textContent).toBe('/');

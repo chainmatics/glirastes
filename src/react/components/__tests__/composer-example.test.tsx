@@ -37,8 +37,8 @@ function transport(): ChatTransport {
   };
 }
 
-function Chat() {
-  const providers = useMemo(() => [templates], []);
+function Chat({ provider = templates }: { provider?: ChatCompletionProvider }) {
+  const providers = useMemo(() => [provider], [provider]);
   return (
     <AiChatProvider transport={transport()} completionProviders={providers} triggers={triggers} composer={composer} language="de">
       <MentionInput />
@@ -75,5 +75,17 @@ describe('composer toolbar example', () => {
     const row = await screen.findByRole('menuitem', { name: 'Auftrag zusammenfassen' });
     fireEvent.click(row);
     await waitFor(() => expect(document.body.textContent).toContain('Fasse den Auftrag zusammen'));
+  });
+
+  it('opens no empty menu when the source finds nothing and there is no attach row, and Escape closes it', async () => {
+    const empty: ChatCompletionProvider = { id: 'templates', trigger: '/', search: async () => [] };
+    render(<Chat provider={empty} />);
+    const plus = screen.getByRole('button', { name: 'Mehr Aktionen' });
+    fireEvent.click(plus);
+    expect(plus.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.keyDown(plus, { key: 'Escape' });
+    expect(plus.getAttribute('aria-expanded')).toBe('false');
   });
 });

@@ -169,6 +169,18 @@ describe('composer toolbar', () => {
     expect(screen.getByRole('textbox').textContent).toBe('Hallo');
   });
 
+  it('keeps the focus in the editor when a custom item is pressed, so openCompletion opens at the caret', () => {
+    render(
+      <Setup composer={{ toolbar: { start: [], end: ['people', 'send'] }, items: { people: { label: 'People', onSelect: (controls) => controls.openCompletion({ trigger: '@' }) } } }}>
+        <MentionInput />
+      </Setup>,
+    );
+    const button = screen.getByRole('button', { name: 'People' });
+    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    button.dispatchEvent(mouseDown);
+    expect(mouseDown.defaultPrevented).toBe(true);
+  });
+
   it('hands the controls to a custom item in the plain input', () => {
     render(
       <Setup interactions={false} attachments={false} composer={{ toolbar: { end: ['greet', 'send'] }, items: { greet: { label: 'Greet', onSelect: (controls) => controls.appendText('Hallo') } } }}>

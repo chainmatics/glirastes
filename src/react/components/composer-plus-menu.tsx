@@ -136,6 +136,8 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
     if (!open || !sourceTrigger || !completionSearch) return;
     let current = true;
     const filter = source?.source;
+    // `completionSearch` is the editor's instance too: this search and one of the editor abort each
+    // other. Harmless: the press outside the editor that opens this menu closes the editor's list first.
     const max = limit !== undefined && Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : DEFAULT_SOURCE_LIMIT;
     completionSearch('', sourceTrigger, filter === undefined ? undefined : { source: filter })
       .then((results) => { if (current) setSourceItems(results.slice(0, max)); })
@@ -161,6 +163,13 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
 
   const rowCount = rows.length;
   const index = rowCount === 0 ? -1 : Math.min(active, rowCount - 1);
+  // Without rows (e.g. a source still loading or empty) no empty menu box is shown.
+  const menuShown = open && rowCount > 0;
+
+  // A turn that starts disables the button: the menu closes, so the focus never goes back to it.
+  useEffect(() => {
+    if (controls.isLoading) setOpen(false);
+  }, [controls.isLoading]);
   useEffect(() => {
     if (open && index >= 0) rowRefs.current[index]?.focus();
   }, [open, index]);
@@ -241,19 +250,24 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
         title={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        {...(open ? { 'aria-controls': menuId } : {})}
+        {...(menuShown ? { 'aria-controls': menuId } : {})}
         disabled={controls.isLoading}
         onClick={() => (open ? close(null) : openMenu('first'))}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
             openMenu(event.key === 'ArrowDown' ? 'first' : 'last');
+          } else if (event.key === 'Escape' && open) {
+            // The focus stays on the button while the menu has no rows yet.
+            event.preventDefault();
+            event.stopPropagation();
+            close(null);
           }
         }}
       >
         <span aria-hidden="true">+</span>
       </button>
-      {open && (
+      {menuShown && (
         <div id={menuId} role="menu" aria-label={label} data-element="plus-menu" onKeyDown={onMenuKeyDown}>
           {rows.slice(0, staticCount).map((row, position) => renderRow(row, position))}
           {rowCount > staticCount && (

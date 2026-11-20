@@ -29,7 +29,7 @@ function warnOnce(id: string, kind: 'unknown' | 'trigger') {
 }
 
 function keepFocus(event: MouseEvent) {
-  // Keeps the caret in the editor, so the list opens where the user was typing.
+  // Keeps the caret in the editor, so a list (also one an item opens) opens where the user was typing.
   event.preventDefault();
 }
 
@@ -48,6 +48,7 @@ function renderItem(id: string, item: ComposerToolbarItem, controls: ChatCompose
       data-item={id}
       aria-label={item.label}
       title={item.label}
+      onMouseDown={keepFocus}
       onClick={() => item.onSelect?.(controls)}
     >
       {item.icon ?? item.label}
