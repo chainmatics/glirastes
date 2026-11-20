@@ -1026,6 +1026,67 @@ export interface ChatLocale {
   activityUiUnconfirmed: string;
   /** Detail of a declined step the user approved but the server did not run (expired or already used approval). */
   activityApprovalNotUsedDetail: string;
+  /*
+   * Detail of a failed step whose text the SDK wrote itself (`StepFailureCode`,
+   * `ActivityStep.failures`), shown instead of that English text. Each is
+   * optional: a locale without it takes the built-in text of the language,
+   * except where the app's own table words the activity log itself and the
+   * language is not stated (`language`): then English, as before the keys.
+   * A text of the app's backend or tool is shown as it is.
+   */
+  /** `failed`, and any code this version does not know: "AI request failed". */
+  activityFailureGeneric?: string;
+  /** `invalid-input`: the model's arguments did not match the tool's schema. */
+  activityFailureInvalidInput?: string;
+  /** `tool-unavailable`: the tool is not offered in this chat (agent, policy, manifest, unknown tool). */
+  activityFailureToolUnavailable?: string;
+  /** `not-permitted`: the user's role may not use the tool. */
+  activityFailureNotPermitted?: string;
+  /** `identity-missing`: the server could not identify the user. */
+  activityFailureIdentityMissing?: string;
+  /** `account-refused`: the call does not fit the user's account (tenant). */
+  activityFailureAccountRefused?: string;
+  /** `tool-disabled`: the tool was revoked. */
+  activityFailureToolDisabled?: string;
+  /** `refused`: refused for another reason. */
+  activityFailureRefused?: string;
+  /** `limit-reached`: the turn's budget, without a named limit. */
+  activityFailureLimitReached?: string;
+  /** `limit-tool-calls`; supports `{limit}`, as are the other `activityFailureLimit…` keys. */
+  activityFailureLimitToolCalls?: string;
+  activityFailureLimitModelSteps?: string;
+  /** `{limit}` is the server's duration (`90 s`, `500 ms`). */
+  activityFailureLimitTime?: string;
+  activityFailureLimitInputTokens?: string;
+  activityFailureLimitOutputTokens?: string;
+  /** `{limit}` in USD. */
+  activityFailureLimitCost?: string;
+  activityFailureLimitRepeatedCalls?: string;
+  activityFailureLimitConsecutiveErrors?: string;
+  /** `record-not-found`: a record the call names does not exist or is not visible to the user. */
+  activityFailureRecordNotFound?: string;
+  /** `record-invalid-id`: an id the call names is not valid. */
+  activityFailureRecordInvalidId?: string;
+  /** `record-unchecked`: a record the call names could not be checked. */
+  activityFailureRecordUnchecked?: string;
+  /** `endpoint-failed`: the backend answered with an error and no message; supports `{status}`. */
+  activityFailureEndpointFailed?: string;
+  /** `endpoint-path-not-relative`: the endpoint caller refused a path off the API's origin. */
+  activityFailureEndpointPathNotRelative?: string;
+  /** `endpoint-path-not-allowed`: the endpoint caller refused a path outside `allowedPathPrefixes`. */
+  activityFailureEndpointPathNotAllowed?: string;
+  /** `endpoint-timeout`: supports `{tool}` (the tool's model-facing name). */
+  activityFailureEndpointTimeout?: string;
+  /** `endpoint-response-too-large`: supports `{tool}`. */
+  activityFailureEndpointResponseTooLarge?: string;
+  /** `memory-kind-unavailable`: the built-in memory tools (`memory_remember`, `memory_forget`). */
+  activityFailureMemoryKindUnavailable?: string;
+  /** `memory-full`: supports `{max}`. */
+  activityFailureMemoryFull?: string;
+  activityFailureMemorySaveFailed?: string;
+  activityFailureMemoryNoteMismatch?: string;
+  activityFailureMemoryRemoveFailed?: string;
+  activityFailureMemoryNoteNotFound?: string;
   /** Outcome of a decided approval (`ApprovalEntry`): approved, no result yet. */
   approvalEntryRunningLabel: string;
   /** Approved and done. */

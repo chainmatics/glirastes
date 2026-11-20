@@ -8,6 +8,7 @@ import {
   ENDPOINT_PATH_NOT_RELATIVE_ERROR,
   toolResultFailure,
 } from '../../runtime/tool-failure.js';
+import { readStepFailures, type StepFailure } from './step-failure.js';
 
 /**
  * `declined`: the call did not run because its approval was refused (by the
@@ -42,6 +43,14 @@ export interface ActivityStep {
    * extra text) or `unconfirmed`. The log shows the matching locale text.
    */
   uiOutcome?: ActivityUiOutcome;
+  /**
+   * Set beside `detail` when the SDK wrote that text itself (a refused call,
+   * invalid input, a limit, the endpoint caller's or a memory tool's fixed
+   * text): its kind and values, so the log shows the locale's text
+   * (`activityFailure…`) instead of the English one. Absent for a text of
+   * the app's backend or tool and for a text this version does not know.
+   */
+  failures?: StepFailure[];
 }
 
 export type ActivityUiOutcome = 'pending' | Exclude<UiOutcomeCode, 'ok'> | 'unconfirmed';
@@ -187,7 +196,14 @@ export function readActivitySteps(
       // The hand-off note of a UI tool is for the model, not the user.
       detail = isUiActionHandoffMessage(part.output.message) ? undefined : part.output.message;
     }
-    if (typeof detail === 'string' && detail.trim() && allowDetail(toolName, status, source)) step.detail = detail.trim();
+    if (typeof detail === 'string' && detail.trim() && allowDetail(toolName, status, source)) {
+      step.detail = detail.trim();
+      const resultStatus = isRecord(part.output) && typeof part.output.status === 'number' ? part.output.status : undefined;
+      const failures = status === 'error' || status === 'expected'
+        ? readStepFailures(step.detail, { source, toolName, ...(source === 'output' && resultStatus !== undefined ? { status: resultStatus } : {}) })
+        : undefined;
+      if (failures) step.failures = failures;
+    }
     steps.push(step);
   });
   return steps;
