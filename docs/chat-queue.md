@@ -68,6 +68,7 @@ not paused (except for the one `sendNow` message).
 | Run ends with an error | Paused until `resumeQueue()` (`pauseOn`). |
 | User stops the run (`stop()`) | Paused (`'aborted'`). |
 | `sendNow` with `'abort'` | Stops the run, sends the message; not paused. |
+| Later turns after a stopped or failed one | The stopped turn keeps what it showed (text, the log with its calls as stopped) and its recorded outcome (`useTurnOutcome`, `reason` `stopped`, `send-now` or `request-failed`), also when it ended before an assistant message existed and after a reload. Its notice stays at it, right after the question when no answer had arrived (`activityLog.noticeScope`, `docs/concepts.md`, message layout). |
 | Safety stop (`pipelineState.status: 'safety-stop'`) | Paused. |
 | Truncation (continue banner) | Paused; resuming sends the next message, which replaces the continue prompt. |
 | Clarification open after a run | Held: a queued text is never turned into a clarification answer by itself. A message the user sends now (or the card's answer) answers it at once, ahead of the queue. |

@@ -580,6 +580,17 @@ export interface ActivityLogConfig {
    */
   noticePlacement?: 'log' | 'message';
   /**
+   * Which turns show their stop or error notice. `'every'` (default): every
+   * turn whose recorded outcome (`TurnOutcome`) is not `completed`, also
+   * after later turns and a reload, at the same place as for the latest
+   * turn; a turn that ended before an assistant message existed shows it as
+   * its own element right after its user message (`components.TurnNotice`,
+   * placement `'message'`; default `<p data-component="turn-notice">`).
+   * `'latest'`: only the latest turn while no later one started, never for a
+   * turn without an assistant message (the behaviour before 0.20.0).
+   */
+  noticeScope?: 'latest' | 'every';
+  /**
    * Which steps show their detail line (`data-element="detail"`: the error
    * text, a done step's message):
    * - `'auto'` (default): a failed or neutral (`expected`) step shows the
@@ -615,6 +626,36 @@ export interface TurnNoticeProps {
   status: TurnNoticeStatus;
   /** `'log'` inside the activity log, `'message'` as its own part of the message. */
   placement: 'log' | 'message';
+  /** The recorded outcome of the turn the notice belongs to, when there is one (`useTurnOutcome`). */
+  outcome?: TurnOutcome;
+}
+
+/** How a turn ended: the end states of `PipelineState.status`. Every one but `completed` has a notice. */
+export type TurnOutcomeStatus = 'completed' | TurnNoticeStatus;
+
+/**
+ * Why a turn ended so: `finished` the run ended by itself, `stopped` the
+ * user's `stop()`, `send-now` a `sendNow` with `sendNowBehavior: 'abort'`,
+ * `request-failed` a transport error, `pipeline` a stop, safety stop or error
+ * the server reported (`data-pipeline-state`).
+ */
+export type TurnOutcomeReason = 'finished' | 'stopped' | 'send-now' | 'request-failed' | 'pipeline';
+
+/**
+ * The recorded end of a turn, keyed by the user message that started it, also
+ * when no assistant message exists (a stop or a failure before the first
+ * token). Kept while later turns run and, with `session.save`/`load`, across
+ * a reload (in the stored user message's `metadata.glirastesTurnOutcome`,
+ * never in a request). A new request for the same user message (a retry)
+ * replaces it with the outcome of the new attempt. Status and reason only.
+ */
+export interface TurnOutcome {
+  /** Id of the user message that started the turn. */
+  userMessageId: string;
+  status: TurnOutcomeStatus;
+  reason: TurnOutcomeReason;
+  /** ISO time it was recorded. */
+  at: string;
 }
 
 /**
@@ -641,10 +682,14 @@ export interface MessageParts extends MessagePartNodes {
   visible: boolean;
   /** Every part of the message in message order, each with its default rendering. */
   parts: MessagePartEntry[];
+  /** The recorded outcome of the message's turn, else null (a turn still running, an older stored one). */
+  turnOutcome: TurnOutcome | null;
 }
 
 export interface MessagePartsProps extends MessagePartNodes {
   message: ChatMessage;
+  /** The recorded outcome of the message's turn, else null (a turn still running, an older stored one). */
+  turnOutcome?: TurnOutcome | null;
   /** Every part of the message in message order, each with its default rendering (`node`). */
   parts: MessagePartEntry[];
   /** All parts in the default order. */
@@ -1774,6 +1819,8 @@ export interface MessageListProps {
 export interface MessageBubbleProps {
   message: ChatMessage;
   className?: string;
+  /** The recorded outcome of the message's turn, passed by `MessageList` when there is one. */
+  turnOutcome?: TurnOutcome | null;
 }
 
 export interface ChatInputProps {

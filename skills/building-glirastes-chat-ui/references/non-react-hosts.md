@@ -101,7 +101,8 @@ required APIs. The configured V1 service does not add those routes automatically
 - **Vue/plain JS:** the same detached-element/config/append ordering applies;
   dispose when the view is removed and remount on identity changes.
 - **Layout without React slots:** `config.activityLog` (`expandWhileRunning`,
-  `runningProgress`, `noticePlacement: 'message'`, `details`, `grouping`),
+  `runningProgress`, `noticePlacement: 'message'`, `details`, `grouping`,
+  `noticeScope: 'latest'` to show the stop notice on the latest turn only),
   `config.approvalDisplay` (`decided: 'entry'`, `open: 'inline'`; leave `decided` off if the host draws its own entry for decided approvals, both would show),
   `config.queue` (message queue, `docs/chat-queue.md`),
   `config.entityLinks.mentionMarkers` and the `data-*` hooks of

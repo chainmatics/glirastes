@@ -28,6 +28,7 @@ import type {
   ChatSubmitResult,
   ChatSubmitOutcome,
   ChatSubmitRejection,
+  TurnOutcome,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
 import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
@@ -143,6 +144,8 @@ export interface ChatContextValue {
   hasMore: boolean;
   pipelineSteps: PipelineStepReport[];
   pipelineState: PipelineState | null;
+  /** How each turn ended, keyed by the user message that started it (`useTurnOutcome`). */
+  turnOutcomes?: ReadonlyMap<string, TurnOutcome>;
 
   // Approvals
   pendingApprovals: PendingApproval[];
