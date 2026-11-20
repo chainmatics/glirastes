@@ -58,12 +58,11 @@ const triggers = useMemo(() => [{ char: '#', label: 'Tickets', types: ['ticket']
 - `useChatComposerInput().inputProps` carries `triggers` only when the
   provider's list differs from the default `@` and `/` (an explicit definition
   or a provider with another char), so an input's own `triggers` prop still
-  applies.
+  applies; when it does carry them, spread `inputProps` before your own
+  `triggers` prop if you set one.
 - A standalone `RichMentionInput` takes `triggers` as chars or definitions
   (default `['@', '/']`), e.g. `['@', { char: '#', prefix: 'tag:' }]`, and
   throws on an invalid entry like the provider.
-- `useChatComposerInput().inputProps` always carries `triggers`: spread it
-  before your own `triggers` prop if you set one.
 - The legacy `mentions` search (without `completionProviders`) stays `@` and `/` only.
 
 ### Sent mentions and `types`
@@ -235,7 +234,8 @@ const composer = useMemo<ComposerConfig>(() => ({
   picking it in the list does: `chip` inserts a pill at the caret, `text` its
   `insertText`, `run` inserts and sends.
   `onCompletionSelect` runs first. No entries, no section; with no rows at
-  all (e.g. while the source loads) no menu box shows, and Escape closes it.
+  all (e.g. while the source loads) no menu box shows, `aria-expanded` stays
+  `false` until it does, and Escape closes it.
 - Keyboard: ArrowDown/ArrowUp (wrapping), Home/End, Enter/Space choose,
   Escape closes and returns focus to the "+" button, Tab closes; a press
   outside closes. ArrowDown/ArrowUp on the button open on the first/last row.

@@ -71,8 +71,11 @@ describe('composer toolbar example', () => {
 
   it('lists the prompt template in the plus menu and inserts its text', async () => {
     render(<Chat />);
-    fireEvent.click(screen.getByRole('button', { name: 'Mehr Aktionen' }));
+    const plus = screen.getByRole('button', { name: 'Mehr Aktionen' });
+    fireEvent.click(plus);
     const row = await screen.findByRole('menuitem', { name: 'Auftrag zusammenfassen' });
+    // Expanded once the rows of the source are in and the menu shows.
+    expect(plus.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(row);
     await waitFor(() => expect(document.body.textContent).toContain('Fasse den Auftrag zusammen'));
   });
@@ -82,9 +85,12 @@ describe('composer toolbar example', () => {
     render(<Chat provider={empty} />);
     const plus = screen.getByRole('button', { name: 'Mehr Aktionen' });
     fireEvent.click(plus);
-    expect(plus.getAttribute('aria-expanded')).toBe('true');
+    // aria-expanded follows the menu element: nothing shows, so nothing is expanded.
+    expect(plus.getAttribute('aria-expanded')).toBe('false');
     await act(async () => { await Promise.resolve(); });
     expect(screen.queryByRole('menu')).toBeNull();
+    expect(plus.getAttribute('aria-expanded')).toBe('false');
+    expect(plus.hasAttribute('aria-controls')).toBe(false);
     fireEvent.keyDown(plus, { key: 'Escape' });
     expect(plus.getAttribute('aria-expanded')).toBe('false');
   });

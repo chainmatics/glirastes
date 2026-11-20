@@ -252,7 +252,8 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
         aria-label={label}
         title={label}
         aria-haspopup="menu"
-        aria-expanded={open}
+        // The menu element, not the open state: while it has no rows nothing shows.
+        aria-expanded={menuShown}
         {...(menuShown ? { 'aria-controls': menuId } : {})}
         disabled={controls.isLoading}
         onClick={() => (open ? close(null) : openMenu('first'))}
