@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Chat queue (`docs/chat-queue.md`): what happens to the queue when a turn of the left chat ends after a session switch and when the first chat is opened again.
 - README install section: an app upgrading from 0.19.0 or older with an existing `bun.lock` keeps a nested `glirastes/pg` (and possibly `glirastes/zod`) entry; how to remove them so the app's copies are shared.
 - README install section: the upgrade note now covers a binary `bun.lockb` (remove and add does not drop the nested pg there; convert with `bun install --save-text-lockfile` first, or `bun update pg`) and the real cause of a nested `glirastes/zod` (bun gives the SDK's `^4.0.0` the newest zod already in the lockfile, so an app locked on an older zod than another dependency gets two copies even after remove and add), with the fixes verified for both formats (`bun add zod@^<that version>`, `bun update zod`, `overrides`), how to check (`bun pm ls --all`, a fresh `node_modules`), and why two zod 4 copies still work.
 
