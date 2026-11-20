@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React, { useMemo } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AiChatProviderConfig,
@@ -11,6 +11,7 @@ import type {
 } from '../../types.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import { MentionInput } from '../mention-input.js';
+import { useChatComposer, type ChatComposer } from '../../composer/chat-composer.js';
 import { RichMentionInput } from '../rich-mention-input.js';
 
 function transport(status: ChatTransport['status'] = 'ready'): ChatTransport {
@@ -199,8 +200,37 @@ describe('completion pick behavior (select)', () => {
     );
     expect(chip(editor, '9')).toBeNull();
     expect(screen.queryByRole('listbox')).toBeNull();
+    // The app handled it: the typed trigger and query go, the caret stays where they were.
+    expect(editor.textContent).toBe('Siehe ');
+    const range = window.getSelection()!.getRangeAt(0);
+    expect(editor.contains(range.startContainer)).toBe(true);
+    expect(range.startOffset).toBe('Siehe '.length);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(chat.sendMessage).not.toHaveBeenCalled();
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('onCompletionSelect returning true removes a trigger opened by openCompletion, with its space', async () => {
+    const onCompletionSelect = vi.fn(() => true);
+    let composer: ChatComposer | null = null;
+    function Grab() { composer = useChatComposer(); return null; }
+    render(
+      <AiChatProvider transport={transport()} completionProviders={[tickets]} onCompletionSelect={onCompletionSelect}>
+        <MentionInput />
+        <Grab />
+      </AiChatProvider>,
+    );
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+    typeInto(editor, 'Siehe');
+    act(() => { composer!.openCompletion({ trigger: '#' }); });
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    expect(editor.textContent).toBe('Siehe #');
+    fireEvent.click(option('Bug sieben'));
+
+    expect(onCompletionSelect).toHaveBeenCalledTimes(1);
+    expect(editor.textContent).toBe('Siehe');
+    expect(window.getSelection()!.getRangeAt(0).startOffset).toBe('Siehe'.length);
+    expect(screen.queryByRole('listbox')).toBeNull();
   });
 
   it('onCompletionSelect returning nothing keeps the built-in behavior', async () => {
@@ -321,5 +351,6 @@ describe('standalone RichMentionInput pick behavior', () => {
     );
     expect(chip(editor, '9')).toBeNull();
     expect(screen.queryByRole('listbox')).toBeNull();
+    expect(editor.textContent).toBe('');
   });
 });

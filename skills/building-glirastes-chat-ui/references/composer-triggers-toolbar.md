@@ -105,8 +105,9 @@ A prompt template as `select: 'text'` replaces rewriting a chip into text in
 `onCompletionSelect(item, { trigger, query, controls })` (`CompletionSelectContext`) on the provider runs
 before the built-in behavior; `controls` is the composer
 (`ChatComposerInputControls`: `setText`, `submit`, `focus`, …). Return `true`
-when the app handled the pick: the list closes and trigger and query stay in
-the editor. A standalone `RichMentionInput` takes `onCompletionSelect` with
+when the app handled the pick: the typed trigger and query (or the text
+`openCompletion` inserted) leave the editor, the caret stays where they were
+and the list closes. A standalone `RichMentionInput` takes `onCompletionSelect` with
 `{ trigger, query }` only, and its `onSearch` receives a third argument
 `{ source }` after a `list` pick; forward it to the search of
 `createCompletionSearch`. An unknown `select`, an empty `insertText` or an

@@ -255,6 +255,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const lastSearchRef = useRef<{ query: string; trigger: string }>({ query: '', trigger: '' });
     // Set by `openCompletion` until the user types or picks.
     const armedRef = useRef<ArmedCompletion | null>(null);
+    // Set while `onCompletionSelect` runs: `openCompletion` calls wait here until the pick cleaned up.
+    const pickQueueRef = useRef<OpenCompletionOptions[] | null>(null);
+    const openCompletionRef = useRef<((options: OpenCompletionOptions) => void) | null>(null);
     const warnedTriggersRef = useRef(new Set<string>());
     const isInitializedRef = useRef(false);
 
@@ -799,10 +802,11 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       }
     }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions, allowEmptySubmit]);
 
-    /** One entry of the list was picked: the app's handler first, then the entry's `select` behavior. */
     /**
-     * `fromCode` (`pickCompletion`): the trigger was inserted armed for this
-     * pick; when nothing replaces it, it goes again, and a `list` keeps it armed.
+     * One entry of the list was picked: the app's handler first, then the
+     * entry's `select` behavior. `fromCode` (`pickCompletion`): the trigger was
+     * inserted armed for this pick; when nothing replaces it, it goes again,
+     * and a `list` keeps it armed.
      */
     const pickResult = useCallback((result: MentionResult, fromCode = false) => {
       const armed = armedRef.current;
@@ -813,38 +817,59 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         removeArmed();
       };
       const active = detectTrigger() ?? lastSearchRef.current;
-      if (onCompletionSelect?.(result, { trigger: active.trigger, query: active.query }) === true) {
-        dropArmed();
+      let handled = false;
+      let deferred: OpenCompletionOptions[] = [];
+      if (onCompletionSelect) {
+        // `openCompletion` called inside the handler (a sub-list) runs once the pick has cleaned up.
+        pickQueueRef.current = deferred;
+        try {
+          handled = onCompletionSelect(result, { trigger: active.trigger, query: active.query }) === true;
+        } finally {
+          deferred = pickQueueRef.current ?? [];
+          pickQueueRef.current = null;
+        }
+      }
+      const openDeferred = () => {
+        for (const options of deferred) openCompletionRef.current?.(options);
+      };
+      if (handled) {
+        // The app handled it: trigger and query (or the untouched `openCompletion` text) leave the editor.
+        armedRef.current = armed;
+        if (!removeArmed() && replaceQuery(() => '') !== null) onChange?.(getFullValue());
         closeDropdown();
+        openDeferred();
         return;
       }
       const selected = result.select ?? triggers.get(active.trigger)?.select ?? 'chip';
       // A `list` without a sub-list would show the same list again: it inserts a pill instead.
       const kind = selected === 'list' && result.listSource === undefined ? 'chip' : selected;
       if (kind === 'text') {
-        if (replaceQuery(() => result.insertText ?? result.label) === null) return dropArmed();
-        closeDropdown();
-        onChange?.(getFullValue());
-        return;
-      }
-      if (kind === 'list') {
+        if (replaceQuery(() => result.insertText ?? result.label) === null) dropArmed();
+        else {
+          closeDropdown();
+          onChange?.(getFullValue());
+        }
+      } else if (kind === 'list') {
         const char = replaceQuery((trigger) => trigger);
-        if (char === null) return dropArmed();
-        // The text is the same, so an armed trigger still closes away untouched.
-        if (fromCode) armedRef.current = armed;
-        clearTimeout(searchTimeoutRef.current);
-        // Searching again clears the list state but keeps it open; the source sticks until it closes.
-        listSourceRef.current = result.listSource;
-        setSelectedIndex(0);
-        setSelectedAction(-1);
-        onChange?.(getFullValue());
-        void performSearch('', char, result.listSource);
-        return;
+        if (char === null) dropArmed();
+        else {
+          // The text is the same, so an armed trigger still closes away untouched.
+          if (fromCode) armedRef.current = armed;
+          clearTimeout(searchTimeoutRef.current);
+          // Searching again clears the list state but keeps it open; the source sticks until it closes.
+          listSourceRef.current = result.listSource;
+          setSelectedIndex(0);
+          setSelectedAction(-1);
+          onChange?.(getFullValue());
+          void performSearch('', char, result.listSource);
+        }
+      } else {
+        // `run` sends through the same path as Enter, so a disabled (streaming) composer sends nothing.
+        const inserted = insertMention(result);
+        if (!inserted) dropArmed();
+        else if (kind === 'run') submit([inserted]);
       }
-      // `run` sends through the same path as Enter, so a disabled (streaming) composer sends nothing.
-      const inserted = insertMention(result);
-      if (!inserted) return dropArmed();
-      if (kind === 'run') submit([inserted]);
+      openDeferred();
     }, [detectTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, performSearch, insertMention, submit, removeArmed]);
 
     const handleKeyDown = useCallback(
@@ -1190,6 +1215,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     }, [hasMentionSupport, triggers, removeArmed]);
 
     const openCompletion = useCallback((options: OpenCompletionOptions) => {
+      if (pickQueueRef.current) {
+        pickQueueRef.current.push(options);
+        return;
+      }
       const trigger = armTrigger(
         options?.trigger,
         options?.query ?? '',
@@ -1203,6 +1232,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onChange?.(getFullValue());
       void performSearch(options.query ?? '', trigger, options.source);
     }, [armTrigger, onChange, getFullValue, performSearch]);
+
+    openCompletionRef.current = openCompletion;
 
     /** A pick from outside the list (the "+" menu): the trigger goes in at the caret, then the normal pick runs. */
     const pickCompletion = useCallback((item: MentionResult, options: { trigger: string }) => {

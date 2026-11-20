@@ -1599,9 +1599,10 @@ export interface AiChatProviderConfig {
   onCompletionProviderError?: (providerId: string, error: unknown) => void;
   /**
    * Runs first when an entry of a completion list is picked. Return `true`
-   * when the app handled it: the list closes and the composer does nothing
-   * else (trigger and query stay in the editor). Otherwise the entry's
-   * `select` behavior runs.
+   * when the app handled it: the typed trigger and query leave the editor,
+   * the caret stays where they were and the list closes; nothing else runs.
+   * Otherwise the entry's `select` behavior runs. For a sub-list, call
+   * `controls.openCompletion({ trigger, source })` here and return `true`.
    */
   onCompletionSelect?: (item: CompletionItem, context: CompletionSelectContext) => boolean | void;
   /**
@@ -2253,7 +2254,7 @@ export interface RichMentionInputProps {
   onSearch?: (query: string, trigger: string) => Promise<MentionResult[]> | MentionResult[];
   /**
    * Runs first when an entry is picked; return `true` to skip its `select`
-   * behavior (the list closes). The provider's `onCompletionSelect` adds the
+   * behavior (trigger and query leave the editor, the list closes). The provider's `onCompletionSelect` adds the
    * composer `controls`.
    */
   onCompletionSelect?: (item: CompletionItem, context: Omit<CompletionSelectContext, 'controls'>) => boolean | void;
