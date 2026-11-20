@@ -181,7 +181,10 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
 
       {approvalReminder && pendingApprovals.length > 0 && (
         <div data-component="approval-reminder" role="status">
-          {locale.approvalPendingHint}
+          {/* A queued message waits for the card; without one the send was refused. */}
+          {queue.enabled && queue.items.length > 0
+            ? locale.queueApprovalWaitingHint ?? locale.approvalPendingHint
+            : locale.approvalPendingHint}
         </div>
       )}
 

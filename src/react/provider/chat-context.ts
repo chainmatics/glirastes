@@ -26,6 +26,8 @@ import type {
   FilePart,
   ChatQueueState,
   ChatSubmitResult,
+  ChatSubmitOutcome,
+  ChatSubmitRejection,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
 import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
@@ -94,6 +96,19 @@ export interface ChatContextValue {
    * `queue.enabled`) or `'rejected'`. `send` returns true for the first two.
    */
   submit: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => ChatSubmitResult;
+  /**
+   * `submit` that also says why a message was refused:
+   * `{ status: 'rejected', reason }` (`ChatSubmitRejectionReason`), else
+   * `{ status: 'sent' | 'queued' }`.
+   */
+  submitWithResult: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => ChatSubmitOutcome;
+  /**
+   * The latest refused `send`/`submit` (also from the built-in composers):
+   * reason and time, no content. Null until one is refused, and again after
+   * the next accepted (sent or queued) `send`/`submit`; sending queued
+   * messages does not touch it. A refusal re-renders the context once.
+   */
+  lastRejection: ChatSubmitRejection | null;
   /**
    * Whether a composer takes input now. Without the queue false while
    * `isLoading`; with `queue.enabled` false only while the conversation

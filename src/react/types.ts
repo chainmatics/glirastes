@@ -1080,6 +1080,13 @@ export interface ChatLocale {
   queueSaveLabel: string;
   queueCancelLabel: string;
   queueFilesLabel: string;            // supports `{count}`
+  /**
+   * The approval notice while a queued message waits for an open approval.
+   * Optional: without it the chat uses the app's own `approvalPendingHint`
+   * when it set one, else the built-in text ("Message waits until the
+   * approval is decided.").
+   */
+  queueApprovalWaitingHint?: string;
 }
 
 // ============================================================================
@@ -1226,6 +1233,31 @@ export interface ChatQueueConfig {
 /** What `submit` did with a message. */
 export type ChatSubmitResult = 'sent' | 'queued' | 'rejected';
 
+/**
+ * Why a message was not taken. `session`: the conversation is not loaded or
+ * is changing. `approval-open`: an approval waits (only without the queue;
+ * with it the message is queued). `attachments-off`: files while attachments
+ * are off. `files-with-command`: files with a direct `/` command. `queue-full`:
+ * the queue holds `maxSize` messages.
+ */
+export type ChatSubmitRejectionReason =
+  | 'session'
+  | 'approval-open'
+  | 'attachments-off'
+  | 'files-with-command'
+  | 'queue-full';
+
+/** `submitWithResult`: what happened, and why for a refused message. */
+export type ChatSubmitOutcome =
+  | { readonly status: 'sent' | 'queued' }
+  | { readonly status: 'rejected'; readonly reason: ChatSubmitRejectionReason };
+
+/** The latest refused message (`lastRejection`): the reason and when (`Date.now()`), no content. */
+export interface ChatSubmitRejection {
+  readonly reason: ChatSubmitRejectionReason;
+  readonly at: number;
+}
+
 /** `ChatContextValue.queue`. */
 export interface ChatQueueState {
   readonly enabled: boolean;
@@ -1243,6 +1275,10 @@ export interface ChatQueueState {
 /** The queue state and its actions (`useChatQueue`, `ChatQueue`'s render prop). */
 export interface ChatQueueApi extends ChatQueueState {
   submit(message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }): ChatSubmitResult;
+  /** `submit` with the reason of a refusal. */
+  submitWithResult(message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }): ChatSubmitOutcome;
+  /** The latest refused `send`/`submit`; null again after the next accepted one. */
+  readonly lastRejection: ChatSubmitRejection | null;
   sendNow(id: string): boolean;
   removeQueued(id: string): boolean;
   editQueued(id: string, text: string): boolean;

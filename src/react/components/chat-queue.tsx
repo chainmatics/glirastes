@@ -8,7 +8,8 @@ import type { ChatQueueApi, ChatQueueProps, QueuedMessage } from '../types.js';
  */
 export function useChatQueue(): ChatQueueApi {
   const {
-    queue, submit, sendNow, removeQueued, editQueued, beginEdit, cancelEdit, clearQueue, resumeQueue, pauseQueue,
+    queue, submit, submitWithResult, lastRejection, sendNow, removeQueued, editQueued, beginEdit, cancelEdit,
+    clearQueue, resumeQueue, pauseQueue,
   } = useChatContext();
   return useMemo(() => ({
     enabled: queue.enabled,
@@ -17,6 +18,8 @@ export function useChatQueue(): ChatQueueApi {
     restoring: queue.restoring,
     editingId: queue.editingId,
     submit,
+    submitWithResult,
+    lastRejection,
     sendNow,
     removeQueued,
     editQueued,
@@ -25,7 +28,10 @@ export function useChatQueue(): ChatQueueApi {
     clearQueue,
     resumeQueue,
     pauseQueue,
-  }), [queue, submit, sendNow, removeQueued, editQueued, beginEdit, cancelEdit, clearQueue, resumeQueue, pauseQueue]);
+  }), [
+    queue, submit, submitWithResult, lastRejection, sendNow, removeQueued, editQueued, beginEdit, cancelEdit,
+    clearQueue, resumeQueue, pauseQueue,
+  ]);
 }
 
 const fill = (text: string, values: Record<string, string | number>) =>
