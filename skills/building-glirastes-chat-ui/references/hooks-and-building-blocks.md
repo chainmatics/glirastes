@@ -113,7 +113,9 @@ Defaults keep today's markup; everything below is opt-in.
   `session.activeId` while a request runs stops it: the left chat's turn is
   `aborted` / `chat-left` and is stored with that chat at once through
   `session.save(leftChatId, …)` (write to the id passed). Nothing of it
-  reaches the new chat, its store or its requests. A retry of the turn replaces it. A custom `MessageBubble` also gets it as `turnOutcome`. Draw a
+  reaches the new chat, its store or its requests. The server request is
+  aborted mid-turn; a backend action it already ran is not undone. Append
+  own messages to the transport only while `isLoading` is false. A retry of the turn replaces it. A custom `MessageBubble` also gets it as `turnOutcome`. Draw a
   per-turn notice from this, not from `pipelineState` (only the latest run's).
 - To act once when a turn ends (refresh data, play a sound, log), pass
   `onTurnEnd(outcome, info)` (`OnTurnEnd`; `info` is `TurnEndInfo`

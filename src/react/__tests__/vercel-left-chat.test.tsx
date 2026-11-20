@@ -99,4 +99,32 @@ describe('Vercel transport: the host opens another chat while a request runs', (
     expect(bodies[1]!.messages).toHaveLength(3);
     expect(JSON.stringify(bodies[1])).not.toContain('of A');
   });
+
+  it('A to B to A without a send: A keeps its partial answer on screen and in its store', async () => {
+    const histories: Record<string, ChatMessage[]> = { A: [], B };
+    const session = (activeId: string): SessionConfig => ({
+      activeId,
+      load: async (id) => histories[id] ?? [],
+      save: (id, messages) => { histories[id] = messages; },
+    });
+    const view = render(<App session={session('A')} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { void ctx.send('a question'); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => {
+      for (const chunk of ['{"type":"start"}', '{"type":"start-step"}', '{"type":"text-start","id":"t"}',
+        '{"type":"text-delta","id":"t","delta":"partial of A"}']) streams[0]!.push(chunk);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await waitFor(() => expect(JSON.stringify(ctx.messages)).toContain('partial of A'));
+    const shown = ctx.messages.map((message) => message.id);
+    view.rerender(<App session={session('B')} />);
+    await waitFor(() => expect(ctx.messages.map((message) => message.id)).toEqual(['b-u1', 'b-a1']));
+    view.rerender(<App session={session('A')} />);
+    await waitFor(() => expect(ctx.messages.map((message) => message.id)).toEqual(shown));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(ctx.messages.map((message) => message.id)).toEqual(shown);
+    expect(histories.A.map((message) => message.id)).toEqual(shown);
+    expect(JSON.stringify(histories.A)).toContain('partial of A');
+  });
 });
