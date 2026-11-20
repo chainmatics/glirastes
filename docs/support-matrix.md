@@ -76,7 +76,7 @@ criteria above. One active runtime per application/environment; no HA claim.
 
 Version 0.19.0 is published on npm and as the public Linux amd64 image
 `ghcr.io/chainmatics/glirastes-runtime:0.19.0`. The
-[acceptance record](acceptance/2026-11-15-runtime-container-v1.md) of 0.14.0 links the release
+[acceptance record](https://github.com/chainmatics/glirastes/blob/v0.19.0/docs/acceptance/2026-11-15-runtime-container-v1.md) of 0.14.0 links the release
 gates and the separate embedded Get It Done production smoke test. Publication
 and a successful embedded pilot do not certify a customer's container deployment.
 

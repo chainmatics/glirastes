@@ -144,6 +144,25 @@ describe('package pack completeness', () => {
     expect(report).toEqual([]);
   }, 60_000);
 
+  it('resolves every relative Markdown link of a packed Markdown file inside the package', async () => {
+    // Internal docs, examples, the container folder, tests and sources are not packed: a link to them is absolute.
+    const broken: string[] = [];
+    let checked = 0;
+    for (const file of [...packed].filter((path) => path.endsWith('.md'))) {
+      const source = await readFile(join(SDK_ROOT, file), 'utf8');
+      for (const match of source.matchAll(/\]\(\s*<?([^)\s>#?]+)/g)) {
+        const target = match[1]!;
+        if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('/')) continue;
+        checked += 1;
+        const resolved = posix.normalize(posix.join(posix.dirname(file), target)).replace(/\/$/, '');
+        if (packed.has(resolved) || [...packed].some((path) => path.startsWith(`${resolved}/`))) continue;
+        broken.push(`${file} -> ${target}`);
+      }
+    }
+    expect(checked).toBeGreaterThan(20);
+    expect(broken.sort()).toEqual([]);
+  }, 60_000);
+
   it('keeps internal docs out of the package', () => {
     const leaked = [...packed].filter((path) => INTERNAL_DOCS.some((pattern) => pattern.test(path))).sort();
     expect(leaked).toEqual([]);
