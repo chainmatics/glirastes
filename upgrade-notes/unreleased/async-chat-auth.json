@@ -5,7 +5,11 @@
   "howTo": "Drop any cast that forced an async function into `headers` or `getToken`; pass the async function directly.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
-    "imports": ["glirastes/react"]
+    "symbols": [
+      "getToken",
+      "AiChatProvider",
+      "VercelAiChat"
+    ]
   },
   "surface": []
 }

@@ -1,16 +1,15 @@
 {
   "id": "stt-worklet-url",
-  "kind": "recommended",
-  "summary": "Voice input loads its audio worklet from /audio-worklet-processor.js, which the host must serve. The path is now the exported DEFAULT_AUDIO_WORKLET_URL and can be changed with DeepgramSttAdapter's workletUrl option.",
-  "howTo": "Add predev and prebuild scripts that copy node_modules/glirastes/dist/react/audio-worklet-processor.js into public/, merged with your existing scripts (see the speech worklet section of the building-glirastes-chat-ui references). If the file is served elsewhere, set voice.workletUrl on the chat, or pass workletUrl to the speech adapter.",
+  "kind": "optional",
+  "summary": "The voice input's audio worklet path (/audio-worklet-processor.js, unchanged) is now exported as DEFAULT_AUDIO_WORKLET_URL and can be changed with the workletUrl option of the speech adapters, VoiceInputButton and the chat's voice config.",
+  "howTo": "Nothing to change while the worklet is served at /audio-worklet-processor.js as before. If you serve it elsewhere, you can set voice.workletUrl on the chat or pass workletUrl to the speech adapter; to keep the copy in sync, you can add predev and prebuild scripts that copy node_modules/glirastes/dist/react/audio-worklet-processor.js into public/ (see the speech worklet section of the building-glirastes-chat-ui references).",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
     "symbols": [
       "DeepgramSttAdapter",
       "RecordedSttAdapter",
       "VoiceInputButton",
-      "useDeepgramTranscription",
-      "voice"
+      "useDeepgramTranscription"
     ]
   },
   "surface": [
@@ -23,5 +22,11 @@
     "glirastes/stt#DEFAULT_AUDIO_WORKLET_URL",
     "glirastes/stt#DeepgramSttAdapterOptions.workletUrl",
     "glirastes/stt#RecordedSttAdapterOptions.workletUrl"
-  ]
+  ],
+  "adoptedWhen": {
+    "symbols": [
+      "workletUrl",
+      "DEFAULT_AUDIO_WORKLET_URL"
+    ]
+  }
 }

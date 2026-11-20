@@ -1,12 +1,13 @@
 {
   "id": "chat-markdown-plugins",
-  "kind": "recommended",
-  "summary": "Chat Markdown lists now show bullets and numbers by default. GFM tables render when you pass remark plugins through the new AiChatProvider `markdown` prop.",
-  "howTo": "Run `bun add remark-gfm`, then pass `markdown={{ remarkPlugins: [remarkGfm] }}` (memoized) to AiChatProvider. Lists now get markers by default, so remove your own list or table CSS workarounds (for example `list-style` overrides) unless you want a different look.",
+  "kind": "optional",
+  "summary": "Chat Markdown lists show bullets and numbers by default, and the new `markdown` prop of AiChatProvider (also VercelAiChat and `<glirastes-chat>`) accepts remark plugins, e.g. for GFM tables.",
+  "howTo": "Nothing to change. For GFM tables you can run `bun add remark-gfm` and pass `markdown={{ remarkPlugins: [remarkGfm] }}` (memoized) to AiChatProvider. If you added your own list CSS (for example `list-style` overrides) only to get markers, you can remove it.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
-    "imports": [
-      "glirastes/react"
+    "symbols": [
+      "AiChatProvider",
+      "VercelAiChat"
     ]
   },
   "surface": [
@@ -16,5 +17,10 @@
     "glirastes/react#ChatMarkdownOptions",
     "glirastes/react#ChatMarkdownOptions.remarkPlugins",
     "glirastes/react/vercel#VercelAiChatProps.markdown"
-  ]
+  ],
+  "adoptedWhen": {
+    "symbols": [
+      "remarkPlugins"
+    ]
+  }
 }
