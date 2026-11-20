@@ -1,0 +1,31 @@
+{
+  "id": "completion-select",
+  "kind": "optional",
+  "summary": "Completion items set what a pick does with `select`: `chip` (default), `text` (inserts `insertText` or the label as plain text), `run` (pill, then sends like the send button) or `list` (shows the providers in `listSource`). `onCompletionSelect` on AiChatProvider can take over a pick.",
+  "howTo": "Prompt templates that you rewrite from a chip into text in `onBeforeSend` (as omnify does) can return `{ select: 'text', insertText: 'Fasse den Auftrag zusammen' }` from their provider instead; the user sees and edits the text before sending, and the `onBeforeSend` rewrite can go. For a sub-list, return `{ select: 'list', listSource: 'templates' }` and give the sub-list its own provider with that id on the same trigger. Return `true` from `onCompletionSelect(item, { trigger, query, controls })` to take over a pick. Nothing changes without these fields. A custom `RichMentionInput` `onSearch` receives a third argument `{ source }` after a `list` pick; forward it to `createCompletionSearch`'s search.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "completionProviders",
+      "ChatCompletionProvider"
+    ]
+  },
+  "surface": [
+    "glirastes/embed#GlirastesChatElementConfig.onCompletionSelect",
+    "glirastes/react#AiChatProviderConfig.onCompletionSelect",
+    "glirastes/react#AiChatProviderProps.onCompletionSelect",
+    "glirastes/react#ChatContextValue.onCompletionSelect",
+    "glirastes/react#CompletionItem.insertText",
+    "glirastes/react#CompletionItem.listSource",
+    "glirastes/react#CompletionItem.select",
+    "glirastes/react#CompletionSelectContext",
+    "glirastes/react#CompletionSelectContext.controls",
+    "glirastes/react#CompletionSelectContext.query",
+    "glirastes/react#CompletionSelectContext.trigger",
+    "glirastes/react#MentionResult.insertText",
+    "glirastes/react#MentionResult.listSource",
+    "glirastes/react#MentionResult.select",
+    "glirastes/react#RichMentionInputProps.onCompletionSelect",
+    "glirastes/react/vercel#VercelAiChatProps.onCompletionSelect"
+  ]
+}

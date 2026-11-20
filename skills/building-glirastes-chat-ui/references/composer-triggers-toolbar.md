@@ -6,6 +6,7 @@ All names below come from `glirastes/react` unless noted.
 
 - Triggers
   - Sent mentions and `types`
+- What a pick does
 
 ## Triggers
 
@@ -35,7 +36,7 @@ char further:
 | `char` | required | Exactly one character, not whitespace |
 | `label` | none | Name of the trigger in composer menus |
 | `prefix` | `char` | Visible prefix of a picked pill, non-empty, no whitespace |
-| `select` | `'chip'` | Default pick behavior (`CompletionSelectKind`); today every kind inserts a pill |
+| `select` | `'chip'` | Default pick behavior of its items (`CompletionSelectKind`, see below) |
 | `types` | none | The mention item types the trigger owns, e.g. `['ticket']`; sent mentions of these types show `prefix` |
 
 ```tsx
@@ -71,3 +72,40 @@ trigger's `prefix`, `command` shows `/`, any other type `@`. Without `types`
 nothing changes. Chat titles in the switcher come from the store, so pass
 the same array there: `createLocalSessionStore({ storageKey, triggers })`
 names a chat `#Bug 7 …` instead of `@Bug 7 …`.
+
+## What a pick does
+
+`select` on a `CompletionItem` (or on `MentionResult`) sets what picking it
+does; without it the trigger's `select` applies, default `chip`.
+
+| `select` | Pick result |
+| --- | --- |
+| `chip` | A pill, as before |
+| `text` | `insertText` (default: the label) replaces trigger and query as plain text; caret behind it, list closes |
+| `run` | A pill, then sends exactly like the send button. While a turn streams nothing is sent and the pill stays |
+| `list` | The trigger stays, the query is cleared, and the list shows the providers in `listSource` (provider id or ids of the same trigger). Typing searches only them until the list closes (Escape) |
+
+```tsx
+const prompts = {
+  id: 'prompts',
+  trigger: '/',
+  search: () => [
+    { id: 'summary', type: 'prompt', label: 'Zusammenfassen', select: 'text', insertText: 'Fasse den Auftrag zusammen' },
+    { id: 'more', type: 'prompt', label: 'Vorlagen', select: 'list', listSource: 'templates' },
+  ],
+};
+```
+
+A prompt template as `select: 'text'` replaces rewriting a chip into text in
+`onBeforeSend`: the user sees and edits the text before sending. Items of a
+`list` sub-list need their own `select` when the trigger default is `list`.
+
+`onCompletionSelect(item, { trigger, query, controls })` (`CompletionSelectContext`) on the provider runs
+before the built-in behavior; `controls` is the composer
+(`ChatComposerInputControls`: `setText`, `submit`, `focus`, …). Return `true`
+when the app handled the pick: the list closes and trigger and query stay in
+the editor. A standalone `RichMentionInput` takes `onCompletionSelect` with
+`{ trigger, query }` only, and its `onSearch` receives a third argument
+`{ source }` after a `list` pick; forward it to the search of
+`createCompletionSearch`. An item with an unknown `select`, an empty
+`insertText` or an invalid `listSource` id is dropped from the list.

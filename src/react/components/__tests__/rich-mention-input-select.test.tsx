@@ -1,0 +1,278 @@
+// @vitest-environment jsdom
+import React, { useMemo } from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  AiChatProviderConfig,
+  ChatCompletionProvider,
+  ChatTransport,
+  ChatTriggerDefinition,
+  MentionResult,
+} from '../../types.js';
+import { AiChatProvider } from '../../provider/ai-chat-provider.js';
+import { MentionInput } from '../mention-input.js';
+import { RichMentionInput } from '../rich-mention-input.js';
+
+function transport(status: ChatTransport['status'] = 'ready'): ChatTransport {
+  return {
+    messages: [],
+    status,
+    error: null,
+    sendMessage: vi.fn(async () => {}),
+    stop: vi.fn(),
+    setMessages: vi.fn(),
+    addToolApprovalResponse: vi.fn(async () => {}),
+  };
+}
+
+const prompts: ChatCompletionProvider = {
+  id: 'prompts',
+  trigger: '/',
+  search: () => [
+    { id: 'sum', type: 'prompt', label: 'Zusammenfassen', select: 'text', insertText: 'Fasse den Auftrag zusammen' },
+    { id: 'templates', type: 'prompt', label: 'Vorlagen', select: 'list', listSource: 'templates' },
+  ],
+};
+const templates: ChatCompletionProvider = {
+  id: 'templates',
+  trigger: '/',
+  search: ({ query }) => [{ id: 'mail', type: 'template', label: `Mail ${query}`.trim(), select: 'text' }],
+};
+const tickets: ChatCompletionProvider = {
+  id: 'tickets',
+  trigger: '#',
+  search: () => [
+    { id: '7', type: 'ticket', label: 'Bug sieben' },
+    { id: '8', type: 'ticket', label: 'Bug acht', select: 'chip' },
+    { id: '9', type: 'ticket', label: 'Bug neun', select: 'run' },
+  ],
+};
+
+interface ComposerProps {
+  chat: ChatTransport;
+  triggers?: ChatTriggerDefinition[];
+  onCompletionSelect?: AiChatProviderConfig['onCompletionSelect'];
+}
+
+function Composer({ chat, triggers, onCompletionSelect }: ComposerProps) {
+  const providers = useMemo(() => [prompts, templates, tickets], []);
+  return (
+    <AiChatProvider
+      transport={chat}
+      completionProviders={providers}
+      triggers={triggers}
+      onCompletionSelect={onCompletionSelect}
+    >
+      <MentionInput />
+    </AiChatProvider>
+  );
+}
+
+function typeInto(editor: HTMLElement, text: string) {
+  editor.textContent = text;
+  const range = document.createRange();
+  range.setStart(editor.firstChild!, text.length);
+  range.collapse(true);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  fireEvent.input(editor);
+}
+
+const chip = (editor: HTMLElement, id: string) => editor.querySelector(`[data-mention-id="${id}"]`);
+const option = (label: string) => screen.getByRole('option', { name: label });
+
+describe('completion pick behavior (select)', () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+  afterEach(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    cleanup();
+  });
+
+  it("'text' replaces trigger and query with insertText as plain text", async () => {
+    const chat = transport();
+    render(<Composer chat={chat} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Bitte /zus');
+    await waitFor(() => expect(option('Zusammenfassen')).toBeTruthy());
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(editor.textContent).toBe('Bitte Fasse den Auftrag zusammen');
+    expect(editor.querySelector('[data-mention-id]')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    const selection = window.getSelection()!;
+    expect(selection.getRangeAt(0).startOffset).toBe('Bitte Fasse den Auftrag zusammen'.length);
+
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith({ text: 'Bitte Fasse den Auftrag zusammen' }));
+  });
+
+  it("'run' inserts the chip and sends once", async () => {
+    const chat = transport();
+    render(<Composer chat={chat} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Siehe #bug');
+    await waitFor(() => expect(option('Bug neun')).toBeTruthy());
+    fireEvent.click(option('Bug neun'));
+
+    await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
+    expect(chat.sendMessage).toHaveBeenCalledWith({ text: 'Siehe {{mention:ticket:9:Bug neun}}' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(chat.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("'run' while a turn streams sends nothing and keeps the chip", async () => {
+    const chat = transport();
+    const { rerender } = render(<Composer chat={chat} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Siehe #bug');
+    await waitFor(() => expect(option('Bug neun')).toBeTruthy());
+    const streaming = { ...chat, status: 'streaming' as const };
+    rerender(<Composer chat={streaming} />);
+    fireEvent.click(option('Bug neun'));
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(chat.sendMessage).not.toHaveBeenCalled();
+    expect(chip(editor, '9')).not.toBeNull();
+  });
+
+  it("'list' keeps the trigger, clears the query and shows the listSource provider", async () => {
+    render(<Composer chat={transport()} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Bitte /vor');
+    await waitFor(() => expect(option('Vorlagen')).toBeTruthy());
+    fireEvent.click(option('Vorlagen'));
+
+    await waitFor(() => expect(option('Mail')).toBeTruthy());
+    expect(editor.textContent).toBe('Bitte /');
+    expect(screen.queryByRole('option', { name: 'Zusammenfassen' })).toBeNull();
+
+    // Typing on searches the sub-list only.
+    typeInto(editor, 'Bitte /ang');
+    await waitFor(() => expect(option('Mail ang')).toBeTruthy());
+    expect(screen.queryByRole('option', { name: 'Zusammenfassen' })).toBeNull();
+
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it("an item's select overrides the trigger default", async () => {
+    render(<Composer chat={transport()} triggers={[{ char: '#', select: 'text' }]} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, '#bug');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+    // The trigger default: no insertText, so the label as text.
+    expect(editor.textContent).toBe('Bug sieben');
+    expect(chip(editor, '7')).toBeNull();
+
+    typeInto(editor, '#bug');
+    await waitFor(() => expect(option('Bug acht')).toBeTruthy());
+    fireEvent.click(option('Bug acht'));
+    expect(chip(editor, '8')).not.toBeNull();
+  });
+
+  it('onCompletionSelect returning true skips the built-in behavior and closes the list', async () => {
+    const onCompletionSelect = vi.fn(() => true);
+    const chat = transport();
+    render(<Composer chat={chat} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Siehe #bug');
+    await waitFor(() => expect(option('Bug neun')).toBeTruthy());
+    fireEvent.click(option('Bug neun'));
+
+    expect(onCompletionSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '9', type: 'ticket', select: 'run' }),
+      expect.objectContaining({
+        trigger: '#',
+        query: 'bug',
+        controls: expect.objectContaining({ submit: expect.any(Function), setText: expect.any(Function) }),
+      }),
+    );
+    expect(chip(editor, '9')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(chat.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('onCompletionSelect returning nothing keeps the built-in behavior', async () => {
+    const onCompletionSelect = vi.fn(() => undefined);
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, '#bug');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(onCompletionSelect).toHaveBeenCalledTimes(1);
+    expect(chip(editor, '7')).not.toBeNull();
+  });
+});
+
+describe('standalone RichMentionInput pick behavior', () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+  afterEach(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    cleanup();
+  });
+
+  const results: MentionResult[] = [
+    { id: '9', type: 'ticket', label: 'Bug neun', select: 'run' },
+  ];
+
+  it("'run' submits once with the chip", async () => {
+    const onSubmit = vi.fn();
+    render(<RichMentionInput onSearch={() => results} onSubmit={onSubmit} triggers={['#']} />);
+    const editor = screen.getByRole('textbox');
+
+    typeInto(editor, 'Siehe #bug');
+    await waitFor(() => expect(option('Bug neun')).toBeTruthy());
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('Siehe #bug-neun', [
+      expect.objectContaining({ id: '9', type: 'ticket', prefix: '#' }),
+    ]);
+  });
+
+  it("'run' on a disabled input submits nothing and keeps the chip", async () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(<RichMentionInput onSearch={() => results} onSubmit={onSubmit} triggers={['#']} />);
+    const editor = screen.getByRole('textbox');
+
+    typeInto(editor, '#bug');
+    await waitFor(() => expect(option('Bug neun')).toBeTruthy());
+    rerender(<RichMentionInput onSearch={() => results} onSubmit={onSubmit} triggers={['#']} disabled />);
+    fireEvent.click(option('Bug neun'));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(chip(editor, '9')).not.toBeNull();
+  });
+
+  it('takes onCompletionSelect with trigger and query', async () => {
+    const onCompletionSelect = vi.fn(() => true);
+    render(<RichMentionInput onSearch={() => results} triggers={['#']} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox');
+
+    typeInto(editor, '#bug');
+    await waitFor(() => expect(option('Bug neun')).toBeTruthy());
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(onCompletionSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '9' }),
+      { trigger: '#', query: 'bug' },
+    );
+    expect(chip(editor, '9')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+});

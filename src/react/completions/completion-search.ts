@@ -58,7 +58,18 @@ function isItem(value: unknown): value is CompletionItem {
     && typeof item.label === 'string' && item.label.trim().length > 0
     && (item.definitionId === undefined && item.args === undefined
       || describeToolReference(item.definitionId, item.args) !== undefined)
-    && isActions(item.actions);
+    && isActions(item.actions)
+    && (item.select === undefined || SELECT_KINDS.has(item.select as string))
+    && (item.insertText === undefined || (typeof item.insertText === 'string' && item.insertText.trim().length > 0))
+    && isListSource(item.listSource);
+}
+
+const SELECT_KINDS = new Set<string>(['chip', 'text', 'run', 'list']);
+
+function isListSource(value: unknown): boolean {
+  if (value === undefined) return true;
+  const ids = typeof value === 'string' ? [value] : value;
+  return Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === 'string' && PROVIDER_ID.test(id));
 }
 
 function groupOf(value: unknown): { group?: string } {
@@ -156,6 +167,11 @@ export function createCompletionSearch(
           ...(item.args ? { args: item.args } : {}),
           ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
           ...groupOf(item.group),
+          ...(item.select ? { select: item.select } : {}),
+          ...(item.insertText !== undefined ? { insertText: item.insertText } : {}),
+          ...(item.listSource !== undefined
+            ? { listSource: typeof item.listSource === 'string' ? item.listSource : [...item.listSource] }
+            : {}),
         });
         if (results.length >= maxResults) break collect;
       }

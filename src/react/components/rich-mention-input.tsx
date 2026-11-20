@@ -178,6 +178,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       triggers: triggerConfig = DEFAULT_TRIGGERS,
       components,
       onEntityAction,
+      onCompletionSelect,
       listLabel = 'Suggestions',
       resultsLabel = '{count} suggestions',
       commandPills = true,
@@ -220,6 +221,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // Refs for stale-closure avoidance and debounce
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const searchVersionRef = useRef(0);
+    // Set by a `select: 'list'` pick: the providers searched until the list closes.
+    const listSourceRef = useRef<string | ReadonlyArray<string> | undefined>(undefined);
+    const lastSearchRef = useRef<{ query: string; trigger: string }>({ query: '', trigger: '' });
     const isInitializedRef = useRef(false);
 
     const DropdownItem = components?.DropdownItem ?? DefaultDropdownItem;
@@ -382,6 +386,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
     const closeDropdown = useCallback(() => {
       searchVersionRef.current++;
+      listSourceRef.current = undefined;
       setDropdownOpen(false);
       setSearchResults([]);
       setNoMatches(false);
@@ -390,12 +395,13 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     }, []);
 
     const performSearch = useCallback(
-      async (query: string, trigger: string) => {
+      async (query: string, trigger: string, source?: string | ReadonlyArray<string>) => {
         if (!onSearch) return;
         const version = ++searchVersionRef.current;
+        lastSearchRef.current = { query, trigger };
         setIsSearching(true);
         try {
-          const results = await onSearch(query, trigger);
+          const results = await (source === undefined ? onSearch(query, trigger) : onSearch(query, trigger, { source }));
           if (searchVersionRef.current !== version) return;
           setSearchResults(results);
           setSelectedIndex(0);
@@ -453,14 +459,14 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // -----------------------------------------------------------------------
 
     const insertMention = useCallback(
-      (result: MentionResult) => {
-        if (!editableRef.current) return;
+      (result: MentionResult): boolean => {
+        if (!editableRef.current) return false;
 
         const selection = editorSelection(editableRef.current);
-        if (!selection || selection.rangeCount === 0) return;
+        if (!selection || selection.rangeCount === 0) return false;
 
         const range = selection.getRangeAt(0);
-        if (range.startContainer.nodeType !== Node.TEXT_NODE) return;
+        if (range.startContainer.nodeType !== Node.TEXT_NODE) return false;
 
         const textNode = range.startContainer as Text;
         const text = textNode.textContent || '';
@@ -478,7 +484,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             }
           }
         }
-        if (triggerPos === -1) return;
+        if (triggerPos === -1) return false;
 
         // The trigger the user typed: an entity found with `@` stays `@` whatever its type.
         const char = text[triggerPos]!;
@@ -508,7 +514,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           requestAnimationFrame(() => {
             onChange?.(getFullValue());
           });
-          return;
+          return true;
         }
 
         // Non-command: insert chip element
@@ -518,7 +524,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         const afterText = text.slice(cursorPos);
 
         const parent = textNode.parentNode;
-        if (!parent) return;
+        if (!parent) return false;
 
         const beforeNode = document.createTextNode(beforeText);
         const afterNode = document.createTextNode(' ' + afterText);
@@ -540,9 +546,39 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         requestAnimationFrame(() => {
           onChange?.(getFullValue());
         });
+        return true;
       },
       [triggers, commandPills, createChipElement, closeDropdown, onChange, getFullValue],
     );
+
+    /**
+     * The trigger and query before the caret are replaced by `replacement`
+     * (plain text); the caret lands behind it. Null when no trigger is active.
+     */
+    const replaceQuery = useCallback((replacement: (char: string) => string): string | null => {
+      const selection = editorSelection(editableRef.current);
+      if (!selection || selection.rangeCount === 0) return null;
+      const range = selection.getRangeAt(0);
+      if (range.startContainer.nodeType !== Node.TEXT_NODE) return null;
+      const textNode = range.startContainer as Text;
+      const text = textNode.textContent || '';
+      const cursorPos = range.startOffset;
+      for (let i = cursorPos - 1; i >= 0; i--) {
+        const char = text[i]!;
+        if (isSpace(char)) break;
+        if (triggers.has(char) && (i === 0 || isSpace(text[i - 1]))) {
+          const inserted = replacement(char);
+          textNode.textContent = text.slice(0, i) + inserted + text.slice(cursorPos);
+          const caret = document.createRange();
+          caret.setStart(textNode, i + inserted.length);
+          caret.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(caret);
+          return char;
+        }
+      }
+      return null;
+    }, [triggers]);
 
     /**
      * Puts a pill at the caret (or at the end when the caret is elsewhere),
@@ -632,7 +668,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       if (triggerState) {
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = setTimeout(() => {
-          void performSearch(triggerState.query, triggerState.trigger);
+          void performSearch(triggerState.query, triggerState.trigger, listSourceRef.current);
         }, SEARCH_DEBOUNCE_MS);
       } else {
         clearTimeout(searchTimeoutRef.current);
@@ -680,6 +716,36 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       }
     }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions, allowEmptySubmit]);
 
+    /** One entry of the list was picked: the app's handler first, then the entry's `select` behavior. */
+    const pickResult = useCallback((result: MentionResult) => {
+      const active = detectTrigger() ?? lastSearchRef.current;
+      if (onCompletionSelect?.(result, { trigger: active.trigger, query: active.query }) === true) {
+        closeDropdown();
+        return;
+      }
+      const kind = result.select ?? triggers.get(active.trigger)?.select ?? 'chip';
+      if (kind === 'text') {
+        if (replaceQuery(() => result.insertText ?? result.label) === null) return;
+        closeDropdown();
+        onChange?.(getFullValue());
+        return;
+      }
+      if (kind === 'list') {
+        const char = replaceQuery((trigger) => trigger);
+        if (char === null) return;
+        clearTimeout(searchTimeoutRef.current);
+        // Searching again clears the list state but keeps it open; the source sticks until it closes.
+        listSourceRef.current = result.listSource;
+        setSelectedIndex(0);
+        setSelectedAction(-1);
+        onChange?.(getFullValue());
+        void performSearch('', char, result.listSource);
+        return;
+      }
+      // `run` sends through the same path as Enter, so a disabled (streaming) composer sends nothing.
+      if (insertMention(result) && kind === 'run') submit();
+    }, [detectTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, performSearch, insertMention, submit]);
+
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
         // Dropdown navigation (mention mode only)
@@ -717,7 +783,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             if (selected && action) {
               runAction(selected, action.id);
             } else if (selected) {
-              insertMention(selected);
+              pickResult(selected);
             }
             return;
           }
@@ -785,7 +851,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         selectedAction,
         onEntityAction,
         runAction,
-        insertMention,
+        pickResult,
         closeDropdown,
         noMatches,
         submit,
@@ -1081,7 +1147,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           key={key}
           result={result}
           isSelected={index === selectedIndex && selectedAction === -1}
-          onClick={() => insertMention(result)}
+          onClick={() => pickResult(result)}
           optionProps={optionProps(index)}
         />
       );

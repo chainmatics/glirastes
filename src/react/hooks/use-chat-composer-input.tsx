@@ -5,6 +5,7 @@ import { useChatContext } from '../provider/chat-context.js';
 import type {
   ChatAttachment,
   ChatComposerInput,
+  ChatComposerInputControls,
   ChatLocale,
   MentionData,
   RichMentionInputHandle,
@@ -41,6 +42,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     components,
     completionSearch,
     triggers,
+    onCompletionSelect,
     runEntityAction,
     composerMentions,
     consumeComposerMentions,
@@ -163,11 +165,21 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
 
   const focus = useCallback(() => { inputRef.current?.focus(); }, []);
 
+  // The controls returned below, read when an entry is picked (after this render).
+  const controlsRef = useRef<ChatComposerInputControls | null>(null);
+
   const inputProps = useMemo<ChatComposerInput['inputProps']>(() => ({
     onChange: setValue,
     onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
     ...(triggers ? { triggers } : {}),
+    ...(onCompletionSelect
+      ? {
+          onCompletionSelect: (item, context) => (controlsRef.current
+            ? onCompletionSelect(item, { ...context, controls: controlsRef.current })
+            : undefined),
+        }
+      : {}),
     placeholder: locale.placeholder,
     disabled: !canCompose,
     onEntityAction: (result, actionId) => runEntityAction(
@@ -185,7 +197,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
           allowEmptySubmit: attachments.length > 0,
         }
       : {}),
-  }), [completionSearch, triggers, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
+  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
 
   const attachmentInputProps = useMemo<ChatComposerInput['attachmentInputProps']>(() => ({
     ref: fileInputRef,
@@ -219,7 +231,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     />
   ) : null;
 
-  return {
+  const composer: ChatComposerInput = {
     value,
     isLoading,
     canSend: (value.trim().length > 0 || attachments.length > 0) && canCompose,
@@ -242,4 +254,6 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     cancelPendingCommand,
     argumentsForm,
   };
+  controlsRef.current = composer;
+  return composer;
 }

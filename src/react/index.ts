@@ -33,6 +33,7 @@ export type {
   CommandArgumentsFormProps,
   CompletionSearchRequest,
   CompletionSelectKind,
+  CompletionSelectContext,
   ChatTriggerDefinition,
   ResolvedChatTrigger,
   UiToolCommandSource,

@@ -192,3 +192,24 @@ describe('createCompletionSearch source filter', () => {
     expect((await search('bug', '#')).map((result) => result.key)).toEqual(['tickets:ticket:7', 'docs:doc:8']);
   });
 });
+
+describe('createCompletionSearch pick fields', () => {
+  it('keeps select, insertText and listSource and drops items with invalid ones', async () => {
+    const search = createCompletionSearch([{
+      id: 'prompts',
+      trigger: '/',
+      search: () => [
+        { id: 'text', type: 'prompt', label: 'Text', select: 'text', insertText: 'Fasse zusammen' },
+        { id: 'list', type: 'prompt', label: 'List', select: 'list', listSource: ['templates'] },
+        { id: 'bad-select', type: 'prompt', label: 'Bad', select: 'open' as never },
+        { id: 'bad-text', type: 'prompt', label: 'Bad', select: 'text', insertText: '  ' },
+        { id: 'bad-source', type: 'prompt', label: 'Bad', select: 'list', listSource: 'No Id' },
+      ],
+    }]);
+
+    const results = await search('', '/');
+    expect(results.map((result) => result.id)).toEqual(['text', 'list']);
+    expect(results[0]).toMatchObject({ select: 'text', insertText: 'Fasse zusammen' });
+    expect(results[1]).toMatchObject({ select: 'list', listSource: ['templates'] });
+  });
+});

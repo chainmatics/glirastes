@@ -346,6 +346,12 @@ export interface MentionResult {
   actions?: ReadonlyArray<CompletionItemAction>;
   /** Heading the list shows above this hit's group. */
   group?: string;
+  /** What picking it does; overrides the trigger's `select` (see `CompletionSelectKind`). */
+  select?: CompletionSelectKind;
+  /** `select: 'text'`: the text put in place of trigger and query; default `label`. */
+  insertText?: string;
+  /** `select: 'list'`: provider id(s) of the trigger whose entries the list shows next. */
+  listSource?: string | ReadonlyArray<string>;
 }
 
 export interface MentionData {
@@ -398,6 +404,12 @@ export interface CompletionItem {
   actions?: ReadonlyArray<CompletionItemAction>;
   /** Heading the list shows above this hit's group. */
   group?: string;
+  /** What picking it does; overrides the trigger's `select` (see `CompletionSelectKind`). */
+  select?: CompletionSelectKind;
+  /** `select: 'text'`: the text put in place of trigger and query; default `label`. */
+  insertText?: string;
+  /** `select: 'list'`: provider id(s) of the trigger whose entries the list shows next. */
+  listSource?: string | ReadonlyArray<string>;
 }
 
 export interface CompletionItemAction {
@@ -431,8 +443,11 @@ export interface ChatCompletionProvider {
 
 /**
  * What picking an entry of a trigger's list does. `chip` (default) inserts a
- * pill. `text`, `run` and `list` are reserved for the pick behaviors of later
- * releases; today every kind inserts a pill.
+ * pill. `text` replaces trigger and query with the entry's `insertText`
+ * (default: its label) as plain text. `run` inserts the pill and sends like
+ * the send button (nothing is sent while a turn streams; the pill stays).
+ * `list` keeps the trigger, clears the query and shows the entries of the
+ * providers in `listSource`.
  */
 export type CompletionSelectKind = 'chip' | 'text' | 'run' | 'list';
 
@@ -1494,6 +1509,13 @@ export interface AiChatProviderConfig {
   completionContext?: CompletionPermissionContext;
   onCompletionProviderError?: (providerId: string, error: unknown) => void;
   /**
+   * Runs first when an entry of a completion list is picked. Return `true`
+   * when the app handled it: the list closes and the composer does nothing
+   * else (trigger and query stay in the editor). Otherwise the entry's
+   * `select` behavior runs.
+   */
+  onCompletionSelect?: (item: CompletionItem, context: CompletionSelectContext) => boolean | void;
+  /**
    * Declarative `@` entities and `/` commands: derived `data` (from
    * `useChatInteractionsData` or the generated module) plus app definitions
    * (`defineChatEntity`, `defineChatCommand`). Memoize the object. A `/`
@@ -2041,11 +2063,21 @@ export interface ChatComposerInputControls {
   focus(): void;
 }
 
+/** Where an entry was picked (`AiChatProviderConfig.onCompletionSelect`). */
+export interface CompletionSelectContext {
+  /** The trigger char the list was opened with, e.g. `#`. */
+  trigger: string;
+  /** The text typed after the trigger. */
+  query: string;
+  /** The composer the entry was picked in. */
+  controls: ChatComposerInputControls;
+}
+
 export interface ChatComposerInput extends ChatComposerInputControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers'>;
   /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
   readonly attachmentInputProps: ChatAttachmentInputProps;
   readonly pendingCommand: PendingChatCommand | null;
@@ -2105,8 +2137,21 @@ export interface RichMentionInputProps {
   onChange?: (nextValue: string) => void;
   /** Receives the text and the structured mentions (chips and commands) still in it. Return `false` to keep the text. */
   onSubmit?: (message: string, mentions: MentionData[]) => void | boolean;
-  /** Search callback for mention autocomplete (BYOS). Return matching results for the given query and trigger character. */
-  onSearch?: (query: string, trigger: string) => Promise<MentionResult[]> | MentionResult[];
+  /**
+   * Search callback for mention autocomplete (BYOS). Return matching results for the given query and trigger character.
+   * After a `select: 'list'` pick it gets `{ source }` (the entry's `listSource`) until the list closes.
+   */
+  onSearch?: (
+    query: string,
+    trigger: string,
+    options?: { source?: string | ReadonlyArray<string> },
+  ) => Promise<MentionResult[]> | MentionResult[];
+  /**
+   * Runs first when an entry is picked; return `true` to skip its `select`
+   * behavior (the list closes). The provider's `onCompletionSelect` adds the
+   * composer `controls`.
+   */
+  onCompletionSelect?: (item: CompletionItem, context: Omit<CompletionSelectContext, 'controls'>) => boolean | void;
   /** Mention data to render as inline chips on mount (e.g. pre-filled context from a detail view). */
   initialMentions?: MentionData[];
   /**
