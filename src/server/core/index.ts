@@ -76,6 +76,7 @@ export {
   type ResultStoreOptions,
 } from './result-store.js';
 export { createReadResultTool, type ReadResultGuard } from './read-result-tool.js';
+export type { ToolMiddleware, ToolMiddlewareCall, ToolMiddlewareNext } from './tool-middleware.js';
 export {
   applyOutputBound,
   assertOutputFields,
