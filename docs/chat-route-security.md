@@ -80,7 +80,8 @@ without these approval checks; give them only input your server has authorized.
 execution of the app's own tools, for logging, metrics, tenant context or
 error mapping. It runs inside every guard. One tool call, outermost first:
 
-1. AI SDK `needsApproval` and the approval subject lookup.
+1. AI SDK `needsApproval` and the approval subject lookup (the lookup's own
+   source call runs through the chain too, see below).
 2. The handler's guard: abort check, approval gate, denied-call handling,
    managed `beforeToolCall` (pinned snapshot, freshly resolved principal,
    budgets, revocations), input parsing, tool timeout.
@@ -107,7 +108,12 @@ Returning a value without calling `next()` short-circuits; that value still
 goes through step 6. A throw before or after `next()` is a tool error: audit
 `tool.failed`, `onToolError(toolId, error)` and the standard
 `{ error: 'Error in <toolName>: <message>', hint }` result, exactly as a
-throwing tool. The handler's built-ins (`find_tools`, `read_result`,
+throwing tool. An approval subject lookup (`docs/approval-subjects.md`) runs
+its source tool through the same chain, as a read call: `toolName` is the
+source tool, `readOnly` is `true` and `toolCallId` is the id of the approval
+it serves, so tenant context and audit middleware see these backend reads
+too. A lookup a middleware rejects shows the subject as not checked. The
+handler's built-ins (`find_tools`, `read_result`,
 clarification, plan, follow-ups, memory) bypass the chain. Tool arguments and
 results stay in your process; nothing here is sent to the Platform.
 

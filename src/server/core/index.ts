@@ -962,6 +962,9 @@ export interface ToolToAiToolOptions {
    * error result); `next` runs at most once; returning without `next`
    * short-circuits. The input must be structured-cloneable when
    * `toolMiddleware` is set. Without it (or with `[]`) nothing changes.
+   * `createAiChatHandler` also runs its approval subject lookups through the
+   * same chain, as read calls of their source tool (`readOnly: true`, the
+   * `toolCallId` of the approval they serve).
    */
   toolMiddleware?: ReadonlyArray<ToolMiddleware>;
 }

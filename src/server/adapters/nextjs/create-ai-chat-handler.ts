@@ -1907,13 +1907,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
        * The approval-subject lookups of this request (docs/approval-subjects.md),
        * or undefined when no tool declares them (then nothing changes).
        * Lookups run through `context` (this request's transport, the user's
-       * credentials) and, in a managed turn, the guard.
+       * credentials) and, in a managed turn, the guard. Each lookup runs its
+       * source tool through the app's `toolMiddleware`, as a read call.
        */
       const approvalSubjectResolverFor = (
         registry: ToolRegistry,
         context: ToolContext,
         shieldSessionId: () => string,
         scope: string,
+        builtinNames: ReadonlyArray<string>,
       ): ApprovalSubjectResolver | undefined => {
         if (!approvalSubjectLimits) return undefined;
         const resolver = createApprovalSubjectResolver({
@@ -1923,6 +1925,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...(piiShield ? { shield: { shield: piiShield, sessionId: shieldSessionId } } : {}),
           limits: approvalSubjectLimits,
           signal: req.signal,
+          ...(toolMiddleware && toolMiddleware.length > 0
+            ? { toolMiddleware: appToolMiddleware(toolMiddleware, builtinNames) }
+            : {}),
           // The whole turn's time limit bounds every lookup, the rechecks before the model too.
           ...(managedTurn ? { turnDeadline: requestStart + managedTurn.snapshot.budget.totalTimeoutMs } : {}),
           scope,
@@ -2064,7 +2069,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           toolMiddleware: appToolMiddleware(toolMiddleware, handlerBuiltinNames),
         };
         const pipelineScope = await requestApprovalScope(req, managedTurn);
-        const pipelineSubjects = approvalSubjectResolverFor(registry, endpointToolContext, () => sessionId, pipelineScope);
+        const pipelineSubjects = approvalSubjectResolverFor(registry, endpointToolContext, () => sessionId, pipelineScope, handlerBuiltinNames);
         const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, pipelineScope, pipelineSubjects);
         processedMessages = pipelineApprovals.messages;
 
@@ -2356,7 +2361,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // The shield session of the legacy path, derived once (also for a recheck before it is used below).
       let legacyShieldSession: string | undefined;
       const legacyShieldSessionOf = () => (legacyShieldSession ??= deriveSessionId(processedMessages));
-      const legacySubjects = approvalSubjectResolverFor(registry, endpointToolContext, legacyShieldSessionOf, legacyScope);
+      const legacySubjects = approvalSubjectResolverFor(registry, endpointToolContext, legacyShieldSessionOf, legacyScope, handlerBuiltinNames);
       const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, legacyScope, legacySubjects);
       processedMessages = legacyApprovals.messages;
       // Routing sees what the model may see: a consumer router can hand the

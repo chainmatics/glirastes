@@ -542,7 +542,10 @@ export interface AiChatHandlerConfig {
    * whatever it returns. `call.input` is a copy (the tool always runs with
    * its validated input), `next` runs at most once, returning without it
    * short-circuits, and a throw is a tool error (`onToolError`, the standard
-   * error result). The handler's built-ins (`find_tools`, `read_result`,
+   * error result). Approval subject lookups run their source tool through
+   * the same chain, as a read call (`readOnly: true`, the `toolCallId` of
+   * the approval they serve), so tenant context and audit middleware see
+   * them too. The handler's built-ins (`find_tools`, `read_result`,
    * clarification, plan, follow-ups, memory) bypass it. It runs in this
    * process only; nothing is sent to the Platform. Tool input must be
    * structured-cloneable. A value that is not an array of functions throws
