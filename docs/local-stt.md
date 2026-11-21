@@ -110,7 +110,11 @@ service) or `transcribe` (a `RecordingTranscriber`), never both. In
 - `timeoutMs` defaults to **120 000** (the `url` mode keeps 45 000). The
   transcriber's `signal` aborts on that timeout and when the client disconnects;
 - a `TranscriptionUnavailableError` (the queue is full) answers **503**
-  `Speech service busy`; any other failure answers 502 and goes to `onError`.
+  `Speech service busy`;
+- the timeout answers **504** `Transcription timed out` and goes to `onError`;
+- a client disconnect answers 499 `Client closed request` (nobody reads it)
+  without calling `onError`;
+- any other failure answers 502 and goes to `onError`.
 
 Any function with the `RecordingTranscriber` shape works there:
 `(audio: RecordingAudio, { language, signal }) => Promise<{ text }>`, with
@@ -290,7 +294,7 @@ audio or transcript content.
 | `worker_failed` | the worker exited while a job ran | `The local speech worker exited unexpectedly (code <n>)…` |
 
 In the route these become 502 (`onError` receives the error); a full queue is
-a 503.
+a 503 and the timeout a 504.
 
 ## Raising the sherpa-onnx-node pin
 

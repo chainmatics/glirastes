@@ -60,8 +60,10 @@ export const POST = createRecordingTranscriptionHandler({
 | 400 | unknown `?language=` or empty body |
 | 413 | above `maxBytes` (5 MB) |
 | 415 | not `audio/wav`, or a WAV that is not PCM16 mono 16 kHz |
-| 502 | the transcriber failed (`onError` gets the error) or the 120 s timeout hit |
+| 499 | the client disconnected; the job is cancelled, nothing is logged |
+| 502 | the transcriber failed (`onError` gets the error) |
 | 503 | the queue is full (`maxQueue`, default 4 waiting jobs) |
+| 504 | the 120 s `timeoutMs` passed (`onError` gets the error) |
 
 Parakeet detects the language itself; `?language=` is still validated.
 

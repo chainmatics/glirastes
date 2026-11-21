@@ -119,7 +119,10 @@ export function createRecordingTranscriptionHandler(
         return Response.json({ text: typeof result?.text === 'string' ? result.text.trim() : '' });
       } catch (error) {
         if (isUnavailable(error)) return failed(503, 'Speech service busy');
+        // The client left: nobody reads this answer, and it is not a server error.
+        if (request.signal.aborted) return failed(499, 'Client closed request');
         onError(error);
+        if (timeout.signal.aborted) return failed(504, 'Transcription timed out');
         return failed(502, 'Transcription failed');
       } finally {
         clearTimeout(timer);

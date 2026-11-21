@@ -194,7 +194,8 @@ describe('createRecordingTranscriptionHandler with a local transcriber', () => {
         signal.addEventListener('abort', () => reject(signal.reason), { once: true });
       });
     });
-    const handler = createRecordingTranscriptionHandler({ authorize: allow, transcribe, onError: () => {} });
+    const onError = vi.fn();
+    const handler = createRecordingTranscriptionHandler({ authorize: allow, transcribe, onError });
     const pending = handler(new Request('http://app.test/api/ai/speech-recognize', {
       method: 'POST',
       headers: { 'content-type': 'audio/wav' },
@@ -205,7 +206,11 @@ describe('createRecordingTranscriptionHandler with a local transcriber', () => {
     expect(received!.aborted).toBe(false);
     controller.abort();
     expect(received!.aborted).toBe(true);
-    await pending;
+    // The client is gone: no server error, no log line.
+    const response = await pending;
+    expect(response.status).toBe(499);
+    expect(await response.json()).toEqual({ error: 'Client closed request' });
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('defaults the local timeout to 120 seconds', async () => {
@@ -216,18 +221,23 @@ describe('createRecordingTranscriptionHandler with a local transcriber', () => {
     const transcribe = transcriber((_audio, { signal }) => {
       received = signal;
       started();
+      // Like the local transcriber: its own AbortError, not the signal's reason.
       return new Promise((_resolve, reject) => {
-        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        signal.addEventListener('abort', () => reject(Object.assign(new Error('Transcription aborted'), { name: 'AbortError' })), { once: true });
       });
     });
-    const handler = createRecordingTranscriptionHandler({ authorize: allow, transcribe, onError: () => {} });
+    const onError = vi.fn();
+    const handler = createRecordingTranscriptionHandler({ authorize: allow, transcribe, onError });
     const pending = handler(request({ body: pcm() }));
     await running;
     await vi.advanceTimersByTimeAsync(119_999);
     expect(received!.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(received!.aborted).toBe(true);
-    expect((await pending).status).toBe(502);
+    const response = await pending;
+    expect(response.status).toBe(504);
+    expect(await response.json()).toEqual({ error: 'Transcription timed out' });
+    expect(onError).toHaveBeenCalledOnce();
   });
 
   it('does not accept a url and a transcriber together', () => {
