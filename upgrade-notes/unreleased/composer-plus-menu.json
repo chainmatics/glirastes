@@ -1,0 +1,20 @@
+{
+  "id": "composer-plus-menu",
+  "kind": "optional",
+  "summary": "The composer toolbar takes the builtin `plus`: a \"+\" button with a menu of `attach`, `trigger:<char>` rows, `composer.items` and an optional `source` section of completion entries (`composer.plusMenu`). Without `plus` in the toolbar nothing changes.",
+  "howTo": "If you built your own \"+\" or \"more\" menu next to the composer (via `renderActions` or `components.InputExtra`), put `'plus'` into `composer.toolbar.start` or `end` and list its rows in `composer.plusMenu.items`: `attach` opens the file picker, `'trigger:@'` opens the `@` list with the focus in the editor (named after the trigger's `label`), keys of `composer.items` run their `onSelect(controls)`. `plusMenu.source: { trigger: '/', source: 'templates', label: 'Templates' }` lists that provider's entries directly; choosing one follows its `select` (`text` inserts `insertText`). The menu texts are the optional locale keys `plusMenuButtonLabel` and `plusMenuAttachLabel` (English and German built in).",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": ["renderActions", "InputExtra", "ComposerConfig"]
+  },
+  "surface": [
+    "glirastes/react#ChatLocale.plusMenuAttachLabel",
+    "glirastes/react#ChatLocale.plusMenuButtonLabel",
+    "glirastes/react#ComposerConfig.plusMenu",
+    "glirastes/react#ComposerPlusMenuConfig",
+    "glirastes/react#ComposerPlusMenuConfig.items",
+    "glirastes/react#ComposerPlusMenuConfig.source",
+    "locale#plusMenuAttachLabel",
+    "locale#plusMenuButtonLabel"
+  ]
+}

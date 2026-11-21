@@ -21,6 +21,26 @@ export interface CompletionSearchOptions {
 /** Compatible with `RichMentionInput`'s `onSearch`. */
 export type CompletionSearch = (query: string, trigger: string) => Promise<MentionResult[]>;
 
+/** Provider ids of one trigger that a search asks; omitted: all of them. */
+export type CompletionSource = string | ReadonlyArray<string>;
+
+/**
+ * Internal: the same search, narrowed to provider ids (`openCompletion({ source })`
+ * and the plus menu's `source` section). It hangs on a search made by
+ * `createCompletionSearch` under a symbol, so the public call signature stays
+ * `(query, trigger)`; not exported from `glirastes/react`.
+ */
+const SOURCE_SEARCH = Symbol('glirastes.completionSearch.source');
+
+type SourceSearch = (query: string, trigger: string, source: CompletionSource | undefined) => Promise<MentionResult[]>;
+
+/** The source-narrowing variant of a search from `createCompletionSearch`; undefined for any other function. */
+export function sourceSearchOf(search: unknown): SourceSearch | undefined {
+  if (typeof search !== 'function') return undefined;
+  const narrowed = (search as { [SOURCE_SEARCH]?: unknown })[SOURCE_SEARCH];
+  return typeof narrowed === 'function' ? narrowed as SourceSearch : undefined;
+}
+
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 function clamp(value: number | undefined, fallback: number, max: number): number {
@@ -50,6 +70,17 @@ function isItem(value: unknown): value is CompletionItem {
       || describeToolReference(item.definitionId, item.args) !== undefined)
     && isActions(item.actions);
 }
+
+/** The pick fields that are valid; an invalid one is left out, so the item falls back to its default. */
+function pickFields(item: CompletionItem): Pick<MentionResult, 'select' | 'insertText'> {
+  const { select, insertText } = item as { select?: unknown; insertText?: unknown };
+  return {
+    ...(typeof select === 'string' && SELECT_KINDS.has(select) ? { select: select as CompletionItem['select'] } : {}),
+    ...(typeof insertText === 'string' && insertText.trim().length > 0 ? { insertText } : {}),
+  };
+}
+
+const SELECT_KINDS = new Set<string>(['chip', 'text', 'run']);
 
 function groupOf(value: unknown): { group?: string } {
   if (typeof value !== 'string') return {};
@@ -81,7 +112,7 @@ function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 /**
- * Merges `/` and `@` providers into one async search. Item ids stay the
+ * Merges the providers of a trigger (`@`, `/`, `#`, …) into one async search. Item ids stay the
  * app's ids (they reach the model through mention markers); `key` is the
  * stable list identity `providerId:type:itemId`. A newer search aborts the older
  * one, and a failing or slow provider never empties the others.
@@ -106,12 +137,13 @@ export function createCompletionSearch(
   const context = Object.freeze({ ...(options.context ?? {}) });
   let current: AbortController | null = null;
 
-  return async (query, trigger) => {
+  const searchSources: SourceSearch = async (query, trigger, source) => {
     current?.abort();
     const controller = new AbortController();
     current = controller;
+    const sources = source === undefined ? undefined : new Set<string>(typeof source === 'string' ? [source] : source);
     const settled = await Promise.all(providers
-      .filter((provider) => provider.trigger === trigger)
+      .filter((provider) => provider.trigger === trigger && (!sources || sources.has(provider.id)))
       .map(async (provider) => {
         try {
           const items = await withTimeout(Promise.resolve(provider.search({
@@ -145,10 +177,13 @@ export function createCompletionSearch(
           ...(item.args ? { args: item.args } : {}),
           ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
           ...groupOf(item.group),
+          ...pickFields(item),
         });
         if (results.length >= maxResults) break collect;
       }
     }
     return grouped(results);
   };
+  const search: CompletionSearch = (query, trigger) => searchSources(query, trigger, undefined);
+  return Object.assign(search, { [SOURCE_SEARCH]: searchSources });
 }

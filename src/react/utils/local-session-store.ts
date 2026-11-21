@@ -3,7 +3,7 @@ import { attachmentIdOf } from '../../contracts/attachments.js';
 import { fileToDataUrl, omitAttachmentData } from './attachments.js';
 import { createIndexedDbAttachmentStore, dataUrlToBlob, type AttachmentBlobStore } from './attachment-blob-store.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
-import { parseMentionSegments } from './mention-markup.js';
+import { inferMentionPrefix, parseMentionSegments } from './mention-markup.js';
 
 type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & Partial<Pick<Storage, 'length' | 'key'>>;
 
@@ -81,11 +81,14 @@ function tail<T extends ChatMessage | WireChatMessage>(messages: T[], max: numbe
 }
 
 /** The first question of a chat, cut at a word, as its name. */
-function titleFrom(messages: ReadonlyArray<ChatMessage | WireChatMessage>): string | null {
+function titleFrom(
+  messages: ReadonlyArray<ChatMessage | WireChatMessage>,
+  prefixOf: (type: string) => string,
+): string | null {
   const first = messages.find((message) => message.role === 'user');
   const raw = first ? textOf(first) : '';
   // Mentions read as `@Name` and `/Command`, not as their markup.
-  const text = parseMentionSegments(raw)
+  const text = parseMentionSegments(raw, prefixOf)
     .map((segment) => (segment.kind === 'text' ? segment.text : `${segment.mention.prefix ?? ''}${segment.mention.displayName}`))
     .join('')
     .replace(/\s+/g, ' ')
@@ -277,13 +280,16 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       if (next === '') return;
       persist(entries().map((entry) => (entry.id === conversationId ? { ...entry, title: next, named: true } : entry)));
     },
-    save(conversationId, allMessages) {
+    save(conversationId, allMessages, saveOptions) {
       if (!storage) return;
       const messages = tail(allMessages, maxMessages);
       const list = entries();
       const existing = list.find((entry) => entry.id === conversationId) ?? fresh(conversationId);
       // Once a save has trimmed the chat, the first stored user message is no longer the first question.
-      const derived = existing.named || existing.trimmed ? null : titleFrom(allMessages);
+      // Mentions show the prefix of the provider's `triggers` types (`#Bug 7`); without them `@` and `/`.
+      const derived = existing.named || existing.trimmed
+        ? null
+        : titleFrom(allMessages, saveOptions?.mentionPrefix ?? inferMentionPrefix);
       const entry: Entry = {
         ...existing,
         ...(messages.length < allMessages.length ? { trimmed: true } : {}),

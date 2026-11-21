@@ -189,6 +189,27 @@ describe('upgrade notes guard', () => {
     ).toEqual([]);
   });
 
+  it('every surface key of an unreleased note is an actual change since the released snapshot', async () => {
+    const released = new Set(JSON.parse(
+      await readFile(join(notesDir, 'api-surface.released.json'), 'utf8'),
+    ) as string[]);
+    const current = new Set(surface);
+    const changed = [...surface.filter((k) => !released.has(k)), ...[...released].filter((k) => !current.has(k))];
+    const unreleased = await unreleasedNoteIds();
+    const notes = (await loadUpgradeNotes(notesDir, SDK_VERSION)).filter((n) => unreleased.has(n.id));
+    // An entry that covers no added or removed key names API that is not there (removed again before
+    // release) or unchanged. A `.*` or `*#` entry counts when it covers at least one changed key.
+    const stale = notes.flatMap((n) => (n.surface ?? [])
+      .filter((entry) => !changed.some((key) => surfaceCovers(entry, key)))
+      .map((entry) => `${n.id}: ${entry}`));
+    expect(stale, [
+      `Unreleased notes list surface keys that did not change:\n${stale.join('\n')}`,
+      '`surface` lists only keys added or removed since api-surface.released.json; a changed signature of an',
+      'existing key (e.g. a new optional parameter) belongs in the note\'s `howTo`, and a key added and removed',
+      'again before release belongs in no note.',
+    ].join('\n')).toEqual([]);
+  });
+
   it('every note\'s skill and anchor exist in skills/', async () => {
     const notes = await loadUpgradeNotes(notesDir, SDK_VERSION);
     const problems: string[] = [];

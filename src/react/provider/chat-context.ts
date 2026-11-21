@@ -35,7 +35,8 @@ import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
 import type { ChatInteractionRegistry, PendingChatCommand } from '../interactions/registry.js';
 import type { ToolResultRendererRegistry } from '../tool-renderers/registry.js';
 
-type MentionTrigger = '@' | '/' | null;
+/** The trigger char of the legacy `mentions` search (`@` or `/`); null when none is active. */
+type MentionTrigger = string | null;
 
 export interface ChatContextValue {
   // Config

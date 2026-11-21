@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandArgumentsForm as DefaultCommandArgumentsForm } from '../components/command-arguments-form.js';
 import { useChatComposerTarget } from '../composer/chat-composer.js';
-import { useChatContext } from '../provider/chat-context.js';
+import { useComposerContext } from '../provider/composer-context.js';
 import type {
   ChatAttachment,
   ChatComposerInput,
+  ChatComposerInputControls,
   ChatLocale,
   MentionData,
+  OpenCompletionOptions,
   RichMentionInputHandle,
   UseChatComposerInputOptions,
 } from '../types.js';
+import type { ResolvedChatTrigger } from '../completions/triggers.js';
 import { formatBytes, readAttachments, toFilePart, type AttachmentProblem } from '../utils/attachments.js';
 
 function describeProblem(problem: AttachmentProblem, locale: ChatLocale): string {
@@ -23,6 +26,14 @@ function describeProblem(problem: AttachmentProblem, locale: ChatLocale): string
     case 'command': return locale.attachmentCommandRefused;
     case 'unsupported': return locale.attachmentUnsupported;
   }
+}
+
+/** Exactly the built-in `@` and `/` (default prefix and pick, no label or types): the input's own default. */
+function isDefaultTriggers(triggers: ReadonlyArray<ResolvedChatTrigger>): boolean {
+  return triggers.length === 2 && triggers.every((trigger, index) => (
+    trigger.char === ['@', '/'][index] && trigger.prefix === trigger.char && trigger.select === 'chip'
+    && trigger.label === undefined && trigger.types === undefined
+  ));
 }
 
 /**
@@ -40,6 +51,8 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     locale,
     components,
     completionSearch,
+    triggers,
+    onCompletionSelect,
     runEntityAction,
     composerMentions,
     consumeComposerMentions,
@@ -48,7 +61,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     cancelPendingCommand,
     attachments: attachmentOptions,
     interactions,
-  } = useChatContext();
+  } = useComposerContext();
   // A hand-built context without `canCompose` locks while loading, as before.
   const canCompose = composable ?? !isLoading;
   const { onSubmit, initialValue } = options;
@@ -162,10 +175,30 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
 
   const focus = useCallback(() => { inputRef.current?.focus(); }, []);
 
+  // Read at call time: a toolbar button may hold controls from before the turn started.
+  const canComposeRef = useRef(canCompose);
+  canComposeRef.current = canCompose;
+  const openCompletion = useCallback((completion: OpenCompletionOptions) => {
+    if (!canComposeRef.current) return;
+    inputRef.current?.openCompletion?.(completion);
+  }, []);
+
+  // The controls returned below, read when an entry is picked (after this render).
+  const controlsRef = useRef<ChatComposerInputControls | null>(null);
+
   const inputProps = useMemo<ChatComposerInput['inputProps']>(() => ({
     onChange: setValue,
     onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
+    // Only a non-default list: a `triggers` prop the app sets on the input must not be overridden by the default.
+    ...(triggers && !isDefaultTriggers(triggers) ? { triggers } : {}),
+    ...(onCompletionSelect
+      ? {
+          onCompletionSelect: (item, context) => (controlsRef.current
+            ? onCompletionSelect(item, { ...context, controls: controlsRef.current })
+            : undefined),
+        }
+      : {}),
     placeholder: locale.placeholder,
     disabled: !canCompose,
     onEntityAction: (result, actionId) => runEntityAction(
@@ -183,7 +216,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
           allowEmptySubmit: attachments.length > 0,
         }
       : {}),
-  }), [completionSearch, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
+  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
 
   const attachmentInputProps = useMemo<ChatComposerInput['attachmentInputProps']>(() => ({
     ref: fileInputRef,
@@ -217,9 +250,10 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     />
   ) : null;
 
-  return {
+  const composer: ChatComposerInput = {
     value,
     isLoading,
+    canCompose,
     canSend: (value.trim().length > 0 || attachments.length > 0) && canCompose,
     attachments,
     attachmentError: attachmentProblem ? describeProblem(attachmentProblem, locale) : null,
@@ -233,6 +267,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     setText,
     appendText,
     focus,
+    openCompletion,
     inputRef,
     inputProps,
     pendingCommand,
@@ -240,4 +275,6 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     cancelPendingCommand,
     argumentsForm,
   };
+  controlsRef.current = composer;
+  return composer;
 }

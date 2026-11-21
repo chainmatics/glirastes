@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { getThemeEffect, getThemeVars } from '../themes.js';
 import { ChatContext, type ChatContextValue } from './chat-context.js';
+import type { ComposerContextValue } from './composer-context.js';
 import type {
   ActivityLogConfig,
   ActivityLogDetails,
@@ -36,7 +37,7 @@ import type {
   QueuedMessage,
 } from '../types.js';
 import { createQueuedMessage, useMessageQueueStore, useResolvedQueueConfig } from './use-message-queue.js';
-import { normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
+import { inferMentionPrefix, normalizeMentionSlug, serializeMentionsForSend } from '../utils/mention-markup.js';
 import { mergePipelineSteps } from '../utils/merge-pipeline-steps.js';
 import { resolveAttachmentOptions } from '../utils/attachments.js';
 import { clearChatAttachmentSource, setActiveChatAttachmentSource } from '../utils/chat-attachment-registry.js';
@@ -48,6 +49,7 @@ import { resolveToolResultConfig } from '../utils/tool-result-config.js';
 import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
+import { createMentionPrefixLookup, resolveChatTriggers } from '../completions/triggers.js';
 import { toChatEntityItem } from '../interactions/definitions.js';
 import {
   createChatInteractionRegistry,
@@ -191,6 +193,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   openEntityLabel: 'Open {label}',
   chatAboutLabel: 'Chat about this',
   attachButtonLabel: 'Attach files',
+  plusMenuButtonLabel: 'More actions',
+  plusMenuAttachLabel: 'Attach file',
   attachmentsLabel: 'Attachments',
   removeAttachmentLabel: 'Remove {name}',
   openAttachmentLabel: 'Open {name}',
@@ -325,7 +329,7 @@ function coerceLoadedMessages(rows: unknown[]): ChatMessage[] {
   return result;
 }
 
-type MentionTrigger = '@' | '/' | null;
+type MentionTrigger = string | null;
 
 function getMentionTypesForTrigger(types: string[], trigger: MentionTrigger): string[] {
   if (trigger === '/') {
@@ -670,8 +674,11 @@ export function AiChatProvider({
   transport,
   mentions,
   completionProviders,
+  triggers: triggerDefinitions,
+  composer: composerConfig,
   completionContext,
   onCompletionProviderError,
+  onCompletionSelect,
   chatInteractions,
   entityLinks,
   markdown,
@@ -998,6 +1005,16 @@ export function AiChatProvider({
     () => [...(completionProviders ?? []), ...(interactionRegistry?.providers ?? [])],
     [completionProviders, interactionRegistry],
   );
+  // Throws on an invalid or duplicate definition, so a bad config fails at once.
+  const triggers = useMemo(
+    () => resolveChatTriggers(triggerDefinitions, allCompletionProviders),
+    [triggerDefinitions, allCompletionProviders],
+  );
+  const entityPrefix = triggers.find((trigger) => trigger.char === '@')?.prefix ?? '@';
+  const mentionPrefix = useMemo(() => createMentionPrefixLookup(triggers), [triggers]);
+  // What `session.save` gets as its third argument: only when a trigger claims `types`, so saves stay as before otherwise.
+  const saveOptionsRef = useRef<{ mentionPrefix: (type: string) => string } | undefined>(undefined);
+  saveOptionsRef.current = mentionPrefix === inferMentionPrefix ? undefined : { mentionPrefix };
   const completionSearch = useMemo(
     () => (allCompletionProviders.length > 0
       ? createCompletionSearch(allCompletionProviders, {
@@ -1298,7 +1315,9 @@ export function AiChatProvider({
     const history = storedHistory(messages, heldMessagesRef.current, turnOutcomesRef.current);
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
-      Promise.resolve(save(activeSessionIdRef.current, history)),
+      Promise.resolve(saveOptionsRef.current
+        ? save(activeSessionIdRef.current, history, saveOptionsRef.current)
+        : save(activeSessionIdRef.current, history)),
       new Promise((resolve) => { timer = setTimeout(resolve, PAGE_LOAD_SAVE_TIMEOUT_MS); }),
     ]).finally(() => clearTimeout(timer));
   }, [reportUiOutcome]);
@@ -1542,7 +1561,9 @@ export function AiChatProvider({
     const cfg = sessionRef.current;
     if (!cfg?.save) return;
     void Promise.resolve(
-      cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes)),
+      saveOptionsRef.current
+        ? cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes), saveOptionsRef.current)
+        : cfg.save(activeSessionId, storedHistory(rawMessages as unknown as ChatMessage[], heldMessages, turnOutcomes)),
     );
   }, [rawMessages, heldMessages, turnOutcomes, isInitialized, activeSessionId, loadedSessionId]);
 
@@ -2184,11 +2205,11 @@ export function AiChatProvider({
       type,
       label: resolved.label,
       displayName: resolved.label,
-      prefix: '@',
+      prefix: entityPrefix,
       slug: normalizeMentionSlug(resolved.label),
     }]);
     return true;
-  }, [interactionRegistry]);
+  }, [interactionRegistry, entityPrefix]);
 
   const consumeComposerMentions = useCallback(() => setComposerMentions([]), []);
 
@@ -2808,7 +2829,7 @@ export function AiChatProvider({
   }, []);
 
   // Build context value
-  const contextValue = useMemo<ChatContextValue>(
+  const contextValue = useMemo<ChatContextValue & ComposerContextValue>(
     () => ({
       classNames,
       components,
@@ -2880,6 +2901,10 @@ export function AiChatProvider({
       hasMentions: !!mentions,
       completionSearch,
       hasCompletions: completionSearch !== undefined,
+      triggers,
+      composer: composerConfig,
+      onCompletionSelect,
+      mentionPrefix,
       interactions: interactionRegistry,
       pendingCommand,
       submitPendingCommand,
@@ -2975,6 +3000,10 @@ export function AiChatProvider({
       clearActiveMentions,
       isMentionSearching,
       completionSearch,
+      triggers,
+      composerConfig,
+      onCompletionSelect,
+      mentionPrefix,
       interactionRegistry,
       pendingCommand,
       submitPendingCommand,

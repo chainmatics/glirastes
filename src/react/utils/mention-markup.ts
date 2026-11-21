@@ -145,7 +145,15 @@ export type MentionTextSegment =
   | { kind: 'text'; text: string }
   | { kind: 'mention'; mention: Mention };
 
-export function parseMentionSegments(text: string): MentionTextSegment[] {
+/**
+ * Splits text at its mention markers. `prefixOf` gives a mention's visible
+ * prefix by type (default `inferMentionPrefix`); the chat context's
+ * `mentionPrefix` applies the provider's `triggers`.
+ */
+export function parseMentionSegments(
+  text: string,
+  prefixOf: (type: string) => string = inferMentionPrefix,
+): MentionTextSegment[] {
   const segments: MentionTextSegment[] = [];
   let cursor = 0;
   let match: RegExpExecArray | null;
@@ -166,7 +174,7 @@ export function parseMentionSegments(text: string): MentionTextSegment[] {
         id,
         type,
         displayName: label,
-        prefix: inferMentionPrefix(type),
+        prefix: prefixOf(type),
       },
     });
 

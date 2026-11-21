@@ -346,6 +346,10 @@ export interface MentionResult {
   actions?: ReadonlyArray<CompletionItemAction>;
   /** Heading the list shows above this hit's group. */
   group?: string;
+  /** What picking it does; overrides the trigger's `select` (see `CompletionSelectKind`). */
+  select?: CompletionSelectKind;
+  /** `select: 'text'`: the text put in place of trigger and query; default `label`. */
+  insertText?: string;
 }
 
 export interface MentionData {
@@ -398,6 +402,10 @@ export interface CompletionItem {
   actions?: ReadonlyArray<CompletionItemAction>;
   /** Heading the list shows above this hit's group. */
   group?: string;
+  /** What picking it does; overrides the trigger's `select` (see `CompletionSelectKind`). */
+  select?: CompletionSelectKind;
+  /** `select: 'text'`: the text put in place of trigger and query; default `label`. */
+  insertText?: string;
 }
 
 export interface CompletionItemAction {
@@ -418,10 +426,45 @@ export interface CompletionSearchRequest {
 export interface ChatCompletionProvider {
   /** Stable, unique provider id (`[a-z0-9-]`, max 40). */
   id: string;
-  trigger: '@' | '/';
+  /**
+   * The character that opens this provider's list: `@`, `/` or any other
+   * single non-whitespace character (e.g. `#`). Describe a new one in
+   * `AiChatProviderConfig.triggers` to set its prefix or pick behavior.
+   */
+  trigger: string;
   search(
     request: CompletionSearchRequest,
   ): Promise<ReadonlyArray<CompletionItem>> | ReadonlyArray<CompletionItem>;
+}
+
+/**
+ * What picking an entry of a trigger's list does. `chip` (default) inserts a
+ * pill. `text` replaces trigger and query with the entry's `insertText`
+ * (default: its label) as plain text. `run` inserts the pill and sends like
+ * the send button (nothing is sent while a turn streams; the pill stays).
+ * For a sub-list, handle the pick in `onCompletionSelect`: call
+ * `controls.openCompletion({ trigger, source })` and return `true`.
+ */
+export type CompletionSelectKind = 'chip' | 'text' | 'run';
+
+/** A character that opens a completion list in the composer. */
+export interface ChatTriggerDefinition {
+  /** Exactly one character, not whitespace, e.g. `#`. */
+  char: string;
+  /** Name of the trigger in composer menus. */
+  label?: string;
+  /** Visible prefix of a picked pill; defaults to `char`. Commands keep `/`. */
+  prefix?: string;
+  /** Default pick behavior of the trigger's entries; default `chip`. */
+  select?: CompletionSelectKind;
+  /**
+   * Mention item types this trigger owns, e.g. `['ticket']`. The wire format
+   * (`{{mention:type:id:label}}`) carries no prefix, so sent messages, restored
+   * history and session titles show a mention of these types with `prefix`;
+   * other types keep `@`. A type belongs to one trigger at most; `command`
+   * always stays `/`.
+   */
+  types?: ReadonlyArray<string>;
 }
 
 /** A catalog UI tool offered as a `/` command. */
@@ -493,8 +536,18 @@ export interface WireChatMessage {
  * component renders.
  */
 export interface SessionConfig {
-  /** Persist messages for a session. Called after each message change. */
-  save?: (conversationId: string, messages: ChatMessage[]) => void | Promise<void>;
+  /**
+   * Persist messages for a session. Called after each message change. Only
+   * when a `triggers` definition claims mention `types`, a third argument
+   * carries `mentionPrefix` (visible prefix by mention type, e.g. `#` for
+   * `ticket`), so a store that names chats from the first question shows
+   * mentions as sent; `createLocalSessionStore` uses it. Other stores may ignore it.
+   */
+  save?: (
+    conversationId: string,
+    messages: ChatMessage[],
+    options?: { mentionPrefix?: (type: string) => string },
+  ) => void | Promise<void>;
   /**
    * Load previously-stored messages for a session. Called on mount and
    * on switch. Return either full SDK `ChatMessage`s (with `parts`) or
@@ -939,6 +992,92 @@ export interface ChatComponents {
    * default `ChatQueue`; `null` hides it (the app renders the queue itself).
    */
   ChatQueue?: ComponentType<ChatQueueProps> | null;
+  /**
+   * Arranges the composer row: the rendered `start` and `end` items of
+   * `composer.toolbar` around the editor. Without it they render in a row
+   * inside the input's form: `start`, editor, `end`.
+   */
+  ComposerToolbar?: ComponentType<ComposerToolbarProps>;
+}
+
+/**
+ * A built-in item of the composer toolbar. `attach` renders only when
+ * attachments are enabled, `mic` only with `voice.enabled`, `actions` is the
+ * input's `renderActions`, `extra` is `components.InputExtra`, `send` is
+ * `renderSubmit` or the default send/stop button. `trigger:<char>` is a
+ * button that opens the completion list of that trigger char (label from the
+ * trigger definition, else the char); the plain input, which has no
+ * completion, leaves it out. `plus` is a "+" button with a menu
+ * (`ComposerConfig.plusMenu`).
+ */
+export type ComposerToolbarBuiltin = 'attach' | 'mic' | 'actions' | 'extra' | 'send' | 'plus' | `trigger:${string}`;
+
+/** An app item of the composer toolbar (`composer.items`). */
+export interface ComposerToolbarItem {
+  /** Accessible name of the button; its text when there is no `icon`. */
+  label: string;
+  icon?: ReactNode;
+  onSelect?: (controls: ChatComposerInputControls) => void;
+  /** Renders the item yourself; wins over `icon` and `onSelect`. */
+  render?: (controls: ChatComposerInputControls) => ReactNode;
+  hidden?: boolean | ((controls: ChatComposerInputControls) => boolean);
+}
+
+/** Layout and app items of the composer (`AiChatProvider` `composer`). */
+export interface ComposerConfig {
+  /**
+   * Item ids before (`start`) and after (`end`) the editor: builtin ids
+   * (`ComposerToolbarBuiltin`) or keys of `items`. An item key equal to a
+   * builtin id replaces the builtin. Unknown ids warn once and are skipped.
+   * Default `{ start: ['attach'], end: ['mic', 'actions', 'extra', 'send'] }`;
+   * a side left out keeps its default.
+   */
+  toolbar?: { start?: ReadonlyArray<string>; end?: ReadonlyArray<string> };
+  items?: Readonly<Record<string, ComposerToolbarItem>>;
+  /** Rows of the `plus` toolbar item; without it the default rows. */
+  plusMenu?: ComposerPlusMenuConfig;
+}
+
+/**
+ * The menu of the `plus` toolbar item. Rows run in `items` order; the
+ * `source` section comes after them.
+ */
+export interface ComposerPlusMenuConfig {
+  /**
+   * Row ids: `attach` (only when attachments are enabled; opens the file
+   * picker), `trigger:<char>` (opens that trigger's list in the editor,
+   * labeled by the trigger's `label`, else the char) or keys of
+   * `composer.items` (their `label`, `icon`, `onSelect`, `hidden`; `render`
+   * items cannot be rows). Unknown ids warn once and are skipped.
+   * Default: `attach`, then one `trigger:<char>` per trigger of the composer.
+   */
+  items?: ReadonlyArray<string>;
+  /**
+   * A section listing completion entries directly, searched with an empty
+   * query when the menu opens. Choosing one does what picking it in the
+   * `trigger` list does (its `select`). No entries: no section.
+   */
+  source?: {
+    /** The trigger whose providers are searched, e.g. `/`. */
+    trigger: string;
+    /** Only these provider ids of the trigger. */
+    source?: string | ReadonlyArray<string>;
+    /** Heading of the section. */
+    label?: string;
+    /** Most entries shown; default 8. */
+    limit?: number;
+  };
+}
+
+/** Props of `components.ComposerToolbar`. */
+export interface ComposerToolbarProps {
+  /** Rendered items before the editor, in `toolbar.start` order; hidden and unavailable ones are left out. */
+  start: ReactNode[];
+  /** Rendered items after the editor, in `toolbar.end` order. */
+  end: ReactNode[];
+  /** The editor (the pill editor or the plain textarea). */
+  editor: ReactNode;
+  controls: ChatComposerInputControls;
 }
 
 export interface CommandArgumentsFormProps {
@@ -1190,6 +1329,10 @@ export interface ChatLocale {
   chatAboutLabel: string;             // a "Chat about this" menu entry (`useChatComposer`)
   // Attachments
   attachButtonLabel: string;
+  /** Accessible name of the composer's "+" menu button; default `More actions`. */
+  plusMenuButtonLabel?: string;
+  /** The `attach` row of the "+" menu; default `Attach file`. */
+  plusMenuAttachLabel?: string;
   attachmentsLabel: string;
   removeAttachmentLabel: string;      // supports `{name}`
   openAttachmentLabel: string;        // supports `{name}`
@@ -1445,8 +1588,29 @@ export interface AiChatProviderConfig {
    * keyboard navigation and keeps structured ids on send.
    */
   completionProviders?: ReadonlyArray<ChatCompletionProvider>;
+  /**
+   * Trigger characters of the composer beyond the provider's own: label,
+   * pill prefix and pick behavior per char. `@` and `/` always open a list;
+   * a provider's char without a definition gets `{ prefix: char, select: 'chip' }`.
+   * An invalid or duplicate definition throws when the provider renders.
+   * Memoize the array.
+   */
+  triggers?: ReadonlyArray<ChatTriggerDefinition>;
+  /**
+   * Toolbar layout and app items of `ChatInput`/`MentionInput`. Without it
+   * the composer renders as before. Memoize the object.
+   */
+  composer?: ComposerConfig;
   completionContext?: CompletionPermissionContext;
   onCompletionProviderError?: (providerId: string, error: unknown) => void;
+  /**
+   * Runs first when an entry of a completion list is picked. Return `true`
+   * when the app handled it: the typed trigger and query leave the editor,
+   * the caret stays where they were and the list closes; nothing else runs.
+   * Otherwise the entry's `select` behavior runs. For a sub-list, call
+   * `controls.openCompletion({ trigger, source })` here and return `true`.
+   */
+  onCompletionSelect?: (item: CompletionItem, context: CompletionSelectContext) => boolean | void;
   /**
    * Declarative `@` entities and `/` commands: derived `data` (from
    * `useChatInteractionsData` or the generated module) plus app definitions
@@ -1971,8 +2135,15 @@ export interface UseChatComposerInputOptions {
 export interface ChatComposerInputControls {
   /** Current text including `@`/`/` tokens. */
   readonly value: string;
+  /** A turn is running. Use `canCompose` to ask whether the composer may be changed. */
   readonly isLoading: boolean;
-  /** Non-blank text or an attachment, and not loading. */
+  /**
+   * Whether the editor accepts input, as the built-in input and toolbar use it:
+   * with `queue.enabled` also while a turn streams, without it only while no
+   * turn runs and the session is ready. `openCompletion` does nothing while false.
+   */
+  readonly canCompose: boolean;
+  /** Non-blank text or an attachment, and `canCompose`. */
   readonly canSend: boolean;
   /** Files waiting to be sent with the next message. */
   readonly attachments: ReadonlyArray<ChatAttachment>;
@@ -1993,13 +2164,43 @@ export interface ChatComposerInputControls {
   /** Appends with one space, e.g. a voice transcript; references stay. */
   appendText(text: string): void;
   focus(): void;
+  /**
+   * Opens a completion list as if the user typed `trigger` (+ `query`), e.g.
+   * from a toolbar button. Closing it untouched removes the inserted text.
+   * Does nothing while `canCompose` is false.
+   */
+  openCompletion(options: OpenCompletionOptions): void;
+}
+
+/** What `openCompletion` puts into the editor and searches. */
+export interface OpenCompletionOptions {
+  /** A trigger char of the composer, e.g. `@` or `#`. Unknown chars warn once and do nothing. */
+  trigger: string;
+  /** Text inserted after the trigger and searched at once. Default: empty. */
+  query?: string;
+  /**
+   * Searches only these provider ids of the trigger until the list closes,
+   * e.g. a sub-list from `onCompletionSelect`. Applies to the composer's
+   * search and one made by `createCompletionSearch`; another `onSearch` lists all.
+   */
+  source?: string | ReadonlyArray<string>;
+}
+
+/** Where an entry was picked (`AiChatProviderConfig.onCompletionSelect`). */
+export interface CompletionSelectContext {
+  /** The trigger char the list was opened with, e.g. `#`. */
+  trigger: string;
+  /** The text typed after the trigger. */
+  query: string;
+  /** The composer the entry was picked in. */
+  controls: ChatComposerInputControls;
 }
 
 export interface ChatComposerInput extends ChatComposerInputControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers'>;
   /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
   readonly attachmentInputProps: ChatAttachmentInputProps;
   readonly pendingCommand: PendingChatCommand | null;
@@ -2024,6 +2225,14 @@ export interface RichMentionInputHandle {
    * becomes a command pill, any other type an entity pill.
    */
   insertMention: (mention: MentionData) => void;
+  /**
+   * Focuses the editor, inserts `trigger` + `query` at the caret (at the end
+   * when the editor had no focus; a space first when needed) and searches at
+   * once. When the list closes before the user typed or picked anything, the
+   * inserted text is removed again and the caret restored. Optional so custom
+   * handles stay valid; `RichMentionInput` always has it.
+   */
+  openCompletion?: (options: OpenCompletionOptions) => void;
 }
 
 /** ARIA wiring of one option in the `@`/`/` list; spread it onto the clickable element. */
@@ -2061,10 +2270,19 @@ export interface RichMentionInputProps {
   onSubmit?: (message: string, mentions: MentionData[]) => void | boolean;
   /** Search callback for mention autocomplete (BYOS). Return matching results for the given query and trigger character. */
   onSearch?: (query: string, trigger: string) => Promise<MentionResult[]> | MentionResult[];
+  /**
+   * Runs first when an entry is picked; return `true` to skip its `select`
+   * behavior (trigger and query leave the editor, the list closes). The provider's `onCompletionSelect` adds the
+   * composer `controls`.
+   */
+  onCompletionSelect?: (item: CompletionItem, context: Omit<CompletionSelectContext, 'controls'>) => boolean | void;
   /** Mention data to render as inline chips on mount (e.g. pre-filled context from a detail view). */
   initialMentions?: MentionData[];
-  /** Characters that open the autocomplete dropdown. Defaults to `['@', '/']`. */
-  triggers?: string[];
+  /**
+   * Characters that open the autocomplete dropdown. Defaults to `['@', '/']`.
+   * An entry can be a definition to set the pill prefix (default: the char).
+   */
+  triggers?: ReadonlyArray<string | ChatTriggerDefinition>;
   /** Component overrides for the autocomplete dropdown. */
   components?: RichMentionInputComponents;
   /** An entity action picked next to a result (mouse, or ArrowRight then Enter). */

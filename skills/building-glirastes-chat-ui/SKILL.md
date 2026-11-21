@@ -213,7 +213,7 @@ Methods, chip options and gotchas: [references/composer-chips-attachments.md](re
 ## Commands, mentions and clarification
 
 `completionProviders` turns the composer into provider search. Each provider
-has a stable `id`, a `trigger` (`/` or `@`) and an async `search` that gets
+has a stable `id`, a `trigger` (`@`, `/` or another char, see [triggers](references/composer-triggers-toolbar.md#triggers)) and an async `search` that gets
 the query, an abort `signal`, a `limit` and the `completionContext` (roles and
 attributes the UI knows). Arrow keys, Tab/Enter and Escape work in the list,
 and the selected item's own id reaches the model in the mention marker.
