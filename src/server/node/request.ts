@@ -85,9 +85,15 @@ export async function toWebRequest(
     const read = await readNodeBody(req, {
       maxBodyBytes: options.maxBodyBytes ?? DEFAULT_NODE_MAX_BODY_BYTES,
     });
-    if (read.reparsed) headers.delete("content-encoding");
-    headers.set("content-length", String(read.bytes.byteLength));
-    body = read.bytes;
+    // A body-less request (e.g. OPTIONS without content-length) stays body-less.
+    const declared =
+      req.headers["content-length"] !== undefined ||
+      req.headers["transfer-encoding"] !== undefined;
+    if (read.bytes.byteLength > 0 || declared) {
+      if (read.reparsed) headers.delete("content-encoding");
+      headers.set("content-length", String(read.bytes.byteLength));
+      body = read.bytes;
+    }
   }
   return new Request(url, {
     method,
