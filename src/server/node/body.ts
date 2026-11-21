@@ -14,6 +14,12 @@ export class RequestBodyTooLargeError extends Error {
   }
 }
 
+/** Internal. A limit that is not a positive safe integer (NaN, Infinity, 0, a fraction) would read without bound: refused. */
+export function assertMaxBodyBytes(value: number): void {
+  if (!(Number.isSafeInteger(value) && value > 0))
+    throw new RangeError("maxBodyBytes must be a positive safe integer");
+}
+
 function bounded(bytes: Uint8Array, maxBodyBytes: number): Uint8Array {
   if (bytes.byteLength > maxBodyBytes)
     throw new RequestBodyTooLargeError(maxBodyBytes);
@@ -30,6 +36,7 @@ export async function readNodeBody(
   options: { maxBodyBytes: number },
 ): Promise<{ bytes: Uint8Array; reparsed: boolean }> {
   const { maxBodyBytes } = options;
+  assertMaxBodyBytes(maxBodyBytes);
   if (!req.readableEnded && req.readable) {
     if (Number(req.headers["content-length"] ?? 0) > maxBodyBytes)
       throw new RequestBodyTooLargeError(maxBodyBytes);

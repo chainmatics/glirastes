@@ -27,6 +27,12 @@ async function drained(extra: Record<string, unknown> = {}) {
 }
 
 describe("readNodeBody", () => {
+  it("refuses a maxBodyBytes that is not a positive safe integer", async () => {
+    await expect(
+      readNodeBody(request([Buffer.from("x".repeat(100))]), { maxBodyBytes: Number.NaN }),
+    ).rejects.toThrow(new RangeError("maxBodyBytes must be a positive safe integer"));
+  });
+
   it("reads a streamed body in chunks", async () => {
     const req = request([Buffer.from("ab"), Buffer.from("cd"), Buffer.from("e")]);
     const out = await readNodeBody(req, { maxBodyBytes: 100 });

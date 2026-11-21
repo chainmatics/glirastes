@@ -1,12 +1,12 @@
 import type { TLSSocket } from "node:tls";
-import { DEFAULT_NODE_MAX_BODY_BYTES, readNodeBody } from "./body.js";
+import { assertMaxBodyBytes, DEFAULT_NODE_MAX_BODY_BYTES, readNodeBody } from "./body.js";
 import { genericRequestHeaderDrop, toWebHeaders } from "./headers.js";
 import type { NodeRequest } from "./types.js";
 
 export interface ToWebRequestOptions {
   /** Origin of the Request URL, which is the address the default endpoint caller calls. Default: this connection's own local address and port (`http`, or `https` on a TLS socket). Must be an http(s) origin without path. */
   origin?: string;
-  /** Default 1_000_000 (the chat handler's own default). Keep it ≥ the handler's `maxBodyBytes`. */
+  /** Default 1_000_000 (the chat handler's own default). Keep it ≥ the handler's `maxBodyBytes`. A value that is not a positive safe integer is refused with a RangeError. */
   maxBodyBytes?: number;
   /** Keep `forwarded` / `x-forwarded-*` headers (default false: dropped). Only behind a proxy that always sets them. */
   trustForwardedHeaders?: boolean;
@@ -68,6 +68,7 @@ export async function toWebRequest(
   req: NodeRequest,
   options: ToWebRequestOptions = {},
 ): Promise<Request> {
+  if (options.maxBodyBytes !== undefined) assertMaxBodyBytes(options.maxBodyBytes);
   const origin =
     options.origin === undefined
       ? new URL(ownOrigin(req)).origin

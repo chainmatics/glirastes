@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "./body.js";
+import { assertMaxBodyBytes, RequestBodyTooLargeError } from "./body.js";
 import { toWebRequest, validateOrigin, type ToWebRequestOptions } from "./request.js";
 import { sendWebResponse } from "./response.js";
 import type { NodeHandler, NodeResponse, WebHandler } from "./types.js";
@@ -22,11 +22,7 @@ export function createNodeHandler(
   options: NodeHandlerOptions = {},
 ): NodeHandler {
   if (options.origin !== undefined) validateOrigin(options.origin);
-  if (
-    options.maxBodyBytes !== undefined &&
-    !(Number.isSafeInteger(options.maxBodyBytes) && options.maxBodyBytes > 0)
-  )
-    throw new RangeError("maxBodyBytes must be a positive safe integer");
+  if (options.maxBodyBytes !== undefined) assertMaxBodyBytes(options.maxBodyBytes);
   return async (req, res) => {
     const abort = new AbortController();
     const disconnect = () => {

@@ -155,6 +155,15 @@ describe("toWebRequest", () => {
     expect(error).toBeInstanceOf(RequestBodyTooLargeError);
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5])(
+    "refuses maxBodyBytes %s instead of reading without a limit",
+    async (maxBodyBytes) => {
+      await expect(
+        toWebRequest(await consumed({ body: { a: 1 } }), { maxBodyBytes }),
+      ).rejects.toThrow(new RangeError("maxBodyBytes must be a positive safe integer"));
+    },
+  );
+
   it("follows options.signal", async () => {
     const controller = new AbortController();
     const request = await toWebRequest(await consumed({ body: {} }), {
