@@ -67,6 +67,8 @@ export class WorkerHost {
   private running: Job | undefined;
   private nextId = 1;
   private exitReason: string | undefined;
+  /** The discarded worker's terminate(); a new worker spawns only after it, so one model is resident at a time. */
+  private terminating: Promise<unknown> = Promise.resolve();
 
   constructor(options: WorkerHostOptions) {
     this.options = options;
@@ -138,6 +140,8 @@ export class WorkerHost {
     }
     await this.preloaded;
     if (this.worker) return this.worker;
+    await this.terminating;
+    if (this.worker) return this.worker;
     const worker = this.options.spawn();
     this.worker = worker;
     this.exitReason = undefined;
@@ -201,7 +205,11 @@ export class WorkerHost {
     this.loading = undefined;
     const controls = this.controls.splice(0);
     if (error) for (const control of controls) control.reject(error);
-    if (worker) await worker.terminate().catch(() => undefined);
+    if (worker) {
+      const terminated = worker.terminate().catch(() => undefined);
+      this.terminating = Promise.all([this.terminating, terminated]);
+      await terminated;
+    }
   }
 
   private cancel(job: Job): void {
@@ -218,8 +226,9 @@ export class WorkerHost {
     Atomics.store(job.cancel, 0, 1);
     job.timers.push(setTimeout(() => {
       if (job.settled || this.running !== job) return;
-      this.finish(job, abortError());
+      // Discard first, so the next job's spawn waits for this worker's terminate().
       void this.discardWorker();
+      this.finish(job, abortError());
     }, this.options.hardStopGraceMs));
   }
 

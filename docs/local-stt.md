@@ -196,7 +196,8 @@ createLocalTranscriber({
   the worker reads between chunks; the warm worker keeps running. Only a job
   that has not answered `hardStopGraceMs` after its cancellation is stopped
   with `worker.terminate()`; the next job then starts a fresh worker and
-  reloads the model (1–9 s). A worker that dies (native crash, out of memory)
+  reloads the model (1–9 s), only after the old worker has exited, so a
+  process never holds two models. A worker that dies (native crash, out of memory)
   fails its running job with `SttLocalError` `worker_failed`; queued jobs run on
   a new worker.
 - **`mode: 'inline'`**: no worker. The model loads with

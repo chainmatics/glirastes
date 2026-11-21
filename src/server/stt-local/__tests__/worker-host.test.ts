@@ -218,6 +218,31 @@ describe('WorkerHost', () => {
     expect(preload).toHaveBeenCalledOnce();
   });
 
+  it('starts the next worker only after the hard-stopped one has terminated', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { host, workers, spawn } = setup({ hardStopGraceMs: 100 });
+    const controller = new AbortController();
+    const first = settle(host.run(samples(), controller.signal, Infinity));
+    const queued = host.run(samples(), new AbortController().signal, Infinity);
+    await loaded(workers);
+    const old = workers[0]!;
+    old.holdTerminate = true; // the native chunk is still running
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(old.terminated).toBe(1);
+    expect(((await first) as { error: Error }).error.name).toBe('AbortError');
+    for (let i = 0; i < 5; i += 1) await tick();
+    // One model resident at a time: no second worker while the first still exits.
+    expect(spawn).toHaveBeenCalledOnce();
+    old.finishTerminate();
+    await tick();
+    await tick();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    await loaded(workers, 1);
+    workers[1]!.reply({ type: 'done', id: workers[1]!.jobs()[0]!.id, text: 'after' });
+    expect(await queued).toBe('after');
+  });
+
   it('hard-stops an overdue job that does not answer', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const { host, workers } = setup({ hardStopGraceMs: 100 });
