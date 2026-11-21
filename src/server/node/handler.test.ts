@@ -118,7 +118,9 @@ describe("createNodeHandler", () => {
     try {
       const left = deferred();
       const threw = deferred();
+      const started = deferred();
       const handler = createNodeHandler(async (r) => {
+        started.resolve();
         await new Promise<void>((resolve) =>
           r.signal.aborted ? resolve() : r.signal.addEventListener("abort", () => resolve()),
         );
@@ -146,7 +148,8 @@ describe("createNodeHandler", () => {
         body: "{}",
         signal: controller.signal,
       }).catch(() => undefined);
-      await new Promise((r) => setTimeout(r, 30));
+      // Abort only once the handler runs, so the request surely reached the server.
+      await started.promise;
       controller.abort();
       await request;
       await new Promise((r) => setTimeout(r, 30));
