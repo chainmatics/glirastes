@@ -116,7 +116,19 @@ async function download(file: SttModelFile, url: string, target: string, fetch: 
         callback(null, chunk);
       },
     });
-    await pipeline(Readable.fromWeb(response.body as unknown as WebReadableStream<Uint8Array>), meter, createWriteStream(partial));
+    try {
+      await pipeline(Readable.fromWeb(response.body as unknown as WebReadableStream<Uint8Array>), meter, createWriteStream(partial));
+    } catch (error) {
+      if (error instanceof FoundationDiagnosticError) throw error;
+      // A reset socket, a full disk: a diagnostic with the remediation, not a raw stack.
+      throw new FoundationDiagnosticError({
+        code: 'E-STT-002',
+        operation: OPERATION,
+        message: `Download of ${file.path} from ${printable(url)} was interrupted: ${error instanceof Error ? error.message : 'stream error'}.`,
+        remediation: RETRY,
+        path: file.path,
+      });
+    }
     if (received !== file.bytes) throw mismatch(file, `received ${received} bytes, expected ${file.bytes}`);
     const actual = hash.digest('hex');
     if (actual !== file.sha256) throw mismatch(file, `sha256 ${actual}, expected ${file.sha256}`);

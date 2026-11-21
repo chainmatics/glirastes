@@ -124,6 +124,21 @@ describe('pullSttModels', () => {
     expect(await walk(dir)).toEqual([]);
   });
 
+  it('maps a connection lost mid-download to E-STT-002 and leaves no partial file', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode('enc'));
+        controller.error(new TypeError('terminated'));
+      },
+    });
+    const fetch = server({ [files[0]!.url]: new Response(body) });
+    const error = await failure(pullSttModels({ dir }, { fetch, files }));
+    expect(error.code).toBe('E-STT-002');
+    expect(error.message).toBe(`Download of ${files[0]!.path} from https://hf.test/x was interrupted: terminated.`);
+    expect(error.remediation).toBe('Check the mirror or network and run glirastes stt pull again.');
+    expect(await walk(dir)).toEqual([]);
+  });
+
   it('uses the mirror with the same relative paths', async () => {
     const fetch = server({
       'https://mirror.local/models/parakeet-tdt-0.6b-v3-int8/x': ONE,
