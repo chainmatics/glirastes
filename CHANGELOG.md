@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-21
+
 ### Added
 
 - `glirastes/server/node` (`docs/node-servers.md`): `createNodeHandler(handler, options)` bridges `node:http`-style servers (Express, Fastify, NestJS on Express) to `createAiChatHandler`, with `toWebRequest` and `sendWebResponse` as its halves and `RequestBodyTooLargeError`. The Request URL comes from `origin` or the socket's own address, never from `Host`; `x-forwarded-*` only with `trustForwardedHeaders`; the body is read incrementally up to `maxBodyBytes` (1 MB), also from `req.rawBody` / `req.body` after a body parser; the response streams with backpressure, `res.flush()` and `x-accel-buffering: no`, and a client disconnect aborts `request.signal`. Fixed errors 413 `body_too_large` and 500 `request_failed`. Integration-tested on `node:http` and Express 5; Fastify and NestJS are documented recipes without a test here. Built-ins only, no new dependency.
@@ -1152,3 +1154,4 @@ No code changes — patch-level docs release.
 [0.19.0]: https://github.com/chainmatics/glirastes/compare/v0.18.1...v0.19.0
 [0.20.0]: https://github.com/chainmatics/glirastes/compare/v0.19.0...v0.20.0
 [0.21.0]: https://github.com/chainmatics/glirastes/compare/v0.20.0...v0.21.0
+[0.22.0]: https://github.com/chainmatics/glirastes/compare/v0.21.0...v0.22.0
