@@ -139,8 +139,9 @@ call with the same three values are ignored.
 ## Next.js
 
 <!-- nextjs-verification -->
-Mark the native addon and glirastes as server externals, so the bundler leaves
-the addon and the worker file in `node_modules`:
+List **both** the native addon and glirastes as server externals, so the
+bundler leaves the addon, the dynamic import and the worker file in
+`node_modules`:
 
 ```ts
 // next.config.ts
@@ -151,6 +152,26 @@ export default nextConfig;
 ```
 
 The route must run on the Node.js runtime (`export const runtime = 'nodejs'`).
+
+Verified on 2026-11-21 with Next.js 15.5.29 (webpack, `next build && next start`),
+the packed SDK and `sherpa-onnx-node` 2.0.1 on darwin-arm64, by posting
+`tests/fixtures/stt/de-thorsten.wav` to the route above:
+
+| `serverExternalPackages` | `mode` | Result |
+|---|---|---|
+| `['sherpa-onnx-node', 'glirastes']` | `worker` | works: 200 with the German text (1.9 s first request including the model load, 0.2 s after that) |
+| `['sherpa-onnx-node', 'glirastes']` | `inline` | works: 200 with the German text |
+| `['sherpa-onnx-node']` | `worker` | fails: 502, `peer_missing` |
+| none | `worker` | fails: 502, `peer_missing` |
+| none | `inline` | fails: 502, `peer_missing` |
+
+The build succeeds in every case. Without `glirastes` in the list, webpack
+bundles `glirastes/server/stt-local` and replaces its dynamic import of the
+addon with a stub that throws `Cannot find module 'sherpa-onnx-node'`,
+although the package is installed. `mode: 'inline'` does not avoid that,
+so it is no substitute for the externals; keep it for hosts where worker
+threads are unavailable. The `peer_missing` message then carries a second
+sentence that names `serverExternalPackages`.
 
 ## Options
 
@@ -258,6 +279,7 @@ audio or transcript content.
 | Code | When | Message |
 |---|---|---|
 | `peer_missing` | `sherpa-onnx-node` is not installed | `glirastes/server/stt-local needs the optional peer sherpa-onnx-node 2.0.1. Install it: npm install sherpa-onnx-node@2.0.1` |
+| `peer_missing` | a bundler inlined glirastes (Next.js without `serverExternalPackages`) | the same, followed by `. If it is installed, a bundler has inlined the import: in Next.js set serverExternalPackages: ['sherpa-onnx-node', 'glirastes']` |
 | `load_failed` | the native addon or the model does not load (`ERR_DLOPEN_FAILED`, `GLIBC_`, `GLIBCXX_`, `CXXABI_`, a missing `sherpa-onnx-<platform>-<arch>` package, …) | `sherpa-onnx-node <installed version \| unknown> failed to load: <original message>. glirastes is tested with sherpa-onnx-node 2.0.1: npm install sherpa-onnx-node@2.0.1` |
 | `platform_unsupported` | musl / Alpine | `glirastes/server/stt-local needs glibc; musl-based Linux (Alpine) is not supported. Use a Debian or Ubuntu based image such as node:22-bookworm-slim.` |
 | `platform_unsupported` | Linux x64 below glibc 2.32 | `glirastes/server/stt-local needs glibc 2.32 or newer on linux-x64 (found <v>).` |

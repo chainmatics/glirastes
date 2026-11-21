@@ -218,8 +218,8 @@ server instead of a transcription service (`docs/local-stt.md`):
    });
    ```
 
-4. `next.config.ts`: `serverExternalPackages: ['sherpa-onnx-node', 'glirastes']`.
-   Call `stt.warmup()` from `instrumentation.ts` so the first request does not
+4. `next.config.ts`: `serverExternalPackages: ['sherpa-onnx-node', 'glirastes']`,
+   both; without `glirastes` the bundled import fails as `peer_missing`. Call `stt.warmup()` from `instrumentation.ts` so the first request does not
    wait for the model; plan 2 GB of memory per process.
 5. `checkLocalStt()` is the model-free deploy readiness check. A full queue
    answers 503, a WAV that is not PCM16 mono 16 kHz answers 415.

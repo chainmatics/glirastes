@@ -48,7 +48,8 @@ export const POST = createRecordingTranscriptionHandler({
 - The `LocalTranscriber` from `createLocalTranscriber()` also has `warmup()`
   (call it from `instrumentation.ts`) and `close()`. One instance per model
   directory, threads and mode in a process, so dev HMR reuses the loaded model.
-- `next.config.ts`: `serverExternalPackages: ['sherpa-onnx-node', 'glirastes']`.
+- `next.config.ts`: `serverExternalPackages: ['sherpa-onnx-node', 'glirastes']`,
+  both of them (verified with Next.js 15.5); `mode: 'inline'` is no substitute.
 
 ## What the route answers
 

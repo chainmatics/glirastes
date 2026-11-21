@@ -21,6 +21,12 @@ curl -F file=@recording.wav http://127.0.0.1:8765/v1/audio/transcriptions
 Any other server with `POST /v1/audio/transcriptions` works the same way, so
 production can run the model wherever it fits (a GPU host, a container).
 
+Without a separate service, `glirastes/server/stt-local` (experimental) runs
+Parakeet TDT v3 int8 inside the Node process on Linux and macOS and plugs into
+the same route with `transcribe` instead of `url`; see
+[docs/local-stt.md](../../docs/local-stt.md). This MLX server stays the fast
+path on Apple Silicon, in `url` mode.
+
 ## 2. The app route
 
 The app owns one route that checks the user, limits size and format, and
