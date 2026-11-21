@@ -267,6 +267,21 @@ describe('toolToAiTool with toolMiddleware', () => {
     expect(tool).toHaveBeenCalledTimes(2);
   });
 
+  it('never executes the tool when a middleware calls next() after the call was aborted', async () => {
+    const tool = vi.fn(() => ({ ok: true }));
+    const controller = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const tools = toolsToAiTools(registry(tool), ctx, {
+      toolMiddleware: [async (_call, next) => { await gate; return next(); }],
+    });
+    const pending = execOf(tools)({ id: 'a' }, { toolCallId: 'c1', abortSignal: controller.signal });
+    controller.abort(new Error('tool timeout'));
+    release();
+    await pending.catch(() => undefined);
+    expect(tool).not.toHaveBeenCalled();
+  });
+
   it('toolsToAiTools rejects a non-array toolMiddleware', () => {
     expect(() => toolsToAiTools(registry(() => 1), ctx, { toolMiddleware: (() => 1) as never })).toThrow(
       new TypeError('toolMiddleware must be an array of functions'),

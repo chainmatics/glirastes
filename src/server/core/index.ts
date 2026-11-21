@@ -1100,7 +1100,11 @@ export function toolToAiTool(
               toolCallId: typeof executionOptions?.toolCallId === 'string' ? executionOptions.toolCallId : undefined,
               input: structuredClone(input), method, readOnly,
               context: executionContext, abortSignal: signal,
-            }, async () => tool.execute(input, executionContext))
+            }, async () => {
+              // A middleware that calls next() late never starts an aborted or timed-out call.
+              signal?.throwIfAborted();
+              return tool.execute(input, executionContext);
+            })
           : await tool.execute(input, executionContext);
 
         // Audit: tool executed successfully
