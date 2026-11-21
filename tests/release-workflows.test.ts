@@ -160,3 +160,22 @@ describe('release notes', () => {
     expect(readme).toContain('`0.5.0` is the first Foundation release');
   });
 });
+
+describe('local STT smoke workflows', () => {
+  const addon = read('.github/workflows/stt-local-addon.yml');
+  const smoke = read('.github/workflows/stt-local-smoke.yml');
+  const consumer = read('scripts/stt-local-consumer.sh');
+
+  it('lets only the latest job relax the exact peer pin', () => {
+    // npm refuses sherpa-onnx-node@latest next to the exact optional peer without it (ERESOLVE).
+    expect(jobLines(smoke, 'latest').join('\n')).toContain("stt-local-consumer.sh /t/glirastes.tgz /t/consumer '$SHERPA_VERSION' --legacy-peer-deps");
+    expect(jobLines(smoke, 'transcribe').join('\n')).not.toContain('--legacy-peer-deps');
+    expect(addon).not.toContain('--legacy-peer-deps');
+  });
+
+  it('installs exactly the sherpa-onnx-node version it was asked for', () => {
+    expect(consumer).toContain('npm view "sherpa-onnx-node@$sherpa" version');
+    expect(consumer).toMatch(/installed .* != requested|is not the requested/);
+  });
+
+});

@@ -297,14 +297,21 @@ a 503.
 CI tests the pinned version in two stages: a model-free addon check
 (`checkLocalStt()`, every pull request and every release) and a transcription
 with the real model (on changes to this feature, weekly and on demand), both on
-`node:22-bookworm-slim` amd64 and arm64 and on macOS arm64. A weekly job runs
-the same against `sherpa-onnx-node@latest` and may fail.
+`node:22-bookworm-slim` amd64 and arm64 and on macOS arm64. A weekly job
+(`latest` in `stt-local-smoke.yml`) runs both stages against the newest
+`sherpa-onnx-node` on the two Linux legs and may fail without failing the
+workflow. It installs with `npm install --legacy-peer-deps`, because npm
+refuses any version other than the exact optional peer pin next to glirastes,
+and it checks that the installed version is the one `latest` resolved to. The
+pinned jobs install without that flag.
 
-1. Wait for a green weekly `latest` job.
+1. Wait for a green weekly `latest` job; its log names the version it tested
+   (`glirastes <v>, sherpa-onnx-node <v>`). Use that exact version.
 2. Raise the exact pin in `package.json#peerDependencies['sherpa-onnx-node']`
-   (and `TESTED_SHERPA_VERSION` in `src/server/stt-local/sherpa.ts`); CI reads
-   the version from `package.json`.
-3. Both stages must be green on that pull request.
+   and `TESTED_SHERPA_VERSION` in `src/server/stt-local/sherpa.ts` together;
+   CI reads the version from `package.json`.
+3. Both stages must be green on that pull request, and an upgrade note names
+   the new pin.
 
 ## Content boundary
 
