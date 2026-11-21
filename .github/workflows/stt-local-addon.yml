@@ -35,7 +35,7 @@ jobs:
             image: node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
             args: ''
           - name: darwin-arm64
-            runner: macos-14
+            runner: macos-15
             image: ''
             args: ''
           - name: linux-x64 alpine (refused)
