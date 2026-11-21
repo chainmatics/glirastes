@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_BODY_BYTES } from "../adapters/nextjs/request-guards.js";
+import { DEFAULT_MAX_BODY_BYTES } from "../body-limit.js";
 import type { NodeRequest } from "./types.js";
 
 /** Internal default; equals the chat handler's own `maxBodyBytes` default. */

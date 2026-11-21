@@ -51,6 +51,28 @@ describe('public foundation subpaths', () => {
     }
   });
 
+  it('keeps glirastes/server/node on Node built-ins and its own files at runtime', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const dir = new URL('./server/node/', import.meta.url);
+    const files = (await readdir(dir)).filter(
+      (name) => name.endsWith('.ts') && !name.endsWith('.test.ts'),
+    );
+    const runtimeImports = (source: string) => [...source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+['"]([^'"]+)['"]/gms)]
+      .map((match) => match[1]!);
+    for (const name of files) {
+      const source = await readFile(new URL(name, dir), 'utf8');
+      for (const specifier of runtimeImports(source)) {
+        expect(
+          specifier.startsWith('node:') || /^\.\/[\w-]+\.js$/.test(specifier) || specifier === '../body-limit.js',
+          `${name} imports ${specifier}`,
+        ).toBe(true);
+      }
+    }
+    // The shared limit is a leaf: it imports nothing.
+    const leaf = await readFile(new URL('./server/body-limit.ts', import.meta.url), 'utf8');
+    expect(leaf).not.toMatch(/^import\s/m);
+  });
+
   it('packages accepted skills without exposing deferred adapters', async () => {
     const packageJson = JSON.parse(
       await readFile(new URL('../package.json', import.meta.url), 'utf8'),
