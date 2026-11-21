@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { defineTool, type ToolContext, type ToolRegistry } from '../../../types.js';
-import { toolsToAiTools, type AuditEvent } from '../index.js';
+import { defineTool, type AuditEvent, type ToolContext, type ToolRegistry } from '../../../types.js';
+import { toolsToAiTools } from '../index.js';
 import {
   assertToolMiddleware,
   composeToolMiddleware,
@@ -253,7 +253,7 @@ describe('toolToAiTool with toolMiddleware', () => {
   });
 
   it('no middleware: input is not cloned', async () => {
-    const tool = vi.fn(() => ({ ok: true }));
+    const tool = vi.fn((_input: unknown) => ({ ok: true }));
     const input = { id: 'a', fn: () => 1 };
     expect(await execOf(toolsToAiTools(registry(tool), ctx))(input)).toEqual({ ok: true });
     expect(tool.mock.calls[0]![0]).toBe(input);

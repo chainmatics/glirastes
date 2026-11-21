@@ -15,6 +15,7 @@ import type {
   SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
+import type { ToolMiddleware } from '../../core/tool-middleware.js';
 import type { ApprovalStore } from './approval-binding.js';
 import type { ApprovalSubjectLimits } from './approval-subject-lookup.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
@@ -533,6 +534,21 @@ export interface AiChatHandlerConfig {
    */
   onError?: (error: unknown, req: Request, info?: AiChatErrorInfo) => void;
   onToolError?: (toolId: string, error: unknown) => void;
+  /**
+   * Wraps the execution of the app's own tools (model turns and direct
+   * commands): `(call, next)` onion, the first entry outermost. It runs after
+   * every identity, RBAC, approval, budget and revocation check and inside
+   * the tool timeout; output bounds, truncation and result handles apply to
+   * whatever it returns. `call.input` is a copy (the tool always runs with
+   * its validated input), `next` runs at most once, returning without it
+   * short-circuits, and a throw is a tool error (`onToolError`, the standard
+   * error result). The handler's built-ins (`find_tools`, `read_result`,
+   * clarification, plan, follow-ups, memory) bypass it. It runs in this
+   * process only; nothing is sent to the Platform. Tool input must be
+   * structured-cloneable. A value that is not an array of functions throws
+   * when the handler is created. See docs/chat-route-security.md#tool-middleware.
+   */
+  toolMiddleware?: ReadonlyArray<ToolMiddleware>;
   /**
    * Classifies a failed backend call of an endpoint tool (non-2xx response)
    * as `'error'` (the default) or `'expected'`, e.g. a 403 for a user

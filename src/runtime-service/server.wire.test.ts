@@ -61,7 +61,7 @@ function rawExchange(
     const socket = connect(port, "127.0.0.1");
     const chunks: Buffer[] = [];
     socket.on("data", (chunk) => {
-      chunks.push(chunk);
+      chunks.push(Buffer.from(chunk));
       onData?.(Buffer.concat(chunks).toString("utf8"));
     });
     socket.on("error", reject);
