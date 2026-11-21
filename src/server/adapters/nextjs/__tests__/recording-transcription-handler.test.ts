@@ -231,9 +231,9 @@ describe('createRecordingTranscriptionHandler with a local transcriber', () => {
   });
 
   it('does not accept a url and a transcriber together', () => {
+    // @ts-expect-error url and transcribe exclude each other
     createRecordingTranscriptionHandler({
       authorize: allow,
-      // @ts-expect-error url and transcribe exclude each other
       url: 'http://stt',
       transcribe: transcriber(),
     });

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SttLocalError } from '../errors.js';
 import type { SttPlatformInfo } from '../platform.js';
+import type { SttEngine } from '../engine.js';
 import type { SherpaModule } from '../sherpa-types.js';
 import {
   checkLocalSttWith,
@@ -17,7 +18,7 @@ function deps(overrides: Partial<LocalTranscriberDeps> = {}) {
   const workers: FakeWorker[] = [];
   const order: string[] = [];
   const sherpa = { OfflineRecognizer: class {}, Vad: class {} } as unknown as SherpaModule;
-  const engine = { transcribe: vi.fn(async () => 'hallo') };
+  const engine = { transcribe: vi.fn<SttEngine['transcribe']>(async () => 'hallo') };
   const base: LocalTranscriberDeps = {
     platform: () => darwin,
     loadSherpa: vi.fn(async () => { order.push('sherpa'); return sherpa; }),
