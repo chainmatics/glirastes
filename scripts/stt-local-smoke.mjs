@@ -54,10 +54,10 @@ for (let i = 0; i < 3; i += 1) long.set(clip, i * (clip.length + gap));
 if (long.length <= 320000) fail(`the long clip must be longer than 20 s, got ${long.length} samples`);
 
 const texts = {};
-// The transcriber transfers the samples to its worker, so each call gets a copy.
+// The same arrays are passed again on purpose: the transcriber must copy, not consume them.
 async function transcribe(stt, samples, label) {
   const { text } = await stt.transcribe(
-    { samples: samples.slice(), sampleRate: 16000 },
+    { samples, sampleRate: 16000 },
     { language: 'de', signal: new AbortController().signal },
   );
   texts[label] = text;
@@ -89,6 +89,7 @@ await stt.close();
 stt = createLocalTranscriber({ modelDir });
 expectClip(await transcribe(stt, clip, 'afterRestart'), 'after restart');
 await stt.close();
+if (clip.length === 0 || long.length === 0) fail('the transcriber consumed the caller\'s samples');
 
 const header = process.report.getReport().header;
 console.log(JSON.stringify({

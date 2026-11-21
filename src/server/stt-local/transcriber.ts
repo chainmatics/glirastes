@@ -26,7 +26,7 @@ export interface LocalTranscriberOptions {
 }
 
 export interface LocalTranscriber {
-  /** Bound; pass it as `transcribe: stt.transcribe` to `createRecordingTranscriptionHandler`. */
+  /** Bound; pass it as `transcribe: stt.transcribe` to `createRecordingTranscriptionHandler`. Copies `audio.samples`; the caller's array is not consumed. */
   transcribe: RecordingTranscriber;
   /** Platform check, peer load, model files check and model load. Call it at server start to avoid a slow first request. */
   warmup(): Promise<void>;

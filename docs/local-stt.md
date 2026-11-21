@@ -114,7 +114,9 @@ service) or `transcribe` (a `RecordingTranscriber`), never both. In
 
 Any function with the `RecordingTranscriber` shape works there:
 `(audio: RecordingAudio, { language, signal }) => Promise<{ text }>`, with
-`audio.samples` a `Float32Array` in [-1, 1) at 16 kHz.
+`audio.samples` a `Float32Array` in [-1, 1) at 16 kHz. The local transcriber
+copies `samples` when it accepts a job and transfers only its copy to the
+worker, so the caller's array stays usable, also for a retry.
 
 ### Warm up at server start
 

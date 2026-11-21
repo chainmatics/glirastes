@@ -60,7 +60,7 @@ describe('WorkerHost', () => {
     expect(await Promise.all(runs)).toEqual(['t0', 't1', 't2']);
   });
 
-  it('runs jobs one at a time in order and transfers the samples buffer', async () => {
+  it('runs jobs one at a time in order and transfers a copy of the samples', async () => {
     const { host, workers } = setup();
     const first = samples(3);
     // An absolute time in the future; a past deadline would cancel the queued job at once.
@@ -70,8 +70,11 @@ describe('WorkerHost', () => {
     await loaded(workers);
     const worker = workers[0]!;
     expect(worker.jobs()).toHaveLength(1);
-    expect(worker.jobs()[0]!.samples).toBe(first);
-    expect(worker.transfers.at(-1)).toEqual([first.buffer]);
+    expect(Array.from(worker.jobs()[0]!.samples!)).toEqual([0.25, 0.25, 0.25]);
+    // The transferred buffer is the host's copy; the caller's array stays usable.
+    expect(worker.transfers.at(-1)).toHaveLength(1);
+    expect(worker.transfers.at(-1)![0]).not.toBe(first.buffer);
+    expect(first.length).toBe(3);
     expect(worker.jobs()[0]!.cancel).toBeInstanceOf(Int32Array);
     expect(worker.jobs()[0]!.cancel!.buffer).toBeInstanceOf(SharedArrayBuffer);
     worker.reply({ type: 'done', id: worker.jobs()[0]!.id, text: 'a' });
@@ -81,6 +84,55 @@ describe('WorkerHost', () => {
     worker.reply({ type: 'done', id: worker.jobs()[1]!.id, text: 'b' });
     expect(await a).toBe('a');
     expect(await b).toBe('b');
+  });
+
+  it('accepts the same samples again after a failed and after a successful job', async () => {
+    const { host, workers } = setup();
+    const audio = samples(3);
+    const failed = settle(host.run(audio, new AbortController().signal, Infinity));
+    await loaded(workers);
+    const worker = workers[0]!;
+    worker.reply({ type: 'error', id: worker.jobs()[0]!.id, message: 'decode failed' });
+    expect(((await failed) as { error: Error }).error.message).toBe('decode failed');
+
+    const retry = host.run(audio, new AbortController().signal, Infinity);
+    await tick();
+    expect(Array.from(worker.jobs()[1]!.samples!)).toEqual([0.25, 0.25, 0.25]);
+    worker.reply({ type: 'done', id: worker.jobs()[1]!.id, text: 'ok' });
+    expect(await retry).toBe('ok');
+
+    const again = host.run(audio, new AbortController().signal, Infinity);
+    await tick();
+    expect(worker.jobs()[2]!.samples).toHaveLength(3);
+    worker.reply({ type: 'done', id: worker.jobs()[2]!.id, text: 'again' });
+    expect(await again).toBe('again');
+    expect(audio.length).toBe(3);
+  });
+
+  it('rejects only the job whose post throws and keeps the queue moving', async () => {
+    const { host, workers } = setup();
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const first = settle(host.run(samples(), new AbortController().signal, Infinity));
+      const second = host.run(samples(), new AbortController().signal, Infinity);
+      await tick();
+      await tick();
+      const worker = workers[0]!;
+      const cloneError = Object.assign(new Error('Cannot transfer object of unsupported type'), { name: 'DataCloneError' });
+      worker.failNextJobPost = cloneError;
+      worker.reply({ type: 'loaded' });
+      expect(((await first) as { error: Error }).error).toBe(cloneError);
+      await tick();
+      expect(worker.jobs()).toHaveLength(1);
+      worker.reply({ type: 'done', id: worker.jobs()[0]!.id, text: 'second' });
+      expect(await second).toBe('second');
+      expect(worker.terminated).toBe(0);
+      await tick();
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
   });
 
   it('rejects with TranscriptionUnavailableError beyond maxQueue', async () => {

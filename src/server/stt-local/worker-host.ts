@@ -99,7 +99,8 @@ export class WorkerHost {
     return new Promise<string>((resolve, reject) => {
       const job: Job = {
         id: this.nextId++,
-        samples,
+        // A private copy: its buffer is transferred to the worker, the caller's array stays usable.
+        samples: samples.slice(),
         signal,
         deadline,
         cancel: new Int32Array(new SharedArrayBuffer(4)),
@@ -115,7 +116,7 @@ export class WorkerHost {
         job.timers.push(setTimeout(() => this.cancel(job), Math.max(0, deadline - Date.now())));
       }
       this.queue.push(job);
-      void this.pump();
+      this.next();
     });
   }
 
@@ -210,7 +211,7 @@ export class WorkerHost {
       if (index >= 0) this.queue.splice(index, 1);
       if (this.running === job) this.running = undefined;
       this.settle(job, abortError());
-      void this.pump();
+      this.next();
       return;
     }
     if (Atomics.load(job.cancel, 0) === 1) return;
@@ -235,7 +236,15 @@ export class WorkerHost {
   private finish(job: Job, result: string | Error): void {
     this.settle(job, result);
     if (this.running === job) this.running = undefined;
-    void this.pump();
+    this.next();
+  }
+
+  /** Starts the next job; a pump never leaves an unhandled rejection behind. */
+  private next(): void {
+    this.pump().catch((error: unknown) => {
+      const job = this.running;
+      if (job) this.finish(job, error instanceof Error ? error : new Error(String(error)));
+    });
   }
 
   private async pump(): Promise<void> {
@@ -251,15 +260,19 @@ export class WorkerHost {
     if (job.settled || this.running !== job || !this.worker) {
       if (this.running === job) {
         this.running = undefined;
-        void this.pump();
+        this.next();
       }
       return;
     }
-    job.posted = true;
-    const transfer = job.samples.buffer instanceof ArrayBuffer ? [job.samples.buffer] : [];
-    this.worker.postMessage(
-      { type: 'job', id: job.id, samples: job.samples, cancel: job.cancel, deadline: job.deadline },
-      transfer,
-    );
+    try {
+      this.worker.postMessage(
+        { type: 'job', id: job.id, samples: job.samples, cancel: job.cancel, deadline: job.deadline },
+        [job.samples.buffer as ArrayBuffer],
+      );
+      job.posted = true;
+    } catch (error) {
+      // e.g. a DataCloneError: fail this job only, the worker never saw it.
+      this.finish(job, error instanceof Error ? error : new Error(String(error)));
+    }
   }
 }
