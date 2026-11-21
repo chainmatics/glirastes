@@ -166,10 +166,12 @@ describe('detect', () => {
   });
 
   // Coarse guard against per-note work over every file (the omnify case: ~1,400
-  // files, 13 notes, 1 s). Files are ~6 KB like a real app. The bounds (1500 ms
-  // in total, 800 ms for evaluation alone) are generous so slow CI machines
-  // pass; per-note line indexing or specifier parsing lands above them.
-  it('scans 2,000 files and evaluates 15 notes in under 1500 ms', async () => {
+  // files, 13 notes, 1 s). Files are ~6 KB like a real app. Alone on a laptop
+  // scan + evaluation take ~0.35 s (scan ~0.17 s, evaluation ~0.17 s); a full
+  // suite under load was seen at 2.7 s. The bounds (4000 ms in total, 1200 ms
+  // for the median evaluation, both >= 7x the alone time) pass on loaded
+  // machines; per-note line indexing or specifier parsing is 15x slower.
+  it('scans 2,000 files and evaluates 15 notes in under 4000 ms', async () => {
     const body = Array.from({ length: 150 }, (_, i) => `export const value${i} = compute(${i}); // filler line\n`).join('');
     for (let i = 0; i < 2000; i++) {
       const header = i % 10 === 0 ? "import { AiChatProvider } from 'glirastes/react';\n" : "import { x } from 'other';\n";
@@ -188,12 +190,20 @@ describe('detect', () => {
     );
     const started = performance.now();
     const scan = await scanApp(root);
-    const scanned = performance.now();
-    const results = notes.map((n) => evaluateNote(n, scan));
-    const finished = performance.now();
+    const scanTime = performance.now() - started;
+    // Evaluate three times and judge the median, so one stall under a loaded
+    // full-suite run does not fail the test.
+    const evalTimes: number[] = [];
+    let results = notes.map((n) => evaluateNote(n, scan));
+    for (let run = 0; run < 3; run++) {
+      const t = performance.now();
+      results = notes.map((n) => evaluateNote(n, scan));
+      evalTimes.push(performance.now() - t);
+    }
+    evalTimes.sort((x, y) => x - y);
     expect(scan.files).toHaveLength(2000);
     expect(results.every((r) => r.status === 'affected')).toBe(true);
-    expect(finished - scanned).toBeLessThan(800);
-    expect(finished - started).toBeLessThan(1500);
+    expect(evalTimes[1]).toBeLessThan(1200);
+    expect(scanTime + evalTimes[1]).toBeLessThan(4000);
   }, 20_000);
 });
