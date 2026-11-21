@@ -63,8 +63,10 @@ describe('WorkerHost', () => {
   it('runs jobs one at a time in order and transfers the samples buffer', async () => {
     const { host, workers } = setup();
     const first = samples(3);
+    // An absolute time in the future; a past deadline would cancel the queued job at once.
+    const deadline = Date.now() + 60_000;
     const a = host.run(first, new AbortController().signal, Infinity);
-    const b = host.run(samples(5), new AbortController().signal, 1234);
+    const b = host.run(samples(5), new AbortController().signal, deadline);
     await loaded(workers);
     const worker = workers[0]!;
     expect(worker.jobs()).toHaveLength(1);
@@ -75,7 +77,7 @@ describe('WorkerHost', () => {
     worker.reply({ type: 'done', id: worker.jobs()[0]!.id, text: 'a' });
     await tick();
     expect(worker.jobs()).toHaveLength(2);
-    expect(worker.jobs()[1]!.deadline).toBe(1234);
+    expect(worker.jobs()[1]!.deadline).toBe(deadline);
     worker.reply({ type: 'done', id: worker.jobs()[1]!.id, text: 'b' });
     expect(await a).toBe('a');
     expect(await b).toBe('b');
