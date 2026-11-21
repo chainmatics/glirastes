@@ -160,6 +160,18 @@ describe('pullSttModels', () => {
     ]);
   });
 
+  it('joins the relative path into the mirror path and keeps its query', async () => {
+    const fetch = server({
+      'https://mirror.local/models/parakeet-tdt-0.6b-v3-int8/x?token=abc': ONE,
+      'https://mirror.local/models/silero-vad/y.onnx?token=abc': TWO,
+    });
+    await pullSttModels({ dir, mirror: 'https://mirror.local/models/?token=abc#frag' }, { fetch, files });
+    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://mirror.local/models/parakeet-tdt-0.6b-v3-int8/x?token=abc',
+      'https://mirror.local/models/silero-vad/y.onnx?token=abc',
+    ]);
+  });
+
   it('keeps mirror credentials out of the error message', async () => {
     const fetch = server({});
     const error = await failure(pullSttModels({ dir, mirror: 'https://user:secret@mirror.local/m' }, { fetch, files }));

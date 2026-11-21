@@ -59,7 +59,8 @@ attribution next to them:
 - A file that is already present with the right size and sha256 is reported
   `verified` and not downloaded again.
 - `--mirror <url>` fetches `<url>/<relative path>` for every file: the same
-  layout as the model directory, the same sha256 pins.
+  layout as the model directory, the same sha256 pins. A query on the mirror
+  URL (for example `?token=…`) is kept on every file URL and never printed.
 - `stt pull` only sends GET requests for the pinned files. It sends no
   consumer data and no Platform key.
 

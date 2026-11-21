@@ -54,6 +54,14 @@ function checkMirror(mirror: string): void {
   }
 }
 
+/** `<mirror path>/<relative path>`, keeping the mirror's query (e.g. a token) and dropping its fragment. */
+function mirrorUrl(mirror: string, path: string): string {
+  const url = new URL(mirror);
+  url.pathname = `${trimTrailingSlashes(url.pathname)}/${path}`;
+  url.hash = '';
+  return url.toString();
+}
+
 async function sha256Of(path: string): Promise<string> {
   const hash = createHash('sha256');
   await pipeline(createReadStream(path), hash);
@@ -188,7 +196,7 @@ export async function pullSttModels(
     // An unverified file never stays under the final name, even if the download fails.
     await rm(target, { force: true });
     await removeStalePartials(target);
-    const url = o.mirror !== undefined ? `${trimTrailingSlashes(o.mirror)}/${file.path}` : file.url;
+    const url = o.mirror !== undefined ? mirrorUrl(o.mirror, file.path) : file.url;
     await download(file, url, target, fetch, o.signal);
     result.files.push({ path: file.path, status: 'downloaded', bytes: file.bytes });
   }
