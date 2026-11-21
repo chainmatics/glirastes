@@ -77,6 +77,10 @@ contracts; it is not proof that its whole stack is officially supported.
    [container reference](references/runtime-container.md). The service is one
    active instance per app/environment; a true sidecar requires a local-only
    dependency or coupled lifecycle, not merely a different backend language.
+   `node:http`-style servers (Express, Fastify, NestJS on Express) use
+   `createNodeHandler` from `glirastes/server/node`; see
+   [node servers](references/node-servers.md). Reuse a server that runs more
+   than one instance only with a shared `approvalStore`.
 4. **Frontend capabilities:** use a supported page/router source where available.
    `registerNavigationBridge` executes navigation (the `GLIRASTES_NAVIGATE_ACTION_ID`
    results, only targets `isSafeAppHref` accepts); it does not discover pages

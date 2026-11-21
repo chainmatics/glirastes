@@ -1,6 +1,14 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
+import {
+  readNodeBody,
+  RequestBodyTooLargeError,
+} from "../server/node/body.js";
+import {
+  containerRequestHeaderDrop,
+  toWebHeaders,
+} from "../server/node/headers.js";
+import { sendWebResponse } from "../server/node/response.js";
 import type { RuntimeServiceConfig } from "./config.js";
 
 export interface RuntimeHttpOptions {
@@ -82,42 +90,27 @@ export function createRuntimeHttpServer(options: RuntimeHttpOptions) {
       }
       active.add(abort);
       tracked = true;
-      const chunks: Buffer[] = [];
-      let size = 0;
-      if (
-        Number(incoming.headers["content-length"] ?? 0) >
-        config.server.maxBodyBytes
-      ) {
+      let bytes: Uint8Array;
+      try {
+        ({ bytes } = await readNodeBody(incoming, {
+          maxBodyBytes: config.server.maxBodyBytes,
+        }));
+      } catch (error) {
+        if (!(error instanceof RequestBodyTooLargeError)) throw error;
         reply(413, "body_too_large");
         return;
       }
-      for await (const chunk of incoming) {
-        size += chunk.length;
-        if (size > config.server.maxBodyBytes) {
-          reply(413, "body_too_large");
-          return;
-        }
-        chunks.push(Buffer.from(chunk));
-      }
       if (abort.signal.aborted) return;
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(incoming.headers)) {
-        if (
-          name === "host" ||
-          name === "forwarded" ||
-          name.startsWith("x-forwarded-") ||
-          name === "connection" ||
-          name === "transfer-encoding"
-        )
-          continue;
-        if (typeof value === "string") headers.set(name, value);
-      }
+      const headers = toWebHeaders(incoming.headers, {
+        drop: containerRequestHeaderDrop,
+        multiValue: "skip",
+      });
       const request = new Request(
         new URL(config.server.chatPath, config.server.publicOrigin),
         {
           method: "POST",
           headers,
-          body: Buffer.concat(chunks),
+          body: Buffer.from(bytes),
           signal: abort.signal,
         },
       );
@@ -126,33 +119,7 @@ export function createRuntimeHttpServer(options: RuntimeHttpOptions) {
         await response.body?.cancel();
         return;
       }
-      outgoing.statusCode = response.status;
-      response.headers.forEach((value, name) => {
-        if (
-          !["connection", "transfer-encoding", "content-length"].includes(name)
-        )
-          outgoing.setHeader(name, value);
-      });
-      outgoing.setHeader("x-accel-buffering", "no");
-      if (response.body) {
-        const reader = response.body.getReader();
-        const cancel = () => {
-          void reader.cancel().catch(() => {});
-        };
-        abort.signal.addEventListener("abort", cancel, { once: true });
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done || abort.signal.aborted) break;
-            if (!outgoing.write(value))
-              await once(outgoing, "drain", { signal: abort.signal });
-          }
-        } finally {
-          abort.signal.removeEventListener("abort", cancel);
-          reader.releaseLock();
-        }
-      }
-      if (!outgoing.destroyed) outgoing.end();
+      await sendWebResponse(outgoing, response, { signal: abort.signal });
     } catch {
       if (!outgoing.headersSent)
         reply(abort.signal.aborted ? 499 : 500, "request_failed");

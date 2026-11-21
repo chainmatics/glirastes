@@ -566,3 +566,60 @@ describe('the data part and the model', () => {
     expect(JSON.stringify(model)).not.toContain('IGNORE ALL INSTRUCTIONS');
   });
 });
+
+describe('approval subject lookups and toolMiddleware', () => {
+  it('runs a lookup through the middleware chain with the call shape of a read tool call', async () => {
+    const { AsyncLocalStorage } = await import('node:async_hooks');
+    const tenant = new AsyncLocalStorage<string>();
+    const seen: Array<string | undefined> = [];
+    const calls: unknown[] = [];
+    const backend = fakeBackend(playlist);
+    const request = new Request('https://app.example/api/chat', { headers: { authorization: 'Bearer user-token' } });
+    const inner = backend.endpointCaller(request);
+    const context = {
+      currentDate: new Date(), locale: 'en',
+      callEndpoint: async (call: Parameters<typeof inner>[0]) => { seen.push(tenant.getStore()); return inner(call); },
+    } as unknown as ToolContext;
+    const resolver = createApprovalSubjectResolver({
+      registry: referenceTools(), context, limits: DEFAULT_APPROVAL_SUBJECT_LIMITS,
+      toolMiddleware: [(call, next) => { calls.push(call); return tenant.run('tenant-a', next); }],
+    });
+    await resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+    expect(resolver.take('c1')!.part.subjects[0]).toMatchObject({ check: 'found', name: 'Lobby Loop' });
+    expect(seen).toEqual(['tenant-a']);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      toolName: 'get_playlist', toolId: 'playlists.get', toolCallId: 'c1', method: 'GET', readOnly: true,
+      input: { playlist_id: 7 }, abortSignal: expect.any(AbortSignal),
+    });
+  });
+
+  it('passes the approval\'s toolCallId to the middleware on a recheck', async () => {
+    const calls: Array<{ toolCallId: string | undefined }> = [];
+    const { resolver } = resolverFor(playlist, {
+      registry: referenceTools({ deletePlaylist: { approvalSubject: { recheck: 'exists' } } }),
+      toolMiddleware: [(call, next) => { calls.push(call); return next(); }],
+    });
+    const refused = await resolver.recheck({ toolCallId: 'c9', toolName: 'delete_playlist', input: { playlist_id: 7 }, digestOf: () => 'd' });
+    expect(refused).toBeUndefined();
+    expect(calls.map((call) => call.toolCallId)).toEqual(['c9']);
+  });
+
+  it('never runs the source when a middleware calls next() after the lookup was cancelled', async () => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let late: Promise<unknown> | undefined;
+    const { resolver, backend } = resolverFor(playlist, {
+      signal: controller.signal,
+      toolMiddleware: [async (_call, next) => { await gate; late = next(); return late; }],
+    });
+    const pending = resolver.resolve({ toolName: 'delete_playlist', toolCallId: 'c1', input: { playlist_id: 7 } });
+    controller.abort(new Error('cancelled'));
+    await expect(pending).rejects.toThrow();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await late?.catch(() => {});
+    expect(backend.calls).toEqual([]);
+  });
+});

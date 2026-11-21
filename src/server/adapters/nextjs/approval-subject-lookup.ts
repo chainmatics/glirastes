@@ -66,6 +66,7 @@ import { cleanToolResult } from '../../core/clean-tool-result.js';
 import { outputBoundOf } from '../../core/output-fields.js';
 import { ENDPOINT_FAILURE_DATA } from '../../core/tool-failure-result.js';
 import type { InternalApiRequest } from '../../core/index.js';
+import { composeToolMiddleware, type ToolMiddleware } from '../../core/tool-middleware.js';
 import { canonicalJson, type ApprovalDenialCode } from './approval-binding.js';
 
 // ============================================================================
@@ -438,6 +439,12 @@ export interface ApprovalSubjectResolverOptions {
   readonly now?: () => number;
   /** When the whole turn must end (`now()` units): request start plus the managed turn's `totalTimeoutMs`. */
   readonly turnDeadline?: number;
+  /**
+   * The app's `toolMiddleware`: every lookup runs through it as a read call of
+   * its source tool (`readOnly: true`, the `toolCallId` of the approval it
+   * serves), so tenant context and audit middleware see lookups too.
+   */
+  readonly toolMiddleware?: ReadonlyArray<ToolMiddleware>;
 }
 
 /** What the stream binding takes for an approval request with server subjects. */
@@ -461,6 +468,8 @@ export interface ApprovalSubjectResolver {
    * before it runs. A denial code, or undefined to run it.
    */
   recheck(call: {
+    /** The approved call; the middleware sees it as the lookup's `toolCallId`. */
+    toolCallId?: string;
     toolName: string;
     input: unknown;
     subjectDigest?: string;
@@ -547,7 +556,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   };
 
   /** Runs the source once: its result as the tool would show it (schema, bound, shield), or why not. */
-  const execute = async (name: string, tool: Tool, input: unknown, timeoutMs: number): Promise<RawOutcome> => {
+  const execute = async (name: string, tool: Tool, input: unknown, timeoutMs: number, toolCallId: string | undefined): Promise<RawOutcome> => {
     const timeout = new AbortController();
     const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal;
     const endpoint = options.context as ToolContext & { callEndpoint?: (request: InternalApiRequest) => Promise<unknown> };
@@ -572,7 +581,22 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     let timedOut = false;
     try {
       const result = await Promise.race([
-        Promise.resolve().then(() => tool.execute(input, context as ToolContext)),
+        Promise.resolve().then(() => {
+          // The source runs as a read call of the app's tool: inside the same middleware chain.
+          const run = async () => {
+            // A middleware that calls next() late never starts a cancelled or timed-out lookup.
+            signal.throwIfAborted();
+            return tool.execute(input, context as ToolContext);
+          };
+          const middleware = options.toolMiddleware;
+          return middleware && middleware.length > 0
+            ? composeToolMiddleware(middleware, {
+                toolName: name, toolId: tool.id, toolCallId,
+                input: structuredClone(input), method: tool.method?.toUpperCase(), readOnly: true,
+                context: context as ToolContext, abortSignal: signal,
+              }, run)
+            : run();
+        }),
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
             timedOut = true;
@@ -625,7 +649,9 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   };
 
   /** One lookup through a source: validated input, authorization, cache, limits. */
-  const lookUp = async (name: string, tool: Tool, params: Record<string, unknown>, deadline: number): Promise<RawOutcome> => {
+  const lookUp = async (
+    name: string, tool: Tool, params: Record<string, unknown>, deadline: number, toolCallId: string | undefined,
+  ): Promise<RawOutcome> => {
     options.signal?.throwIfAborted();
     const parsed = tool.inputSchema.safeParse(params);
     if (!parsed.success) return { kind: 'invalid' };
@@ -646,7 +672,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     if (cached) return cached;
     if (lookups >= limits.maxLookupsPerTurn || timeoutMs <= 0) return { kind: 'unchecked', reason: 'limit' };
     lookups += 1;
-    const running = execute(name, tool, parsed.data, timeoutMs);
+    const running = execute(name, tool, parsed.data, timeoutMs, toolCallId);
     cache.set(key, running);
     return running;
   };
@@ -891,7 +917,9 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     };
   };
 
-  const previewOf = async (plan: ToolPlan, input: unknown, deadline: number, overLimit: boolean): Promise<ApprovalPreviewData> => {
+  const previewOf = async (
+    plan: ToolPlan, input: unknown, deadline: number, overLimit: boolean, toolCallId: string | undefined,
+  ): Promise<ApprovalPreviewData> => {
     const preview = plan.preview!;
     const none = (reason: ApprovalSubjectUncheckedReason): ApprovalPreviewData => ({ check: 'unchecked', reason, fields: [] });
     if (overLimit) return none('limit');
@@ -905,7 +933,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
         params[param] = source.const;
       }
     }
-    const outcome = await lookUp(preview.source.name, preview.source.tool, params, deadline);
+    const outcome = await lookUp(preview.source.name, preview.source.tool, params, deadline, toolCallId);
     if (outcome.kind === 'unchecked') return none(outcome.reason);
     if (outcome.kind === 'forbidden') return none('forbidden');
     if (outcome.kind !== 'ok') return none('unavailable');
@@ -927,7 +955,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   };
 
   /** Looks up every planned subject of a call (parallel within the call) and its preview. */
-  const subjectsOf = async (plan: ToolPlan, input: unknown, forDisplay: boolean): Promise<{
+  const subjectsOf = async (plan: ToolPlan, input: unknown, forDisplay: boolean, toolCallId: string | undefined): Promise<{
     outcomes: SubjectOutcome[];
     /** Planned references the call carries no id value for (absent, null, a list): never a passed check. */
     missing: number;
@@ -968,7 +996,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       const params = source ? paramsFor(source, wanted, plan.refs, backendInput) : undefined;
       tasks.push(source === undefined || params === undefined
         ? Promise.resolve(unchecked(item, ids, 'source_unavailable'))
-        : lookUp(source.name, source.tool, params, deadline).then(async (outcome) => {
+        : lookUp(source.name, source.tool, params, deadline, toolCallId).then(async (outcome) => {
           const found = match(item, source, ids, outcome, plan, wanted);
           // Only what reaches the browser is shielded (bounded like the lookup); a recheck compares the raw values.
           return forDisplay ? present(found, item, ids, deadline) : found;
@@ -977,7 +1005,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const previewTask = plan.preview
       ? (shieldFailure
         ? Promise.resolve<ApprovalPreviewData>({ check: 'unchecked', reason: shieldFailure, fields: [] })
-        : previewOf(plan, backendInput, deadline, slots <= 0))
+        : previewOf(plan, backendInput, deadline, slots <= 0, toolCallId))
       : undefined;
     try {
       const [outcomes, preview] = await Promise.all([Promise.all(tasks), previewTask]);
@@ -999,7 +1027,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       if (plan.items.length === 0 && !plan.preview && plan.onUnavailable === 'block') {
         return { deny: new ApprovalSubjectRefusedError('approval_subject_unavailable', plan.refs[0]?.type ?? 'record') };
       }
-      const { outcomes, missing, preview } = await subjectsOf(plan, input, true);
+      const { outcomes, missing, preview } = await subjectsOf(plan, input, true, toolCallId);
       const denied = outcomes.find((outcome): outcome is Extract<SubjectOutcome, { kind: 'deny' }> => outcome.kind === 'deny');
       if (denied) return { deny: new ApprovalSubjectRefusedError(denied.code, denied.type) };
       const subjects = outcomes.map((outcome) => (outcome as Extract<SubjectOutcome, { kind: 'subject' }>));
@@ -1029,7 +1057,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       return entry;
     },
 
-    async recheck({ toolName, input, subjectDigest, digestOf }) {
+    async recheck({ toolCallId, toolName, input, subjectDigest, digestOf }) {
       const plan = plans.get(toolName);
       if (!plan || plan.recheck === 'none') return undefined;
       // A recheck with nothing to check again is not a passed recheck.
@@ -1037,7 +1065,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       // The same validated input the approval was decided on (defaults, transforms): the history holds the model's raw one.
       const parsed = options.registry[toolName]?.inputSchema.safeParse(input);
       if (!parsed?.success) return 'approval_subject_unavailable';
-      const { outcomes, missing } = await subjectsOf({ ...plan, preview: undefined } as ToolPlan, parsed.data, false);
+      const { outcomes, missing } = await subjectsOf({ ...plan, preview: undefined } as ToolPlan, parsed.data, false, toolCallId);
       if (outcomes.some((outcome) => outcome.kind === 'deny')) return 'approval_subject_gone';
       // A planned reference without an id value was never checked: no passed recheck.
       if (missing > 0) return 'approval_subject_unavailable';

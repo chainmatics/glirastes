@@ -80,6 +80,7 @@ import {
 import { finalSummaryInstruction } from '../../../runtime/tool-denial.js';
 import type { BudgetLimitState } from '../../../runtime/budget.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
+import { assertToolMiddleware, type ToolMiddleware } from '../../core/tool-middleware.js';
 import type { Tool, ToolContext, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
@@ -1195,6 +1196,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
+    toolMiddleware,
     classifyToolFailure,
     maxResultChars,
     resultHandles,
@@ -1225,6 +1227,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     uiToolResultShape = 'auto',
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
+  assertToolMiddleware(toolMiddleware);
   // Server lookups behind approval cards: only the built-in stream handler makes them.
   const approvalSubjectLimits = customStreamHandler || approvalSubjectsConfig === false
     ? undefined
@@ -1904,13 +1907,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
        * The approval-subject lookups of this request (docs/approval-subjects.md),
        * or undefined when no tool declares them (then nothing changes).
        * Lookups run through `context` (this request's transport, the user's
-       * credentials) and, in a managed turn, the guard.
+       * credentials) and, in a managed turn, the guard. Each lookup runs its
+       * source tool through the app's `toolMiddleware`, as a read call.
        */
       const approvalSubjectResolverFor = (
         registry: ToolRegistry,
         context: ToolContext,
         shieldSessionId: () => string,
         scope: string,
+        builtinNames: ReadonlyArray<string>,
       ): ApprovalSubjectResolver | undefined => {
         if (!approvalSubjectLimits) return undefined;
         const resolver = createApprovalSubjectResolver({
@@ -1920,6 +1925,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...(piiShield ? { shield: { shield: piiShield, sessionId: shieldSessionId } } : {}),
           limits: approvalSubjectLimits,
           signal: req.signal,
+          ...(toolMiddleware && toolMiddleware.length > 0
+            ? { toolMiddleware: appToolMiddleware(toolMiddleware, builtinNames) }
+            : {}),
           // The whole turn's time limit bounds every lookup, the rechecks before the model too.
           ...(managedTurn ? { turnDeadline: requestStart + managedTurn.snapshot.budget.totalTimeoutMs } : {}),
           scope,
@@ -1973,7 +1981,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         const registry = staticTools ?? await loadTools!(endpointToolContext);
         const commandScope = await requestApprovalScope(req, managedTurn);
         const { binder: commandBinder, storeScope: commandStoreScope } = await secureApprovals(req, registry, [], managedTurn, commandScope);
-        let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);
+        let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, {
+          ...toolOptions,
+          toolMiddleware: appToolMiddleware(toolMiddleware, findHandlerBuiltins(registry, [clarificationTool, planTool])),
+        });
         // The result stays in the chat history that later model turns send to the model.
         if (piiShield) {
           commandTools = wrapToolsWithShield(commandTools, piiShield, sessionId);
@@ -2047,16 +2058,18 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           registry = { ...registry, [followupTool.id]: followupTool };
         }
         const turnResults = beginTurnResults(registry, () => sessionId);
-        const pipelineToolOptions: ToolToAiToolOptions = turnResults
-          ? { ...toolOptions, resultStore: turnResults.store }
-          : toolOptions;
         registry = withResultTool(withMemoryTools(withAlwaysOnBuiltins(registry)), turnResults);
         const handlerBuiltinNames = findHandlerBuiltins(
           registry,
           [followupTool, clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
         );
+        const pipelineToolOptions: ToolToAiToolOptions = {
+          ...toolOptions,
+          ...(turnResults ? { resultStore: turnResults.store } : {}),
+          toolMiddleware: appToolMiddleware(toolMiddleware, handlerBuiltinNames),
+        };
         const pipelineScope = await requestApprovalScope(req, managedTurn);
-        const pipelineSubjects = approvalSubjectResolverFor(registry, endpointToolContext, () => sessionId, pipelineScope);
+        const pipelineSubjects = approvalSubjectResolverFor(registry, endpointToolContext, () => sessionId, pipelineScope, handlerBuiltinNames);
         const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, pipelineScope, pipelineSubjects);
         processedMessages = pipelineApprovals.messages;
 
@@ -2334,19 +2347,21 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       // The shield session of the legacy path is derived below; results are sealed only once tools run.
       const turnResults = beginTurnResults(registry, () => legacySessionId);
-      const legacyToolOptions: ToolToAiToolOptions = turnResults
-        ? { ...toolOptions, resultStore: turnResults.store }
-        : toolOptions;
       registry = withResultTool(withMemoryTools(withAlwaysOnBuiltins(registry)), turnResults);
       const handlerBuiltinNames = findHandlerBuiltins(
         registry,
         [clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
       );
+      const legacyToolOptions: ToolToAiToolOptions = {
+        ...toolOptions,
+        ...(turnResults ? { resultStore: turnResults.store } : {}),
+        toolMiddleware: appToolMiddleware(toolMiddleware, handlerBuiltinNames),
+      };
       const legacyScope = await requestApprovalScope(req, managedTurn);
       // The shield session of the legacy path, derived once (also for a recheck before it is used below).
       let legacyShieldSession: string | undefined;
       const legacyShieldSessionOf = () => (legacyShieldSession ??= deriveSessionId(processedMessages));
-      const legacySubjects = approvalSubjectResolverFor(registry, endpointToolContext, legacyShieldSessionOf, legacyScope);
+      const legacySubjects = approvalSubjectResolverFor(registry, endpointToolContext, legacyShieldSessionOf, legacyScope, handlerBuiltinNames);
       const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, legacyScope, legacySubjects);
       processedMessages = legacyApprovals.messages;
       // Routing sees what the model may see: a consumer router can hand the
@@ -2550,6 +2565,21 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
  * Instance identity decides, not the name: a registry- or manifest-supplied
  * tool that shares a built-in's name is never listed and stays fully guarded.
  */
+/**
+ * The app's middleware for app tools only: SDK built-ins of the handler pass
+ * straight through. The built-in names come from `findHandlerBuiltins`, which
+ * decides by instance identity, so an app tool that shares a built-in's name
+ * still runs through the middleware.
+ */
+function appToolMiddleware(
+  middleware: ReadonlyArray<ToolMiddleware> | undefined,
+  builtinNames: ReadonlyArray<string>,
+): ReadonlyArray<ToolMiddleware> | undefined {
+  if (!middleware || middleware.length === 0) return undefined;
+  const skip = new Set(builtinNames);
+  return middleware.map((entry): ToolMiddleware => (call, next) => (skip.has(call.toolName) ? next() : entry(call, next)));
+}
+
 function findHandlerBuiltins(
   registry: ToolRegistry,
   created: ReadonlyArray<Tool | null>,

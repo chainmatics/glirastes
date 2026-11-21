@@ -108,6 +108,7 @@ export {
 
 // Re-export from server-node for convenience
 export { createNextInternalApiCaller } from '../../core/index.js';
+export type { ToolMiddleware, ToolMiddlewareCall, ToolMiddlewareNext } from '../../core/tool-middleware.js';
 
 // Types
 export type {

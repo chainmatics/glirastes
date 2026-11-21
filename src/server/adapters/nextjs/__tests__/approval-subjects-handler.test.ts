@@ -621,3 +621,25 @@ describe('apps without a server declaration (golden)', () => {
     ]);
   });
 });
+
+describe('server approval subjects and toolMiddleware', () => {
+  it('runs the subject lookup inside the app middleware, so its tenant context reaches the endpointCaller', async () => {
+    const { AsyncLocalStorage } = await import('node:async_hooks');
+    const tenant = new AsyncLocalStorage<string>();
+    const seen: Array<{ method: string; tenant: string | undefined }> = [];
+    const { config } = deletePlaylist(() => ok({ playlist_id: 7, displayName: 'Lobby Loop' }));
+    const inner = config.endpointCaller;
+    const calls: Array<{ toolName: string; toolCallId: string | undefined; readOnly: boolean }> = [];
+    const { chunks } = await turn({
+      ...config,
+      endpointCaller: (req: Request) => {
+        const caller = inner(req);
+        return async (request) => { seen.push({ method: request.method, tenant: tenant.getStore() }); return caller(request); };
+      },
+      toolMiddleware: [(call, next) => { calls.push(call); return tenant.run('tenant-a', next); }],
+    });
+    expect(subjectsPart(chunks)!.data.subjects[0]).toMatchObject({ check: 'found', name: 'Lobby Loop' });
+    expect(seen).toEqual([{ method: 'GET', tenant: 'tenant-a' }]);
+    expect(calls).toEqual([expect.objectContaining({ toolName: 'get_playlist', toolCallId: 'call-1', readOnly: true })]);
+  });
+});

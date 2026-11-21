@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `glirastes/server/node` (`docs/node-servers.md`): `createNodeHandler(handler, options)` bridges `node:http`-style servers (Express, Fastify, NestJS on Express) to `createAiChatHandler`, with `toWebRequest` and `sendWebResponse` as its halves and `RequestBodyTooLargeError`. The Request URL comes from `origin` or the socket's own address, never from `Host`; `x-forwarded-*` only with `trustForwardedHeaders`; the body is read incrementally up to `maxBodyBytes` (1 MB), also from `req.rawBody` / `req.body` after a body parser; the response streams with backpressure, `res.flush()` and `x-accel-buffering: no`, and a client disconnect aborts `request.signal`. Fixed errors 413 `body_too_large` and 500 `request_failed`. Integration-tested on `node:http` and Express 5; Fastify and NestJS are documented recipes without a test here. Built-ins only, no new dependency.
+- `toolMiddleware` on `createAiChatHandler` and `toolsToAiTools` (`docs/chat-route-security.md`, "Tool middleware"): a `(call, next)` onion (`ToolMiddleware`, `ToolMiddlewareCall`, `ToolMiddlewareNext`) around the execution of the app's own tools, after every identity, RBAC, approval, budget and revocation check and before output bounds and truncation. `call.input` is a structured copy and `next` takes no arguments, so the tool runs with its validated input; `next` runs at most once; returning without it short-circuits (still bounded); a throw is a tool error (`tool.failed`, `onToolError`, the standard error result). Approval subject lookups run their source tool through the same chain as a read call (`readOnly: true`, the approval's `toolCallId`). The handler's built-ins bypass it. Without it nothing changes.
+- Docs: running more than one instance (shared `ApprovalStore` recipes for PostgreSQL and Redis, restart caveat), NestJS Zod pipe recipe.
+
+### Changed
+
+- The runtime container's HTTP host uses the shared bridge; responses are unchanged.
+
 ## [0.21.0] - 2026-11-21
 
 ### Added
