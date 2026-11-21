@@ -24,6 +24,7 @@ const config = parseRuntimeConfig({
 });
 
 const cleanups: Array<() => Promise<void>> = [];
+let lastHost: ReturnType<typeof createRuntimeHttpServer> | undefined;
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()));
 });
@@ -41,11 +42,16 @@ async function start(
     host.server.listen(0, "127.0.0.1", resolve),
   );
   cleanups.push(host.close);
+  lastHost = host;
   return (host.server.address() as { port: number }).port;
 }
 
 /** Writes one raw HTTP/1.1 request (adds Connection: close) and returns the normalized response text. */
-function rawExchange(port: number, request: string): Promise<string> {
+function rawExchange(
+  port: number,
+  request: string,
+  onData?: (text: string) => void,
+): Promise<string> {
   const [head, ...rest] = request.split("\r\n\r\n");
   const [line, ...headers] = head!.split("\r\n");
   const raw = [line, ...headers, "Connection: close"].join("\r\n") +
@@ -54,7 +60,10 @@ function rawExchange(port: number, request: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = connect(port, "127.0.0.1");
     const chunks: Buffer[] = [];
-    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.on("data", (chunk) => {
+      chunks.push(chunk);
+      onData?.(Buffer.concat(chunks).toString("utf8"));
+    });
     socket.on("error", reject);
     socket.on("close", () =>
       resolve(
@@ -346,6 +355,49 @@ describe("runtime HTTP host wire bytes", () => {
           "1",
         ],
       ]
+    `);
+  });
+
+  it("abortAll mid-stream ends the chunked response cleanly", async () => {
+    let cancelled = false;
+    const port = await start(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new TextEncoder().encode("a"));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { headers: { "content-type": "text/plain" } },
+        ),
+    );
+    let aborted = false;
+    const text = await rawExchange(port, post("{}"), (soFar) => {
+      if (!aborted && soFar.includes("\r\na\r\n")) {
+        aborted = true;
+        lastHost!.abortAll();
+      }
+    });
+    expect(cancelled).toBe(true);
+    expect(text).toMatchInlineSnapshot(`
+      "HTTP/1.1 200 OK
+      x-request-id: <id>
+      cache-control: no-store
+      x-content-type-options: nosniff
+      content-type: text/plain
+      x-accel-buffering: no
+      Date: <date>
+      Connection: close
+      Transfer-Encoding: chunked
+
+      1
+      a
+      0
+
+      "
     `);
   });
 });
