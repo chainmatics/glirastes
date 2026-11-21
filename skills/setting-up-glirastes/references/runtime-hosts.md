@@ -9,7 +9,8 @@ available in `integrating-glirastes-web` when that optional skill is installed.
 1. Reuse an existing Node/Next.js server if it authenticates the user, can reach
    the API and supports long streams. The framework-neutral handler is
    `createAiChatHandler` from `glirastes/server/http`; the Next.js export remains
-   compatible. Keep existing SDK tools, guards and authorization.
+   compatible; for `node:http`-style servers wrap it with `createNodeHandler`
+   (`glirastes/server/node`). Keep existing SDK tools, guards and authorization.
 2. For Rust/PHP/Java or an application without a suitable Node host, use the
    0.14 `glirastes-runtime` container. It is one active service per app/environment,
    independently of backend replica count. The customer needs no Node server code
