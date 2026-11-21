@@ -19,7 +19,12 @@ export const STT_USAGE = [
 
 export async function runSttCommand(
   argv: readonly string[],
-  d: SttPullDependencies & { log?: (line: string) => void; error?: (line: string) => void } = {},
+  d: SttPullDependencies & {
+    log?: (line: string) => void;
+    error?: (line: string) => void;
+    /** Calls `abort` on Ctrl-C or a stop signal; returns the unsubscribe. Default SIGINT and SIGTERM. */
+    interrupts?: (abort: () => void) => () => void;
+  } = {},
 ): Promise<number> {
   const log = d.log ?? ((line: string) => { console.log(line); });
   const error = d.error ?? ((line: string) => { console.error(line); });
@@ -29,12 +34,15 @@ export async function runSttCommand(
     return 2;
   }
   const json = rest.includes('--json');
+  // An interrupt aborts the running download, whose partial file is then removed.
+  const controller = new AbortController();
+  const unsubscribe = (d.interrupts ?? onStopSignals)(() => { controller.abort(); });
   try {
     const args = parseToolArgs(rest, STT_SUBCOMMANDS.pull!);
     const dirFlag = args.values.get('--dir');
     const dir = dirFlag !== undefined ? resolve(dirFlag) : resolveSttModelDir(d.env ?? process.env);
     const mirror = args.values.get('--mirror');
-    const result = await pullSttModels({ dir, ...(mirror !== undefined ? { mirror } : {}) }, d);
+    const result = await pullSttModels({ dir, signal: controller.signal, ...(mirror !== undefined ? { mirror } : {}) }, d);
     if (json) {
       log(JSON.stringify({ ...result, attribution: STT_ATTRIBUTION_TEXT }));
     } else {
@@ -51,8 +59,19 @@ export async function runSttCommand(
     if (isFoundationDiagnosticError(caught)) {
       if (json) log(JSON.stringify(caught.toJSON()));
       else error(`${caught.code}: ${caught.message}\n${caught.remediation}`);
-      return 1;
+      return controller.signal.aborted ? 130 : 1;
     }
     throw caught;
+  } finally {
+    unsubscribe();
   }
+}
+
+function onStopSignals(abort: () => void): () => void {
+  process.once('SIGINT', abort);
+  process.once('SIGTERM', abort);
+  return () => {
+    process.off('SIGINT', abort);
+    process.off('SIGTERM', abort);
+  };
 }

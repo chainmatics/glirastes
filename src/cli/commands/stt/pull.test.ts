@@ -139,6 +139,15 @@ describe('pullSttModels', () => {
     expect(await walk(dir)).toEqual([]);
   });
 
+  it('removes partial files that an interrupted earlier pull left behind', async () => {
+    await mkdir(join(dir, 'parakeet-tdt-0.6b-v3-int8'), { recursive: true });
+    await writeFile(join(dir, 'parakeet-tdt-0.6b-v3-int8', 'x.partial-0123456789ab'), 'stale');
+    await writeFile(join(dir, 'parakeet-tdt-0.6b-v3-int8', 'keep.txt'), 'other');
+    const fetch = server({ [files[0]!.url]: ONE, [files[1]!.url]: TWO });
+    await pullSttModels({ dir }, { fetch, files });
+    expect(await walk(dir)).toEqual(['ATTRIBUTION.txt', 'parakeet-tdt-0.6b-v3-int8/keep.txt', files[0]!.path, files[1]!.path].sort());
+  });
+
   it('uses the mirror with the same relative paths', async () => {
     const fetch = server({
       'https://mirror.local/models/parakeet-tdt-0.6b-v3-int8/x': ONE,
@@ -218,6 +227,25 @@ describe('runSttCommand', () => {
     const target = join(dir, 'from-env');
     expect(await runSttCommand(['pull'], { fetch, files, env: { GLIRASTES_MODEL_DIR: target }, ...lines })).toBe(0);
     expect(existsSync(join(target, files[0]!.path))).toBe(true);
+  });
+
+  it('removes the partial file and exits 130 when interrupted mid-download', async () => {
+    const lines = io();
+    let interrupt!: () => void;
+    const interrupts = vi.fn((abort: () => void) => { interrupt = abort; return vi.fn(); });
+    // The body never ends on its own; only the interrupt stops it.
+    const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('enc'));
+        init!.signal!.addEventListener('abort', () => controller.error(init!.signal!.reason), { once: true });
+        queueMicrotask(() => setTimeout(() => interrupt(), 10));
+      },
+    })));
+    expect(await runSttCommand(['pull', '--dir', dir], { fetch, files, interrupts, ...lines })).toBe(130);
+    expect(lines.err.join('\n')).toContain('E-STT-002');
+    expect(lines.err.join('\n')).toContain('cancelled');
+    expect(await walk(dir)).toEqual([]);
+    expect(interrupts.mock.results[0]!.value).toHaveBeenCalledOnce();
   });
 
   it('exits 1 with the diagnostic on a failed download', async () => {

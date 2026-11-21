@@ -53,6 +53,9 @@ attribution next to them:
   1 (`E-STT-001` checksum or size, `E-STT-002` HTTP, `E-STT-003` a `--mirror`
   that is not `http:`/`https:`). A file that does not verify is never left
   under its final name.
+- Ctrl-C or SIGTERM cancels the running download, removes its partial file
+  and exits 130. Partial files that a killed pull (`kill -9`, an OOM kill, a
+  stopped container) left behind are removed by the next pull.
 - A file that is already present with the right size and sha256 is reported
   `verified` and not downloaded again.
 - `--mirror <url>` fetches `<url>/<relative path>` for every file: the same

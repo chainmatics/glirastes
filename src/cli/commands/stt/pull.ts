@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
@@ -75,11 +75,36 @@ function mismatch(file: SttModelFile, detail: string): FoundationDiagnosticError
   });
 }
 
-async function download(file: SttModelFile, url: string, target: string, fetch: typeof globalThis.fetch): Promise<void> {
+function cancelled(file: SttModelFile): FoundationDiagnosticError {
+  return new FoundationDiagnosticError({
+    code: 'E-STT-002',
+    operation: OPERATION,
+    message: `Download of ${file.path} was cancelled; its partial file was removed.`,
+    remediation: 'Run glirastes stt pull again to finish the download.',
+    path: file.path,
+  });
+}
+
+/** Removes `<name>.partial-*` files that a killed earlier pull left beside `target` (up to 652 MB each). */
+async function removeStalePartials(target: string): Promise<void> {
+  const prefix = `${basename(target)}.partial-`;
+  const names = await readdir(dirname(target)).catch(() => [] as string[]);
+  await Promise.all(names.filter((name) => name.startsWith(prefix)).map((name) => rm(join(dirname(target), name), { force: true })));
+}
+
+async function download(
+  file: SttModelFile,
+  url: string,
+  target: string,
+  fetch: typeof globalThis.fetch,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (signal?.aborted) throw cancelled(file);
   let response: Response;
   try {
-    response = await fetch(url, { redirect: 'follow' });
+    response = await fetch(url, { redirect: 'follow', ...(signal ? { signal } : {}) });
   } catch (error) {
+    if (signal?.aborted) throw cancelled(file);
     throw new FoundationDiagnosticError({
       code: 'E-STT-002',
       operation: OPERATION,
@@ -120,6 +145,7 @@ async function download(file: SttModelFile, url: string, target: string, fetch: 
       await pipeline(Readable.fromWeb(response.body as unknown as WebReadableStream<Uint8Array>), meter, createWriteStream(partial));
     } catch (error) {
       if (error instanceof FoundationDiagnosticError) throw error;
+      if (signal?.aborted) throw cancelled(file);
       // A reset socket, a full disk: a diagnostic with the remediation, not a raw stack.
       throw new FoundationDiagnosticError({
         code: 'E-STT-002',
@@ -145,7 +171,7 @@ async function download(file: SttModelFile, url: string, target: string, fetch: 
  * size and sha256 match. Sends only GET requests for the pinned files.
  */
 export async function pullSttModels(
-  o: { dir: string; mirror?: string },
+  o: { dir: string; mirror?: string; signal?: AbortSignal },
   d: SttPullDependencies = {},
 ): Promise<SttPullResult> {
   if (o.mirror !== undefined) checkMirror(o.mirror);
@@ -161,8 +187,9 @@ export async function pullSttModels(
     }
     // An unverified file never stays under the final name, even if the download fails.
     await rm(target, { force: true });
+    await removeStalePartials(target);
     const url = o.mirror !== undefined ? `${trimTrailingSlashes(o.mirror)}/${file.path}` : file.url;
-    await download(file, url, target, fetch);
+    await download(file, url, target, fetch, o.signal);
     result.files.push({ path: file.path, status: 'downloaded', bytes: file.bytes });
   }
   await writeFile(join(o.dir, 'ATTRIBUTION.txt'), `${STT_ATTRIBUTION_TEXT}\n`);
