@@ -43,6 +43,7 @@ export function VoiceInputButton({
   className,
   language = 'de',
   baseUrl,
+  workletUrl,
   getToken,
   onError,
 }: VoiceInputButtonProps) {
@@ -51,6 +52,7 @@ export function VoiceInputButton({
   const { isRecording, isConnecting, startRecording, stopRecording } = useDeepgramTranscription({
     language,
     baseUrl,
+    workletUrl,
     getToken,
     onError,
   });

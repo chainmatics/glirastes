@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppFixture, removeAppFixtures } from '../../../codegen/tools/__tests__/app-fixture.js';
 import { toolFinding } from '../../../codegen/tools/findings.js';
@@ -249,5 +252,96 @@ describe('glirastes tools', () => {
     const err: string[] = [];
     expect(await runToolsCommand(['status', '--root', fixture.root], { log: () => undefined, error: (line) => { err.push(line); } })).toBe(1);
     expect(err.join('\n')).toContain('E-TOOLS-020');
+  });
+});
+
+describe('upgrade hint in tools refresh', () => {
+  const dirs: string[] = [];
+  afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
+
+  async function app(reviewedThrough = '0.18.0', withNote = true): Promise<{ root: string; notesDir: string }> {
+    const root = await mkdtemp(join(tmpdir(), 'glirastes-refresh-upgrade-'));
+    dirs.push(root);
+    const notesDir = join(root, '.notes');
+    await mkdir(notesDir, { recursive: true });
+    await mkdir(join(root, '.glirastes'), { recursive: true });
+    await writeFile(join(root, '.glirastes/sdk-baseline.json'), JSON.stringify({ schemaVersion: 1, reviewedThrough, decisions: {} }));
+    if (withNote) {
+      await writeFile(join(notesDir, '0.19.0.json'), JSON.stringify({
+        version: '0.19.0',
+        notes: [{ id: 'break-one', kind: 'breaking', summary: 's', howTo: 'h', skill: 'some-skill' }],
+      }));
+    }
+    return { root, notesDir };
+  }
+
+  const upgradeOf = (notesDir: string, root: string) => ({
+    sdkVersion: '0.19.0', notesDir, changelogPath: join(root, 'missing-changelog.md'),
+  });
+
+  it('prints the upgrade summary line once when notes are pending', async () => {
+    const { root, notesDir } = await app();
+    const h = harness();
+    expect(await runToolsCommand(['refresh', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) })).toBe(0);
+    const lines = h.out.join('\n').split('\n').filter((line) => line.includes('glirastes upgrade report'));
+    expect(lines).toEqual(['Glirastes 0.18.0 → 0.19.0: 1 must, 0 should, 0 recommended, 0 optional. Run `glirastes upgrade report`.']);
+  });
+
+  it('prints nothing when up to date, and the same fixture prints the line when a note is pending', async () => {
+    const { root, notesDir } = await app('0.19.0');
+    const h = harness();
+    await runToolsCommand(['refresh', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) });
+    expect(h.out.join('\n')).not.toContain('Glirastes 0.');
+    expect(h.err).toEqual([]);
+
+    await writeFile(join(root, '.glirastes/sdk-baseline.json'), JSON.stringify({ schemaVersion: 1, reviewedThrough: '0.18.0', decisions: {} }));
+    const pending = harness();
+    await runToolsCommand(['refresh', '--root', root], { ...pending.deps(), upgrade: upgradeOf(notesDir, root) });
+    expect(pending.out.join('\n')).toContain('1 must');
+  });
+
+  it('skips the hint in integrity mode', async () => {
+    const { root, notesDir } = await app();
+    const h = harness();
+    await runToolsCommand(['refresh', '--mode', 'integrity', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) });
+    expect(h.out.join('\n')).not.toContain('1 must');
+  });
+
+  it('GLIRASTES_UPGRADE_HINT=0 suppresses it', async () => {
+    const { root, notesDir } = await app();
+    const h = harness();
+    await runToolsCommand(['refresh', '--root', root], { ...h.deps({ GLIRASTES_UPGRADE_HINT: '0' }), upgrade: upgradeOf(notesDir, root) });
+    expect(h.out.join('\n')).not.toContain('upgrade report');
+  });
+
+  it('adds the line to --json instead of printing it', async () => {
+    const { root, notesDir } = await app();
+    const h = harness();
+    await runToolsCommand(['refresh', '--json', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) });
+    expect(h.out).toHaveLength(1);
+    expect(JSON.parse(h.out[0]!).upgrade.line).toContain('1 must');
+  });
+
+  it('a report error never fails refresh', async () => {
+    const { root, notesDir } = await app();
+    await writeFile(join(root, '.glirastes/sdk-baseline.json'), '<<<<<<< HEAD\n');
+    const h = harness();
+    expect(await runToolsCommand(['refresh', '--root', root], { ...h.deps(), upgrade: upgradeOf(notesDir, root) })).toBe(0);
+    expect(h.err.join('\n')).toMatch(/^glirastes upgrade: .*\.glirastes\/sdk-baseline\.json/);
+    const json = harness();
+    expect(await runToolsCommand(['refresh', '--json', '--root', root], { ...json.deps(), upgrade: upgradeOf(notesDir, root) })).toBe(0);
+    expect(JSON.parse(json.out[0]!).upgrade).toMatchObject({ line: null, error: expect.stringContaining('sdk-baseline.json') });
+  });
+
+  it('resolves the baseline from --root, never from the working directory', async () => {
+    const a = await app('0.18.0', true);
+    const b = await app('0.18.0', true);
+    const h = harness();
+    await runToolsCommand(['refresh', '--root', a.root], { ...h.deps({}, b.root), upgrade: upgradeOf(a.notesDir, a.root) });
+    expect(h.out.join('\n')).toContain('1 must');
+    await rm(join(b.root, '.glirastes/sdk-baseline.json'));
+    await rm(join(a.root, '.glirastes/sdk-baseline.json'));
+    await runToolsCommand(['refresh', '--root', a.root], { ...h.deps({}, b.root), upgrade: upgradeOf(a.notesDir, a.root) });
+    await expect(readFile(join(b.root, '.glirastes/sdk-baseline.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

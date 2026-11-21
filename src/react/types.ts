@@ -15,6 +15,9 @@ export type {
   ClarificationTarget,
 } from '../contracts/clarification.js';
 
+/** A value or a promise of it. @internal */
+export type MaybePromise<T> = T | Promise<T>;
+
 // ============================================================================
 // Chat Transport — transport-agnostic interface for chat backends
 // ============================================================================
@@ -125,8 +128,10 @@ export interface ChatTransportConfig {
 export interface UseDeepgramTranscriptionOptions {
   language?: string;
   baseUrl?: string;
+  /** URL of the audio worklet file; default `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   /**
    * The app's own speech provider instead of the Deepgram stream, for example
    * a `RecordedSttAdapter`. `baseUrl` and `getToken` are then unused. Keep
@@ -158,8 +163,10 @@ export interface VoiceInputButtonProps {
   className?: string;
   language?: string;
   baseUrl?: string;
+  /** URL of the audio worklet file; default `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   onError?: (error: string) => void;
 }
 
@@ -822,8 +829,10 @@ export interface VoiceInputConfig {
   enabled?: boolean;
   language?: string;
   baseUrl?: string;
+  /** URL of the audio worklet file; default `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   /**
    * Speech provider adapter; defaults to the Deepgram speech-stream adapter.
    * Keep its identity stable: a new adapter restarts the controller.
@@ -1452,6 +1461,11 @@ export interface AiChatProviderConfig {
    * and how a chip opens its entity. Memoize the object.
    */
   entityLinks?: ChatEntityLinksConfig;
+  /**
+   * Markdown rendering options for the default `Markdown` slot, e.g.
+   * `{ remarkPlugins: [remarkGfm] }` for GFM tables. Memoize the object.
+   */
+  markdown?: ChatMarkdownOptions;
   /**
    * Shows the chat when `useChatComposer().open()` or `chatAbout()` asks for
    * it. Without it the surrounding `AssistantLayoutProvider` opens.
@@ -2289,4 +2303,10 @@ export interface AiTriggerButtonProps {
   icon?: ReactNode;
   /** ARIA label for cancel recording. Default: "Cancel recording" */
   cancelAriaLabel?: string;
+}
+
+/** Options the host passes to the default Markdown renderer. */
+export interface ChatMarkdownOptions {
+  /** remark plugins, e.g. `remark-gfm` (installed by the host, not by glirastes). */
+  remarkPlugins?: ReadonlyArray<unknown>;
 }

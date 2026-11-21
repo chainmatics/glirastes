@@ -13,6 +13,7 @@ import {
   skillsAutoUpdateDisabled,
   type SkillsUpdatePlan,
 } from '../skills-auto-update.js';
+import { computeUpgradeHint, printUpgradeHint, withUpgradeJson } from '../upgrade/hint.js';
 
 export const REFRESH_ARGS = {
   flags: ['--keep-going', '--json', '--watch', '--no-skills'],
@@ -66,7 +67,7 @@ async function updateInstalledSkills(root: string, io: ToolsIo, json: boolean): 
   try {
     const plan = await planSkillsUpdate({ rootDir: root });
     if (!plan) return null;
-    await applySkillsUpdate(root, plan);
+    for (const warning of await applySkillsUpdate(root, plan)) io.error(warning);
     if (!json) for (const line of formatSkillsUpdate(plan)) io.log(line);
     return plan;
   } catch (error) {
@@ -89,6 +90,7 @@ export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo):
     if (mode !== 'write') throw new ToolsUsageError('--watch refreshes in write mode only; CI and Docker builds check once.');
     if (json || args.values.has('--adopt')) throw new ToolsUsageError('--watch cannot be combined with --json or --adopt.');
     if (skills) await updateInstalledSkills(root, io, false);
+    printUpgradeHint(await computeUpgradeHint(root, io), io);
     return watchRefresh(root, io);
   }
   const skillsPlan = skills ? await updateInstalledSkills(root, io, json) : null;
@@ -100,12 +102,18 @@ export async function runToolsRefresh(argv: ReadonlyArray<string>, io: ToolsIo):
     ...(keepGoing ? { keepGoing } : {}),
     ...(adoptInventoryPath ? { adoptInventoryPath } : {}),
   });
+  // Integrity (Docker builds) depends on nothing but the committed outputs.
+  const upgrade = mode === 'integrity'
+    ? { line: null }
+    : await computeUpgradeHint(root, io, skillsPlan ? { keptSkills: skillsPlan.kept } : {});
   if (json) {
-    io.log(skillsPlan ? withSkillsJson(formatToolsJson(result), skillsPlan) : formatToolsJson(result));
+    const raw = skillsPlan ? withSkillsJson(formatToolsJson(result), skillsPlan) : formatToolsJson(result);
+    io.log(withUpgradeJson(raw, upgrade));
     return 0;
   }
   const notes = agentWorkNotes(result);
   io.log(notes.length > 0 ? `${formatToolsHuman(result)}\n\n${notes.join('\n')}` : formatToolsHuman(result));
+  printUpgradeHint(upgrade, io);
   return 0;
 }
 

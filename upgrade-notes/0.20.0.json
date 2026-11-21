@@ -1,0 +1,102 @@
+{
+  "version": "0.20.0",
+  "notes": [
+    {
+      "id": "chat-context-required-members",
+      "kind": "breaking",
+      "summary": "Values the SDK hands to the app gained required members, so a hand-built ChatContextValue, ChatQueueApi or MessageParts (a test mock or fake) no longer compiles until it has them. Nothing an app passes in changed.",
+      "howTo": "Add to hand-built values: ChatContextValue.submitWithResult, lastRejection, turnOutcomes and activityLog.noticeScope; ChatQueueApi.submitWithResult and lastRejection; MessageParts.turnOutcome. Provider config, SessionConfig, ChatTransport, ChatQueueStorage, ChatLocale and component props are unchanged.",
+      "skill": "building-glirastes-chat-ui#headless-hooks",
+      "affectedWhen": {
+        "patterns": [
+          ":\\s*(?:ChatContextValue|ChatQueueApi|MessageParts)\\b",
+          "\\bsatisfies\\s+(?:ChatContextValue|ChatQueueApi|MessageParts)\\b",
+          "\\bas\\s+(?:ChatContextValue|ChatQueueApi|MessageParts)\\b"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "\\bsubmitWithResult\\s*:"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ChatContextValue.submitWithResult",
+        "glirastes/react#ChatContextValue.lastRejection",
+        "glirastes/react#ChatContextValue.turnOutcomes",
+        "glirastes/react#ChatQueueApi.submitWithResult",
+        "glirastes/react#ChatQueueApi.lastRejection",
+        "glirastes/react#MessageParts.turnOutcome"
+      ]
+    },
+    {
+      "id": "turn-notice-on-every-turn",
+      "kind": "recommended",
+      "summary": "Visible default change: the stop, safety-stop or error notice now stays on every turn that ended so, also after a reload, and a turn that ended before any answer shows it after its question.",
+      "howTo": "If the app draws its own per-turn notice, set activityLog: { noticeScope: 'latest' } (config.activityLog on <glirastes-chat>) or components.TurnNotice: () => null, else both show. With the queue on and no own approvalPendingHint, the approval notice now reads \"Message waits until the approval is decided.\"; set queueApprovalWaitingHint to word it.",
+      "skill": "building-glirastes-chat-ui#message-layout",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react",
+          "glirastes/embed"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "noticeScope"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ActivityLogConfig.noticeScope",
+        "glirastes/react#ActivityLogProps.noticeOutcome",
+        "glirastes/react#ChatLocale.queueApprovalWaitingHint",
+        "locale#queueApprovalWaitingHint"
+      ]
+    },
+    {
+      "id": "turn-outcomes-and-refusal-reason",
+      "kind": "optional",
+      "summary": "How each turn ended is recorded as a TurnOutcome per user message (useTurnOutcome, useTurnOutcomes), and submitWithResult and lastRejection say why a message was refused.",
+      "howTo": "Read useTurnOutcome(message) to show your own per-turn state; with a session store the outcome is saved in the user message's metadata.glirastesTurnOutcome. Use submitWithResult(text) or lastRejection to explain a refused send (session, approval-open, attachments-off, files-with-command, queue-full). See docs/chat-queue.md.",
+      "skill": "building-glirastes-chat-ui#message-layout",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "useTurnOutcome",
+          "useTurnOutcomes",
+          "submitWithResult",
+          "lastRejection"
+        ]
+      },
+      "surface": [
+        "glirastes/react#TurnOutcome.*",
+        "glirastes/react#TurnOutcomeReason",
+        "glirastes/react#TurnOutcomeStatus",
+        "glirastes/react#useTurnOutcome",
+        "glirastes/react#useTurnOutcomes",
+        "glirastes/react#ChatSubmitOutcome",
+        "glirastes/react#ChatSubmitRejection.*",
+        "glirastes/react#ChatSubmitRejectionReason",
+        "glirastes/react#MessageBubbleProps.turnOutcome",
+        "glirastes/react#StyledMessageBubbleProps.turnOutcome",
+        "glirastes/react#MessagePartsProps.turnOutcome",
+        "glirastes/react#TurnNoticeProps.outcome"
+      ]
+    },
+    {
+      "id": "pg-range-widened",
+      "kind": "optional",
+      "summary": "The pg dependency range is now >=8.11 <9, so an app with pg 8.11 or newer shares its copy. A bun lockfile from 0.19.0 or older keeps a nested glirastes/pg entry until it is removed.",
+      "howTo": "Only for apps that also depend on pg: to share one copy, follow the README install section (remove and re-add glirastes, or bun update pg; convert a binary bun.lockb first). pg is used only by the glirastes-runtime binary.",
+      "skill": "setting-up-glirastes#package-dependencies-in-a-node-host",
+      "affectedWhen": {
+        "imports": [
+          "pg"
+        ]
+      }
+    }
+  ]
+}

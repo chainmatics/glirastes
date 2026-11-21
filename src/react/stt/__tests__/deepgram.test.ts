@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createDeepgramSegmentParser,
+  createPcmPipeline,
+  DEFAULT_AUDIO_WORKLET_URL,
   DeepgramSttAdapter,
 } from '../deepgram.js';
 
@@ -236,6 +238,137 @@ describe('Deepgram segment parser', () => {
       isFinal: true,
     }));
     await finalizing;
+    await connection.close();
+  });
+});
+
+describe('Deepgram token', () => {
+  function stubBrowser(urls: string[]) {
+    class CapturingWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      readonly close = vi.fn();
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(url: string) {
+        urls.push(url);
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { protocol: 'https:', host: 'example.test', href: 'https://example.test/' } },
+    });
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: CapturingWebSocket });
+  }
+
+  const connectWith = (getToken: () => Promise<string | null | undefined>, signal?: AbortSignal) =>
+    new DeepgramSttAdapter({ getToken }).connect({
+      stream: {} as MediaStream,
+      language: 'de',
+      signal: signal ?? new AbortController().signal,
+      events: { onSegment: vi.fn(), onError: vi.fn(), onClosed: vi.fn() },
+    });
+
+  it('connect awaits an async getToken', async () => {
+    const urls: string[] = [];
+    stubBrowser(urls);
+    await expect(connectWith(async () => 'abc')).rejects.toThrow('Speech provider connection failed');
+    expect(new URL(urls[0]!).searchParams.get('token')).toBe('abc');
+  });
+
+  it('connect omits token when getToken resolves null', async () => {
+    const urls: string[] = [];
+    stubBrowser(urls);
+    await expect(connectWith(async () => null)).rejects.toThrow('Speech provider connection failed');
+    expect(new URL(urls[0]!).searchParams.has('token')).toBe(false);
+  });
+
+  it('connect opens no socket when aborted while the token is pending', async () => {
+    const urls: string[] = [];
+    stubBrowser(urls);
+    const controller = new AbortController();
+    const connect = connectWith(async () => {
+      controller.abort();
+      return 'abc';
+    }, controller.signal);
+    await expect(connect).rejects.toThrow('Speech provider connection cancelled');
+    expect(urls).toEqual([]);
+  });
+});
+
+describe('audio worklet URL', () => {
+  function stubAudio() {
+    const addModule = vi.fn(async (_url: string) => {});
+    const context = {
+      audioWorklet: { addModule },
+      createMediaStreamSource: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() })),
+      destination: {},
+      close: vi.fn(async () => {}),
+    };
+    class TestAudioContext {
+      constructor(_options: AudioContextOptions) {
+        return context;
+      }
+    }
+    class TestAudioWorkletNode {
+      readonly port = { onmessage: null };
+      readonly connect = vi.fn();
+      readonly disconnect = vi.fn();
+      constructor(_context: AudioContext, _name: string) {}
+    }
+    Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: TestAudioContext });
+    Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: TestAudioWorkletNode });
+    return addModule;
+  }
+
+  it('createPcmPipeline loads the given worklet URL', async () => {
+    const addModule = stubAudio();
+    await createPcmPipeline({} as MediaStream, vi.fn(), { workletUrl: '/static/pcm.js' });
+    expect(addModule).toHaveBeenCalledWith('/static/pcm.js');
+  });
+
+  it('createPcmPipeline defaults to /audio-worklet-processor.js', async () => {
+    const addModule = stubAudio();
+    await createPcmPipeline({} as MediaStream, vi.fn());
+    expect(addModule).toHaveBeenCalledWith('/audio-worklet-processor.js');
+    expect(DEFAULT_AUDIO_WORKLET_URL).toBe('/audio-worklet-processor.js');
+  });
+
+  it('DeepgramSttAdapter forwards workletUrl', async () => {
+    const addModule = stubAudio();
+    class OpenWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      readonly close = vi.fn();
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(_url: string) {
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+    }
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { protocol: 'https:', host: 'example.test', href: 'https://example.test/' } },
+    });
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: OpenWebSocket });
+
+    const connection = await new DeepgramSttAdapter({ workletUrl: '/static/pcm.js' }).connect({
+      stream: {} as MediaStream,
+      language: 'de',
+      signal: new AbortController().signal,
+      events: { onSegment: vi.fn(), onError: vi.fn(), onClosed: vi.fn() },
+    });
+    expect(addModule).toHaveBeenCalledWith('/static/pcm.js');
     await connection.close();
   });
 });

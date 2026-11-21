@@ -20,6 +20,13 @@ export interface LocalSessionStoreOptions {
   /** Chats kept; the one used longest ago goes first. Default: 30. */
   maxSessions?: number;
   /**
+   * Messages kept per chat (newest). Default: no limit. Values below 1 count as
+   * 1. The kept part starts with a user message, so it can hold fewer messages
+   * than the limit (or more, when the limit would cut off every user message).
+   * The title still comes from the first question.
+   */
+  maxMessagesPerSession?: number;
+  /**
    * Where attachment files live (IndexedDB). Default: IndexedDB when `storage`
    * is set; `null` keeps no files.
    */
@@ -57,6 +64,20 @@ function textOf(message: ChatMessage | WireChatMessage): string {
   }
   const content = (message as { content?: unknown }).content;
   return typeof content === 'string' ? content : '';
+}
+
+/**
+ * The newest `max` messages, starting at a user message so the model never
+ * gets an assistant or tool turn first. When they hold no user message, it
+ * starts at the last user message instead.
+ */
+function tail<T extends ChatMessage | WireChatMessage>(messages: T[], max: number): T[] {
+  if (messages.length <= max) return messages;
+  const cut = messages.slice(-max);
+  const first = cut.findIndex((message) => message.role === 'user');
+  if (first >= 0) return cut.slice(first);
+  const last = messages.map((message) => message.role).lastIndexOf('user');
+  return last >= 0 ? messages.slice(last) : cut;
 }
 
 /** The first question of a chat, cut at a word, as its name. */
@@ -125,6 +146,8 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const storage = options.storage === undefined ? browserStorage() : options.storage;
   const newTitle = options.newTitle ?? 'New chat';
   const maxSessions = Math.max(1, options.maxSessions ?? 30);
+  const maxMessages = options.maxMessagesPerSession === undefined
+    ? Infinity : Math.max(1, Math.floor(options.maxMessagesPerSession));
   const now = options.now ?? (() => Date.now());
   const createId = options.createId ?? randomId;
   const files = options.attachmentStore === undefined
@@ -153,7 +176,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const activeKey = `${options.storageKey}:active`;
   const indexKey = `${options.storageKey}:sessions`;
   const messagesKey = (id: string) => `${options.storageKey}:messages:${id}`;
-  type Entry = SessionSummary & { createdAt: number; updatedAt: number; named?: boolean };
+  type Entry = SessionSummary & { createdAt: number; updatedAt: number; named?: boolean; trimmed?: boolean };
 
   const read = (key: string): unknown => {
     try {
@@ -201,7 +224,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     write(indexKey, kept);
     return kept;
   };
-  const summary = ({ named: _named, ...entry }: Entry): SessionSummary => entry;
+  const summary = ({ named: _named, trimmed: _trimmed, ...entry }: Entry): SessionSummary => entry;
 
   const rehydrate = async (conversationId: string, messages: Array<ChatMessage | WireChatMessage>) => {
     if (!files) return messages;
@@ -254,13 +277,16 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       if (next === '') return;
       persist(entries().map((entry) => (entry.id === conversationId ? { ...entry, title: next, named: true } : entry)));
     },
-    save(conversationId, messages) {
+    save(conversationId, allMessages) {
       if (!storage) return;
+      const messages = tail(allMessages, maxMessages);
       const list = entries();
       const existing = list.find((entry) => entry.id === conversationId) ?? fresh(conversationId);
-      const derived = existing.named ? null : titleFrom(messages);
+      // Once a save has trimmed the chat, the first stored user message is no longer the first question.
+      const derived = existing.named || existing.trimmed ? null : titleFrom(allMessages);
       const entry: Entry = {
         ...existing,
+        ...(messages.length < allMessages.length ? { trimmed: true } : {}),
         title: derived ?? existing.title,
         updatedAt: now(),
         messageCount: messages.length,

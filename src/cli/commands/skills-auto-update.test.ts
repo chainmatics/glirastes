@@ -12,6 +12,7 @@ import {
   readInstalledSkillsManifest,
   writeInstalledSkillsManifest,
 } from './installed-skills-manifest.js';
+import { BASELINE_PATH, readBaseline } from './upgrade/baseline.js';
 import { planSkillsUpdate } from './skills-auto-update.js';
 import { runToolsCommand } from './tools/index.js';
 
@@ -149,6 +150,24 @@ describe('skills update on tools refresh', () => {
     expect(h.out.join('\n')).toContain('1 added, 1 removed');
   });
 
+  it('a chat-ui-only install gains the upgrade skill on refresh and no other part', async () => {
+    const root = await nextApp();
+    await installSkills({ rootDir: root, host: 'claude', quiet: true, parts: ['chat-ui'] });
+    await rm(join(root, '.claude/skills/upgrading-glirastes'), { recursive: true });
+    const manifest = (await readInstalledSkillsManifest(root))!;
+    delete manifest.installs[0]!.skills['upgrading-glirastes'];
+    await writeInstalledSkillsManifest(root, { ...manifest, sdkVersion: '0.0.1' });
+
+    await runToolsCommand(['refresh'], io(root).deps);
+
+    expect(Object.keys((await readInstalledSkillsManifest(root))!.installs[0]!.skills)).toEqual([
+      'building-glirastes-chat-ui',
+      'curating-glirastes-chat-interactions',
+      'upgrading-glirastes',
+    ]);
+    expect(await installed(root, 'upgrading-glirastes')).toBe(await shipped('upgrading-glirastes'));
+  });
+
   it('relinks symlinked skills instead of copying them', async () => {
     const root = await installedByOlderSdk({ symlink: true });
     const link = join(root, '.claude/skills/maintaining-glirastes-tools');
@@ -263,5 +282,36 @@ describe('skills in doctor', () => {
 
     const bare = await createDoctorReport({ rootDir: await nextApp(), env: {} });
     expect(bare.checks.some((item) => item.name === 'agent-skills')).toBe(false);
+  });
+});
+
+describe('baseline on skills auto-update', () => {
+  it('creates the baseline with the previous manifest version before bumping', async () => {
+    const root = await installedByOlderSdk();
+    await rm(join(root, BASELINE_PATH), { force: true });
+    expect(await readBaseline(root)).toBeUndefined();
+
+    await runToolsCommand(['refresh'], io(root).deps);
+
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.0.1');
+    expect((await readInstalledSkillsManifest(root))!.sdkVersion).toBe(SDK_VERSION);
+
+    // A later refresh never moves it.
+    await runToolsCommand(['refresh'], io(root).deps);
+    expect((await readBaseline(root))!.reviewedThrough).toBe('0.0.1');
+  });
+
+  it('a corrupt baseline never keeps the manifest from moving on', async () => {
+    const root = await installedByOlderSdk();
+    await ageSkill(root, 'maintaining-glirastes-tools');
+    await writeFile(join(root, BASELINE_PATH), '<<<<<<< HEAD\n');
+    const h = io(root);
+
+    expect(await runToolsCommand(['refresh'], h.deps)).toBe(0);
+
+    expect((await readInstalledSkillsManifest(root))!.sdkVersion).toBe(SDK_VERSION);
+    expect(h.err.join('\n')).not.toContain('not updated');
+    expect(h.err.join('\n')).toContain('sdk-baseline.json');
+    expect(await runToolsCommand(['check'], io(root).deps)).toBe(0);
   });
 });

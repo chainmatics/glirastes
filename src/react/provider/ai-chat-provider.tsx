@@ -55,6 +55,7 @@ import {
 } from '../interactions/registry.js';
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
+import { ChatMarkdownOptionsContext, NO_MARKDOWN_OPTIONS } from '../markdown-options.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
 import {
   runToolResultUiActions,
@@ -673,6 +674,7 @@ export function AiChatProvider({
   onCompletionProviderError,
   chatInteractions,
   entityLinks,
+  markdown,
   onOpenRequest,
   toolRenderers,
   toolResults: userToolResults,
@@ -3001,7 +3003,9 @@ export function AiChatProvider({
     <ChatContext.Provider value={contextValue}>
       <ChatComposerQueueProvider onOpenRequest={onOpenRequest}>
         <ChatEntityLinksProvider config={entityLinks} uiActionBus={uiActionBus}>
-          {children}
+          <ChatMarkdownOptionsContext.Provider value={markdown ?? NO_MARKDOWN_OPTIONS}>
+            {children}
+          </ChatMarkdownOptionsContext.Provider>
         </ChatEntityLinksProvider>
       </ChatComposerQueueProvider>
     </ChatContext.Provider>

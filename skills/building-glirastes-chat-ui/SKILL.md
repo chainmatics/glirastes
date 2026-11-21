@@ -207,7 +207,7 @@ repository, not shipped in the package) has the table and override format.
 
 `chatInteractions` makes the default `ChatInput` show `/` and `@` pills (`theme.colors.pill*`, `--cm-pill-*`, `glirastes/react/pills.css` when unstyled); keep it.
 `useChatComposer().chatAbout({ type, id, label })` opens the chat with the pills in it (composers on `useChatComposerInput` get them; other own composers: `useChatComposerTarget`); `useOptionalChatComposer()` is `null` outside the provider, and `onOpenRequest` on the provider shows a chat the app opens itself.
-`entityLinks={{ matchers, open }}` makes references in answers clickable chips; a replaced `Markdown` slot keeps them only through `useChatEntityLinks()`.
+`entityLinks={{ matchers, open }}` makes references in answers clickable chips; a replaced `Markdown` slot keeps them only through `useChatEntityLinks()`. Markdown: lists are styled by default; tables need `bun add remark-gfm` and `markdown={{ remarkPlugins: [remarkGfm] }}` (`ChatMarkdownOptions`, memoized).
 Methods, chip options and gotchas: [references/composer-chips-attachments.md](references/composer-chips-attachments.md).
 
 ## Commands, mentions and clarification
@@ -344,13 +344,13 @@ Use the SDK STT controller as the only recording state machine:
 - retry permission, provider, and reconnect failures explicitly;
 - close MediaStream tracks, sockets, timers, and audio resources on every exit.
 
-`voice.pushToTalk` adds hold-to-talk on the mic button and a hold hotkey
-(default `mod+shift+space`) next to tap-to-toggle. Pass `voice.routeKey` (for
-example the pathname) so navigation stops recording and keeps the speech as
-draft; back/forward, session switches and unmount release the microphone as
-well. `voice.adapter` plugs in another provider (an `SttProviderAdapter`;
-`DeepgramSttAdapter` and `RecordedSttAdapter` ship in `glirastes/stt`); keep
-its identity stable.
+`voice.getToken` and chat `headers` may be async. `voice.pushToTalk` adds
+hold-to-talk on the mic button and a hotkey (default `mod+shift+space`) next to
+tap-to-toggle. Pass `voice.routeKey` (for example the pathname) so navigation
+stops recording and keeps the speech as draft; back/forward, session switches and
+unmount release the microphone as well. `voice.adapter` plugs in another provider
+(an `SttProviderAdapter`; `DeepgramSttAdapter` and `RecordedSttAdapter` ship in
+`glirastes/stt`; the Deepgram worklet file must be served, see [speech worklet](references/hooks-and-building-blocks.md#speech-worklet)); keep its identity stable.
 
 A finished recording (`RecordedSttAdapter`, `audio/wav` to
 `/api/ai/speech-recognize`) needs one route; the app's transcription service

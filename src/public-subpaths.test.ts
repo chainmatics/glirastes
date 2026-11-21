@@ -52,6 +52,9 @@ describe('public foundation subpaths', () => {
     }
     expect(packageJson.files).not.toContain('openapi');
     expect(packageJson.files).toContain('skills');
+    // Upgrade notes ship; the api-surface snapshot is a repo-only CI input.
+    expect(packageJson.files).toContain('upgrade-notes');
+    expect(packageJson.files).toContain('!upgrade-notes/api-surface.released.json');
   });
 
   it('keeps deferred generator APIs out of the Foundation codegen surface', async () => {

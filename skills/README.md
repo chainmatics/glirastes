@@ -4,7 +4,7 @@ For the guided integration path and searchable SDK reference, visit the
 [developer documentation](https://glirastes.io/docs). Check each guide's release
 status before using preview APIs with an installed SDK version.
 
-The package ships nine skills for the app's existing coding agent. Glirastes
+The package ships ten skills for the app's existing coding agent. Glirastes
 does not need a separate coding-agent service: the CLI generator derives
 tools and prints work lists, and these skills guide the app's agent. Chat
 model calls run in the customer's embedded or configured SDK runtime.
@@ -19,6 +19,7 @@ model calls run in the customer's embedded or configured SDK runtime.
 | [`describing-glirastes-tools`](./describing-glirastes-tools/SKILL.md) | Writing descriptions, schemas, synonyms and examples from `glirastes tools describe --print` |
 | [`building-glirastes-chat-ui`](./building-glirastes-chat-ui/SKILL.md) | React/web-component chat, identity-isolated browser sessions, the derived `@` entities and `/` commands (served by `createChatInteractionsHandler`, with direct commands), providers, result components, approvals and STT |
 | [`curating-glirastes-chat-interactions`](./curating-glirastes-chat-interactions/SKILL.md) | Reviewing the derived `@` entities and `/` commands after a refresh: hide, rename or add entries, wire a custom composer, remove hand-built lists |
+| [`upgrading-glirastes`](./upgrading-glirastes/SKILL.md) | After a Glirastes upgrade, when `glirastes tools refresh` prints an upgrade line, or before changing code that uses glirastes: review `glirastes upgrade report` with the developer |
 | [`migrating-to-glirastes`](./migrating-to-glirastes/SKILL.md) | Moving off `@chainmatics/agentic-*` and `ai-tool.ts` |
 
 Install project-local copies with:

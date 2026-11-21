@@ -1,0 +1,13 @@
+{
+  "id": "composer-initial-value-mount-only",
+  "kind": "recommended",
+  "summary": "useChatComposerInput applies initialValue only on mount, as documented. A value that arrives later is ignored; before, the first non-empty value was applied late and reset the caret (typing 'Welche' became 'elcheW W').",
+  "howTo": "For a draft or prefill that arrives after mount, call the composer's `setText` (or the input handle's `setValue`) instead of relying on a late `initialValue`.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "useChatComposerInput",
+      "MentionInput"
+    ]
+  }
+}

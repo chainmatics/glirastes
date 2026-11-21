@@ -69,7 +69,7 @@ import {
   type IdLabels,
 } from './hide-ids.js';
 import { entityDeclarationsOfTools, TOOL_ENTITIES_PART_TYPE } from './tool-entities.js';
-import { createToolStreamErrorMask, streamErrorText } from './stream-error-text.js';
+import { builtInStreamErrorTexts, createToolStreamErrorMask, streamErrorText, withStepFailureParts, type StreamErrorTexts } from './stream-error-text.js';
 import {
   budgetStopText,
   resolveBudgetStopTexts,
@@ -225,8 +225,8 @@ export interface StreamHandlerContext {
   earlierMessages?: unknown[];
   /** Max output tokens */
   maxOutputTokens: number;
-  /** Temperature */
-  temperature: number;
+  /** Temperature; `undefined` when the handler config is `null` (send none). */
+  temperature?: number;
   /** Max context messages for model-message preparation */
   maxContextMessages: number;
   /** Model tier from intent routing or pipeline */
@@ -600,6 +600,8 @@ async function defaultStreamHandler(
   budgetStopTexts: BudgetStopTexts = resolveBudgetStopTexts(ctx.locale, undefined),
   silentTurnText?: string,
   request: RequestTurnState = {},
+  streamErrorTexts: StreamErrorTexts = builtInStreamErrorTexts(ctx.locale),
+  configuredInvalidToolInputTexts: ReadonlyArray<string> = [],
 ): Promise<Response> {
   const uiOutcomes = request.uiOutcomes;
   // SDK built-ins the handler created itself are not manifest tools, so the
@@ -662,6 +664,7 @@ async function defaultStreamHandler(
   // Seen objects and the debug hook only; without them the options are as before.
   const historyExtras = {
     ...(ctx.earlierMessages ? { earlierMessages: ctx.earlierMessages as UIMessage[] } : {}),
+    invalidToolInputTexts: [streamErrorTexts.invalidToolInput, ...configuredInvalidToolInputTexts],
     ...(ctx.onModelInput ? { onBreakdown: (value: ModelInputBreakdown) => { breakdown = value; } } : {}),
   };
   const preparedMessages = await prepareModelMessages(
@@ -778,7 +781,7 @@ async function defaultStreamHandler(
   };
   // Failed tool calls pass the UI stream's error mask: the chat gets a fixed
   // text, the app's callback the cause (see createToolStreamErrorMask).
-  const toolErrorMask = createToolStreamErrorMask();
+  const toolErrorMask = createToolStreamErrorMask(streamErrorTexts);
   const maskToolStreamError = (error: unknown) => {
     const masked = toolErrorMask(error);
     if (masked.report) reportError(error, masked.report.info, masked.report.error);
@@ -822,7 +825,7 @@ async function defaultStreamHandler(
         providerErrorReported = true;
         reportError(error);
       }
-      return streamErrorText(error);
+      return streamErrorText(error, streamErrorTexts);
     },
     execute: async ({ writer }) => {
       let totalSteps = 0;
@@ -902,7 +905,7 @@ async function defaultStreamHandler(
           return { activeTools: permitted ? active.filter((name) => permitted.has(name)) : active };
         }),
         maxOutputTokens: ctx.maxOutputTokens,
-        temperature: ctx.temperature,
+        ...(ctx.temperature === undefined ? {} : { temperature: ctx.temperature }),
         timeout: resolveTurnTimeout(
           ctx.managedTurn?.snapshot.budget.totalTimeoutMs,
         ),
@@ -1088,7 +1091,10 @@ async function defaultStreamHandler(
       // Settles once the turn has written its final state, the error state included.
       let settleTurn!: () => void;
       const turnSettled = new Promise<void>((resolve) => { settleTurn = resolve; });
-      const modelStream = sideParts.sequence(result.toUIMessageStream({ onError: maskToolStreamError }), turnSettled);
+      const modelStream = sideParts.sequence(
+        withStepFailureParts(result.toUIMessageStream({ onError: maskToolStreamError }), streamErrorTexts),
+        turnSettled,
+      );
       const answerStream = withStopNotice(modelStream, stopNotice);
       const uiStream = resumedApprovals
         ? answerStream
@@ -1229,19 +1235,28 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
   const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
   assertChatServerLocales(localesConfig);
+  // Every configured invalid-input text, of any language: a later turn's history swaps it for the model's English text.
+  const configuredInvalidToolInputTexts = Object.values(localesConfig ?? {})
+    .flatMap((table) => (typeof table.invalidToolInput === 'string' ? [table.invalidToolInput] : []));
   const explicitLocale = config.locale;
   if (requestLocale !== undefined && typeof requestLocale !== 'function') {
     throw new Error('createAiChatHandler: requestLocale must be a function of the request');
   }
   // The handler's own texts per turn language; without locales or requestLocale exactly the texts of before.
-  const serverTexts = new Map<string, { budgetStop: BudgetStopTexts; silentTurn?: string }>();
-  const textsFor = (turnLocale: string | undefined): { budgetStop: BudgetStopTexts; silentTurn?: string } => {
-    if (!localesConfig && (turnLocale === undefined || turnLocale === configuredLocale)) return { budgetStop: budgetStopTexts };
+  type TurnTexts = { budgetStop: BudgetStopTexts; silentTurn?: string; streamErrors: StreamErrorTexts };
+  const configuredTexts: TurnTexts = {
+    budgetStop: budgetStopTexts,
+    // Detected like the budget stop notice of this path, so one chat never mixes languages.
+    streamErrors: builtInStreamErrorTexts(configuredLocale),
+  };
+  const serverTexts = new Map<string, TurnTexts>();
+  const textsFor = (turnLocale: string | undefined): TurnTexts => {
+    if (!localesConfig && (turnLocale === undefined || turnLocale === configuredLocale)) return configuredTexts;
     const key = turnLocale ?? configuredLocale;
     let texts = serverTexts.get(key);
     if (!texts) {
-      const { silentTurn, ...budgetStop } = resolveChatServerTexts(key, budgetStopTextsConfig, localesConfig);
-      texts = { budgetStop: Object.freeze(budgetStop), silentTurn };
+      const { silentTurn, streamError, invalidToolInput, ...budgetStop } = resolveChatServerTexts(key, budgetStopTextsConfig, localesConfig);
+      texts = { budgetStop: Object.freeze(budgetStop), silentTurn, streamErrors: Object.freeze({ streamError, invalidToolInput }) };
       if (serverTexts.size < 100) serverTexts.set(key, texts);
     }
     return texts;
@@ -1264,7 +1279,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     }
   };
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
-  const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
+  const chatMemory = memoryConfig ? createChatMemory(memoryConfig, process.env, { temperature }) : null;
   /**
    * With `history.seenObjects` (default on): the messages the window or the chat memory
    * left out ahead of `recent` (a suffix of `all`), for the memo; else none.
@@ -1371,6 +1386,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         texts.budgetStop,
         texts.silentTurn,
         requestState,
+        texts.streamErrors,
+        configuredInvalidToolInputTexts,
       );
     };
   }
@@ -2261,7 +2278,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           emitStepReports,
           onStepReport,
           maxOutputTokens,
-          temperature,
+          temperature: temperature ?? undefined,
           maxContextMessages,
         locale,
         history,
@@ -2471,7 +2488,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         emitStepReports,
         onStepReport,
         maxOutputTokens,
-        temperature,
+        temperature: temperature ?? undefined,
         maxContextMessages,
         locale,
         history,

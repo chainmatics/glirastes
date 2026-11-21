@@ -267,6 +267,7 @@ glirastes tools refresh           # derive tools (--watch next to `next dev`)
 glirastes tools status            # what the chat can do
 glirastes tools check             # verify committed outputs, no model, no network
 glirastes tools eval              # every example sentence finds its tool
+glirastes upgrade report          # what changed since you last reviewed the SDK (then: upgrade ack)
 ```
 
 **Policy.** Reads run directly, writes ask first, deletes and anything
@@ -465,13 +466,13 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 
 ## Agent skills
 
-The package ships nine skills in [`skills/`](skills/README.md) for your
+The package ships ten skills in [`skills/`](skills/README.md) for your
 existing coding agent (Codex, Claude Code, Gemini): `setting-up-glirastes`,
 `setting-up-glirastes-memory`,
 `integrating-glirastes-nextjs`, `integrating-glirastes-web`,
 `maintaining-glirastes-tools`, `describing-glirastes-tools`,
-`building-glirastes-chat-ui`, `curating-glirastes-chat-interactions` and
-`migrating-to-glirastes`. `glirastes init`
+`building-glirastes-chat-ui`, `curating-glirastes-chat-interactions`,
+`migrating-to-glirastes` and `upgrading-glirastes`. `glirastes init`
 installs them; `glirastes install --host codex --with-setup-skills` installs
 them without starting setup. After an SDK upgrade, `glirastes tools refresh`
 replaces the unedited copies, adds new skills and keeps edited ones, and

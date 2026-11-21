@@ -42,6 +42,7 @@ export interface ToolsCommandDependencies {
   runPipeline?: (options: ToolsPipelineOptions) => Promise<ToolsPipelineResult>;
   watch?: ToolsIo['watch'];
   signal?: AbortSignal;
+  upgrade?: ToolsIo['upgrade'];
   /** `tools enrich --managed`: git, network and the provider loader (tests inject them). */
   enrich?: EnrichDependencies;
 }
@@ -50,6 +51,7 @@ export const TOOLS_USAGE = [
   'Usage: glirastes tools refresh [--root <dir>] [--mode write|frozen|integrity] [--keep-going] [--adopt <inventory>] [--watch] [--no-skills] [--json]',
   '         derive tools from the code (writes locally, checks in CI, verifies in Docker; --watch keeps refreshing)',
   '         and bring unedited installed agent skills up to this SDK (--no-skills or GLIRASTES_SKILLS_AUTO_UPDATE=0 opts out)',
+  '         and print one line when SDK upgrade follow-ups are pending (GLIRASTES_UPGRADE_HINT=0 opts out)',
   '       glirastes tools check [--root <dir>] [--strict] [--integrity-only] [--no-skills] [--json]',
   '         verify the committed tool outputs and installed skills without writing, models or network',
   '       glirastes tools status [--root <dir>] [--json]',
@@ -78,6 +80,7 @@ export async function runToolsCommand(argv: string[], deps: ToolsCommandDependen
     runPipeline: deps.runPipeline ?? runToolsPipeline,
     ...(deps.watch ? { watch: deps.watch } : {}),
     ...(deps.signal ? { signal: deps.signal } : {}),
+    ...(deps.upgrade ? { upgrade: deps.upgrade } : {}),
   };
   const [subcommand, ...rest] = argv;
   const json = rest.includes('--json');

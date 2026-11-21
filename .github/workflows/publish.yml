@@ -14,7 +14,45 @@ permissions:
   contents: read
 
 jobs:
+  # Runs before anything is published (the image push and the npm publish both need it).
+  release-preflight:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Release flow: unreleased notes are merged into upgrade-notes/<version>.json first.
+      # A prerelease needs its own file too (upgrade-notes/<x.y.z-rc.n>.json, `notes: []` is fine).
+      - name: Verify upgrade notes are released for this version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if ls upgrade-notes/unreleased/*.json >/dev/null 2>&1; then
+            echo "::error::upgrade-notes/unreleased/ still holds notes; merge them into upgrade-notes/$PKG_VERSION.json"
+            exit 1
+          fi
+          if [ ! -f "upgrade-notes/$PKG_VERSION.json" ]; then
+            echo "::error::upgrade-notes/$PKG_VERSION.json is missing"
+            exit 1
+          fi
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # bun run release:prepare refreshes the snapshot; a release commit without it fails here.
+      - name: Verify the api-surface snapshot matches the source
+        run: bun scripts/api-surface.ts --check
   runtime-container:
+    needs: release-preflight
     if: startsWith(github.ref, 'refs/tags/v')
     uses: ./.github/workflows/runtime-container.yml
     with:
@@ -23,8 +61,8 @@ jobs:
       contents: read
       packages: write
   publish:
-    needs: runtime-container
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.runtime-container.result == 'success' }}
+    needs: [release-preflight, runtime-container]
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.release-preflight.result == 'success' && needs.runtime-container.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

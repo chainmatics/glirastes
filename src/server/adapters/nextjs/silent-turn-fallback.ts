@@ -1,3 +1,5 @@
+import { isGermanTextLocale } from './budget-stop-notice.js';
+
 /**
  * A model can end a turn with nothing the chat shows: no text (or only
  * whitespace), reasoning only, no tool call. Without a guard the user sees an
@@ -9,7 +11,7 @@ export const SILENT_TURN_FALLBACK_TEXTS = {
 } as const;
 
 export function silentTurnFallbackText(locale?: string): string {
-  return locale?.toLowerCase().startsWith('de') ? SILENT_TURN_FALLBACK_TEXTS.de : SILENT_TURN_FALLBACK_TEXTS.en;
+  return isGermanTextLocale(locale) ? SILENT_TURN_FALLBACK_TEXTS.de : SILENT_TURN_FALLBACK_TEXTS.en;
 }
 
 /** True when no step produced visible text or a tool call. */

@@ -14,6 +14,7 @@ them.
 - UI action outcomes
 - Sessions
 - Theme and keyboard
+- Speech worklet
 
 ## Own provider and transport
 
@@ -206,7 +207,14 @@ Defaults keep today's markup; everything below is opt-in.
   (`StepFailure[]`, `{ code: StepFailureCode, values? }`) beside `detail` for
   such a step; `stepFailureText(failures, locale, language?)` renders it, a
   code it does not know as `activityFailureGeneric`. A step without any text
-  shows no detail.
+  shows no detail. The generic failure and invalid input are also recognized
+  when the server wrote them in another wording (a German chat, the
+  handler's own `locales` texts `streamError` / `invalidToolInput`): the
+  server then streams a `data-step-failure` part (`{ toolCallId, code }`,
+  content-free) after the call, and the log shows the client's
+  `activityFailureGeneric` / `activityFailureInvalidInput` (app overrides
+  included) instead of the server text. Outside the log the server text
+  stays.
 - Which table these failure texts follow: the built-in texts of the chat's
   language (German for `de`) when the app states `language`, or when its own
   tables (`locale`, `locales` for that language) set no other `activity…`
@@ -373,3 +381,32 @@ the Tailwind config to get `chat-primary`, `chat-border` and the other
 global shortcut (`mod` is ⌘ on macOS, Ctrl elsewhere), `useChatShortcuts`
 the chat window keys, `usePushToTalkHotkey` a hold-to-talk combination, and
 `useFloatingPanel` moves and resizes a floating panel by pointer or keyboard.
+
+## Speech worklet
+
+`DeepgramSttAdapter` and `RecordedSttAdapter` capture microphone audio in an
+AudioWorklet loaded from `DEFAULT_AUDIO_WORKLET_URL`
+(`/audio-worklet-processor.js`, exported from `glirastes/react` and
+`glirastes/stt`). The package ships the file at
+`node_modules/glirastes/dist/react/audio-worklet-processor.js`; the host must
+serve it at that path. Copy it into `public/` on dev and build:
+
+```json
+"scripts": {
+  "predev": "cp node_modules/glirastes/dist/react/audio-worklet-processor.js public/",
+  "prebuild": "cp node_modules/glirastes/dist/react/audio-worklet-processor.js public/"
+}
+```
+
+Cross-platform alternative (also works on Windows; `public/` must exist):
+
+```json
+"predev": "node -e \"require('fs').copyFileSync('node_modules/glirastes/dist/react/audio-worklet-processor.js','public/audio-worklet-processor.js')\""
+```
+
+Merge these two entries with the existing `predev` and `prebuild` scripts
+rather than replacing them.
+
+Served elsewhere: set `voice.workletUrl` on the chat (the built-in voice input
+passes it to its adapter), or construct `new DeepgramSttAdapter({ workletUrl, getToken })`
+or `new RecordedSttAdapter({ workletUrl })` and pass it as `voice.adapter`; keep that instance stable.

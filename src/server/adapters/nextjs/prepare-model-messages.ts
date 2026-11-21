@@ -125,6 +125,12 @@ export interface PrepareModelMessagesOptions {
    * ids). A throw from it is ignored.
    */
   onBreakdown?: (breakdown: ModelInputBreakdown) => void;
+  /**
+   * The chat text the app shows for an invalid tool call, when it is not one
+   * of the built-in English or German texts (`locales.<tag>.invalidToolInput`).
+   * Such a call reads as an instruction for the model in later turns.
+   */
+  invalidToolInputTexts?: ReadonlyArray<string>;
   /** Override pruneMessages config (legacy pipeline only). */
   pruneConfig?: {
     /** How to handle reasoning blocks (default: 'none'). */
@@ -196,7 +202,7 @@ export async function prepareModelMessages(
   // A failed call keeps only the chat's text in the browser; the model gets an instruction instead.
   // A UI result of the outcome protocol becomes the fixed text of its code; approval subjects
   // are for the browser only: never model input, whatever the AI SDK's defaults.
-  const raw = await convertToModelMessages(withModelFacingToolErrors(withModelFacingUiOutcomes(withAttachmentReferences(withoutApprovalSubjectParts(uiMessages)))), {
+  const raw = await convertToModelMessages(withModelFacingToolErrors(withModelFacingUiOutcomes(withAttachmentReferences(withoutApprovalSubjectParts(uiMessages))), options?.invalidToolInputTexts), {
     ignoreIncompleteToolCalls: true,
   });
 
@@ -228,7 +234,7 @@ export async function prepareModelMessages(
   const seen = history && seenObjects && options?.entities
     ? await seenObjectsMemo(
         stripped as ModelMessageLike[], raw as ModelMessageLike[], options.earlierMessages,
-        options.entities, seenObjects,
+        options.entities, seenObjects, options.invalidToolInputTexts,
       )
     : undefined;
   const result = seen ? [seen.message as (typeof stripped)[number], ...stripped] : stripped;
@@ -265,9 +271,10 @@ async function seenObjectsMemo(
   earlierMessages: UIMessage[] | undefined,
   entities: EntityDeclarationsByTool,
   setting: true | SeenObjectsOptions,
+  invalidToolInputTexts?: ReadonlyArray<string>,
 ): Promise<{ message: ModelMessageLike; objects: SeenObject[]; omitted: number } | undefined> {
   const earlier = earlierMessages && earlierMessages.length > 0
-    ? await convertToModelMessages(withModelFacingToolErrors(withoutApprovalSubjectParts(earlierMessages)), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
+    ? await convertToModelMessages(withModelFacingToolErrors(withoutApprovalSubjectParts(earlierMessages), invalidToolInputTexts), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
     : [];
   const all = [...earlier, ...raw];
   const handles = handleProducersOf(all);

@@ -508,6 +508,8 @@ function createNoteTools(
 export function createChatMemory(
   config: ChatMemoryConfig,
   env: Record<string, string | undefined> = process.env,
+  /** The handler's temperature: null sends none with the summary calls, a number keeps 0. */
+  modelOptions: { temperature?: number | null } = {},
 ): ChatMemoryRuntime | null {
   const chat = config.chat === false ? null : typeof config.chat === 'object' ? config.chat : {};
   const configured = chat?.autoCompact !== undefined;
@@ -625,7 +627,7 @@ export function createChatMemory(
                       system: summaryPrompt(Math.floor(maxTokens * 0.7)),
                       prompt: anonymize ? await anonymize(input) : input,
                       maxOutputTokens: maxTokens,
-                      temperature: 0,
+                      ...(modelOptions.temperature === null ? {} : { temperature: 0 }),
                       abortSignal: abortSignal ? AbortSignal.any([abortSignal, signal]) : signal,
                     });
                     const text = (restore ? await restore(result.text) : result.text).trim();

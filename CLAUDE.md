@@ -58,9 +58,21 @@ The workflow triggers on:
 2. Manual `workflow_dispatch` from the GitHub Actions tab
 
 Release flow:
-1. Bump `version` in `package.json`
-2. Commit via `/commit` and push to `main`
+1. On a clean tree run `bun run release:prepare <version>` (`scripts/prepare-release.ts`). It merges
+   `upgrade-notes/unreleased/*.json` into `upgrade-notes/<version>.json` as `{ "version", "notes" }`,
+   deletes the merged files (keeps `.gitkeep`), refreshes `upgrade-notes/api-surface.released.json` and
+   sets the version in `package.json` and `src/runtime/sdk-version.ts`. It refuses, changing nothing, on
+   a dirty tree, a version not above the current one, or when `upgrade-notes/<version>.json` already
+   holds notes.
+2. Update `CHANGELOG.md`, run the gate, commit everything in one release commit via `/commit` and push to `main`
 3. Tag: `git tag v<version> && git push origin v<version>` — CI builds and publishes to npm
+
+The `release-preflight` job in `publish.yml` refuses a tag before the image push or npm publish while
+`upgrade-notes/unreleased/*.json` exists, `upgrade-notes/<version>.json` is missing, or
+`upgrade-notes/api-surface.released.json` differs from the source (`bun scripts/api-surface.ts --check`).
+Every prerelease tag also needs its own `upgrade-notes/<rc-version>.json`: `bun run release:prepare
+0.19.0-rc.1` writes it and takes the pending unreleased notes, so the first rc carries them and later
+rcs or the final `0.19.0.json` get only what was added since (`notes: []` is fine).
 
 The SDK package lives on public npm. Release CI also tests and publishes the
 public Linux amd64 image `ghcr.io/chainmatics/glirastes-runtime:<version>`.
@@ -99,8 +111,8 @@ src/
 │   └── testing/              — Test helpers without LLM calls
 ├── react/                    — Chat UI components, hooks, provider, STT bridges
 ├── codegen/                  — Scanner, execution inventory, registry generation
-└── cli/                      — scan | sync | setup | validate | build | status |
-                                install-skills | check-upgrade
+└── cli/                      — init | scan | setup | connect | sync | doctor | install |
+                                validate | build | tools | upgrade (report|ack)
 ```
 
 ## Subpath Exports
@@ -167,6 +179,15 @@ result/progress** — comparing tool names alone is not sufficient.
 **Lancer is internal-only** in the published package. `createLancer()` is not exported, and
 the normal managed-local execution path must not send content to Platform
 services.
+
+## Upgrade notes and skills
+
+Every PR that changes public API, defaults or behavior a consumer can notice:
+1. updates the affected skill in `skills/` in the same PR, and
+2. adds one file `upgrade-notes/unreleased/<id>.json` (schema: `src/cli/commands/upgrade/notes.ts`).
+`src/upgrade-notes.test.ts` fails when the public surface changes without a note. A note's `surface`
+lists the keys it covers; `X.*` covers a type and all its members, `*#X.*` does so in every subpath. Behavior changes
+the snapshot cannot see are a review rule: the reviewer asks for the note.
 
 ## Conventions
 

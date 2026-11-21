@@ -18,7 +18,7 @@ import {
   parseHoldCombo,
   usePushToTalkHotkey,
 } from '../hooks/use-push-to-talk-hotkey.js';
-import type { VoicePushToTalkConfig } from '../types.js';
+import type { MaybePromise, VoicePushToTalkConfig } from '../types.js';
 import { RecordingBar } from './recording-bar.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
 
@@ -77,8 +77,10 @@ interface VoiceInputAddonProps {
   disabled: boolean;
   language: string;
   baseUrl?: string;
+  /** URL of the audio worklet file; default `/audio-worklet-processor.js`. */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   /** Speech provider; defaults to the Deepgram speech-stream adapter. */
   adapter?: SttProviderAdapter;
   onTranscript: (text: string) => void;
@@ -102,6 +104,7 @@ export function VoiceInputAddon({
   disabled,
   language,
   baseUrl,
+  workletUrl,
   getToken,
   adapter,
   onTranscript,
@@ -123,9 +126,10 @@ export function VoiceInputAddon({
   const resolvedAdapter = useMemo<SttProviderAdapter>(
     () => adapter ?? new DeepgramSttAdapter({
       baseUrl,
+      workletUrl,
       getToken: () => getTokenRef.current?.(),
     }),
-    [adapter, baseUrl],
+    [adapter, baseUrl, workletUrl],
   );
   const {
     phase,

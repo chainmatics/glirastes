@@ -8,9 +8,13 @@ const adapterConnect = vi.hoisted(() => vi.fn(async () => ({
   cancel: vi.fn(async () => {}),
   close: vi.fn(async () => {}),
 })));
+const adapterOptions = vi.hoisted(() => vi.fn());
 
 vi.mock('../../stt/deepgram.js', () => ({
   DeepgramSttAdapter: class {
+    constructor(options: unknown) {
+      adapterOptions(options);
+    }
     connect = adapterConnect;
   },
 }));
@@ -19,6 +23,13 @@ import { useDeepgramTranscription } from '../use-deepgram-transcription.js';
 
 afterEach(() => {
   adapterConnect.mockClear();
+  adapterOptions.mockClear();
+});
+
+it('passes workletUrl to the adapter it creates', () => {
+  const { unmount } = renderHook(() => useDeepgramTranscription({ workletUrl: '/static/pcm.js' }));
+  expect(adapterOptions).toHaveBeenCalledWith(expect.objectContaining({ workletUrl: '/static/pcm.js' }));
+  unmount();
 });
 
 describe('useDeepgramTranscription', () => {

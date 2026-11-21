@@ -1,6 +1,8 @@
 import { Fragment, Suspense, lazy, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
+import { useChatMarkdownOptions } from '../markdown-options.js';
 import { useChatContext } from '../provider/chat-context.js';
+import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
 import {
   EntityText,
@@ -48,6 +50,7 @@ import { turnStartId } from '../utils/turn-outcomes.js';
 // server-only consumers don't pay for it, and gracefully degrades to raw text
 // when the optional peer dep isn't installed.
 type MarkdownModule = typeof import('react-markdown');
+type ReactMarkdownOptions = import('react-markdown').Options;
 
 const ReactMarkdown = lazy<MarkdownModule['default']>(async () => {
   try {
@@ -351,9 +354,12 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   const isAssistant = message.role === 'assistant';
   const details = activityLog?.details ?? 'auto';
   const resultShown = (toolName: string) => shouldRenderToolResult(toolName, mode, allowlist);
+  // The server's named kinds of its failure texts, from the whole message: a run of steps has no data parts.
+  const stepFailureCodes = readStepFailurePartCodes(message.parts);
   const readSteps = (parts: ReadonlyArray<unknown>): ActivityStep[] => readActivitySteps(
     parts,
     (toolName, status, source) => allowStepDetail(details, status, source, resultShown(toolName)),
+    stepFailureCodes,
   ).map((step) => (
     // A call the user approved that the server did not run: the reason is the SDK's own text.
     step.status === 'declined' && step.declinedBy === 'server' && !step.detail
@@ -771,10 +777,14 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   const links = useChatEntityLinks();
+  const { remarkPlugins } = useChatMarkdownOptions();
   return (
     <div className={className} data-component="markdown">
       <Suspense fallback={<>{content}</>}>
-        <ReactMarkdown components={links.enabled ? links.markdownComponents : undefined}>{content}</ReactMarkdown>
+        <ReactMarkdown
+          components={links.enabled ? links.markdownComponents : undefined}
+          remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
+        >{content}</ReactMarkdown>
       </Suspense>
     </div>
   );

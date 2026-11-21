@@ -372,8 +372,10 @@ export interface AiChatHandlerConfig {
   clientLanguage?: boolean;
   /**
    * The handler's own texts per BCP-47 language tag, to add a language
-   * (`pl`) or change single texts of one: the keys of `budgetStopTexts` plus
-   * `silentTurn` (the answer of a turn that produced nothing). Partial tables
+   * (`pl`) or change single texts of one: the keys of `budgetStopTexts`,
+   * `silentTurn` (the answer of a turn that produced nothing), `streamError`
+   * (any failure the SDK does not name itself) and `invalidToolInput` (a
+   * tool call whose arguments do not match the schema). Partial tables
    * fall back per key: the language, another region of it, the built-in
    * German or English texts, English. `budgetStopTexts` stays language-free
    * and wins for every language. An unknown key, an empty text or a key
@@ -393,7 +395,12 @@ export interface AiChatHandlerConfig {
   budgetStopTexts?: Partial<BudgetStopTexts>;
   uiActionSchema?: SchemaLike;
   maxOutputTokens?: number;
-  temperature?: number;
+  /**
+   * Sampling temperature (default 0.2). `null` sends no `temperature` to the
+   * model, for models that reject it (reasoning models); this includes the
+   * memory summary calls.
+   */
+  temperature?: number | null;
   /**
    * Explicit hard cap for reasoning steps.
    *

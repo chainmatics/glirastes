@@ -9,6 +9,7 @@ import {
   toolResultFailure,
 } from '../../runtime/tool-failure.js';
 import { readStepFailures, type StepFailure } from './step-failure.js';
+import { readStepFailurePartCodes, type StepFailurePartCode } from '../../contracts/step-failure.js';
 
 /**
  * `declined`: the call did not run because its approval was refused (by the
@@ -159,6 +160,12 @@ function declinedByOf(approval: unknown): ActivityStep['declinedBy'] {
 export function readActivitySteps(
   parts: ReadonlyArray<unknown>,
   allowDetail: (toolName: string, status: ActivityStepStatus, source: ActivityDetailSource) => boolean,
+  /**
+   * The kind per call id the server named for an `errorText` in another
+   * wording than the English one (`data-step-failure`); read from `parts`
+   * when not given (pass the whole message's when `parts` is a run of it).
+   */
+  stepFailureCodes: ReadonlyMap<string, StepFailurePartCode> = readStepFailurePartCodes(parts),
 ): ActivityStep[] {
   const steps: ActivityStep[] = [];
   parts.forEach((part, index) => {
@@ -199,8 +206,11 @@ export function readActivitySteps(
     if (typeof detail === 'string' && detail.trim() && allowDetail(toolName, status, source)) {
       step.detail = detail.trim();
       const resultStatus = isRecord(part.output) && typeof part.output.status === 'number' ? part.output.status : undefined;
+      // The server's named kind of its own errorText (any wording), else the English wording.
+      const named = source === 'error-text' && typeof part.toolCallId === 'string' ? stepFailureCodes.get(part.toolCallId) : undefined;
       const failures = status === 'error' || status === 'expected'
-        ? readStepFailures(step.detail, { source, toolName, ...(source === 'output' && resultStatus !== undefined ? { status: resultStatus } : {}) })
+        ? named ? [{ code: named }]
+          : readStepFailures(step.detail, { source, toolName, ...(source === 'output' && resultStatus !== undefined ? { status: resultStatus } : {}) })
         : undefined;
       if (failures) step.failures = failures;
     }

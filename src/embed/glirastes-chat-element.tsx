@@ -42,7 +42,7 @@ export type GlirastesChatEventName = keyof GlirastesChatEventMap;
 /** JS-only settings that do not fit attributes. Theme comes from the attribute. */
 export interface GlirastesChatElementConfig
   extends Omit<AiChatProviderConfig, 'theme' | 'themeScope'> {
-  headers?: Record<string, string> | (() => Record<string, string>);
+  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
   bodyExtras?: Record<string, unknown> | (() => Record<string, unknown>);
 }
 

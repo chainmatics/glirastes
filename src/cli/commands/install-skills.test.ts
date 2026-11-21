@@ -1,8 +1,10 @@
-import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { SDK_VERSION } from '../../runtime/sdk-version.js';
+import { readBaseline } from './upgrade/baseline.js';
 import { installSkills } from './install-skills.js';
 import {
   MANIFEST_RELATIVE_PATH,
@@ -20,6 +22,7 @@ const foundationSkills = [
   'describing-glirastes-tools',
   'building-glirastes-chat-ui',
   'curating-glirastes-chat-interactions',
+  'upgrading-glirastes',
 ] as const;
 const setupSkill = 'setting-up-glirastes';
 
@@ -229,7 +232,6 @@ describe('foundation agent skills', () => {
 
     expect(packageJson.files).toContain('skills');
     expect(packageJson.files).not.toContain('!dist/cli/commands');
-    expect(packageJson.files).toContain('!dist/cli/commands/check-upgrade.*');
   });
 
   it('names only React surfaces that actually exist in the chat UI skill', async () => {
@@ -386,5 +388,84 @@ describe('foundation agent skills', () => {
 
     expect(described.filter((entry) => !entry.described).map((e) => e.name))
       .toEqual([]);
+  });
+});
+
+describe('upgrade baseline and hook on install', () => {
+  it('fresh install writes baseline at SDK_VERSION', async () => {
+    const rootDir = await nextAppRoot();
+    await installSkills({ rootDir, host: 'claude', quiet: true });
+    expect((await readBaseline(rootDir))!.reviewedThrough).toBe(SDK_VERSION);
+  });
+
+  it('brings an outdated Glirastes block in AGENTS.md and CLAUDE.md up to date', async () => {
+    const rootDir = await nextAppRoot();
+    const old = '<!-- glirastes:tools -->\n## Glirastes tools\n\nOld text.\n<!-- /glirastes:tools -->';
+    await writeFile(join(rootDir, 'AGENTS.md'), `# Mine\n\n${old}\n`);
+    await writeFile(join(rootDir, 'CLAUDE.md'), '# No block here\n');
+    await installSkills({ rootDir, host: 'claude', quiet: true });
+    const agents = await readFile(join(rootDir, 'AGENTS.md'), 'utf8');
+    expect(agents.startsWith('# Mine\n\n')).toBe(true);
+    expect(agents).not.toContain('Old text.');
+    expect(agents).toContain('glirastes upgrade report');
+    expect(await readFile(join(rootDir, 'CLAUDE.md'), 'utf8')).toBe('# No block here\n');
+  });
+
+  it('leaves the Glirastes block alone on a dry run and a global install', async () => {
+    const rootDir = await nextAppRoot();
+    const old = '<!-- glirastes:tools -->\nOld text.\n<!-- /glirastes:tools -->\n';
+    await writeFile(join(rootDir, 'AGENTS.md'), old);
+    await installSkills({ rootDir, host: 'claude', quiet: true, dryRun: true });
+    await installSkills({ rootDir, host: 'claude', quiet: true, global: true, dryRun: true });
+    expect(await readFile(join(rootDir, 'AGENTS.md'), 'utf8')).toBe(old);
+  });
+
+  it('writes no baseline on a dry run', async () => {
+    const rootDir = await nextAppRoot();
+    await installSkills({ rootDir, host: 'claude', quiet: true, dryRun: true });
+    expect(await readBaseline(rootDir)).toBeUndefined();
+  });
+
+  it('seeds the baseline from a prerelease manifest version', async () => {
+    const rootDir = await nextAppRoot();
+    await mkdir(join(rootDir, '.glirastes'), { recursive: true });
+    await writeFile(
+      join(rootDir, '.glirastes/installed-skills.json'),
+      JSON.stringify({ schemaVersion: 1, sdkVersion: '0.19.0-rc.1', installs: [] }),
+    );
+    await installSkills({ rootDir, host: 'claude', quiet: true });
+    expect((await readBaseline(rootDir))!.reviewedThrough).toBe('0.19.0-rc.1');
+  });
+
+  it('an invalid manifest version warns and writes no baseline', async () => {
+    const rootDir = await nextAppRoot();
+    await mkdir(join(rootDir, '.glirastes'), { recursive: true });
+    await writeFile(
+      join(rootDir, '.glirastes/installed-skills.json'),
+      JSON.stringify({ schemaVersion: 1, sdkVersion: 'workspace:*', installs: [] }),
+    );
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await installSkills({ rootDir, host: 'claude', quiet: true });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]?.[0])).toContain('workspace:*');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await readBaseline(rootDir)).toBeUndefined();
+  });
+
+  it('a corrupt baseline warns once and does not abort the other hosts', async () => {
+    const rootDir = await nextAppRoot();
+    await mkdir(join(rootDir, '.glirastes'), { recursive: true });
+    await writeFile(join(rootDir, '.glirastes/sdk-baseline.json'), '<<<<<<< HEAD\n');
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await installSkills({ rootDir, hosts: ['claude', 'codex'], quiet: true });
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await readInstalledSkillsManifest(rootDir))!.installs.map((install) => install.host).sort()).toEqual(['claude', 'codex']);
   });
 });

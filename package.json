@@ -228,8 +228,6 @@
     "!dist/cjs/codegen/coverage.*",
     "!dist/codegen/scaffolder.*",
     "!dist/cjs/codegen/scaffolder.*",
-    "!dist/cli/commands/check-upgrade.*",
-    "!dist/cjs/cli/commands/check-upgrade.*",
     "!dist/cli/commands/test.*",
     "!dist/cjs/cli/commands/test.*",
     "!dist/cli/utils",
@@ -279,6 +277,8 @@
     "browser",
     "codegen",
     "skills",
+    "upgrade-notes",
+    "!upgrade-notes/api-surface.released.json",
     "docs/README.md",
     "docs/approval-subjects.md",
     "docs/chat-attachments.md",
@@ -306,7 +306,9 @@
     "build": "node scripts/generate-embed-styles.mjs --check && node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && cp src/react/pills.css dist/react/pills.css && cp src/react/pills.css dist/cjs/react/pills.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/ && cp src/codegen/tools/sources/fastapi-routes.py dist/codegen/tools/sources/",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "api-surface": "bun scripts/api-surface.ts --write",
+    "release:prepare": "bun scripts/prepare-release.ts"
   },
   "dependencies": {
     "ai": "^6.0.0",
@@ -412,6 +414,7 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "reflect-metadata": "^0.2.0",
+    "remark-gfm": "^4.0.1",
     "vitest": "^4.0.18",
     "ws": "^8.0.0",
     "zod-v3": "npm:zod@3.25.76"

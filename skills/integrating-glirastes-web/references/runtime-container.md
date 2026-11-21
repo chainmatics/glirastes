@@ -181,7 +181,7 @@ into a header the chat's transport sends (`headers: { 'x-app-language':
 user.language }`), named in `chat.requestLocaleHeader`; pass the same value as
 the chat's `language` so its built-in texts match. `chat.locales` adds or
 changes the runtime's own texts per language (`{"pl": {"closing": "...",
-"silentTurn": "..."}}`, keys of the SDK handler's `locales`; partial tables
+"silentTurn": "...", "streamError": "..."}}`, keys of the SDK handler's `locales`; partial tables
 fall back per key, an unknown key fails at start). The artifact carries the
 tool labels per language (`.glirastes/tools.json` `languages`, by default
 en, de and every declared language; local, never sent to the Platform), and

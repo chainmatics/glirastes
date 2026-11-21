@@ -26,19 +26,31 @@ import { CHAT_LANGUAGE_HEADER, chatLanguageOf } from '../../contracts/localized-
 import { shouldContinueChat } from '../utils/ui-outcome-continuation.js';
 import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
 
+import type { MaybePromise } from '../types.js';
+
+type HeadersSource = Record<string, string> | (() => MaybePromise<Record<string, string>>);
+
 /**
  * Headers of each chat request: the host's, plus the chat language
  * (`Content-Language`, one BCP-47 tag) unless the host sets that header itself.
  * @internal
  */
 export function chatRequestHeaders(
-  headers: Record<string, string> | (() => Record<string, string>) | undefined,
+  headers: HeadersSource | undefined,
   language: string | null,
-): Record<string, string> {
-  const resolved = !headers ? {} : typeof headers === 'function' ? headers() : headers;
+): MaybePromise<Record<string, string>> {
+  const source = !headers ? {} : typeof headers === 'function' ? headers() : headers;
   const tag = chatLanguageOf(language);
-  if (!tag || Object.keys(resolved).some((name) => name.toLowerCase() === CHAT_LANGUAGE_HEADER)) return resolved;
-  return { ...resolved, [CHAT_LANGUAGE_HEADER]: tag };
+  const withLanguage = (resolved: Record<string, string>): Record<string, string> => {
+    if (!tag || Object.keys(resolved).some((name) => name.toLowerCase() === CHAT_LANGUAGE_HEADER)) return resolved;
+    return { ...resolved, [CHAT_LANGUAGE_HEADER]: tag };
+  };
+  // A sync source stays sync; only an async one makes the result a promise.
+  return isPromiseLike(source) ? Promise.resolve(source).then(withLanguage) : withLanguage(source);
+}
+
+function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {
+  return typeof (value as Promise<T> | null)?.then === 'function';
 }
 
 /**
@@ -61,7 +73,9 @@ export function chatRequestBody(
   };
 }
 
-export interface UseVercelAiChatTransportOptions extends ChatTransportConfig {
+export interface UseVercelAiChatTransportOptions extends Omit<ChatTransportConfig, 'headers'> {
+  /** Static headers, or a (possibly async) function called per request. */
+  headers?: HeadersSource;
   /**
    * When true, automatically resumes generation after all pending
    * approval responses are provided. Default: true.

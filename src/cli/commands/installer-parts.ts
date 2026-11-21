@@ -27,20 +27,23 @@ export interface PartResolutionContext {
 
 /**
  * Skills each part contributes. The framework part is stack-dependent, so it
- * resolves through the detected stack rather than a fixed name.
+ * resolves through the detected stack rather than a fixed name. Every part
+ * carries the upgrade skill, so any install learns what a new SDK changes.
  */
+const UPGRADE_SKILL = 'upgrading-glirastes';
+
 const FRAMEWORK_SKILLS: Record<DetectedStack, ReadonlyArray<string>> = {
-  nextjs: ['integrating-glirastes-nextjs'],
-  web: ['integrating-glirastes-web'],
+  nextjs: ['integrating-glirastes-nextjs', UPGRADE_SKILL],
+  web: ['integrating-glirastes-web', UPGRADE_SKILL],
 };
 
 const PART_SKILLS: Record<
   Exclude<InstallerPart, 'framework'>,
   ReadonlyArray<string>
 > = {
-  'chat-ui': ['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions'],
-  tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools'],
-  setup: ['setting-up-glirastes', 'setting-up-glirastes-memory', 'migrating-to-glirastes'],
+  'chat-ui': ['building-glirastes-chat-ui', 'curating-glirastes-chat-interactions', UPGRADE_SKILL],
+  tools: ['maintaining-glirastes-tools', 'describing-glirastes-tools', UPGRADE_SKILL],
+  setup: ['setting-up-glirastes', 'setting-up-glirastes-memory', 'migrating-to-glirastes', UPGRADE_SKILL],
 };
 
 /** Dependency whose presence proves a stack, rather than a heuristic; Next.js wins. */
@@ -124,7 +127,8 @@ export const PART_LABELS: Record<InstallerPart, string> = {
 
 /**
  * Every skill of each part an install already has a skill from — the install's
- * selection as the current SDK defines it. Each framework stack counts as its
+ * selection as the current SDK defines it. A skill shared by several parts
+ * does not count as a sign of any of them. Each framework stack counts as its
  * own part, so a Next.js install never gains the web skill.
  */
 export function selectionOfInstalledSkills(
@@ -134,9 +138,11 @@ export function selectionOfInstalledSkills(
     ...Object.values(FRAMEWORK_SKILLS),
     ...Object.values(PART_SKILLS),
   ];
+  // A skill that several parts carry says nothing about which part was chosen.
+  const shared = (skill: string) => groups.filter((group) => group.includes(skill)).length > 1;
   const selection: string[] = [];
   for (const group of groups) {
-    if (!group.some((skill) => installed.includes(skill))) continue;
+    if (!group.some((skill) => !shared(skill) && installed.includes(skill))) continue;
     for (const skill of group) {
       if (!selection.includes(skill)) selection.push(skill);
     }
