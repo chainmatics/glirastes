@@ -51,7 +51,23 @@ describe('loadSherpa', () => {
     const importer = async () => {
       throw Object.assign(new Error("Cannot find module 'sherpa-onnx-node'\nRequire stack:\n- /app/x.js"), { code: 'MODULE_NOT_FOUND' });
     };
-    expect((await failure(loadSherpa({ importer, installedVersion: () => undefined, platform: darwin }))).code).toBe('peer_missing');
+    const error = await failure(loadSherpa({ importer, installedVersion: () => undefined, platform: darwin }));
+    expect(error.code).toBe('peer_missing');
+    expect(error.message).toBe('glirastes/server/stt-local needs the optional peer sherpa-onnx-node 2.0.1. Install it: npm install sherpa-onnx-node@2.0.1');
+  });
+
+  // webpack (Next.js without serverExternalPackages) replaces the variable import() with a stub
+  // that throws this, without a require stack, although the package is installed.
+  it('adds the bundler hint to a MODULE_NOT_FOUND without a require stack', async () => {
+    const importer = async () => {
+      throw Object.assign(new Error("Cannot find module 'sherpa-onnx-node'"), { code: 'MODULE_NOT_FOUND' });
+    };
+    const error = await failure(loadSherpa({ importer, installedVersion: () => undefined, platform: darwin }));
+    expect(error.code).toBe('peer_missing');
+    expect(error.message).toBe(
+      'glirastes/server/stt-local needs the optional peer sherpa-onnx-node 2.0.1. Install it: npm install sherpa-onnx-node@2.0.1. '
+      + "If it is installed, a bundler has inlined the import: in Next.js set serverExternalPackages: ['sherpa-onnx-node', 'glirastes']",
+    );
   });
 
   it.each([

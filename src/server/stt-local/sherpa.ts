@@ -65,9 +65,13 @@ async function load(options: LoadSherpaOptions): Promise<SherpaModule> {
     imported = await (options.importer ?? ((specifier: string) => import(specifier)))(SPECIFIER);
   } catch (error) {
     if (isPeerMissing(error)) {
+      // Node's own CJS error carries a require stack; webpack's stub for an
+      // unresolvable import() does not, and appears although the package is installed.
+      const bundled = (error as { code?: unknown }).code === 'MODULE_NOT_FOUND' && !(error as Error).message.includes('\n');
       throw new SttLocalError(
         'peer_missing',
-        `glirastes/server/stt-local needs the optional peer sherpa-onnx-node ${TESTED_SHERPA_VERSION}. Install it: npm install sherpa-onnx-node@${TESTED_SHERPA_VERSION}`,
+        `glirastes/server/stt-local needs the optional peer sherpa-onnx-node ${TESTED_SHERPA_VERSION}. Install it: npm install sherpa-onnx-node@${TESTED_SHERPA_VERSION}`
+          + (bundled ? ". If it is installed, a bundler has inlined the import: in Next.js set serverExternalPackages: ['sherpa-onnx-node', 'glirastes']" : ''),
         { cause: error },
       );
     }
