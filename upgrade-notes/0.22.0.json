@@ -1,0 +1,98 @@
+{
+  "version": "0.22.0",
+  "notes": [
+    {
+      "id": "node-http-bridge",
+      "kind": "optional",
+      "summary": "New glirastes/server/node: createNodeHandler bridges node:http-style servers (Express, Fastify, NestJS on Express) to the chat handler with bounded body reads, streaming with backpressure and abort on disconnect.",
+      "howTo": "Replace a hand-written IncomingMessage/ServerResponse adapter with createNodeHandler(handler, { maxBodyBytes }) from glirastes/server/node. Keep maxBodyBytes at least the handler's and raise express.json's 100 kB limit (or leave express.json off the route). Pass origin for an HTTPS server or when the API runs elsewhere; the Request URL never comes from Host, and x-forwarded-* headers are dropped unless trustForwardedHeaders is set. Tested on node:http and Express 5; Fastify and NestJS are documented recipes. See docs/node-servers.md.",
+      "skill": "integrating-glirastes-web#bridge-contract",
+      "affectedWhen": {
+        "symbols": [
+          "createAiChatHandler"
+        ],
+        "patterns": [
+          "getReader\\(\\)[\\s\\S]{0,800}\\.write\\("
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "createNodeHandler",
+          "toWebRequest",
+          "sendWebResponse"
+        ]
+      },
+      "surface": [
+        "glirastes/server/node#createNodeHandler",
+        "glirastes/server/node#toWebRequest",
+        "glirastes/server/node#sendWebResponse",
+        "glirastes/server/node#RequestBodyTooLargeError",
+        "glirastes/server/node#WebHandler",
+        "glirastes/server/node#NodeRequest",
+        "glirastes/server/node#NodeResponse",
+        "glirastes/server/node#NodeHandler",
+        "glirastes/server/node#NodeHandlerOptions.*",
+        "glirastes/server/node#ToWebRequestOptions.*",
+        "glirastes/server/node#SendWebResponseOptions.*"
+      ]
+    },
+    {
+      "id": "stt-local-transcribe",
+      "kind": "optional",
+      "summary": "Experimental glirastes/server/stt-local transcribes browser recordings in your own Node server (Parakeet TDT 0.6b v3 int8 via sherpa-onnx), through a new transcribe option on createRecordingTranscriptionHandler and the CLI command glirastes stt pull.",
+      "howTo": "createRecordingTranscriptionHandler now also takes { transcribe } instead of url: const stt = createLocalTranscriber() from glirastes/server/stt-local (ESM only), then createRecordingTranscriptionHandler({ authorize, transcribe: stt.transcribe }). In this mode the default timeout is 120 s, WAV that is not PCM16 mono 16 kHz answers 415, a full queue (TranscriptionUnavailableError) answers 503, the timeout 504, and a client disconnect 499 without onError. Install the optional peer exactly: npm install sherpa-onnx-node@2.0.1 (linux-x64 2.0.2 does not load on Debian bookworm). Run glirastes stt pull (at image build, into GLIRASTES_MODEL_DIR) to download the sha256-pinned models; nothing is downloaded at runtime. Plan about 2 GB of memory per process, glibc Linux (no Alpine) or macOS arm64, export const runtime = 'nodejs' and serverExternalPackages: ['sherpa-onnx-node', 'glirastes'] in next.config. checkLocalStt() is a model-free deploy readiness check. See docs/local-stt.md.",
+      "skill": "integrating-glirastes-nextjs#local-speech-recognition",
+      "affectedWhen": {
+        "symbols": [
+          "createRecordingTranscriptionHandler"
+        ]
+      },
+      "adoptedWhen": {
+        "imports": [
+          "glirastes/server/stt-local"
+        ]
+      },
+      "surface": [
+        "*#RecordingAudio.*",
+        "*#RecordingTranscriber",
+        "*#TranscriptionUnavailableError",
+        "*#LocalRecordingTranscriptionHandlerConfig.*",
+        "*#RecordingTranscriptionHandlerConfig.transcribe",
+        "glirastes/server/stt-local#createLocalTranscriber",
+        "glirastes/server/stt-local#checkLocalStt",
+        "glirastes/server/stt-local#LocalSttCheck.*",
+        "glirastes/server/stt-local#LocalTranscriber.*",
+        "glirastes/server/stt-local#LocalTranscriberOptions.*",
+        "glirastes/server/stt-local#resolveSttModelDir",
+        "glirastes/server/stt-local#SttLocalError",
+        "glirastes/server/stt-local#SttLocalErrorCode"
+      ]
+    },
+    {
+      "id": "tool-middleware",
+      "kind": "optional",
+      "summary": "New toolMiddleware option ((call, next) onion) around the execution of the app's own tools, after every identity, RBAC, approval, budget and revocation check; for logging, metrics, tenant context and error mapping.",
+      "howTo": "Move a wrapper around tool.execute in loadTools into toolMiddleware: [async (call, next) => ...] on createAiChatHandler (or toolsToAiTools). A throw is a tool error (onToolError, the standard error result), call next at most once, returning without next short-circuits (the result is still bounded), and call.input is a structured copy, so the tool always runs with its validated input; the input must be structured-cloneable. Approval subject lookups run their source tool through the same chain as a read call (readOnly true, the toolCallId of the approval they serve). The handler's built-ins (find_tools, read_result, clarification, plan, follow-ups, memory) bypass it. See docs/chat-route-security.md#tool-middleware.",
+      "skill": "integrating-glirastes-nextjs#callbacks-and-observability",
+      "affectedWhen": {
+        "symbols": [
+          "createAiChatHandler",
+          "toolsToAiTools"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "\\btoolMiddleware\\s*:"
+        ]
+      },
+      "surface": [
+        "*#AiChatHandlerConfig.toolMiddleware",
+        "*#AiChatHandlerFullConfig.toolMiddleware",
+        "*#ToolMiddleware",
+        "*#ToolMiddlewareCall.*",
+        "*#ToolMiddlewareNext",
+        "glirastes/server#ToolToAiToolOptions.toolMiddleware"
+      ]
+    }
+  ]
+}
