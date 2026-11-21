@@ -73,3 +73,129 @@ only when every request comes through a proxy that sets `x-forwarded-host`
 
 `executeTool` and routes built from `glirastes/runtime/ai-sdk` alone run a tool
 without these approval checks; give them only input your server has authorized.
+
+## Tool middleware
+
+`toolMiddleware` (on `createAiChatHandler` and `toolsToAiTools`) wraps the
+execution of the app's own tools, for logging, metrics, tenant context or
+error mapping. It runs inside every guard. One tool call, outermost first:
+
+1. AI SDK `needsApproval` and the approval subject lookup.
+2. The handler's guard: abort check, approval gate, denied-call handling,
+   managed `beforeToolCall` (pinned snapshot, freshly resolved principal,
+   budgets, revocations), input parsing, tool timeout.
+3. PII shield rehydration, when configured.
+4. Abort check and result-store owner capture.
+5. **`toolMiddleware[0]` → ... → `toolMiddleware[n-1]` → the tool.**
+6. Output fields, the result store or truncation, uiAction normalization,
+   audit `tool.executed`.
+7. `afterToolCall` (budget fingerprint over the returned result) and PII
+   anonymization.
+
+A call that a guard stops (role, policy, revocation, budget, missing or used
+approval) never reaches a middleware.
+
+Each middleware is `(call, next) => result`. `call` carries `toolName`,
+`toolId`, `toolCallId` (the AI SDK id; undefined for a direct command),
+`input`, `method` (upper case, endpoint tools only), `readOnly`, `context` and
+`abortSignal`. `call.input` is a structured clone of the validated input: the
+tool always runs with the original, so an approval stays bound to exactly what
+executes. The input must be structured-cloneable while `toolMiddleware` is
+set. `next()` takes no arguments and runs the rest of the chain once; a second
+call, or a call after the tool call ended, rejects without running anything.
+Returning a value without calling `next()` short-circuits; that value still
+goes through step 6. A throw before or after `next()` is a tool error: audit
+`tool.failed`, `onToolError(toolId, error)` and the standard
+`{ error: 'Error in <toolName>: <message>', hint }` result, exactly as a
+throwing tool. The handler's built-ins (`find_tools`, `read_result`,
+clarification, plan, follow-ups, memory) bypass the chain. Tool arguments and
+results stay in your process; nothing here is sent to the Platform.
+
+```ts
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const toolCall = new AsyncLocalStorage<{ toolCallId?: string; tenantId: string }>();
+
+createAiChatHandler({
+  // ...
+  toolMiddleware: [
+    // Timing and logging, without arguments or results in the log line.
+    async (call, next) => {
+      const started = Date.now();
+      try {
+        return await next();
+      } finally {
+        logger.info({ tool: call.toolName, ms: Date.now() - started });
+      }
+    },
+    // Tenant context for code the tool calls (endpointCaller, repositories).
+    (call, next) => toolCall.run({ toolCallId: call.toolCallId, tenantId: currentTenant() }, next),
+    // Error mapping: a domain error becomes a short message for the model.
+    async (_call, next) => {
+      try {
+        return await next();
+      } catch (error) {
+        if (error instanceof TaskLockedError) throw new Error('The task is locked; ask the user.');
+        throw error;
+      }
+    },
+  ],
+});
+```
+
+## Running more than one instance
+
+The default approval store lives in the memory of one process. Behind a load
+balancer, an approved history replayed to another instance runs there once
+more, as long as the approval is valid: `approvalMaxAgeMs` (15 minutes by
+default) plus 60 seconds of allowed clock skew. A restart clears the memory
+store and opens the same window. With more than one instance, or restarts
+within that window:
+
+- give every instance the same `GLIRASTES_APPROVAL_SECRET`, and
+- pass one shared `approvalStore`. Its `consume(approvalId, expiresAtMs, { scope })`
+  returns `true` exactly once per id.
+
+PostgreSQL:
+
+```sql
+create table glirastes_consumed_approvals (
+  approval_id text primary key,
+  expires_at timestamptz not null
+);
+```
+
+```ts
+const approvalStore: ApprovalStore = {
+  async consume(approvalId, expiresAtMs) {
+    const result = await pool.query(
+      `insert into glirastes_consumed_approvals (approval_id, expires_at)
+       values ($1, to_timestamp($2 / 1000.0) + interval '60 seconds')
+       on conflict (approval_id) do nothing`,
+      [approvalId, expiresAtMs],
+    );
+    return result.rowCount === 1;
+  },
+};
+// periodically: delete from glirastes_consumed_approvals where expires_at < now()
+```
+
+Redis:
+
+```ts
+const approvalStore: ApprovalStore = {
+  async consume(approvalId, expiresAtMs) {
+    const ttl = Math.max(1, expiresAtMs - Date.now() + 60_000);
+    // Redis 6.2 or later can use PXAT expiresAtMs + 60_000 instead.
+    return (await redis.set(`glirastes:approval:${approvalId}`, '1', { NX: true, PX: ttl })) === 'OK';
+  },
+};
+```
+
+Let a store error throw: the handler then refuses the approval
+(`approval_store_unavailable`), which fails closed. Never return `true` on an
+error. The `scope` argument is for quotas only; single use is by id. Make
+backend writes idempotent anyway, for example with a middleware that puts
+`call.toolCallId` into an `AsyncLocalStorage` and an `endpointCaller` that
+sends it as `Idempotency-Key`. The configured runtime container already
+persists approvals in PostgreSQL; that store stays internal to the container.
