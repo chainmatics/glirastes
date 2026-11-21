@@ -1,0 +1,142 @@
+name: Local STT transcription (stage 2)
+
+# Stage 2 of the local STT smoke test, with the pinned Parakeet model: the
+# packed tarball in a scratch consumer, `glirastes stt pull`, then the German
+# fixture, a > 20 s clip (VAD and chunking) and a worker restart against the
+# real addon. Not a release gate; stage 1 (stt-local-addon.yml) is.
+# The weekly run on main keeps the model cache warm, because PR caches are not shared.
+
+on:
+  pull_request:
+    paths:
+      - 'src/server/stt-local/**'
+      - 'src/cli/commands/stt/**'
+      - 'src/server/adapters/nextjs/recording-*.ts'
+      - 'scripts/stt-local-*.mjs'
+      - 'scripts/stt-local-consumer.sh'
+      - 'scripts/generate-subpath-shims.mjs'
+      - 'tsconfig*.json'
+      - 'tests/fixtures/stt/**'
+      - '.github/workflows/stt-local-*.yml'
+      - 'package.json'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stt-local-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  transcribe:
+    name: Transcribe ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64 bookworm
+            runner: ubuntu-latest
+            image: node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+          - name: linux-arm64 bookworm
+            runner: ubuntu-24.04-arm
+            image: node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+          - name: darwin-arm64
+            runner: macos-14
+            image: ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Build and pack
+        run: |
+          bun run build
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP"/glirastes-*.tgz "$RUNNER_TEMP/glirastes.tgz"
+          echo "SHERPA_VERSION=$(node -p "require('./package.json').peerDependencies['sherpa-onnx-node']")" >> "$GITHUB_ENV"
+      # The key names the pinned Parakeet and Silero VAD revisions (src/server/stt-local/models.ts).
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/models
+          key: stt-models-ed5d7456-9e2449e1
+      - name: Pull models and transcribe (container)
+        if: matrix.image != ''
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE:/w:ro" -v "$RUNNER_TEMP:/t" "$IMAGE" \
+            sh -c "sh /w/scripts/stt-local-consumer.sh /t/glirastes.tgz /t/consumer '$SHERPA_VERSION' && cd /t/consumer && npx glirastes stt pull --dir /t/models && node stt-local-smoke.mjs /w/tests/fixtures/stt/de-thorsten.wav /t/models"
+      - name: Pull models and transcribe (host)
+        if: matrix.image == ''
+        run: |
+          sh scripts/stt-local-consumer.sh "$RUNNER_TEMP/glirastes.tgz" "$RUNNER_TEMP/consumer" "$SHERPA_VERSION"
+          cd "$RUNNER_TEMP/consumer"
+          npx glirastes stt pull --dir "$RUNNER_TEMP/models"
+          node stt-local-smoke.mjs "$GITHUB_WORKSPACE/tests/fixtures/stt/de-thorsten.wav" "$RUNNER_TEMP/models"
+
+  # The newest sherpa-onnx-node against the pinned model. Informational: a green
+  # run is the signal to lift the pin, after the bump procedure in docs/local-stt.md.
+  latest:
+    name: Latest sherpa-onnx-node ${{ matrix.name }}
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64 bookworm
+            runner: ubuntu-latest
+          - name: linux-arm64 bookworm
+            runner: ubuntu-24.04-arm
+    env:
+      IMAGE: node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+      SHERPA_VERSION: latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Build and pack
+        run: |
+          bun run build
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP"/glirastes-*.tgz "$RUNNER_TEMP/glirastes.tgz"
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/models
+          key: stt-models-ed5d7456-9e2449e1
+      - name: Addon, pull and transcribe with sherpa-onnx-node@latest
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE:/w:ro" -v "$RUNNER_TEMP:/t" "$IMAGE" \
+            sh -c "sh /w/scripts/stt-local-consumer.sh /t/glirastes.tgz /t/consumer '$SHERPA_VERSION' && cd /t/consumer && node stt-local-addon-smoke.mjs && npx glirastes stt pull --dir /t/models && node stt-local-smoke.mjs /w/tests/fixtures/stt/de-thorsten.wav /t/models"

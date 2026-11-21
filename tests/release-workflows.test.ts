@@ -117,7 +117,12 @@ describe('release workflows', () => {
     ]);
     // The image is pushed inside runtime-container, so it must wait for the preflight too.
     expect(jobNeeds(workflow, 'runtime-container')).toEqual(['release-preflight']);
-    expect(jobNeeds(workflow, 'publish')).toEqual(['release-preflight', 'runtime-container']);
+    // Local STT stage 1 is a release gate as well; stage 2 (the model) is not.
+    expect(jobNeeds(workflow, 'stt-local-addon')).toEqual(['release-preflight']);
+    expect(workflow).toContain('uses: ./.github/workflows/stt-local-addon.yml');
+    expect(jobNeeds(workflow, 'publish')).toEqual(['release-preflight', 'runtime-container', 'stt-local-addon']);
+    expect(workflow).toContain("needs.stt-local-addon.result == 'success'");
+    expect(workflow).not.toContain('stt-local-smoke.yml');
     const step = jobStep(workflow, 'release-preflight', 'Verify upgrade notes are released for this version');
     expect(step).toContain('ls upgrade-notes/unreleased/*.json');
     expect(step).toContain('[ ! -f "upgrade-notes/$PKG_VERSION.json" ]');

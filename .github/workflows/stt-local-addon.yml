@@ -1,0 +1,79 @@
+name: Local STT addon (stage 1)
+
+# Stage 1 of the local STT smoke test, without a model: the packed tarball in a
+# scratch consumer, sherpa-onnx-node at the pinned peer version, checkLocalStt()
+# (platform check, main-thread addon, worker probe, worker restart, probe).
+# Release gate: publish.yml calls this workflow before npm publish.
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stt-local-addon-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  addon:
+    name: Addon ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64 bookworm
+            runner: ubuntu-latest
+            image: node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+            args: ''
+          - name: linux-arm64 bookworm
+            runner: ubuntu-24.04-arm
+            image: node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+            args: ''
+          - name: darwin-arm64
+            runner: macos-14
+            image: ''
+            args: ''
+          - name: linux-x64 alpine (refused)
+            runner: ubuntu-latest
+            image: node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+            args: --expect-unsupported
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Build and pack
+        run: |
+          bun run build
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP"/glirastes-*.tgz "$RUNNER_TEMP/glirastes.tgz"
+          echo "SHERPA_VERSION=$(node -p "require('./package.json').peerDependencies['sherpa-onnx-node']")" >> "$GITHUB_ENV"
+      - name: Consumer and addon smoke (container)
+        if: matrix.image != ''
+        env:
+          IMAGE: ${{ matrix.image }}
+          ARGS: ${{ matrix.args }}
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE:/w:ro" -v "$RUNNER_TEMP:/t" "$IMAGE" \
+            sh -c "sh /w/scripts/stt-local-consumer.sh /t/glirastes.tgz /t/consumer '$SHERPA_VERSION' && cd /t/consumer && node stt-local-addon-smoke.mjs $ARGS"
+      - name: Consumer and addon smoke (host)
+        if: matrix.image == ''
+        run: |
+          sh scripts/stt-local-consumer.sh "$RUNNER_TEMP/glirastes.tgz" "$RUNNER_TEMP/consumer" "$SHERPA_VERSION"
+          cd "$RUNNER_TEMP/consumer" && node stt-local-addon-smoke.mjs ${{ matrix.args }}
