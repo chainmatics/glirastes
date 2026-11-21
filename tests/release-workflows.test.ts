@@ -178,4 +178,10 @@ describe('local STT smoke workflows', () => {
     expect(consumer).toMatch(/installed .* != requested|is not the requested/);
   });
 
+  it('runs stage 2 on every source the pull and the handler path load', () => {
+    const paths = smoke.split('paths:')[1]!.split('workflow_dispatch')[0]!;
+    for (const path of ['src/contracts/url.ts', 'src/diagnostics/**', 'src/server/adapters/nextjs/index.ts', 'src/cli/index.ts']) {
+      expect(paths).toContain(`'${path}'`);
+    }
+  });
 });
