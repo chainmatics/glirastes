@@ -54,6 +54,7 @@ import {
 import type { ResultStore } from './result-store.js';
 import { isResultReader } from './read-result-tool.js';
 import { cleanToolResult } from './clean-tool-result.js';
+import { assertToolMiddleware, composeToolMiddleware, type ToolMiddleware } from './tool-middleware.js';
 export {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -948,6 +949,21 @@ export interface ToolToAiToolOptions {
    * `uiAction` keeps `{ success: true, message }`.
    */
   uiToolResultShape?: UiToolResultShape;
+  /**
+   * Wraps only the execution of each tool call: `(call, next)` onion, the
+   * first entry outermost. Every guard (approval gate, managed
+   * `beforeToolCall` with principal, budget and revocation checks, input
+   * validation, tool timeout, PII rehydration) has already run before the
+   * chain starts, and output bounds, truncation, the result store and
+   * uiAction normalization run on whatever it returns, so a middleware
+   * cannot skip or loosen them. `call.input` is a structured clone and
+   * `next` takes no arguments: the tool always runs with its validated
+   * input. A throw is a tool error (`tool.failed`, `onError`, the standard
+   * error result); `next` runs at most once; returning without `next`
+   * short-circuits. The input must be structured-cloneable when
+   * `toolMiddleware` is set. Without it (or with `[]`) nothing changes.
+   */
+  toolMiddleware?: ReadonlyArray<ToolMiddleware>;
 }
 
 /** See `ToolToAiToolOptions.uiToolResultShape`. */
@@ -1057,7 +1073,7 @@ export function toolToAiTool(
           return needed;
         }
       : undefined,
-    execute: async (input: unknown, executionOptions?: { abortSignal?: AbortSignal }) => {
+    execute: async (input: unknown, executionOptions?: { abortSignal?: AbortSignal; toolCallId?: string }) => {
       const signals = [context.abortSignal, executionOptions?.abortSignal].filter((value): value is AbortSignal => Boolean(value));
       const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
       signal?.throwIfAborted();
@@ -1073,7 +1089,16 @@ export function toolToAiTool(
         // A handle belongs to the principal the tool runs for: captured before it runs.
         const store = options?.resultStore;
         const capturedOwner = store && !isResultReader(tool) ? await store.captureOwner() : undefined;
-        const result = await tool.execute(input, executionContext);
+        // Guards have passed; the app's middleware wraps only the execution.
+        const middleware = options?.toolMiddleware;
+        const result = middleware && middleware.length > 0
+          ? await composeToolMiddleware(middleware, {
+              toolName: name, toolId: tool.id,
+              toolCallId: typeof executionOptions?.toolCallId === 'string' ? executionOptions.toolCallId : undefined,
+              input: structuredClone(input), method, readOnly,
+              context: executionContext, abortSignal: signal,
+            }, async () => tool.execute(input, executionContext))
+          : await tool.execute(input, executionContext);
 
         // Audit: tool executed successfully
         options?.onAudit?.({
@@ -1214,6 +1239,7 @@ export function toolsToAiTools(
   context: ToolContext,
   options?: ToolToAiToolOptions,
 ): Record<string, ReturnType<typeof toolToAiTool>> {
+  assertToolMiddleware(options?.toolMiddleware);
   const resolvedOptions = withTelemetryForwarding(options);
   const tools: Record<string, ReturnType<typeof toolToAiTool>> = {};
 
