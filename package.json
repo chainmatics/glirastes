@@ -153,6 +153,16 @@
         "default": "./dist/cjs/server/adapters/nextjs/index.js"
       }
     },
+    "./server/node": {
+      "import": {
+        "types": "./dist/server/node/index.d.ts",
+        "default": "./dist/server/node/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/node/index.d.ts",
+        "default": "./dist/cjs/server/node/index.js"
+      }
+    },
     "./server/testing": {
       "types": "./dist/server/testing/index.d.ts",
       "default": "./dist/server/testing/index.js"

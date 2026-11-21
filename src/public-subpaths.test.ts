@@ -17,6 +17,7 @@ describe('public foundation subpaths', () => {
     ],
     ['framework-neutral chat embed', './embed', './dist/embed/index.js'],
     ['framework-neutral UI bridge', './browser', './dist/browser/index.js'],
+    ['node:http bridge', './server/node', './dist/server/node/index.js'],
   ])('exports the independently importable %s surface', async (
     _label,
     subpath,
@@ -32,6 +33,22 @@ describe('public foundation subpaths', () => {
     expect(configured).toBeDefined();
     expect(configured?.default ?? configured?.import?.default)
       .toBe(expectedDefault);
+  });
+
+  it('keeps glirastes/server/node free of Platform and engine imports', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const dir = new URL('./server/node/', import.meta.url);
+    const files = (await readdir(dir)).filter(
+      (name) => name.endsWith('.ts') && !name.endsWith('.test.ts'),
+    );
+    expect(files).toContain('index.ts');
+    for (const name of files) {
+      const source = await readFile(new URL(name, dir), 'utf8');
+      expect(source, name).not.toMatch(/from ['"]\.\.\/\.\.\/(?:sync|runtime-service)\//);
+      expect(source, name).not.toMatch(/lancer/);
+      expect(source, name).not.toMatch(/from ['"]ai['"]/);
+      expect(source, name).not.toMatch(/console\./);
+    }
   });
 
   it('packages accepted skills without exposing deferred adapters', async () => {

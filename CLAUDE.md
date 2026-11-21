@@ -121,7 +121,7 @@ The authoritative list is `package.json#exports`; `src/public-subpaths.test.ts`
 enforces it. The current Foundation package exposes:
 
 `glirastes` · `/contracts` · `/runtime` · `/runtime/ai-sdk` · `/ai-sdk` ·
-`/stt` · `/sync` · `/server` · `/server/http` · `/server/nextjs` · `/adapter/nextjs` ·
+`/stt` · `/sync` · `/server` · `/server/http` · `/server/node` · `/server/nextjs` · `/adapter/nextjs` ·
 `/server/testing` · `/react` · `/react/vercel` · `/react/styles.css` · `/react/pills.css` · `/embed` ·
 `/browser` · `/codegen`
 

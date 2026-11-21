@@ -33,6 +33,7 @@ const SHIMS = [
   ['adapter/nextjs', 'server/adapters/nextjs'],
   ['adapter/nestjs', 'server/adapters/nestjs'],
   ['server/testing', 'server/testing'],
+  ['server/node', 'server/node'],
   ['react', 'react'],
   ['react/vercel', 'react/transports/vercel'],
   ['react/langgraph', 'react/transports/langgraph'],
