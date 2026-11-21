@@ -10,6 +10,7 @@
 //
 // Each shim contains a tiny package.json pointing at the appropriate
 // dist/-output (CJS for `main`, ESM for `module`, the ESM types as `types`).
+// ESM-only subpaths (no dist/cjs build) point `main` at the ESM file too.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -18,7 +19,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /**
- * Each entry: [subpath as the consumer imports it, dist directory name].
+ * Each entry: [subpath as the consumer imports it, dist directory name, options?].
+ * `{ esmOnly: true }`: the subpath has no CommonJS build.
  * Subpath segments determine how many `../` we need to climb back to root.
  */
 const SHIMS = [
@@ -34,6 +36,7 @@ const SHIMS = [
   ['adapter/nestjs', 'server/adapters/nestjs'],
   ['server/testing', 'server/testing'],
   ['server/node', 'server/node'],
+  ['server/stt-local', 'server/stt-local', { esmOnly: true }],
   ['react', 'react'],
   ['react/vercel', 'react/transports/vercel'],
   ['react/langgraph', 'react/transports/langgraph'],
@@ -43,13 +46,13 @@ const SHIMS = [
   ['openapi', 'openapi'],
 ];
 
-for (const [subpath, distRel] of SHIMS) {
+for (const [subpath, distRel, options = {}] of SHIMS) {
   const depth = subpath.split('/').length;
   const up = '../'.repeat(depth);
   const dirPath = `${ROOT}/${subpath}`;
 
   const pkg = {
-    main: `${up}dist/cjs/${distRel}/index.js`,
+    main: options.esmOnly ? `${up}dist/${distRel}/index.js` : `${up}dist/cjs/${distRel}/index.js`,
     module: `${up}dist/${distRel}/index.js`,
     types: `${up}dist/${distRel}/index.d.ts`,
   };

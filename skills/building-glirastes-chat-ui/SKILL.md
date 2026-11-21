@@ -353,8 +353,8 @@ unmount release the microphone as well. `voice.adapter` plugs in another provide
 `glirastes/stt`; the Deepgram worklet file must be served, see [speech worklet](references/hooks-and-building-blocks.md#speech-worklet)); keep its identity stable.
 
 A finished recording (`RecordedSttAdapter`, `audio/wav` to
-`/api/ai/speech-recognize`) needs one route; the app's transcription service
-(any `POST /v1/audio/transcriptions` server) stays on the server:
+`/api/ai/speech-recognize`) needs one route to the app's transcription service,
+or to [local speech recognition](references/local-speech.md) in its own server:
 
 ```ts
 // src/app/api/ai/speech-recognize/route.ts
