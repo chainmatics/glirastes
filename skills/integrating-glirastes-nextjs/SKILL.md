@@ -193,6 +193,37 @@ second, hand-maintained catalogue.
    Connecting is optional and only in Platform mode (`setting-up-glirastes`):
    `glirastes connect`, then `glirastes sync` uploads the technical result.
 
+### Local speech recognition
+
+Experimental, only when the app asks for transcription inside its own Node
+server instead of a transcription service (`docs/local-stt.md`):
+
+1. `npm install sherpa-onnx-node@2.0.1`, exactly this version: linux-x64 2.0.2
+   does not load on Debian bookworm. glibc Linux (no Alpine) or macOS arm64.
+2. `glirastes stt pull` downloads the five sha256-pinned model files (670 MB)
+   into `GLIRASTES_MODEL_DIR` (default `~/.cache/glirastes/models`); in a
+   container run it at image build. Nothing is downloaded at runtime.
+3. The recording route passes `transcribe` instead of `url`:
+
+   ```ts
+   // src/app/api/ai/speech-recognize/route.ts
+   import { createRecordingTranscriptionHandler } from 'glirastes/server/nextjs';
+   import { createLocalTranscriber } from 'glirastes/server/stt-local';
+
+   export const runtime = 'nodejs';
+   const stt = createLocalTranscriber();
+   export const POST = createRecordingTranscriptionHandler({
+     authorize: async (request) => Boolean(await resolvePrincipal(request)),
+     transcribe: stt.transcribe,
+   });
+   ```
+
+4. `next.config.ts`: `serverExternalPackages: ['sherpa-onnx-node', 'glirastes']`,
+   both; without `glirastes` the bundled import fails as `peer_missing`. Call `stt.warmup()` from `instrumentation.ts` so the first request does not
+   wait for the model; plan 2 GB of memory per process.
+5. `checkLocalStt()` is the model-free deploy readiness check. A full queue
+   answers 503, a WAV that is not PCM16 mono 16 kHz answers 415.
+
 ## Commands
 
 ```bash
@@ -202,6 +233,7 @@ glirastes tools status
 glirastes tools check
 glirastes tools check --integrity-only
 glirastes doctor
+glirastes stt pull
 ```
 
 ## Verification

@@ -80,6 +80,15 @@ Version 0.21.0 is published on npm and as the public Linux amd64 image
 gates and the separate embedded Get It Done production smoke test. Publication
 and a successful embedded pilot do not certify a customer's container deployment.
 
+## Experimental
+
+Shipped, tested in CI, without a stability promise: options, defaults and the
+pinned peer version may change in a minor release, with an upgrade note.
+
+| Feature | Platforms | Evidence | Limits |
+| --- | --- | --- | --- |
+| Local STT (`glirastes/server/stt-local`) | linux-x64 (glibc 2.32+), linux-arm64, darwin-arm64; musl/Alpine refused | `.github/workflows/stt-local-addon.yml` (release gate: packed tarball, addon, worker restart), `.github/workflows/stt-local-smoke.yml` (real model, German fixture, > 20 s clip; weekly, not a gate) | `sherpa-onnx-node` pinned to 2.0.1; one worker per process, queue 4; ~2 GB memory; Next.js needs `serverExternalPackages`; see [local STT](local-stt.md) |
+
 ## Browser frontend references
 
 `examples/frontend-frameworks` contains actual Angular 21, SvelteKit 2/Svelte 5

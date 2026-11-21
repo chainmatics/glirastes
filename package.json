@@ -163,6 +163,12 @@
         "default": "./dist/cjs/server/node/index.js"
       }
     },
+    "./server/stt-local": {
+      "import": {
+        "types": "./dist/server/stt-local/index.d.ts",
+        "default": "./dist/server/stt-local/index.js"
+      }
+    },
     "./server/testing": {
       "types": "./dist/server/testing/index.d.ts",
       "default": "./dist/server/testing/index.js"
@@ -298,6 +304,7 @@
     "docs/concepts.md",
     "docs/entity-identity.md",
     "docs/history-measurement.md",
+    "docs/local-stt.md",
     "docs/managed-runtime-sync.md",
     "docs/node-servers.md",
     "docs/runtime-container.md",
@@ -346,7 +353,8 @@
     "class-transformer": ">=0.5 <1",
     "class-validator": ">=0.14 <1",
     "reflect-metadata": ">=0.2 <1",
-    "vitest": ">=2.0.0"
+    "vitest": ">=2.0.0",
+    "sherpa-onnx-node": "2.0.1"
   },
   "peerDependenciesMeta": {
     "@ai-sdk/openai": {
@@ -395,6 +403,9 @@
       "optional": true
     },
     "vitest": {
+      "optional": true
+    },
+    "sherpa-onnx-node": {
       "optional": true
     }
   },

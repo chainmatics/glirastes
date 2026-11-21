@@ -54,6 +54,10 @@ export {
 export {
   createRecordingTranscriptionHandler,
   DEFAULT_RECORDING_LANGUAGES,
+  TranscriptionUnavailableError,
+  type LocalRecordingTranscriptionHandlerConfig,
+  type RecordingAudio,
+  type RecordingTranscriber,
   type RecordingTranscriptionHandlerConfig,
 } from './recording-transcription-handler.js';
 export {

@@ -50,6 +50,7 @@ import { runAgentSetup, type AgentSetupDependencies } from './commands/agent-set
 import { writeCiWorkflow } from './commands/ci-workflow.js';
 import { runUpgradeCommand } from './commands/upgrade/index.js';
 import { runToolsCommand, type ToolsCommandDependencies } from './commands/tools/index.js';
+import { runSttCommand, type SttPullDependencies } from './commands/stt/index.js';
 
 type CommandName =
   | 'init'
@@ -62,6 +63,7 @@ type CommandName =
   | 'validate'
   | 'build'
   | 'tools'
+  | 'stt'
   | 'upgrade';
 
 export interface CliDependencies {
@@ -70,6 +72,7 @@ export interface CliDependencies {
   connect?: ConnectCommandDependencies;
   sync?: SyncCommandDependencies;
   tools?: ToolsCommandDependencies;
+  stt?: SttPullDependencies;
 }
 
 /** `--flag value` or `--flag=value`. */
@@ -164,7 +167,9 @@ export const CLI_USAGE =
   + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify|enrich> [options]\n'
   + '         derive chat tools from the code, check them, show them and print agent work lists\n'
   + '       glirastes upgrade <report|ack> [options]\n'
-  + '         see what changed in the SDK since this app was last reviewed, acknowledge the review\n';
+  + '         see what changed in the SDK since this app was last reviewed, acknowledge the review\n'
+  + '       glirastes stt pull [--dir <path>] [--mirror <url>] [--json]\n'
+  + '         download the sha256-pinned local speech models for glirastes/server/stt-local\n';
 
 const HELP_FLAGS = new Set(['--help', '-h', 'help']);
 
@@ -206,6 +211,7 @@ function parseCommand(args: string[]): {
     && command !== 'validate'
     && command !== 'build'
     && command !== 'tools'
+    && command !== 'stt'
     && command !== 'upgrade'
   ) {
     throw new FoundationDiagnosticError({
@@ -799,6 +805,11 @@ export async function runCli(
   }
   if (command === 'tools') {
     const exitCode = await runToolsCommand(rest, dependencies.tools);
+    if (exitCode !== 0) process.exitCode = exitCode;
+    return;
+  }
+  if (command === 'stt') {
+    const exitCode = await runSttCommand(rest, dependencies.stt);
     if (exitCode !== 0) process.exitCode = exitCode;
     return;
   }

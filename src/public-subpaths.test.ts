@@ -18,6 +18,7 @@ describe('public foundation subpaths', () => {
     ['framework-neutral chat embed', './embed', './dist/embed/index.js'],
     ['framework-neutral UI bridge', './browser', './dist/browser/index.js'],
     ['node:http bridge', './server/node', './dist/server/node/index.js'],
+    ['local STT', './server/stt-local', './dist/server/stt-local/index.js'],
   ])('exports the independently importable %s surface', async (
     _label,
     subpath,
@@ -33,6 +34,34 @@ describe('public foundation subpaths', () => {
     expect(configured).toBeDefined();
     expect(configured?.default ?? configured?.import?.default)
       .toBe(expectedDefault);
+  });
+
+  it('ships local STT ESM only with an exactly pinned optional peer', async () => {
+    const [packageJson, cjsConfig, serverSource, shims] = await Promise.all([
+      readFile(new URL('../package.json', import.meta.url), 'utf8').then((text) => JSON.parse(text) as {
+        exports: Record<string, { import?: unknown; require?: unknown }>;
+        peerDependencies: Record<string, string>;
+        peerDependenciesMeta: Record<string, { optional?: boolean }>;
+        devDependencies?: Record<string, string>;
+        dependencies?: Record<string, string>;
+        files: string[];
+      }),
+      readFile(new URL('../tsconfig.cjs.json', import.meta.url), 'utf8').then((text) => JSON.parse(text) as { exclude: string[] }),
+      readFile(new URL('./server/index.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../scripts/generate-subpath-shims.mjs', import.meta.url), 'utf8'),
+    ]);
+    expect(packageJson.exports['./server/stt-local']).toEqual({
+      import: { types: './dist/server/stt-local/index.d.ts', default: './dist/server/stt-local/index.js' },
+    });
+    expect(packageJson.exports['./server/stt-local']!.require).toBeUndefined();
+    expect(packageJson.peerDependencies['sherpa-onnx-node']).toBe('2.0.1');
+    expect(packageJson.peerDependenciesMeta['sherpa-onnx-node']!.optional).toBe(true);
+    expect(packageJson.devDependencies?.['sherpa-onnx-node']).toBeUndefined();
+    expect(packageJson.dependencies?.['sherpa-onnx-node']).toBeUndefined();
+    expect(packageJson.files).toContain('docs/local-stt.md');
+    expect(cjsConfig.exclude).toContain('src/server/stt-local/**');
+    expect(serverSource).not.toContain('stt-local');
+    expect(shims).toContain("['server/stt-local', 'server/stt-local', { esmOnly: true }]");
   });
 
   it('keeps glirastes/server/node free of Platform and engine imports', async () => {
