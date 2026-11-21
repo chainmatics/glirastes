@@ -1,0 +1,21 @@
+{
+  "id": "tool-middleware",
+  "kind": "optional",
+  "summary": "New toolMiddleware option ((call, next) onion) around the execution of the app's own tools, after every identity, RBAC, approval, budget and revocation check; for logging, metrics, tenant context and error mapping.",
+  "howTo": "Move a wrapper around tool.execute in loadTools into toolMiddleware: [async (call, next) => ...] on createAiChatHandler (or toolsToAiTools). A throw is a tool error (onToolError, the standard error result), call next at most once, returning without next short-circuits (the result is still bounded), and call.input is a structured copy, so the tool always runs with its validated input; the input must be structured-cloneable. The handler's built-ins (find_tools, read_result, clarification, plan, follow-ups, memory) bypass it. See docs/chat-route-security.md#tool-middleware.",
+  "skill": "integrating-glirastes-nextjs#callbacks-and-observability",
+  "affectedWhen": {
+    "symbols": ["createAiChatHandler", "toolsToAiTools"]
+  },
+  "adoptedWhen": {
+    "patterns": ["\\btoolMiddleware\\s*:"]
+  },
+  "surface": [
+    "*#AiChatHandlerConfig.toolMiddleware",
+    "*#AiChatHandlerFullConfig.toolMiddleware",
+    "*#ToolMiddleware",
+    "*#ToolMiddlewareCall.*",
+    "*#ToolMiddlewareNext",
+    "glirastes/server#ToolToAiToolOptions.toolMiddleware"
+  ]
+}
