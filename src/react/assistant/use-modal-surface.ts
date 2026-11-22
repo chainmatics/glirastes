@@ -44,7 +44,7 @@ export function focusableIn(surface: HTMLElement): HTMLElement[] {
  * nobody else consumed. Elements added to <body> later (portaled dialogs)
  * and elements marked `data-cm-keep-interactive` are left alone.
  */
-export function useModalSurface(ref: RefObject<HTMLElement | null>, options: { active: boolean; onEscape(): void }): void {
+export function useModalSurface(ref: RefObject<HTMLElement | null>, options: { active: boolean; onEscape?: () => void }): void {
   const { active } = options;
   const onEscape = useRef(options.onEscape);
   onEscape.current = options.onEscape;
@@ -69,9 +69,10 @@ export function useModalSurface(ref: RefObject<HTMLElement | null>, options: { a
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (event.defaultPrevented || event.isComposing || otherModalOpen(surface)) return;
+        const handler = onEscape.current;
+        if (!handler || event.defaultPrevented || event.isComposing || otherModalOpen(surface)) return;
         event.preventDefault();
-        onEscape.current();
+        handler();
         return;
       }
       if (event.key !== 'Tab' || event.defaultPrevented || otherModalOpen(surface)) return;

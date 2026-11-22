@@ -15,7 +15,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('PointerEvent', MouseEvent);
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 const ALL: AssistantLayoutMode[] = ['sidebar', 'floating', 'fullscreen'];
 const frame = () => act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
@@ -164,6 +164,31 @@ describe('layout menu', () => {
     await mount({}, false);
     await frame();
     expect(state()).toMatchObject({ open: true, mode: 'floating' });
+  });
+
+  it('a stored full screen outside modes never makes the page inert', async () => {
+    store.set(DEFAULT_ASSISTANT_LAYOUT_KEY, JSON.stringify({ open: true, mode: 'fullscreen', defaultMode: 'floating', collapsed: false, width: 420 }));
+    const marked: Element[] = [];
+    const setAttribute = Element.prototype.setAttribute;
+    vi.spyOn(Element.prototype, 'setAttribute').mockImplementation(function (this: Element, name: string, value: string) {
+      if (name === 'inert') marked.push(this);
+      setAttribute.call(this, name, value);
+    });
+    await mount({}, false);
+    await frame();
+    expect(state()).toMatchObject({ open: true, mode: 'floating' });
+    expect(marked.filter(element => element.matches('main'))).toEqual([]);
+  });
+
+  it('with only full screen allowed Escape keeps full screen', async () => {
+    await mount({ modes: ['fullscreen'] });
+    await frame();
+    expect(state()).toMatchObject({ open: true, mode: 'fullscreen' });
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => { document.body.dispatchEvent(event); });
+    // There is no layout to return to: Escape is left alone instead of blinking out and back.
+    expect(event.defaultPrevented).toBe(false);
+    expect(state()).toMatchObject({ open: true, mode: 'fullscreen' });
   });
 
   it('menu follows the order of modes', async () => {

@@ -462,7 +462,12 @@ export function AssistantShell({
 
   // Full screen is a modal: the page is inert, Tab stays inside, Escape returns to the previous layout.
   // Declared before the open effect, so on close the page loses `inert` before focus goes back to the opener.
-  useModalSurface(shell, { active: ui.open && fullscreen, onEscape: ui.restoreMode });
+  // Full screen outside `modes` is only a stored leftover the fallback below replaces before paint.
+  // With full screen as the only layout there is nothing to return to, so Escape stays with the page.
+  useModalSurface(shell, {
+    active: ui.open && fullscreen && modes.includes('fullscreen'),
+    onEscape: modes.some(m => m !== 'fullscreen') ? ui.restoreMode : undefined,
+  });
   const focusComposer = useCallback(() => {
     const composer = shell.current?.querySelector<HTMLElement>('[contenteditable="true"],[contenteditable=""],textarea');
     (composer ?? shell.current?.querySelector<HTMLElement>('button'))?.focus();
@@ -537,7 +542,8 @@ export function AssistantShell({
 
   // A layout outside `modes` falls back: full screen to the previous layout, otherwise the first listed one.
   const { mode, defaultMode, open, restoreMode, setMode, setDefaultMode } = ui;
-  useEffect(() => {
+  // Before paint, so a stored layout outside `modes` never shows for a frame.
+  useLayoutEffect(() => {
     const allowed = modeKey.split(',') as AssistantLayoutMode[];
     const normal: AssistantLayoutMode[] = allowed.filter(m => m !== 'fullscreen');
     if (mode === 'fullscreen') {
