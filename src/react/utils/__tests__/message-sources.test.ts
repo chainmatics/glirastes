@@ -41,6 +41,16 @@ describe('readMessageSources', () => {
     ]);
   });
 
+  it('labels lose bidi and control characters', () => {
+    expect(readMessageSources([
+      { type: 'source-url', sourceId: 's1', url: 'https://e.com/a', title: 'Safe\u202E gnp.exe\u0007 doc\u2066x\u2069\u200F' },
+      { type: 'source-url', sourceId: 's2', url: 'https://e.com/b', title: '\u202A\u200E' },
+    ])).toEqual([
+      { href: 'https://e.com/a', label: 'Safe gnp.exe docx', domain: 'e.com' },
+      { href: 'https://e.com/b', label: 'e.com', domain: 'e.com' },
+    ]);
+  });
+
   it('duplicates collapse and at most 20', () => {
     const links = Array.from({ length: 25 }, (_, i) => `[l${i}](https://e${i}.com/)`);
     links.splice(3, 0, '[again](https://e0.com/)');

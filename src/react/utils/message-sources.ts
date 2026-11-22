@@ -7,6 +7,9 @@ export interface MessageSource {
 
 const MAX_SOURCES = 20;
 const MAX_LABEL = 160;
+// Bidi marks, embeddings, overrides and isolates and C0/C1 controls (not whitespace): model or tool text could
+// reorder the label next to its domain.
+const INVISIBLE = /[\u200E\u200F\u202A-\u202E\u2066-\u2069\u061C\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 
 // A fence runs to its closing fence, or to the end of the text when unclosed (`(?![\s\S])`: not `$`, which
 // the `m` flag lets match at every line end).
@@ -112,7 +115,7 @@ export function readMessageSources(parts: ReadonlyArray<unknown>): MessageSource
     if (!url || seen.has(url.href)) continue;
     seen.add(url.href);
     const domain = url.hostname.replace(/^www\./i, '');
-    const label = rawLabel.trim().replace(/\s+/g, ' ').slice(0, MAX_LABEL) || domain;
+    const label = rawLabel.replace(INVISIBLE, '').trim().replace(/\s+/g, ' ').slice(0, MAX_LABEL) || domain;
     sources.push({ href: url.href, label, domain });
   }
   return sources;
