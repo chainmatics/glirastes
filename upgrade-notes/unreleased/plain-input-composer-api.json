@@ -1,0 +1,11 @@
+{
+  "id": "plain-input-composer-api",
+  "kind": "optional",
+  "summary": "useChatComposer (insertText, setDraft, chatAbout, clear, focus) now also fills the plain chat input; mentions arrive there as text.",
+  "howTo": "Nothing to change. Without chatInteractions or completionProviders the chat input is a plain textarea; useChatComposer operations used to be ignored there and now apply: insertText appends, setDraft replaces, clear empties, focus focuses, and insertMention/chatAbout put the mention's visible text (for example @Bug 7 or /Open tasks) at the caret. openCompletion still does nothing in the plain input, which has no list.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": ["glirastes/react"],
+    "symbols": ["useChatComposer"]
+  }
+}

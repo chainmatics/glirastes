@@ -13,7 +13,9 @@ import { VoiceInputAddon } from './voice-input-addon.js';
 import { MentionInput } from './mention-input.js';
 import { ComposerToolbarLayout } from './composer-toolbar.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
-import type { ChatAttachment, ChatComposerInputControls, ChatInputProps } from '../types.js';
+import { createTextareaComposerHandle } from './textarea-composer-handle.js';
+import { useChatComposerTarget } from '../composer/chat-composer.js';
+import type { ChatAttachment, ChatComposerInputControls, ChatInputProps, RichMentionInputHandle } from '../types.js';
 
 const NO_ATTACHMENTS: ReadonlyArray<ChatAttachment> = [];
 
@@ -36,6 +38,10 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
   const [value, setValue] = useState('');
   const InputExtra = components.InputExtra;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // `useChatComposer` operations (insertText, setDraft, chatAbout, ...) reach the textarea through this handle.
+  const handleRef = useRef<RichMentionInputHandle | null>(null);
+  if (!handleRef.current) handleRef.current = createTextareaComposerHandle(textareaRef, setValue);
+  useChatComposerTarget(handleRef, { onChange: setValue });
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
