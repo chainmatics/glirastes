@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - CLI: `glirastes stt worklet [--out <dir>] [--root <path>] [--json]` copies the audio worklet voice input needs into `public/` (or `--out`), served at `/audio-worklet-processor.js`; an identical copy is left alone, the source map comment is dropped. The file is also a package export, `glirastes/react/audio-worklet-processor.js`.
-- `glirastes init` chains `glirastes stt worklet &&` in front of `predev` and `prebuild` for Next.js, Vite and Create React App apps (new or existing scripts; existing commands stay). A React app without one of them gets a note on how to serve the file.
-- `glirastes doctor`: new check `voice-worklet` for apps that use voice input (`voice: { enabled: true }`, `VoiceInputAddon`, `VoiceInputButton`, `RecordedSttAdapter`, `DeepgramSttAdapter`, `useDeepgramTranscription`). It fails (`E-SETUP-034`, `provide-audio-worklet`) when neither `public/audio-worklet-processor.js` (or a configured `workletUrl` path under `public/`) nor a package.json script that copies it exists, and names the fix; an absolute worklet URL is a warning (`verify-audio-worklet-url`). Apps without voice input get no check.
+- `glirastes init` chains `glirastes stt worklet &&` in front of `predev` and `prebuild` for Next.js, Vite and Create React App apps (new or existing scripts; existing commands stay) and lists `/public/audio-worklet-processor.js` in an existing `.gitignore` (it creates none). A React app without one of them gets a note on how to serve the file.
+- `glirastes doctor`: new check `voice-worklet` for apps that use voice input (`voice: { enabled: true }`, `VoiceInputAddon`, `VoiceInputButton`, `RecordedSttAdapter`, `DeepgramSttAdapter`, `useDeepgramTranscription`). It passes only when the file exists under `public/` at each literal `workletUrl` path, or at `/audio-worklet-processor.js` when none is set. Without the file or a copy script it fails (`E-SETUP-034`, `provide-audio-worklet`) and names the fix; a package.json script that copies it but has not run yet is a warning (`run-audio-worklet-copy`), as are a copy into another `--out` folder and an absolute worklet URL (`verify-audio-worklet-url`). Apps without voice input get no check. Known limit: voice use is detected from the glirastes voice symbols and a literal `voice: { enabled: true }` only.
 - STT: `AudioWorkletLoadError` (`url`, `cause`), `isAudioWorkletLoadError` and `AUDIO_WORKLET_UNAVAILABLE` in `glirastes/react` and `glirastes/stt`; `SttSessionSnapshot.errorCode` (`'audio-worklet-unavailable'`), also on `useStt` and `useDeepgramTranscription`. `VoiceInputButtonProps.adapter`.
 - Locale keys `voiceStartAriaLabel`, `voiceStopAriaLabel`, `voiceConnectingAriaLabel`, `voiceTranscribingAriaLabel`, `voiceCancelAriaLabel`, `voiceFailedText`, `voiceUnavailableText` (German ships).
 
@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Voice input no longer fails silently when the audio worklet cannot be loaded (404): the chat shows a localized alert (`span[role="alert"][data-element="voice-error"]`, `voiceUnavailableText`) next to the mic button and `console.error` names the URL, the cause and the fix. Any other failed recording shows `voiceFailedText`. The audio context of a failed load is closed.
+- Voice input no longer fails silently when the audio worklet cannot be loaded (404): the chat shows a localized alert (`span[role="alert"][data-element="voice-error"]`, `voiceUnavailableText`) next to the mic button and `console.error` names the URL (path only, without query or hash), the cause and the fix. A loaded file that does not register `audio-processor` takes the same path. Any other failed recording shows `voiceFailedText`. The audio context of a failed pipeline is closed.
 
 ### Documentation
 

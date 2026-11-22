@@ -147,7 +147,7 @@ npx --no-install glirastes init
 
 `init` writes `.glirastes/tools.json`, `.glirastes/prompt-bundle.json`, the
 `predev` / `prebuild` scripts (`glirastes tools refresh`, plus the voice
-worklet copy `glirastes stt worklet` for Next.js and Vite) and a short hint in
+worklet copy `glirastes stt worklet` for Next.js, Vite and Create React App) and a short hint in
 `AGENTS.md` / `CLAUDE.md`, installs the [agent skills](#agent-skills) and hands
 the integration to your coding agent. Existing files are never replaced.
 
@@ -359,12 +359,18 @@ two jobs:
   `glirastes/stt` adapters, `createRecordingTranscriptionHandler` for a
   server-side transcription route). Audio goes from the app to its own
   provider, never through Glirastes.
+- Without React: the `<glirastes-chat>` element from `glirastes/embed` and the
+  bridge in `glirastes/browser`.
 
-**Voice input requires the audio worklet file.** Every recording loads
-`/audio-worklet-processor.js` (package export
+See the skill [`building-glirastes-chat-ui`](skills/building-glirastes-chat-ui/SKILL.md).
+
+### Voice input needs the audio worklet
+
+Every recording loads `/audio-worklet-processor.js` (package export
 `glirastes/react/audio-worklet-processor.js`); without it voice input fails
-with an error next to the mic button. `glirastes init` sets this up for Next.js
-and Vite. In an existing app, chain the copy step in front of your scripts:
+with an error next to the mic button and a `console.error` naming the URL.
+`glirastes init` sets this up for Next.js, Vite and Create React App. In an
+existing app, chain the copy step in front of your scripts:
 
 ```json
 "scripts": {
@@ -373,13 +379,15 @@ and Vite. In an existing app, chain the copy step in front of your scripts:
 }
 ```
 
-`glirastes stt worklet` copies the file into `public/` (`--out <dir>` for
-another folder; set `voice.workletUrl` when it is served at another path).
-`glirastes doctor` reports a missing worklet when the app uses voice input.
-- Without React: the `<glirastes-chat>` element from `glirastes/embed` and the
-  bridge in `glirastes/browser`.
-
-See the skill [`building-glirastes-chat-ui`](skills/building-glirastes-chat-ui/SKILL.md).
+- `glirastes stt worklet` copies the file into `public/`. A Vite app with its
+  own `root` or `publicDir` passes that folder: `glirastes stt worklet --out
+  web/static`. Served at another path, set `voice.workletUrl`.
+- yarn berry and pnpm may skip `pre*` scripts; when you start `next dev` or
+  `vite` directly, run `glirastes stt worklet` once first.
+- The copy is a build output: `public/audio-worklet-processor.js` can be
+  Git-ignored (`glirastes init` adds it to an existing `.gitignore`).
+- `glirastes doctor` checks the file at the configured or default URL when the
+  app uses voice input.
 
 ## Standalone and Connected
 

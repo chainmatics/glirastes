@@ -449,9 +449,20 @@ existing app add it yourself, in front of the existing commands:
 }
 ```
 
-`glirastes doctor` fails (`voice-worklet`, `E-SETUP-034`) when the app uses
-voice input and neither `public/audio-worklet-processor.js` nor a script that
-copies it exists.
+- Vite with its own `root` or `publicDir`: pass that folder,
+  `glirastes stt worklet --out web/static`. Served at another path: set
+  `voice.workletUrl` (it reaches an own `RecordedSttAdapter` or
+  `DeepgramSttAdapter` passed as `voice.adapter`) or the adapter's `workletUrl`.
+- yarn berry and pnpm may skip `pre*` scripts; when the app starts `next dev`
+  or `vite` directly, run `glirastes stt worklet` once first.
+- The copy is a build output: `public/audio-worklet-processor.js` can be
+  Git-ignored; `glirastes init` adds it to an existing `.gitignore`.
+
+`glirastes doctor` (check `voice-worklet`) passes only when the file exists in
+`public/` at each literal `workletUrl` path, or at the default path when none is
+set. It fails (`E-SETUP-034`) without the file or a copy script, and warns
+(`E-SETUP-108`) when a copy script exists but has not run yet, copies outside
+`public/`, or the URL is absolute.
 
 When the file cannot be loaded, the chat shows `voiceUnavailableText` as an
 alert next to the mic button and logs the URL with `console.error`; the
