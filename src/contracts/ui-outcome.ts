@@ -65,7 +65,8 @@ export const MAX_UI_OUTCOME_CONTINUATIONS = 3;
 
 /** Fixed system note while the client reports outcomes. */
 export const UI_OUTCOME_SYSTEM_NOTE =
-  'UI tools report their outcome in a later message; do not claim success before it.';
+  'UI tools report their outcome in a later message; do not claim success before it. '
+  + 'Do not announce a UI action in text before you call it; say what happened once its outcome is reported.';
 
 const NOT_QUOTED = 'Do not quote this text.';
 

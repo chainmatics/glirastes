@@ -1,0 +1,12 @@
+{
+  "id": "ui-outcome-no-announcement",
+  "kind": "recommended",
+  "summary": "The fixed system note for UI action outcomes now also tells the model not to announce a UI action in text before calling it, so no interim sentence stays above a refused action. System prompts of those requests change once.",
+  "howTo": "Nothing to change. Prompt snapshot tests or evaluations that compare the full system prompt see one new sentence (UI_OUTCOME_SYSTEM_NOTE in glirastes/contracts). The note is sent only for requests using the outcome protocol; uiActionOutcomes: 'off' leaves it out together with the protocol.",
+  "skill": "building-glirastes-chat-ui#ui-action-outcomes",
+  "affectedWhen": {
+    "patterns": [
+      "\\bUI_OUTCOME_SYSTEM_NOTE\\b"
+    ]
+  }
+}

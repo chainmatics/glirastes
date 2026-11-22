@@ -254,6 +254,8 @@ describe('a UI tool result with the outcome protocol (confirm)', () => {
     const states = chunks.filter((chunk) => chunk.type === 'data-pipeline-state').map((chunk) => (chunk.data as { status: string }).status);
     expect(states.at(-1)).toBe('completed');
     expect(finished).toEqual([expect.objectContaining({ awaitingUiOutcome: true, wasTruncated: false })]);
+    // The model writes nothing before a UI call, so no "I'm highlighting it" sentence stays above a refusal.
+    expect(prompt(model)).toContain('Do not announce a UI action in text before you call it');
     expect(finished[0]).not.toHaveProperty('continuation');
   });
 
