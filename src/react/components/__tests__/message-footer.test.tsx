@@ -39,7 +39,7 @@ function elapse(ms: number) {
   vi.setSystemTime(Date.now() + ms);
 }
 
-const text = (value: string) => ({ type: 'text', text: value });
+const text = (value: string) => ({ type: 'text' as const, text: value });
 
 /** One finished question and answer; the clock ran `ms` while it streamed. */
 async function answered(config: Partial<AiChatProviderConfig>, answer = LINKS, ms = 3240) {
