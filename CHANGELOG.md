@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - Upgrade notes for 0.15.0 to 0.17.3: `glirastes upgrade report` listed these versions as "Unclassified (no upgrade notes, read the changelog)". They now carry classified notes, among them the required `ChatLocale` keys and new `ActivityStepStatus` members of 0.17.x, `ToolSearchIndex.rank`, the 0.17.0 stop notice (English unless `locale: 'de-DE'`), the tool result bound with `read_result`, per-tool-call `onError` and the authorized tool set of managed turns. A test keeps every released version since 0.14.0 classified.
-- Counting turns in `onFinish`: it fires once per request, so a UI tool turn with the outcome protocol calls it twice, the second time with `continuation: 'ui-outcome'` (an answered approval: `'approval'`). The `onFinish` type, `docs/ui-action-outcomes.md` ("Counting turns"), `docs/managed-runtime-sync.md` and the `integrating-glirastes-nextjs` handler reference now show how to count one logical turn and add up its tokens.
+- Counting turns in `onFinish`: it fires once per request, so a UI tool turn with the outcome protocol calls it at least twice: once more for every request that continues the turn after reported outcomes (`continuation: 'ui-outcome'`, at most `MAX_UI_OUTCOME_CONTINUATIONS`, 3) or answered approvals (`'approval'`). The `onFinish` type, `docs/ui-action-outcomes.md` ("Counting turns"), `docs/managed-runtime-sync.md` and the `integrating-glirastes-nextjs` handler reference now show how to count one logical turn and add up its tokens.
 
 ## [0.23.0] - 2026-11-22
 

@@ -641,8 +641,9 @@ export interface AiChatHandlerConfig {
      * answered approvals (`'approval'`) or reported UI outcomes
      * (`'ui-outcome'`). `onFinish` fires once per request, so count turns
      * by the requests without it. A UI tool turn with the outcome protocol
-     * takes two requests (the second with `'ui-outcome'`), an approval two
-     * as well; tokens and steps of every request belong to the turn:
+     * takes at least two requests (one more with `'ui-outcome'` per reported
+     * step, at most `MAX_UI_OUTCOME_CONTINUATIONS`), and each answered
+     * approval adds one; tokens and steps of every request belong to the turn:
      *
      * ```ts
      * onFinish: (event) => {

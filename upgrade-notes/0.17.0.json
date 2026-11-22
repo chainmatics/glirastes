@@ -5,7 +5,7 @@
       "id": "chat-locale-keys-0-17-0",
       "kind": "breaking",
       "summary": "ChatLocale gained required keys in 0.17.0. A hand-written full ChatLocale object no longer compiles and misses texts until it has them. Partial<ChatLocale> overrides are unaffected.",
-      "howTo": "Add these keys to every full ChatLocale object: approvalTargetLabel, approvalAmbiguousIdWarning, approvalUnknownIdWarning, approvalUnknownIdsWarning. English and German defaults ship with the SDK; the locale and locales props of AiChatProvider take Partial<ChatLocale>, so partial tables need no change. The approval card now names the entity behind every id of a call (approvalSubjects on the provider, default true) and warns for ids without a known name.",
+      "howTo": "Add these keys to every full ChatLocale object: approvalTargetLabel, approvalAmbiguousIdWarning, approvalUnknownIdWarning, approvalUnknownIdsWarning. English and German defaults ship with the SDK; the locale prop of AiChatProvider takes Partial<ChatLocale>, so partial overrides need no change. The approval card now names the entity behind every id of a call (approvalSubjects on the provider, default true) and warns for ids without a known name.",
       "skill": "building-glirastes-chat-ui#configuration",
       "adoptedWhen": {
         "patterns": [
@@ -127,7 +127,7 @@
       "skill": "setting-up-glirastes#connecting-the-platform",
       "affectedWhen": {
         "patterns": [
-          "glirastes\\s+(connect|sync|doctor)\\b"
+          "(?<![\\s\\S])(?![\\s\\S]*\"next\"\\s*:)[\\s\\S]*?\\bglirastes\\s+(connect|sync|doctor)\\b"
         ]
       },
       "adoptedWhen": {

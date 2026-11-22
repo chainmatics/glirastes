@@ -140,10 +140,11 @@ card's wording and the handler's own texts (with `locales`); the order is
 ### Counting turns in onFinish
 
 `onFinish` fires once per request, not once per turn. A turn with a UI tool
-takes two requests when the browser reports UI outcomes (the default): the
-first ends with `awaitingUiOutcome: true`, the second carries
-`continuation: 'ui-outcome'`. An answered approval is a second request with
-`continuation: 'approval'`. Count a turn on the request without
+takes at least two requests when the browser reports UI outcomes (the
+default): a request that ends with `awaitingUiOutcome: true` is followed by
+one with `continuation: 'ui-outcome'`, once per reported step, at most
+`MAX_UI_OUTCOME_CONTINUATIONS` (3) per turn. Each answered approval adds a
+request with `continuation: 'approval'`, also mixed with UI outcomes. Count a turn on the request without
 `continuation`, and add tokens and steps of every request to it:
 
 ```ts

@@ -5,7 +5,7 @@
       "id": "chat-locale-keys-0-17-3",
       "kind": "breaking",
       "summary": "ChatLocale gained required keys in 0.17.3. A hand-written full ChatLocale object no longer compiles and misses texts until it has them. Partial<ChatLocale> overrides are unaffected.",
-      "howTo": "Add these keys to every full ChatLocale object: activityExpectedLabel. English and German defaults ship with the SDK; the locale and locales props of AiChatProvider take Partial<ChatLocale>, so partial tables need no change.",
+      "howTo": "Add these keys to every full ChatLocale object: activityExpectedLabel. English and German defaults ship with the SDK; the locale prop of AiChatProvider takes Partial<ChatLocale>, so partial overrides need no change.",
       "skill": "building-glirastes-chat-ui#configuration",
       "adoptedWhen": {
         "patterns": [
@@ -25,8 +25,8 @@
     {
       "id": "activity-step-status-expected",
       "kind": "breaking",
-      "summary": "ActivityStepStatus gained 'expected': a tool output with success: false and a 4xx status (or marked expectedFailure) is now neutral, and other failure outputs are 'error' instead of 'done'. An exhaustive switch or Record over the type no longer compiles.",
-      "howTo": "Add a case for 'expected' to every exhaustive switch or Record<ActivityStepStatus, ...>: show it neutrally, never as failed. Tests that assert activity-log summary text or the check icon for failed outputs need updating. Display only: maxConsecutiveErrors and metrics still follow classifyToolFailure.",
+      "summary": "ActivityStepStatus gained 'expected'. A failure output (success: false or an error text) is no longer 'done': it is 'expected' (neutral) or 'error'. An exhaustive switch or Record over the type no longer compiles.",
+      "howTo": "Add a case for 'expected' to every exhaustive switch or Record<ActivityStepStatus, ...>: show it neutrally, never as failed. A step is 'expected' when the output has success: false and either expectedFailure: true (any status) or an integer status from 400 to 499 other than 408 and 429, unless the SDK's endpoint caller refused the path itself (Endpoint path is not allowed / must be relative). Every other failure output (5xx, 408, 429, no status, an error text without success: false) is 'error'. Tests that assert activity-log summary text or the check icon for failed outputs need updating. Display only: maxConsecutiveErrors and metrics still follow classifyToolFailure.",
       "skill": "building-glirastes-chat-ui#tool-results-and-approvals",
       "affectedWhen": {
         "symbols": [

@@ -149,16 +149,20 @@ with `awaitsOutcome` there to not run them twice.
   `glirastesUiOutcomes`.
 - Count turns by requests without `continuation` (or by `turnId` in the
   metric events), not by the number of `onFinish` calls: `onFinish` fires
-  once per request, so a UI turn calls it twice (see "Counting turns" below).
+  once per request, so a UI turn calls it at least twice (see "Counting turns"
+  below).
 - `uiActionOutcomes: 'off'` plus `uiToolResultShape: 'legacy'` restores 0.17.3.
 
 ## Counting turns
 
 `onFinish` of `createAiChatHandler` fires once per request. With the outcome
-protocol a turn that calls a UI tool takes two requests: the first ends with
-`awaitingUiOutcome: true`, the second has `continuation: 'ui-outcome'` (an
-answered approval: `continuation: 'approval'`). Count one logical turn per
-request without `continuation` and add the usage of every request to it:
+protocol a turn that calls a UI tool takes at least two requests: a request
+that ends with `awaitingUiOutcome: true` is followed by one with
+`continuation: 'ui-outcome'`, once per reported step, at most
+`MAX_UI_OUTCOME_CONTINUATIONS` (3) per turn. An answered approval adds a
+request with `continuation: 'approval'`, also in the same turn as UI outcomes.
+Count one logical turn per request without `continuation` and add the usage
+of every request to it:
 
 ```ts
 createAiChatHandler({

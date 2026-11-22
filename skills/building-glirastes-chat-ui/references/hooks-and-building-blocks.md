@@ -370,8 +370,9 @@ gets UI results as `{ handedOff: true, message, uiAction }` without
 (`UI_OUTCOME_SYSTEM_NOTE`) tells the model not to claim success before the
 outcome and not to announce a UI action in text before calling it, so no
 interim sentence stays above a refused action. The server's `onFinish` fires
-once per request, so a UI turn calls it twice (the second with
-`continuation: 'ui-outcome'`): count turns on the calls without
+once per request, so a UI turn calls it at least twice (every continuation
+after reported outcomes carries `continuation: 'ui-outcome'`, at most 3 per
+turn; an answered approval `'approval'`): count turns on the calls without
 `continuation`. Details: `docs/ui-action-outcomes.md` of the package.
 
 | `code` | When |
