@@ -161,6 +161,12 @@ export interface AssistantShellProps {
   insetProperty?: string | false;
   /** Remaining row width below which the docked assistant fills the row. Default: 840. */
   narrowWidth?: number;
+  /**
+   * Page width the docked assistant always leaves free. The widest sidebar
+   * is `min(maxWidth, row − minPageWidth)`, never below `minWidth`. Default 0
+   * (as before). Below `narrowWidth` the assistant still takes the whole row.
+   */
+  minPageWidth?: number;
   /** Width of the collapsed rail. Default: 44. */
   railWidth?: number;
 }
@@ -290,6 +296,7 @@ export function AssistantShell({
   mainSelector = '[data-assistant-main]',
   insetProperty = '--assistant-right-inset',
   narrowWidth = 840,
+  minPageWidth = 0,
   railWidth = 44,
 }: AssistantShellProps) {
   const ui = useAssistantLayout();
@@ -335,7 +342,8 @@ export function AssistantShell({
       const leftWidth = main ? siblings.slice(0, siblings.indexOf(main)).reduce((sum, element) => sum + (getComputedStyle(element).position === 'fixed' ? 0 : element.getBoundingClientRect().width), 0) : 0;
       const remaining = rowWidth - leftWidth;
       setNarrow(remaining < narrowWidth);
-      setAvailable(Math.max(minWidth, Math.min(maxWidth, remaining)));
+      // The stored width stays as chosen, so a wider window gets it back.
+      setAvailable(Math.max(minWidth, Math.min(maxWidth, remaining - minPageWidth)));
     };
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
@@ -344,7 +352,7 @@ export function AssistantShell({
     if (main) observer?.observe(main);
     window.addEventListener('resize', measure);
     return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
-  }, [shell, mainSelector, narrowWidth, minWidth, maxWidth]);
+  }, [shell, mainSelector, narrowWidth, minPageWidth, minWidth, maxWidth]);
   useEffect(() => {
     if (insetProperty) document.documentElement.style.setProperty(insetProperty, `${inset}px`);
     const main = shell.current?.parentElement?.querySelector<HTMLElement>(mainSelector);
@@ -394,7 +402,7 @@ export function AssistantShell({
         ...(sidebar ? { position: 'relative', flexShrink: 0, height: '100%', maxHeight: '100%' } : { position: 'fixed', maxHeight: '100dvh' }),
         ...placement,
       }}>
-      {sidebar && !ui.collapsed && !fillsRow && <SidebarResizeHandle label={labels.resize} width={width} min={minWidth} max={maxWidth}
+      {sidebar && !ui.collapsed && !fillsRow && <SidebarResizeHandle label={labels.resize} width={width} min={minWidth} max={available}
         defaultWidth={defaultWidth} className={classNames.resizeHandle} onCommit={ui.setWidth} onPreview={value => {
           if (shell.current) shell.current.style.width = `${value}px`;
           if (insetProperty) document.documentElement.style.setProperty(insetProperty, `${value}px`);

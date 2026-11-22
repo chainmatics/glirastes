@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chat composer: `composer.starters` (`ChatStarter`: `label`, `prompt`, `description`, `icon`, `send`) shows starter chips above the composer on an empty chat; a click fills the composer and focuses it, `send: true` sends. Disabled while the composer is locked; `suggestions.staticChips` are hidden while starters show. `ChatStarters` for own panels; locale key `startersLabel`. Default off.
 - Chat composer: `composer.hint` shows a keyboard hint line under the composer ("↵ Send · ⇧ ↵ New line", the list keys while a completion list is open; `aria-hidden`, hidden on touch devices). `ComposerHint` for own composers with `ChatComposerInput.completionOpen`; `RichMentionInputProps.onListOpenChange`; locale keys `composerHintSend`, `composerHintNewline`, `composerHintNavigate`, `composerHintPick`, `composerHintClose`. Default off.
 - Chat composer: "+" menu rows show an icon and a description (`ComposerToolbarItem.description`, `ChatTriggerDefinition.icon`/`description`; a `trigger:<char>` button shows the trigger's icon). `composer.renderIcon(name, { type, trigger })` renders string icon names of completion entries (new `CompletionItem.icon`; the existing `ChatCommandDefinition.icon` and `ChatEntityDefinition.icon` now reach it) in the default list item and in `plusMenu.source` rows; `plusMenu.source` rows now show the entry's `description`.
+- Assistant: `AssistantShell` / `AssistantWorkspace` take `minPageWidth`: the docked assistant never grows so wide that the page row keeps less than that (never below `minWidth`; below `narrowWidth` it still fills the row). The user's chosen width is kept and comes back on wider windows. Default 0.
 
 ### Changed
 
@@ -21,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Assistant: the sidebar width handle announces (`aria-valuemax`) and stops (End key, drag) at the widest width that can actually render in the row, instead of `maxWidth`.
 - Chat composer: `useChatComposer()` (`insertText`, `setDraft`, `chatAbout`, `clear`, `focus`) also fills the plain chat input (no completion, no attachments); mentions arrive there as their text.
 - Chat composer: `onCompletionSelect` returning `true` also removes the typed trigger and query when the handler put text or a pill before them (`setText`, `insertMention` at the start); after a rebuild only a single whole-word occurrence is removed (inserted text such as `#bug-7` is never cut), several remove nothing.
 
