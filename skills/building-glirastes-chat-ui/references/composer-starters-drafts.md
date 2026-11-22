@@ -18,7 +18,8 @@ before.
 "↑ ↓ Navigate · ↵ Pick suggestion · Esc Close" (also for a list opened by
 `openCompletion` or a "+" menu row). It is `aria-hidden` (the keys are the
 textbox's own, and an open list announces itself) and hidden on touch
-devices (`@media (hover: none) and (pointer: coarse)`). Default `false`.
+devices (`@media (hover: none) and (pointer: coarse)`, part of the default
+styles: an `unstyled` app hides it there itself). Default `false`.
 
 ```tsx
 <AiChatProvider transport={transport} composer={{ hint: true }}>
