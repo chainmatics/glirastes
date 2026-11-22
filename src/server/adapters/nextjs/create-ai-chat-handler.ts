@@ -1233,6 +1233,14 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     ? undefined
     : resolveApprovalSubjectLimits(approvalSubjectsConfig);
   assertUiActionOutcomesOption(uiActionOutcomes, 'createAiChatHandler');
+  if (followups && followups.enabled !== false && !pipeline) {
+    // Registration is unchanged: the follow-up tool exists only in pipeline mode.
+    console.warn(
+      '[glirastes] createAiChatHandler: `followups` is set without `pipeline`, so the model gets no suggest_followups tool. '
+      + 'Pass a `pipeline` (glirastes/server) to enable it, or remove `followups`; the chat UI then reads a trailing '
+      + 'suggestion list of the answer instead.',
+    );
+  }
   if (uiToolResultShape !== 'auto' && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
     throw new Error("createAiChatHandler: uiToolResultShape must be 'auto', 'handoff' or 'legacy'");
   }

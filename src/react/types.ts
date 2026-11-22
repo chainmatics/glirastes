@@ -689,6 +689,24 @@ export interface ActivityLogConfig {
    * come before its text renders exactly as with `'message'`.
    */
   grouping?: 'message' | 'sections';
+  /**
+   * Model-facing tool names (e.g. `'ui_action_toast'`) that never show as a
+   * step, count in the summary or split a section. The tool still runs and
+   * its UI action still fires. Default `[]` (the SDK's built-ins stay hidden).
+   */
+  hiddenTools?: ReadonlyArray<string>;
+}
+
+/** Per-answer footer (`AiChatProvider` `messageFooter`). Each part defaults to true once the footer is on. */
+export interface MessageFooterConfig {
+  /** Copy button: the answer as formatted text (lists, tables, links) and plain text. */
+  copy?: boolean;
+  /** A toggle with the https links the answer cites (its links, source parts, tool `sources`/`citations`). */
+  sources?: boolean;
+  /** "Done in 3.2 s" under the last answer of a completed turn; the elapsed time while it runs. */
+  duration?: boolean;
+  /** A stop button under the answer that is running. */
+  stop?: boolean;
 }
 
 /** Detail policy of the activity log steps (`ActivityLogConfig.details`). */
@@ -727,7 +745,7 @@ export type TurnOutcomeReason = 'finished' | 'stopped' | 'send-now' | 'request-f
  * chat's requests do not carry it). It belongs to the chat and user message
  * its request was started for, also when another chat was opened meanwhile.
  * A new request for the same user message (a retry) replaces it with the
- * outcome of the new attempt. Status and reason only.
+ * outcome of the new attempt. Status, reason and the turn's working time.
  */
 export interface TurnOutcome {
   /** Id of the user message that started the turn. */
@@ -736,6 +754,12 @@ export interface TurnOutcome {
   reason: TurnOutcomeReason;
   /** ISO time it was recorded. */
   at: string;
+  /**
+   * Working time of the turn in ms: the time its requests ran (a run after an
+   * approval adds to the first; waiting for the user does not count),
+   * measured in the browser. Absent on outcomes stored by an older version.
+   */
+  durationMs?: number;
 }
 
 /** The second argument of `onTurnEnd`. */
@@ -753,7 +777,7 @@ export type OnTurnEnd = (outcome: TurnOutcome, info: TurnEndInfo) => void;
 
 /**
  * The rendered parts of one message, each `null` when absent. Order of the
- * default bubble: plan, activity, notice, attachments, text, toolResults.
+ * default bubble: plan, activity, notice, attachments, text, toolResults, footer.
  */
 export interface MessagePartNodes {
   /** `PlanChecklist` of the latest `update_plan` call. */
@@ -768,6 +792,11 @@ export interface MessagePartNodes {
   text: ReactNode;
   /** Tool result blocks, custom renderers and clarification cards. */
   toolResults: ReactNode;
+  /**
+   * The answer's footer (`messageFooter`: copy, sources, duration, stop),
+   * rendered last; null when nothing shows. Always set by the SDK.
+   */
+  footer?: ReactNode;
 }
 
 export interface MessageParts extends MessagePartNodes {
@@ -932,6 +961,15 @@ export interface SuggestionsConfig {
   autoSuggest?: boolean;
   staticChips?: string[];
   rotationInterval?: number;
+  /**
+   * Where the model's follow-up questions show. `'composer'` (default): the
+   * rotating `SuggestionBar` above the input, as before. `'message'`: the
+   * latest answer's follow-ups as buttons under it (heading
+   * `followUpsLabel`), hidden while a turn runs, an approval or clarification
+   * is open, or after a stop or error; no `SuggestionBar` then, so
+   * `staticChips` show nowhere (use `composer.starters` for an empty chat).
+   */
+  placement?: 'composer' | 'message';
 }
 
 // ============================================================================
@@ -1369,6 +1407,22 @@ export interface ChatLocale {
   /** Quiet note when the server could not load the preview of a call. */
   approvalPreviewUncheckedNote: string;
 
+  // Message footer (`messageFooter`)
+  /** Copy button of an answer. */
+  copyMessageLabel?: string;
+  /** Copy button right after a successful copy. */
+  copiedMessageLabel?: string;
+  /** Copy button after the clipboard refused the copy. */
+  copyMessageFailedLabel?: string;
+  /** Sources toggle of an answer that cites one link. */
+  messageSourceOneLabel?: string;
+  /** Sources toggle; supports `{count}`. */
+  messageSourcesLabel?: string;
+  /** Working time of a completed turn under its last answer; supports `{duration}` ("3.2 s", "1 min 5 s"). */
+  messageDurationLabel?: string;
+  /** Heading of the follow-ups under the latest answer (`suggestions.placement: 'message'`). */
+  followUpsLabel?: string;
+
   // Floating widget / chat window chrome
   chatTitle: string;                 // default header title ("AI Assistant")
   closeChatAriaLabel: string;        // close button aria / tooltip
@@ -1742,6 +1796,13 @@ export interface AiChatProviderConfig {
   toolResults?: ToolResultDisplayConfig;
   /** Work log layout: open while running, running progress, notice placement. All off by default. */
   activityLog?: ActivityLogConfig;
+  /**
+   * A footer under each answer: copy, the https sources it cites, the turn's
+   * working time ("Done in 3.2 s") and, while it runs, the elapsed time with a
+   * stop button. `true` turns every part on; an object switches single parts
+   * off. Off by default. Everything is computed in the browser.
+   */
+  messageFooter?: boolean | MessageFooterConfig;
   /**
    * Message queue, off by default: with `enabled: true` a message sent while
    * a run is busy or an approval is open is queued instead of refused, and

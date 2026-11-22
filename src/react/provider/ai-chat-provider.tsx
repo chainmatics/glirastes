@@ -13,6 +13,7 @@ import type { ComposerContextValue } from './composer-context.js';
 import type {
   ActivityLogConfig,
   ActivityLogDetails,
+  MessageFooterConfig,
   ApprovalDisplayConfig,
   AiChatProviderConfig,
   ChatMessage,
@@ -46,7 +47,7 @@ import { describeApprovalCall } from '../utils/describe-approval.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
 import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
 import { resolveToolResultConfig } from '../utils/tool-result-config.js';
-import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
+import { readMessageFollowups } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
 import { createMentionPrefixLookup, resolveChatTriggers } from '../completions/triggers.js';
@@ -91,6 +92,8 @@ import {
 
 import type { ApprovalDescriptionFn, ChatLocale, ToolLabelConfig } from '../types.js';
 
+const NO_HIDDEN_TOOLS: readonly string[] = Object.freeze([]);
+
 export const DEFAULT_LOCALE: ChatLocale = {
   placeholder: 'Type a message...',
   sendButton: 'Send',
@@ -118,6 +121,13 @@ export const DEFAULT_LOCALE: ChatLocale = {
   approvalSubjectsUncheckedWarning: 'These could not be checked right now: {ids}.',
   approvalReferenceIdNote: 'Referenced, not checked.',
   approvalPreviewUncheckedNote: 'The preview could not be loaded.',
+  copyMessageLabel: 'Copy',
+  copiedMessageLabel: 'Copied',
+  copyMessageFailedLabel: 'Copy failed',
+  messageSourceOneLabel: '1 source',
+  messageSourcesLabel: '{count} sources',
+  messageDurationLabel: 'Done in {duration}',
+  followUpsLabel: 'Ask next',
   moreItemsLabel: 'more',
   showAllItemsLabel: 'Show all {count}',
   showMoreLabel: 'Show more',
@@ -696,6 +706,7 @@ export function AiChatProvider({
   toolRenderers,
   toolResults: userToolResults,
   activityLog: userActivityLog,
+  messageFooter: userMessageFooter,
   attachments: userAttachments,
   voice: userVoice,
   session,
@@ -787,6 +798,9 @@ export function AiChatProvider({
     : 'auto';
   const activityGrouping = userActivityLog?.grouping === 'sections' ? 'sections' : 'message';
   const activityNoticeScope = userActivityLog?.noticeScope === 'latest' ? 'latest' : 'every';
+  const activityHiddenKey = Array.isArray(userActivityLog?.hiddenTools)
+    ? userActivityLog!.hiddenTools!.filter((name): name is string => typeof name === 'string' && name.length > 0).join('\n')
+    : '';
   const activityLogConfig = useMemo<Required<ActivityLogConfig>>(() => ({
     expandWhileRunning: activityExpandWhileRunning,
     runningProgress: activityRunningProgress,
@@ -794,8 +808,19 @@ export function AiChatProvider({
     details: activityDetails,
     grouping: activityGrouping,
     noticeScope: activityNoticeScope,
+    hiddenTools: activityHiddenKey ? Object.freeze(activityHiddenKey.split('\n')) : NO_HIDDEN_TOOLS,
   }), [activityExpandWhileRunning, activityRunningProgress, activityNoticePlacement, activityDetails, activityGrouping,
-    activityNoticeScope]);
+    activityNoticeScope, activityHiddenKey]);
+  // Keyed on the four switches, so an inline `messageFooter={{ … }}` does not re-render every message.
+  const footerOn = userMessageFooter === true || (typeof userMessageFooter === 'object' && userMessageFooter !== null);
+  const footerParts: MessageFooterConfig = typeof userMessageFooter === 'object' && userMessageFooter !== null ? userMessageFooter : {};
+  const footerCopy = footerParts.copy !== false;
+  const footerSources = footerParts.sources !== false;
+  const footerDuration = footerParts.duration !== false;
+  const footerStop = footerParts.stop !== false;
+  const messageFooterConfig = useMemo<Required<MessageFooterConfig> | null>(() => (footerOn
+    ? { copy: footerCopy, sources: footerSources, duration: footerDuration, stop: footerStop }
+    : null), [footerOn, footerCopy, footerSources, footerDuration, footerStop]);
   const toolRendererRegistry = useMemo(
     () => (toolRenderers && toolRenderers.length > 0
       ? createToolResultRendererRegistry(toolRenderers)
@@ -945,6 +970,14 @@ export function AiChatProvider({
   const onTurnEndRef = useRef(onTurnEnd);
   onTurnEndRef.current = onTurnEnd;
   const [, setTurnEndCheck] = useState(0);
+  // The working time of the bound turn (`TurnOutcome.durationMs`): the time its requests ran so far and the
+  // start of the running one (null between runs).
+  const turnTimeRef = useRef<{ userMessageId: string; workedMs: number; runStartedAt: number | null } | null>(null);
+  const turnWorkedMs = useCallback((): number | null => {
+    const time = turnTimeRef.current;
+    if (!time || time.runStartedAt === null) return null;
+    return Math.max(0, time.workedMs + Date.now() - time.runStartedAt);
+  }, []);
   /** Where the outcome of the running or last request goes, and whether that chat is the one open. */
   const requestTurn = useCallback(() => {
     const bound = requestTurnRef.current ?? {
@@ -965,12 +998,21 @@ export function AiChatProvider({
     const target = requestTurn();
     if (!target) return;
     const { userMessageId } = target;
+    // Measured now, not when the update applies: a stop records during the run.
+    const time = turnTimeRef.current;
+    let durationMs: number | undefined;
+    if (time && time.userMessageId === userMessageId) {
+      durationMs = Math.round(time.workedMs + (time.runStartedAt === null ? 0 : Math.max(0, Date.now() - time.runStartedAt)));
+    }
     const apply = (prev: ReadonlyMap<string, TurnOutcome>, notify = false) => {
       if (notify) turnEndQueuedRef.current.delete(userMessageId);
       const current = prev.get(userMessageId);
       if (current?.status === status || (onlyIfNone && current)) return prev;
       const next = new Map(prev);
-      next.set(userMessageId, { userMessageId, status, reason, at: new Date().toISOString() });
+      next.set(userMessageId, {
+        userMessageId, status, reason, at: new Date().toISOString(),
+        ...(durationMs === undefined ? {} : { durationMs }),
+      });
       // A change of the open chat's outcome: `onTurnEnd` reports it once the turn is over (idempotent, so a
       // StrictMode double call of this updater sets the same entry).
       if (notify) turnEndPendingRef.current.set(userMessageId, { sessionId: target.sessionId, status, reason });
@@ -1803,63 +1845,32 @@ export function AiChatProvider({
 
   // Extract suggestions from suggest_followups tool, with a strict text
   // fallback for models that append a trailing Markdown suggestion section.
+  // Only the latest turn counts: a turn that brings none drops the chips of an
+  // earlier one (the static chips come back instead, once nothing runs).
+  const followupChipsShownRef = useRef(false);
   useEffect(() => {
     if (rawMessages.length === 0) return;
 
     const count = suggestionsConfig.count ?? 3;
     let latestFollowups: string[] | null = null;
-
     for (let messageIndex = rawMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-      const message = rawMessages[messageIndex];
-      if (message.role !== 'assistant') continue;
-
-      let structuredFollowups: string[] | null = null;
-      for (const part of message.parts) {
-        if (!('type' in part)) continue;
-        const partType = (part as { type: string }).type;
-
-        if (partType !== 'tool-suggest_followups') continue;
-
-        const toolPart = part as { output?: unknown; state?: string };
-        if (toolPart.state !== 'output-available' || !isRecord(toolPart.output)) {
-          continue;
-        }
-
-        const result = toolPart.output;
-        if (!Array.isArray(result.followups)) continue;
-
-        const followups = result.followups.filter(
-          (f: unknown): f is string => typeof f === 'string' && f.trim().length > 0
-        );
-
-        if (followups.length > 0) {
-          structuredFollowups = followups.slice(0, count);
-        }
-      }
-
-      if (structuredFollowups && structuredFollowups.length > 0) {
-        latestFollowups = structuredFollowups;
-      } else {
-        for (const part of message.parts) {
-          if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') {
-            continue;
-          }
-          const extracted = extractTrailingFollowupSuggestions(part.text, count);
-          if (extracted.suggestions.length > 0) {
-            latestFollowups = extracted.suggestions;
-          }
-        }
-      }
-
-      if (latestFollowups && latestFollowups.length > 0) {
+      const message = rawMessages[messageIndex] as { role: string; parts: unknown[] };
+      if (message.role === 'user') break;
+      const followups = readMessageFollowups(message, count);
+      if (followups.length > 0) {
+        latestFollowups = followups;
         break;
       }
     }
 
     if (latestFollowups && latestFollowups.length > 0) {
+      followupChipsShownRef.current = true;
       setSuggestionChips(latestFollowups);
+    } else if (followupChipsShownRef.current) {
+      followupChipsShownRef.current = false;
+      setSuggestionChips(isLoading ? [] : suggestionsConfig.staticChips ?? []);
     }
-  }, [rawMessages, suggestionsConfig.count]);
+  }, [rawMessages, suggestionsConfig.count, isLoading, suggestionsConfig.staticChips]);
 
   // Fallback to static chips when model doesn't call suggest_followups
   const prevIsLoadingRef = useRef(false);
@@ -2454,6 +2465,11 @@ export function AiChatProvider({
     const ended = outcomeRunEndRef.current && !isLoading;
     outcomeRunEndRef.current = isLoading;
     if (!ended) return;
+    const time = turnTimeRef.current;
+    if (time && time.runStartedAt !== null) {
+      time.workedMs += Math.max(0, Date.now() - time.runStartedAt);
+      time.runStartedAt = null;
+    }
     if (status === 'error' || transportError) {
       recordTurnOutcome('error', 'request-failed');
       return;
@@ -2477,7 +2493,19 @@ export function AiChatProvider({
     if (!started) return;
     const userMessageId = latestUserMessageId(rawMessagesRef.current as unknown as ChatMessage[]);
     requestTurnRef.current = { sessionId: loadedSessionIdRef.current, userMessageId };
-    if (!userMessageId) return;
+    if (!userMessageId) {
+      turnTimeRef.current = null;
+      return;
+    }
+    // The history decides: with the user message last, a new turn or a new attempt of it (a retry trims to it)
+    // is measured afresh; with an answer of the same turn last, the turn goes on (after an approval or a UI
+    // action result) and its time adds up.
+    const time = turnTimeRef.current;
+    const now = Date.now();
+    const continues = rawMessagesRef.current.at(-1)?.role === 'assistant';
+    turnTimeRef.current = time && time.userMessageId === userMessageId && continues
+      ? { ...time, runStartedAt: now }
+      : { userMessageId, workedMs: 0, runStartedAt: now };
     setTurnOutcomes((prev) => {
       if (!prev.has(userMessageId)) return prev;
       const next = new Map(prev);
@@ -2868,6 +2896,7 @@ export function AiChatProvider({
       toolLabels,
       toolResults: toolResultConfig,
       activityLog: activityLogConfig,
+      messageFooter: messageFooterConfig,
       toolRendererRegistry,
       attachments: attachmentOptions,
       voice: voiceConfig,
@@ -2933,6 +2962,8 @@ export function AiChatProvider({
       onCompletionSelect,
       mentionPrefix,
       drafts,
+      turnWorkedMs,
+      isTurnRunning: isLoading || awaitedOutcomes > 0,
       interactions: interactionRegistry,
       pendingCommand,
       submitPendingCommand,
@@ -2970,6 +3001,7 @@ export function AiChatProvider({
       toolLabels,
       toolResultConfig,
       activityLogConfig,
+      messageFooterConfig,
       approvalSubjects,
       approvalDisplayConfig,
       toolRendererRegistry,

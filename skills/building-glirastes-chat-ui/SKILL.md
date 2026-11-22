@@ -65,7 +65,7 @@ component; headless hooks and building blocks for an own chat:
 | `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = `language`, else the page `lang` (`<glirastes-chat>`: nearest `lang`), else the turn's tool labels, followed when the page changes it later; `languageSource: 'server'` = old order; sent per request as `Content-Language` unless `sendLanguage: false`, server side: `requestLocale` > `locale` > that > manifest, `clientLanguage: false`) |
 | `session` | `save` / `load` / `clear` for durable conversations |
 | `mentions` | mention sources and search |
-| `suggestions` | contextual suggestion chips |
+| `suggestions`, `messageFooter` | suggestion chips (`placement: 'message'` puts follow-ups under the answer); `messageFooter`: copy, sources, duration and stop per answer (references/hooks-and-building-blocks.md) |
 | `voice` | speech-to-text |
 | `attachments`, `queue` | image and PDF attachments (section below); opt-in message queue, messages sent while busy or during an approval go once idle (`references/composer-chips-attachments.md`, "Message queue") |
 | `chatInteractions` | derived `@` entities and `/` commands (section below) |

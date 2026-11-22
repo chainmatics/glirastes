@@ -11,7 +11,7 @@ import { composerContextOf } from '../provider/composer-context.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { BulkApprovalCard as DefaultBulkApprovalCard } from './bulk-approval-card.js';
 import { ChatQueue as DefaultChatQueue } from './chat-queue.js';
-import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
+import { readActivitySteps, readLatestPlan, withoutHiddenTools } from '../utils/activity.js';
 import type { AiChatPanelProps, ChatMessage, PendingApproval } from '../types.js';
 
 /** Approval ids of the tool parts of the shown messages (where an inline card renders). */
@@ -65,6 +65,8 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     attachments,
     approvalDisplay,
     queue,
+    suggestions,
+    activityLog,
   } = context;
   // Starters replace the static suggestion chips on an empty chat.
   const startersShown = messages.length === 0 && (composerContextOf(context).composer?.starters?.length ?? 0) > 0;
@@ -111,14 +113,14 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     if (!lastAssistant) return true;
     // The activity log already shows a spinner for running tools.
     if (
-      readActivitySteps(lastAssistant.parts, () => false).length > 0
+      withoutHiddenTools(readActivitySteps(lastAssistant.parts, () => false), activityLog?.hiddenTools).length > 0
       || (readLatestPlan(lastAssistant.parts)?.length ?? 0) >= 2
     ) return false;
     const hasText = lastAssistant.parts.some(
       p => 'text' in p && typeof p.text === 'string' && p.text.trim().length > 0,
     );
     return !hasText;
-  }, [isLoading, messages]);
+  }, [isLoading, messages, activityLog?.hiddenTools]);
 
   return (
     <div
@@ -220,7 +222,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
 
       {startersShown && <ChatStarters />}
       {composerContextOf(context).composer?.clarificationChips && <ClarificationChips />}
-      {!isLoading && !showTypingIndicator && !startersShown && <SuggestionBar />}
+      {!isLoading && !showTypingIndicator && !startersShown && suggestions?.placement !== 'message' && <SuggestionBar />}
       {queue?.enabled && ChatQueueComponent && <ChatQueueComponent />}
       <InputComponent />
     </div>

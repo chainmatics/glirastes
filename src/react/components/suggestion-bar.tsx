@@ -49,6 +49,9 @@ export function SuggestionBar({ className }: SuggestionBarProps) {
   }, [selectSuggestion, suggestionChips, currentIndex]);
 
   if (suggestionChips.length === 0) return null;
+  if (suggestions.enabled === false) return null;
+  // `placement: 'message'`: the follow-ups show under the answer, and no chip shows here (also no static one).
+  if (suggestions.placement === 'message') return null;
 
   return (
     <div

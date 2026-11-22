@@ -1,0 +1,39 @@
+{
+  "id": "message-footer",
+  "kind": "optional",
+  "summary": "messageFooter adds a footer under each answer: copy as formatted and plain text, the https sources it cites, 'Done in 3.2 s', and the elapsed time with a stop button while it runs. Off by default; useMessageParts and MessageParts get it as footer.",
+  "howTo": "<VercelAiChat messageFooter /> or messageFooter={{ stop: false }}. A custom MessageParts that does not render children places parts.footer itself. Texts: copyMessageLabel, copiedMessageLabel, copyMessageFailedLabel, messageSourceOneLabel, messageSourcesLabel, messageDurationLabel (German in deChatLocale). Nothing is sent anywhere.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": [
+      "glirastes/react"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "messageFooter"
+    ]
+  },
+  "surface": [
+    "glirastes/react#MessageFooterConfig.*",
+    "glirastes/react#AiChatProviderConfig.messageFooter",
+    "glirastes/react#AiChatProviderProps.messageFooter",
+    "glirastes/react/vercel#VercelAiChatProps.messageFooter",
+    "glirastes/embed#GlirastesChatElementConfig.messageFooter",
+    "glirastes/react#MessagePartNodes.footer",
+    "glirastes/react#MessageParts.footer",
+    "glirastes/react#MessagePartsProps.footer",
+    "glirastes/react#ChatLocale.copyMessageLabel",
+    "glirastes/react#ChatLocale.copiedMessageLabel",
+    "glirastes/react#ChatLocale.copyMessageFailedLabel",
+    "glirastes/react#ChatLocale.messageSourceOneLabel",
+    "glirastes/react#ChatLocale.messageSourcesLabel",
+    "glirastes/react#ChatLocale.messageDurationLabel",
+    "locale#copyMessageLabel",
+    "locale#copiedMessageLabel",
+    "locale#copyMessageFailedLabel",
+    "locale#messageSourceOneLabel",
+    "locale#messageSourcesLabel",
+    "locale#messageDurationLabel"
+  ]
+}

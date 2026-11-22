@@ -1,4 +1,4 @@
-import type { CompletionItem, CompletionSelectContext, ComposerConfig } from '../types.js';
+import type { CompletionItem, CompletionSelectContext, ComposerConfig, MessageFooterConfig } from '../types.js';
 import type { ResolvedChatTrigger } from '../completions/triggers.js';
 import type { ComposerDraftController } from '../composer/composer-drafts.js';
 import { useChatContext, type ChatContextValue } from './chat-context.js';
@@ -20,6 +20,19 @@ export interface ComposerContextValue {
   mentionPrefix?: (type: string) => string;
   /** The unsent composer text per chat, owned by this provider instance. */
   drafts?: ComposerDraftController;
+  /**
+   * While a request runs: the working time of its turn so far in ms (earlier
+   * runs of the same turn included, approval waits not); `null` when nothing
+   * runs. A getter, so the provider does not re-render while time passes.
+   */
+  turnWorkedMs?: () => number | null;
+  /**
+   * A request runs or a UI action outcome it waits for is open: `isLoading`
+   * without the session load and session changes it also covers.
+   */
+  isTurnRunning?: boolean;
+  /** The resolved `messageFooter` (every part a boolean), null when it is off. */
+  messageFooter?: Required<MessageFooterConfig> | null;
 }
 
 /** The internal composer fields of a chat context value (absent outside the provider). */

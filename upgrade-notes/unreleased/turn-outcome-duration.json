@@ -1,0 +1,13 @@
+{
+  "id": "turn-outcome-duration",
+  "kind": "optional",
+  "summary": "A recorded TurnOutcome now carries durationMs, the time the turn's requests ran (approval waits excluded), measured in the browser and stored with the outcome in the session store.",
+  "howTo": "Read outcome.durationMs in onTurnEnd or useTurnOutcome for your own timing display or local analytics; messageFooter shows it as 'Done in 3.2 s'. Tests that compare whole outcomes with toEqual need the new member.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": ["glirastes/react"]
+  },
+  "surface": [
+    "glirastes/react#TurnOutcome.durationMs"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "suggestion-bar-enabled-and-stale",
+  "kind": "recommended",
+  "summary": "Visible fix: the SuggestionBar now shows nothing with suggestions.enabled: false (it used to show follow-up and static chips anyway), and a turn that brings no follow-ups no longer keeps showing the previous turn's chips; the static chips (or none) show instead.",
+  "howTo": "Nothing to change if the bar should behave as configured. An app that set suggestions.enabled: false but relied on the chips showing anyway removes enabled: false. An app that relied on a turn's follow-ups staying visible after later turns keeps them itself (useSuggestions().chips, onTurnEnd) or sets staticChips as the fallback.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "patterns": [
+      "suggestions\\s*[=:]\\s*\\{\\{?[^}]*enabled\\s*:\\s*false",
+      "staticChips",
+      "suggest_followups",
+      "followups\\s*:\\s*\\{"
+    ]
+  }
+}

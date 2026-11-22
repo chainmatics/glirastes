@@ -33,7 +33,11 @@ function readOutcome(value: unknown, userMessageId: string): TurnOutcome | null 
   const status = value.status as TurnOutcome['status'];
   const reason = value.reason as TurnOutcomeReason;
   if (!STATUSES.has(status) || !REASONS.has(reason)) return null;
-  return { userMessageId, status, reason, at: typeof value.at === 'string' ? value.at : '' };
+  const outcome: TurnOutcome = { userMessageId, status, reason, at: typeof value.at === 'string' ? value.at : '' };
+  // A bad duration is dropped; the outcome itself stays valid.
+  const durationMs = value.durationMs;
+  if (typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs >= 0) outcome.durationMs = durationMs;
+  return outcome;
 }
 
 /**
