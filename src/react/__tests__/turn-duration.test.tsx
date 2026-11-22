@@ -88,6 +88,36 @@ describe('TurnOutcome.durationMs: the working time of a turn', () => {
     expect(outcomeOf(chat)).toMatchObject({ status: 'completed', durationMs: 700 });
   });
 
+  it('a continuation after a UI action result adds up', async () => {
+    const chat = new StreamingChat();
+    render(<Host chat={chat} />);
+    await act(async () => { ctx.send('one'); });
+    elapse(1000);
+    act(() => chat.finish([{
+      type: 'tool-ui_navigate', toolCallId: 'call-1', state: 'output-available', input: {}, output: { success: true },
+    }]));
+    expect(outcomeOf(chat)).toMatchObject({ status: 'completed', durationMs: 1000 });
+    // The UI action reports its outcome; the same turn continues without a new user message.
+    elapse(4000);
+    act(() => chat.resume());
+    await waitFor(() => expect(outcomeOf(chat)).toBeUndefined());
+    elapse(500);
+    act(() => chat.finish([text('Opened')]));
+    expect(outcomeOf(chat)).toMatchObject({ status: 'completed', durationMs: 1500 });
+  });
+
+  it('a new user message after a continuation measures afresh', async () => {
+    const chat = new StreamingChat();
+    render(<Host chat={chat} />);
+    await act(async () => { ctx.send('one'); });
+    elapse(1000);
+    act(() => chat.finish());
+    await act(async () => { ctx.send('two'); });
+    elapse(300);
+    act(() => chat.finish());
+    expect(outcomeOf(chat, 1)).toMatchObject({ status: 'completed', durationMs: 300 });
+  });
+
   it('the duration survives a reload with the session store', async () => {
     const storage = memoryStorage();
     const store = storeFor('duration', storage);

@@ -970,9 +970,9 @@ export function AiChatProvider({
   const onTurnEndRef = useRef(onTurnEnd);
   onTurnEndRef.current = onTurnEnd;
   const [, setTurnEndCheck] = useState(0);
-  // The working time of the bound turn (`TurnOutcome.durationMs`): the time its requests ran so far, the start
-  // of the running one (null between runs), and whether an outcome was recorded for it (a new run then starts afresh).
-  const turnTimeRef = useRef<{ userMessageId: string; workedMs: number; runStartedAt: number | null; recorded: boolean } | null>(null);
+  // The working time of the bound turn (`TurnOutcome.durationMs`): the time its requests ran so far and the
+  // start of the running one (null between runs).
+  const turnTimeRef = useRef<{ userMessageId: string; workedMs: number; runStartedAt: number | null } | null>(null);
   const turnWorkedMs = useCallback((): number | null => {
     const time = turnTimeRef.current;
     if (!time || time.runStartedAt === null) return null;
@@ -1003,7 +1003,6 @@ export function AiChatProvider({
     let durationMs: number | undefined;
     if (time && time.userMessageId === userMessageId) {
       durationMs = Math.round(time.workedMs + (time.runStartedAt === null ? 0 : Math.max(0, Date.now() - time.runStartedAt)));
-      time.recorded = true;
     }
     const apply = (prev: ReadonlyMap<string, TurnOutcome>, notify = false) => {
       if (notify) turnEndQueuedRef.current.delete(userMessageId);
@@ -2498,13 +2497,15 @@ export function AiChatProvider({
       turnTimeRef.current = null;
       return;
     }
-    // The same turn goes on (after an approval): its time adds up. Another turn, or a new attempt of one that
-    // ended (a retry): measured afresh.
+    // The history decides: with the user message last, a new turn or a new attempt of it (a retry trims to it)
+    // is measured afresh; with an answer of the same turn last, the turn goes on (after an approval or a UI
+    // action result) and its time adds up.
     const time = turnTimeRef.current;
     const now = Date.now();
-    turnTimeRef.current = time && time.userMessageId === userMessageId && !time.recorded
+    const continues = rawMessagesRef.current.at(-1)?.role === 'assistant';
+    turnTimeRef.current = time && time.userMessageId === userMessageId && continues
       ? { ...time, runStartedAt: now }
-      : { userMessageId, workedMs: 0, runStartedAt: now, recorded: false };
+      : { userMessageId, workedMs: 0, runStartedAt: now };
     setTurnOutcomes((prev) => {
       if (!prev.has(userMessageId)) return prev;
       const next = new Map(prev);
