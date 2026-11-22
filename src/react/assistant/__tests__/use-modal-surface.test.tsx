@@ -70,6 +70,29 @@ describe('useModalSurface', () => {
     expect(document.activeElement).toBe(last);
   });
 
+  it('a hidden or inert modal elsewhere on the page does not take Escape or Tab', () => {
+    // Consent managers keep a hidden preference center with aria-modal in the DOM.
+    const consent = document.body.appendChild(document.createElement('div'));
+    consent.setAttribute('role', 'dialog');
+    consent.setAttribute('aria-modal', 'true');
+    consent.hidden = true;
+    const closed = document.body.appendChild(document.createElement('div'));
+    closed.style.display = 'none';
+    closed.appendChild(document.createElement('div')).setAttribute('aria-modal', 'true');
+    // Visible, but in a sibling the surface makes inert.
+    const behind = document.body.appendChild(document.createElement('div'));
+    behind.appendChild(document.createElement('div')).setAttribute('role', 'alertdialog');
+    const onEscape = vi.fn();
+    setup(true, onEscape);
+    expect(behind.hasAttribute('inert')).toBe(true);
+    const last = screen.getByRole('button', { name: 'Last' });
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'First' }));
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(onEscape).toHaveBeenCalledTimes(1);
+  });
+
   it('escape ownership', () => {
     const onEscape = vi.fn();
     function Owned() {

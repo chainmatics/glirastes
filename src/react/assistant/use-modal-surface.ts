@@ -5,9 +5,25 @@ import { useEffect, useRef, type RefObject } from 'react';
 const OTHER_MODAL = '[role="alertdialog"], [aria-modal="true"]';
 const FOCUSABLE = 'button, [href], input, select, textarea, [contenteditable="true"], [tabindex]';
 
-/** Another modal (e.g. a portaled `ConfirmDialog`) outside the surface owns the keyboard. */
+/** Whether an element is shown and usable: not hidden, not inert, not `display: none` on the way up. */
+function isShown(element: Element): boolean {
+  if (element.closest('[hidden],[inert]')) return false;
+  const check = (element as Element & { checkVisibility?: () => boolean }).checkVisibility;
+  if (typeof check === 'function') return check.call(element);
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    if (getComputedStyle(node).display === 'none') return false;
+  }
+  return getComputedStyle(element).visibility !== 'hidden';
+}
+
+/**
+ * Another modal (e.g. a portaled `ConfirmDialog`) outside the surface owns
+ * the keyboard. Hidden or inert ones (a consent manager's closed preference
+ * center, anything behind the surface) do not count.
+ */
 function otherModalOpen(surface: HTMLElement): boolean {
-  return Array.from(document.querySelectorAll(OTHER_MODAL)).some(element => !surface.contains(element) && !element.contains(surface));
+  return Array.from(document.querySelectorAll(OTHER_MODAL))
+    .some(element => !surface.contains(element) && !element.contains(surface) && isShown(element));
 }
 
 /**
