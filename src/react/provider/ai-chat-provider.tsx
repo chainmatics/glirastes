@@ -1840,13 +1840,18 @@ export function AiChatProvider({
 
   // Extract suggestions from suggest_followups tool, with a strict text
   // fallback for models that append a trailing Markdown suggestion section.
+  // Only the latest turn counts: a turn that brings none drops the chips of an
+  // earlier one (the static chips come back instead, once nothing runs).
+  const followupChipsShownRef = useRef(false);
   useEffect(() => {
     if (rawMessages.length === 0) return;
 
     const count = suggestionsConfig.count ?? 3;
     let latestFollowups: string[] | null = null;
     for (let messageIndex = rawMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-      const followups = readMessageFollowups(rawMessages[messageIndex] as { role: string; parts: unknown[] }, count);
+      const message = rawMessages[messageIndex] as { role: string; parts: unknown[] };
+      if (message.role === 'user') break;
+      const followups = readMessageFollowups(message, count);
       if (followups.length > 0) {
         latestFollowups = followups;
         break;
@@ -1854,9 +1859,13 @@ export function AiChatProvider({
     }
 
     if (latestFollowups && latestFollowups.length > 0) {
+      followupChipsShownRef.current = true;
       setSuggestionChips(latestFollowups);
+    } else if (followupChipsShownRef.current) {
+      followupChipsShownRef.current = false;
+      setSuggestionChips(isLoading ? [] : suggestionsConfig.staticChips ?? []);
     }
-  }, [rawMessages, suggestionsConfig.count]);
+  }, [rawMessages, suggestionsConfig.count, isLoading, suggestionsConfig.staticChips]);
 
   // Fallback to static chips when model doesn't call suggest_followups
   const prevIsLoadingRef = useRef(false);
