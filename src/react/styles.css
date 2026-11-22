@@ -2349,3 +2349,22 @@
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="message-attachment"] [data-element="attachment-note"] {
   font-size: 0.75rem;
 }
+
+/* composer.layout 'stacked': the editor on its own row, the toolbar items in a row under it. */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) form:has(> [data-component="composer-toolbar"][data-layout="stacked"]) {
+  flex-wrap: wrap;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) form:has(> [data-component="composer-toolbar"][data-layout="stacked"]) > * {
+  flex: 1 1 100%;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-toolbar"][data-layout="stacked"] {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.25rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-toolbar"][data-layout="stacked"] > :is([data-element="toolbar-start"], [data-element="toolbar-end"]) {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}

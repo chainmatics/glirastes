@@ -1117,6 +1117,13 @@ export interface ComposerConfig {
    * list's trigger char when known. Without it string icons render nothing.
    */
   renderIcon?: (name: string, context: { type: string; trigger?: string }) => ReactNode;
+  /**
+   * `inline` (default): items left and right of the editor in one row, as
+   * before. `stacked`: the editor on its own row, the toolbar items in a row
+   * under it (`start` left, `end` right). `components.ComposerToolbar` still
+   * replaces both.
+   */
+  layout?: 'inline' | 'stacked';
 }
 
 /**

@@ -139,5 +139,14 @@ export function ComposerToolbarLayout({ builtins, editor, controls, triggers, pi
   const end = build(endIds);
   const Toolbar = components.ComposerToolbar;
   if (Toolbar) return <Toolbar start={start} end={end} editor={editor} controls={controls} />;
+  if (composer?.layout === 'stacked') {
+    return <>
+      {editor}
+      <div data-component="composer-toolbar" data-layout="stacked">
+        <div data-element="toolbar-start">{start}</div>
+        <div data-element="toolbar-end">{end}</div>
+      </div>
+    </>;
+  }
   return <>{start}{editor}{end}</>;
 }
