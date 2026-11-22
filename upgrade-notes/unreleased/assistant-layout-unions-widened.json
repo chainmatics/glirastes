@@ -1,0 +1,25 @@
+{
+  "id": "assistant-layout-unions-widened",
+  "kind": "breaking",
+  "summary": "Type-only: AssistantLayoutMode gains 'fullscreen', AssistantShellAction gains 'mode' and 'history', AssistantLayout gains required restoreMode. Exhaustive switches, Records keyed by these unions and hand-built AssistantLayout mocks stop compiling. Runtime is unchanged without modes.",
+  "howTo": "Add 'fullscreen' cases (AssistantLayoutMode), 'mode' and 'history' cases (AssistantShellAction, e.g. in renderButton) and restoreMode to hand-built AssistantLayout values.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "patterns": [
+      "Record<\\s*(?:AssistantLayoutMode|AssistantShellAction)\\b",
+      ":\\s*AssistantLayout\\b",
+      "\\bsatisfies\\s+AssistantLayout\\b",
+      "\\bas\\s+AssistantLayout\\b",
+      "case\\s+['\"](?:detach|dock|collapse)['\"]"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "case\\s+['\"](?:fullscreen|history)['\"]",
+      "\\brestoreMode\\s*:"
+    ]
+  },
+  "surface": [
+    "glirastes/react#AssistantLayout.restoreMode"
+  ]
+}

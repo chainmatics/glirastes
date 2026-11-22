@@ -1,0 +1,29 @@
+{
+  "id": "assistant-layout-modes",
+  "kind": "optional",
+  "summary": "AssistantShell and AssistantWorkspace take modes. With 'fullscreen' in it the header shows a layout menu (sidebar, window, full screen) instead of the detach/dock button; a single mode hides the layout control.",
+  "howTo": "Pass modes={['sidebar', 'floating', 'fullscreen']} to AssistantWorkspace or AssistantShell. A layout outside modes falls back (full screen to defaultMode, otherwise the first entry); one entry removes the layout control and the layout shortcut. A renderButton receives expanded and controls for the new 'mode' and 'history' buttons (map to aria-expanded / aria-controls, and aria-haspopup=\"menu\" for 'mode'). New optional labels layout, sidebar, floating and icons fullscreen, history.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "AssistantShellAction",
+      "AssistantShellButtonProps"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "modes\\s*=\\s*\\{"
+    ]
+  },
+  "surface": [
+    "glirastes/react#AssistantShellProps.modes",
+    "glirastes/react#AssistantWorkspaceProps.modes",
+    "glirastes/react#AssistantShellButtonProps.expanded",
+    "glirastes/react#AssistantShellButtonProps.controls",
+    "glirastes/react#AssistantShellLabels.layout",
+    "glirastes/react#AssistantShellLabels.sidebar",
+    "glirastes/react#AssistantShellLabels.floating",
+    "glirastes/react#AssistantShellIcons.fullscreen",
+    "glirastes/react#AssistantShellIcons.history"
+  ]
+}

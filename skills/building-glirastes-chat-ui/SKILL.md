@@ -289,7 +289,7 @@ transport refuses files. Limits, error codes and the composer API:
 
 `session.save`, `.load` and `.clear` make conversations durable; `load` takes
 SDK `ChatMessage`s or flat `WireChatMessage`s. `SessionSwitcher` renders list,
-create, switch and rename.
+create, switch and rename (`variant="list"` for a side column).
 
 Corrupted stored sessions fail closed; clearing history needs a confirmation.
 
@@ -317,8 +317,8 @@ The default for an app with its own layout: an "Ask AI" button where the app
 wants it (usually the top bar), and the chat docked on the right or detached
 as a window. `AssistantWorkspace` inside `VercelAiChat` is that whole
 integration; `AssistantToggle` and `useAssistantLayout()` control it from any
-depth, and the parent needs a height. Example, shortcuts, look options and the
-own-layout parts: [references/placing-the-assistant.md](references/placing-the-assistant.md).
+depth, the parent needs a height, `modes` adds full screen with a chat column.
+Example, width, shortcuts, look, own layout: [references/placing-the-assistant.md](references/placing-the-assistant.md).
 
 ## Approvals
 

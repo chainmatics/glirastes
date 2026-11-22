@@ -1,0 +1,22 @@
+{
+  "id": "assistant-fullscreen",
+  "kind": "optional",
+  "summary": "AssistantShell renders full screen as a modal and offers it when its modes list includes 'fullscreen'; useAssistantLayout().setMode('fullscreen') opens it, restoreMode() leaves it.",
+  "howTo": "Add 'fullscreen' to AssistantShell/AssistantWorkspace modes; setMode('fullscreen') opens full screen, restoreMode() or Escape returns to defaultMode. A UI action that shows page UI calls restoreMode() first or puts that UI above --cm-chat-fullscreen-z (default 1000); page portals that must stay usable carry data-cm-keep-interactive.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "AssistantLayoutMode",
+      "useAssistantLayout"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "modes\\s*=\\s*\\{[^}]*['\"]fullscreen['\"]",
+      "setMode\\(\\s*['\"]fullscreen['\"]"
+    ]
+  },
+  "surface": [
+    "glirastes/react#AssistantShellLabels.fullscreen"
+  ]
+}

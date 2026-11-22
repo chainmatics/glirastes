@@ -1,0 +1,21 @@
+{
+  "id": "session-switcher-list",
+  "kind": "optional",
+  "summary": "SessionSwitcher takes variant=\"list\" for an always visible chat list (new chat, recent chats, rename, delete, arrow keys) and onSelect, called after a pick or a new chat.",
+  "howTo": "Render <SessionSwitcher variant=\"list\" onSelect={() => …} /> in an own side column; it needs a chat that keeps several conversations (renders nothing otherwise). Texts: locale.chatHistoryLabel (navigation name) and locale.recentChatsLabel (heading); German ships. onSelect also works on the default dropdown.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": ["SessionSwitcher"]
+  },
+  "adoptedWhen": {
+    "patterns": ["variant\\s*=\\s*[\"']list[\"']"]
+  },
+  "surface": [
+    "glirastes/react#SessionSwitcherProps.variant",
+    "glirastes/react#SessionSwitcherProps.onSelect",
+    "glirastes/react#ChatLocale.chatHistoryLabel",
+    "glirastes/react#ChatLocale.recentChatsLabel",
+    "locale#chatHistoryLabel",
+    "locale#recentChatsLabel"
+  ]
+}

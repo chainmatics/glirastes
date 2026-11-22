@@ -10,6 +10,7 @@ All names below come from `glirastes/react` unless noted.
   - Sub-lists
 - Opening a list from a button
 - Toolbar
+  - Layout
 - Plus menu
   - Row descriptions and icons
 - End-to-end example
@@ -215,6 +216,26 @@ const composer = useMemo<ComposerConfig>(() => ({
   level (or memoize it): an inline component remounts the editor and loses
   the draft.
 - The legacy `mentions` input ignores `composer`.
+
+### Layout
+
+`composer.layout` places the toolbar. `'inline'` (default) keeps one row:
+`start` items, the editor, `end` items, with no wrapper element. `'stacked'`
+puts the editor on its own row and the toolbar items in a row under it,
+`start` on the left and `end` on the right (as in omnify):
+
+```tsx
+const composer = useMemo<ComposerConfig>(() => ({
+  layout: 'stacked',
+  toolbar: { start: ['plus', 'trigger:@', 'trigger:/'], end: ['mic', 'send'] },
+}), []);
+```
+
+Stacked markup inside the form: the editor, then
+`div[data-component="composer-toolbar"][data-layout="stacked"]` with
+`[data-element="toolbar-start"]` and `[data-element="toolbar-end"]`. The
+hint line (`composer.hint`) stays the last row. `components.ComposerToolbar`
+still replaces both layouts.
 
 ## Plus menu
 

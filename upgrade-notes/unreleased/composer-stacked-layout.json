@@ -1,0 +1,16 @@
+{
+  "id": "composer-stacked-layout",
+  "kind": "optional",
+  "summary": "composer.layout: 'stacked' puts the editor on its own row and the toolbar items in a row under it; the default 'inline' keeps today's single row.",
+  "howTo": "Set composer: { layout: 'stacked', toolbar: { start: ['plus', 'trigger:@', 'trigger:/'], end: ['mic', 'send'] } } on AiChatProvider. The row is div[data-component=\"composer-toolbar\"][data-layout=\"stacked\"] with toolbar-start and toolbar-end. components.ComposerToolbar still replaces both layouts. See references/composer-triggers-toolbar.md#layout.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": ["glirastes/react"]
+  },
+  "adoptedWhen": {
+    "patterns": ["layout\\s*:\\s*['\"]stacked['\"]"]
+  },
+  "surface": [
+    "glirastes/react#ComposerConfig.layout"
+  ]
+}

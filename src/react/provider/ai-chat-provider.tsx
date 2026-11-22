@@ -178,6 +178,8 @@ export const DEFAULT_LOCALE: ChatLocale = {
   sessionArchiveMessage: '"{title}" will be archived.',
   renameSessionAriaLabel: 'Rename conversation',
   renameSessionPlaceholder: 'Conversation title',
+  chatHistoryLabel: 'Chats',
+  recentChatsLabel: 'Recent chats',
   clarificationInputLabel: 'Your answer',
   clarificationSubmitButton: 'Answer',
   retryRecordingAriaLabel: 'Retry recording',
