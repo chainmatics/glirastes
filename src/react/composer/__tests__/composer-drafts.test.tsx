@@ -240,7 +240,7 @@ describe('composer drafts in storage', () => {
     typeInto(editor(), 'abcdef');
     view.rerender(<Host chat={chat} session={withDraft('B', draft)} />);
     await ready();
-    await pause(400);
+    // Written at the switch, not 300 ms later.
     expect(draft.save).toHaveBeenCalledWith('A', { text: 'abcdef' });
   });
 

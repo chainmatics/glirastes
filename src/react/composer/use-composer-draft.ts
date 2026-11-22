@@ -34,7 +34,10 @@ export function useComposerDraft(
     if (!drafts || !handle || shownRef.current === activeSessionId) return;
     const first = shownRef.current === null;
     // The editor is the truth for the chat being left: a pill's `onChange` may still be pending.
-    if (!first) drafts.set(shownRef.current!, { text: handle.getValue(), mentions: handle.getMentions() });
+    if (!first) {
+      drafts.set(shownRef.current!, { text: handle.getValue(), mentions: handle.getMentions() });
+      drafts.flush();
+    }
     shownRef.current = activeSessionId;
     const sessionId = activeSessionId;
     const show = (text: string, mentions: ReadonlyArray<MentionData> = []) => {
