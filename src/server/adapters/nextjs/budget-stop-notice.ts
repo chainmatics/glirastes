@@ -7,6 +7,8 @@
  * other dimensions, no tool data, no principal data.
  */
 import type { BudgetReason } from '../../../runtime/budget.js';
+import type { BudgetStopSummaryTexts, TurnToolCall } from './budget-continuation.js';
+import { toolResultFailure } from '../../../runtime/tool-failure.js';
 
 /** Why the handler stopped the turn: a runtime budget dimension, or `maxSteps` (the handler's step cap). */
 export type BudgetStopReason = BudgetReason | 'maxSteps';
@@ -16,12 +18,21 @@ export type BudgetStopReason = BudgetReason | 'maxSteps';
  * notice after text of the model, `closingWithoutAnswer` the one for a turn
  * that showed no text at all; `{reason}` are the reached limits; each reason text gets the limit as
  * `{limit}` (number formatted for the locale; a duration with its unit).
+ * After it come the summary paragraphs: `done` and `open` (with `{items}`,
+ * a comma-separated list), `openUnanswered` (no open plan items),
+ * `continueHint` (the chat offers "Continue") or `continueTypedHint`.
  */
-export type BudgetStopTexts = { closing: string; closingWithoutAnswer: string } & Record<BudgetStopReason, string>;
+export type BudgetStopTexts = { closing: string; closingWithoutAnswer: string } & BudgetStopSummaryTexts
+  & Record<BudgetStopReason, string>;
 
 const EN: BudgetStopTexts = Object.freeze({
   closing: 'I had to stop here: {reason}. The answer above may be incomplete.',
   closingWithoutAnswer: 'I could not finish this request: {reason}.',
+  done: 'Done so far: {items}.',
+  open: 'Still open: {items}.',
+  openUnanswered: 'Still open: your question is not answered yet.',
+  continueHint: 'Choose “Continue” or write “continue” to go on with the open steps.',
+  continueTypedHint: 'Write “continue” to go on with the open steps.',
   maxSteps: 'the step limit for this request was reached ({limit} steps)',
   maxModelSteps: 'the step limit for this request was reached ({limit} steps)',
   maxToolCalls: 'the limit for this request was reached (tool calls: {limit})',
@@ -36,6 +47,11 @@ const EN: BudgetStopTexts = Object.freeze({
 const DE: BudgetStopTexts = Object.freeze({
   closing: 'Ich musste hier aufhören: {reason}. Die Antwort oben ist möglicherweise unvollständig.',
   closingWithoutAnswer: 'Ich konnte diese Anfrage nicht abschließen: {reason}.',
+  done: 'Erledigt: {items}.',
+  open: 'Offen: {items}.',
+  openUnanswered: 'Offen: Deine Frage ist noch nicht beantwortet.',
+  continueHint: 'Wähle „Weitermachen“ oder schreib „weiter“, um mit den offenen Schritten fortzufahren.',
+  continueTypedHint: 'Schreib „weiter“, um mit den offenen Schritten fortzufahren.',
   maxSteps: 'das Schrittlimit für diese Anfrage ist erreicht ({limit} Schritte)',
   maxModelSteps: 'das Schrittlimit für diese Anfrage ist erreicht ({limit} Schritte)',
   maxToolCalls: 'das Limit für diese Anfrage ist erreicht (Tool-Aufrufe: {limit})',
@@ -104,31 +120,50 @@ export interface BudgetStopLimit {
   limit: number;
 }
 
+/** What the stream handler writes at the end: the notice text and parts that go right before it. */
+export type StopNotice<T> = string | { text: string; before?: T[] } | undefined;
+
 /**
  * Asks `notice` at each part that can end the stream (`finish`, `error`,
  * `abort`) and, when it returns a text, writes it as an own text part right
- * before that part: at most once per stream.
+ * before that part (after the `before` parts): at most once per stream. The
+ * tool calls the stream showed so far are handed to it, in order.
  */
 export function withStopNotice<T>(
   source: ReadableStream<T>,
-  notice: (terminal: 'finish' | 'error' | 'abort', hadText: boolean) => string | undefined,
+  notice: (terminal: 'finish' | 'error' | 'abort', hadText: boolean, calls: TurnToolCall[]) => StopNotice<T>,
 ): ReadableStream<T> {
   let written = false;
   // Whether the user has seen any text of the model in this answer.
   let hadText = false;
+  const calls = new Map<string, TurnToolCall>();
   return source.pipeThrough(new TransformStream<T, T>({
     transform(chunk, controller) {
-      const type = (chunk as { type?: unknown }).type;
-      if (type === 'text-delta' && typeof (chunk as { delta?: unknown }).delta === 'string'
-        && ((chunk as { delta: string }).delta).trim() !== '') hadText = true;
+      const record = chunk as Record<string, unknown>;
+      const type = record.type;
+      if (type === 'text-delta' && typeof record.delta === 'string' && record.delta.trim() !== '') hadText = true;
+      const id = typeof record.toolCallId === 'string' ? record.toolCallId : undefined;
+      if (id && type === 'tool-input-available' && typeof record.toolName === 'string') {
+        calls.set(id, { id, toolName: record.toolName, input: record.input, state: 'open' });
+      } else if (id && calls.has(id)) {
+        const call = calls.get(id)!;
+        if (type === 'tool-output-available') {
+          const output = record.output;
+          call.state = typeof output === 'object' && output !== null && !Array.isArray(output)
+            && toolResultFailure(output as Record<string, unknown>) !== undefined ? 'failed' : 'done';
+        } else if (type === 'tool-output-error') call.state = 'failed';
+        else if (type === 'tool-output-denied') call.state = 'declined';
+      }
       if (!written && (type === 'finish' || type === 'error' || type === 'abort')) {
-        const text = notice(type, hadText);
+        const result = notice(type, hadText, [...calls.values()]);
+        const text = typeof result === 'string' ? result : result?.text;
         if (text) {
           written = true;
-          const id = 'glirastes-stop-notice';
-          controller.enqueue({ type: 'text-start', id } as T);
-          controller.enqueue({ type: 'text-delta', id, delta: text } as T);
-          controller.enqueue({ type: 'text-end', id } as T);
+          for (const part of typeof result === 'object' ? result.before ?? [] : []) controller.enqueue(part);
+          const noticeId = 'glirastes-stop-notice';
+          controller.enqueue({ type: 'text-start', id: noticeId } as T);
+          controller.enqueue({ type: 'text-delta', id: noticeId, delta: text } as T);
+          controller.enqueue({ type: 'text-end', id: noticeId } as T);
         }
       }
       controller.enqueue(chunk);

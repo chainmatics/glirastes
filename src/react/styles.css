@@ -816,6 +816,28 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* ---------- Continue after a budget stop ---------- */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="budget-continue"] {
+  display: flex;
+  margin-top: 0.5rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="continue-after-stop"] {
+  padding: 0.375rem 0.75rem;
+  background: transparent;
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  color: var(--cm-text);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="continue-after-stop"]:hover {
+  background: var(--cm-primary-tint);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="continue-after-stop"]:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
 /* ---------- Tool result ---------- */
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="tool-result"] {
   margin: 0.375rem 0;

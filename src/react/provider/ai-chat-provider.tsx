@@ -2799,6 +2799,20 @@ export function AiChatProvider({
     setTruncation(null);
   }, []);
 
+  // "Continue" after a budget stop: the history again, with the continuation marker (no new message).
+  const canContinueAfterBudgetStop = typeof resolvedTransport.continueAfterBudgetStop === 'function';
+  const continueAfterBudgetStop = useCallback(() => {
+    const transportNow = transportRef.current;
+    const go = transportNow.continueAfterBudgetStop;
+    if (typeof go !== 'function') return;
+    setSuggestionChips([]);
+    setPipelineSteps([]);
+    setPipelineState(null);
+    void Promise.resolve(go.call(transportNow)).catch(() => {
+      console.warn('[glirastes] The stopped turn could not be continued');
+    });
+  }, []);
+
   // Pending approvals as array (for context consumers)
   const pendingApprovals = useMemo(
     () => Array.from(pendingApprovalsMap.values()),
@@ -2944,6 +2958,7 @@ export function AiChatProvider({
       truncation,
       continueTruncation,
       dismissTruncation,
+      ...(canContinueAfterBudgetStop ? { continueAfterBudgetStop } : {}),
       mentionQuery,
       mentionTrigger,
       mentionResults,
@@ -3049,6 +3064,8 @@ export function AiChatProvider({
       truncation,
       continueTruncation,
       dismissTruncation,
+      canContinueAfterBudgetStop,
+      continueAfterBudgetStop,
       mentionQuery,
       mentionTrigger,
       mentionResults,

@@ -164,9 +164,18 @@ Defaults keep today's markup; everything below is opt-in.
   end. A throw or a rejected promise is caught. Details: `docs/concepts.md`.
 - `components.MessageParts` arranges the parts inside the bubble root and
   receives `message`, the nodes (`MessagePartNodes`) `plan`, `activity`, `notice`, `attachments`,
-  `text`, `toolResults`, `footer` (each `null` when absent) and `children` (all of them
+  `text`, `toolResults`, `continuation`, `footer` (each `null` when absent) and `children` (all of them
   in the default order) and `turnOutcome`. `useMessageParts(message)` returns the same nodes
-  plus `visible` and `turnOutcome` for a custom `MessageBubble`.
+  plus `visible` and `turnOutcome` for a custom `MessageBubble`. A layout that drops `children`
+  places `continuation` itself, or the user loses the "Continue" button after a stop.
+- `continuation`: the "Continue" button (`locale.continueButton`, German "Weitermachen") under
+  the latest answer when the server's stop notice ends it with a continuable `data-budget-stop`
+  part; a `<button type="button" data-action="continue-after-stop">` in
+  `[data-element="budget-continue"]`, before the footer. A click calls
+  `continueAfterBudgetStop()` of the chat context (present only when the transport has
+  `ChatTransport.continueAfterBudgetStop`, as `useVercelAiChatTransport` does), which resends the
+  history with `glirastesContinuation: 'budget'`. A custom transport implements it the same way
+  or the button is not shown.
 - `parts` (in `MessagePartsProps` and from `useMessageParts`): every part of
   the message in message order as a `MessagePartEntry` `{ key, index, kind,
   part, toolName?, toolCallId?, node, approval? }` (`MessagePartKind`

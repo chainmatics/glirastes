@@ -24,6 +24,7 @@ import { MEMORY_BODY_FIELD, MEMORY_MAX_USER_NOTES, MEMORY_NOTES_PART, readMemory
 import { UI_OUTCOME_PROTOCOL_VERSION, UI_OUTCOMES_REQUEST_FIELD } from '../../contracts/ui-outcome.js';
 import { CHAT_LANGUAGE_HEADER, chatLanguageOf } from '../../contracts/localized-text.js';
 import { shouldContinueChat } from '../utils/ui-outcome-continuation.js';
+import { BUDGET_CONTINUATION, CONTINUATION_REQUEST_FIELD } from '../../contracts/budget-continuation.js';
 import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
 
 import type { MaybePromise } from '../types.js';
@@ -227,6 +228,11 @@ export function useVercelAiChatTransport(
   );
   // The history as it is, sent again without a new message (a turn continued on a new page).
   const continueTurn = useCallback(() => sendMessage(), [sendMessage]);
+  // The history again with the marker of a budget continuation ("Continue" under a stop notice).
+  const continueAfterBudgetStop = useCallback(
+    () => sendMessage(undefined, { body: { [CONTINUATION_REQUEST_FIELD]: BUDGET_CONTINUATION } }),
+    [sendMessage],
+  );
 
   return useMemo<ChatTransport>(
     () => ({
@@ -239,9 +245,10 @@ export function useVercelAiChatTransport(
       addToolApprovalResponse,
       subscribeToData,
       setRequestLanguage,
+      continueAfterBudgetStop,
       ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
     [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
-      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting],
+      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
   );
 }

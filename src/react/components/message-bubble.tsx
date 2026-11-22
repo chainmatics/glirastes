@@ -31,6 +31,7 @@ import {
 } from '../../contracts/clarification.js';
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
+import { endsWithContinuableBudgetStop } from '../../contracts/budget-continuation.js';
 import type {
   ActivityLogDetails,
   ChatLocale,
@@ -313,6 +314,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     messageFooter,
     suggestions,
     isTurnRunning,
+    continueAfterBudgetStop,
   } = useComposerContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
@@ -650,6 +652,19 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     );
   }
 
+  /** "Continue" under a budget stop notice: the latest answer, stopped at a limit the server offers to continue. */
+  function continuationNode(): ReactNode {
+    if (!isAssistant || !isLatestMessage || isLoading || !continueAfterBudgetStop) return null;
+    if (!endsWithContinuableBudgetStop(message)) return null;
+    return (
+      <div data-element="budget-continue">
+        <button type="button" data-action="continue-after-stop" onClick={() => continueAfterBudgetStop()}>
+          {locale.continueButton}
+        </button>
+      </div>
+    );
+  }
+
   // `activityLog.grouping: 'sections'`: a log per run of steps, at its place between the texts.
   const sections = (activityLog?.grouping ?? 'message') === 'sections' && isAssistant && activitySteps.length > 0
     ? activitySections(message.parts, textEntries.map((entry, i) => ({ index: entry.index, node: textNodes[i] ?? null })), readSteps)
@@ -703,6 +718,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
       )
       : null,
     toolResults: toolResultNodes.some((node) => node !== null) ? <>{toolResultNodes}</> : null,
+    continuation: continuationNode(),
     footer: footerNode(),
   };
   const textNodeAt = new Map(textEntries.map((entry, i) => [entry.index, textNodes[i] ?? null] as const));
@@ -742,6 +758,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     attachments: scoped(nodes.attachments),
     text: scoped(nodes.text),
     toolResults: scoped(nodes.toolResults),
+    continuation: nodes.continuation,
     footer: scoped(nodes.footer),
   };
 }
@@ -790,6 +807,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
             {nodes.toolResults}
           </>
         )}
+      {nodes.continuation}
       {nodes.footer}
     </>
   );

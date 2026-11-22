@@ -1,0 +1,20 @@
+{
+  "id": "budget-stop-continue",
+  "kind": "recommended",
+  "summary": "Visible change: the stop notice after a limit now says what was done and what is open, and the chat shows a Continue button (German Weitermachen) that continues the stopped turn with a fresh budget and never runs a write call of it again.",
+  "howTo": "Nothing to do with createAiChatHandler and useVercelAiChatTransport. Own budgetStopTexts or locales can set the new keys done, open, openUnanswered ({items}), continueHint and continueTypedHint. The click sends glirastesContinuation: 'budget' in the chat request body: a backend that validates the body strictly must allow that field. onFinish reports continuation: 'budget' for such a request; metrics report it as a normal turn.finished. A custom ChatTransport adds continueAfterBudgetStop() (resend the history with that body field) or the button is not shown; a custom MessageParts layout that drops children places the new continuation node. The German continueButton text is now Weitermachen (also on the truncation banner). A customStreamHandler gets no continuation (400). See skills/integrating-glirastes-nextjs/references/handler-options.md (budgetStopTexts) and docs/managed-runtime-sync.md, Continuing a stopped turn.",
+  "skill": "integrating-glirastes-nextjs",
+  "affectedWhen": {
+    "symbols": ["createAiChatHandler", "AiChatProvider", "useVercelAiChatTransport"]
+  },
+  "adoptedWhen": {
+    "patterns": ["continueAfterBudgetStop", "continueHint"]
+  },
+  "surface": [
+    "glirastes/react#ChatContextValue.continueAfterBudgetStop",
+    "glirastes/react#ChatTransport.continueAfterBudgetStop",
+    "glirastes/react#MessagePartNodes.continuation",
+    "glirastes/react#MessageParts.continuation",
+    "glirastes/react#MessagePartsProps.continuation"
+  ]
+}
