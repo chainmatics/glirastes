@@ -640,10 +640,24 @@ export interface AiChatHandlerConfig {
      * Set when this request continued a turn instead of starting one:
      * answered approvals (`'approval'`) or reported UI outcomes
      * (`'ui-outcome'`). `onFinish` fires once per request, so count turns
-     * by the requests without it.
+     * by the requests without it. A UI tool turn with the outcome protocol
+     * takes two requests (the second with `'ui-outcome'`), an approval two
+     * as well; tokens and steps of every request belong to the turn:
+     *
+     * ```ts
+     * onFinish: (event) => {
+     *   if (!event.continuation) metrics.turns += 1; // one logical turn
+     *   metrics.requests += 1;
+     *   metrics.totalTokens += event.usage.totalTokens; // every request costs
+     * }
+     * ```
      */
     continuation?: 'approval' | 'ui-outcome';
-    /** Set when the request ended to wait for the outcome of a UI action; a continuation follows. */
+    /**
+     * Set when the request ended to wait for the outcome of a UI action; a
+     * continuation with `continuation: 'ui-outcome'` follows (unless the
+     * browser never reports, e.g. the tab was closed).
+     */
     awaitingUiOutcome?: true;
   }) => void;
 

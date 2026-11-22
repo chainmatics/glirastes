@@ -452,7 +452,11 @@ continuation of a turn the same `turnId`, also after a restart; with the
 process secret only continuations served by the same process share it.
 `turn.finished` carries no `turnId`, so the Platform can group the
 continuations of one turn and count turns from `turn.finished`, but cannot
-join a turn's first request to its continuations. A `modelPricing`
+join a turn's first request to its continuations. The handler's local
+`onFinish` follows the same rule: it fires once per request and carries
+`continuation: 'approval' | 'ui-outcome'` on a continuation, so count turns on
+the events without it (example in `docs/ui-action-outcomes.md`, Counting
+turns). A `modelPricing`
 table on the handler estimates the rest (`price-table`, with its version).
 Without either, the cost stays unknown (`null`), never 0. A known cost also
 counts against the turn's `maxEstimatedCostUsd`. The legacy Lancer `telemetry`

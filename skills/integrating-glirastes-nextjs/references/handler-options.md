@@ -13,6 +13,7 @@ it. The type's JSDoc carries the full detail.
 - Approvals
 - Request safety
 - Callbacks and observability
+- Counting turns in onFinish
 - Order of parts at the end of the stream
 - Legacy and Pro
 
@@ -135,6 +136,29 @@ card's wording and the handler's own texts (with `locales`); the order is
 | `onAudit` | `AuditEmitter` for all audit events; forward to logs or a SIEM |
 | `metrics` | content-free turn metrics, e.g. from `createGlirastes(...).chatTurn()`; a continuation is a `turn.continued` event (`TurnContinuedEvent`, `TurnContinuedEventSchema`, `TurnContinuation`, `TurnContinuationSchema`) instead of `turn.finished`, in batches of its own, with an opaque `turnId` (HMAC keyed by the approval secret, never the client's message id) shared by every continuation of the turn |
 | `modelPricing` | price table for providers that report no cost |
+
+### Counting turns in onFinish
+
+`onFinish` fires once per request, not once per turn. A turn with a UI tool
+takes two requests when the browser reports UI outcomes (the default): the
+first ends with `awaitingUiOutcome: true`, the second carries
+`continuation: 'ui-outcome'`. An answered approval is a second request with
+`continuation: 'approval'`. Count a turn on the request without
+`continuation`, and add tokens and steps of every request to it:
+
+```ts
+createAiChatHandler({
+  // ...
+  onFinish: (event) => {
+    if (!event.continuation) metrics.turns += 1; // one logical turn
+    metrics.requests += 1;
+    metrics.totalTokens += event.usage.totalTokens; // continuations cost too
+  },
+});
+```
+
+`onFinish` carries no turn id; the content-free `metrics` events do
+(`turnId` on `turn.continued`).
 
 ### Order of parts at the end of the stream
 
