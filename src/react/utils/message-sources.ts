@@ -8,7 +8,9 @@ export interface MessageSource {
 const MAX_SOURCES = 20;
 const MAX_LABEL = 160;
 
-const FENCED_CODE = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]{0,3}\1[`~]*[ \t]*(?=\n|$)|$)/gm;
+// A fence runs to its closing fence, or to the end of the text when unclosed (`(?![\s\S])`: not `$`, which
+// the `m` flag lets match at every line end).
+const FENCED_CODE = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*(?:\n[\s\S]*?)??(?:\n[ \t]{0,3}\1[`~]*[ \t]*(?=\n|(?![\s\S]))|(?![\s\S]))/gm;
 const INLINE_CODE = /(`+)[\s\S]*?\1/g;
 const DEFINITION = /^[ ]{0,3}\[([^\]\n]+)\]:[ \t]*<?([^\s>]+)>?(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$/gm;
 // `[label](url "title")` or `[label][id]` / `[label][]`; an image (`![…]`) is not a source.

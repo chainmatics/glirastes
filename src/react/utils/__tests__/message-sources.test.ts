@@ -28,6 +28,19 @@ describe('readMessageSources', () => {
     expect(readMessageSources([text('```\n[x](https://e.com/a)\n```\n\n`[y](https://e.com/b)` and\n~~~\n[z](https://e.com/c)\n~~~')])).toEqual([]);
   });
 
+  it('a multi-line code block hides every line and the link after it counts', () => {
+    const answer = 'Intro\n```md\nline one\n[x](https://evil.example/a)\n[y](https://evil.example/b)\n```\n[After](https://ok.example/c)';
+    expect(readMessageSources([text(answer)])).toEqual([
+      { href: 'https://ok.example/c', label: 'After', domain: 'ok.example' },
+    ]);
+  });
+
+  it('an unclosed code block runs to the end of the text', () => {
+    expect(readMessageSources([text('[Before](https://ok.example/a)\n~~~\ncode\n[x](https://evil.example/a)')])).toEqual([
+      { href: 'https://ok.example/a', label: 'Before', domain: 'ok.example' },
+    ]);
+  });
+
   it('duplicates collapse and at most 20', () => {
     const links = Array.from({ length: 25 }, (_, i) => `[l${i}](https://e${i}.com/)`);
     links.splice(3, 0, '[again](https://e0.com/)');
