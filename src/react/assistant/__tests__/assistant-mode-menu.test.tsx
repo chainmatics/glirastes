@@ -98,6 +98,18 @@ describe('layout menu', () => {
     expect(state()).toMatchObject({ mode: 'sidebar' });
   });
 
+  it('in full screen Tab from the menu moves on from the trigger instead of wrapping', async () => {
+    await mount({ modes: ALL });
+    fireEvent.click(trigger());
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Full screen' }));
+    key(trigger(), 'Enter');
+    const event = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    act(() => { document.activeElement!.dispatchEvent(event); });
+    expect(document.activeElement).toBe(trigger());
+    // The trap left it to the browser: the trigger is not the last stop.
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it('outside click and Tab close the menu', async () => {
     await mount({ modes: ALL });
     fireEvent.click(trigger());
