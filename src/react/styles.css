@@ -1822,6 +1822,18 @@
 [data-component="assistant-shell"][data-floating-gesture="move"]:where(:not([data-unstyled], [data-unstyled] *)) {
   box-shadow: 0 16px 40px -12px rgba(17, 24, 39, 0.35);
 }
+/* Full screen: a modal over the page; the conversation keeps a reading width. */
+[data-component="assistant-shell"][data-mode="fullscreen"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  z-index: 1000;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+[data-component="assistant-shell"][data-mode="fullscreen"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="body"] {
+  width: 100%;
+  max-width: var(--cm-chat-max-width, 960px);
+  margin-inline: auto;
+}
 [data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="header"] {
   display: flex;
   align-items: center;

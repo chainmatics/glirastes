@@ -8,6 +8,7 @@ import { useFloatingPanel, type FloatingResizeEdge } from '../hooks/use-floating
 import { isGerman, usePageLanguage } from '../utils/tool-presentation.js';
 import { SessionSwitcher } from '../components/session-switcher.js';
 import { useAssistantLayout } from './assistant-layout.js';
+import { useModalSurface } from './use-modal-surface.js';
 
 /** A built-in button of the shell, for `renderButton`. */
 export type AssistantShellAction = 'bubble' | 'toggle' | 'detach' | 'dock' | 'collapse' | 'clear' | 'close';
@@ -48,6 +49,8 @@ export interface AssistantShellLabels {
   resize: string;
   /** Accessible name of the draggable header of the detached window. */
   windowHeader: string;
+  /** The full-screen layout, e.g. in the layout menu. */
+  fullscreen?: string;
 }
 
 export interface AssistantShellClassNames {
@@ -76,6 +79,7 @@ export const DEFAULT_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freez
   close: 'Close',
   resize: 'AI assistant width',
   windowHeader: 'Chat window: arrow keys move, Alt and arrow keys resize, double click resets',
+  fullscreen: 'Full screen',
 });
 
 export const DE_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freeze({
@@ -89,6 +93,7 @@ export const DE_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freeze({
   close: 'Schließen',
   resize: 'Breite des KI-Assistenten',
   windowHeader: 'Chatfenster: Pfeiltasten verschieben, Alt und Pfeiltasten ändern die Größe, Doppelklick setzt zurück',
+  fullscreen: 'Vollbild',
 });
 
 /** The built-in labels for the language of the page; an app's own `labels` still override them. */
@@ -311,6 +316,8 @@ export function AssistantShell({
   const [available, setAvailable] = useState(maxWidth);
   const [narrow, setNarrow] = useState(false);
   const sidebar = ui.mode === 'sidebar';
+  const floating = ui.mode === 'floating';
+  const fullscreen = ui.mode === 'fullscreen';
   const width = Math.min(ui.width, available);
 
   const floatingWidth = windowOptions.width ?? ui.width;
@@ -318,7 +325,7 @@ export function AssistantShell({
   const right = windowOptions.right ?? 16;
   const bottom = windowOptions.bottom ?? 72;
   const { ref: shell, style: windowStyle, dragHandleProps, getResizeHandleProps } = useFloatingPanel<HTMLElement>({
-    enabled: ui.open && !sidebar,
+    enabled: ui.open && floating,
     defaultRect: useCallback(() => {
       const height = Math.min(floatingHeight, window.innerHeight - 88);
       return { width: floatingWidth, height, x: window.innerWidth - floatingWidth - right, y: window.innerHeight - height - bottom };
@@ -379,23 +386,34 @@ export function AssistantShell({
   const newChat = onNewChat ?? (sessionsSupported && chat?.createSession ? () => { void chat.createSession(); } : undefined);
   const shortcuts = useChatShortcuts({
     toggle: ui.toggleChat,
-    toggleLayout: () => { if (ui.open) ui.setMode(sidebar ? 'floating' : 'sidebar'); },
+    toggleLayout: () => {
+      if (!ui.open) return;
+      if (fullscreen) ui.restoreMode();
+      else ui.setMode(sidebar ? 'floating' : 'sidebar');
+    },
     toggleCollapse: () => { if (ui.open && sidebar) ui.toggleCollapsed(); },
     ...(newChat ? { newChat: () => { ui.openChat(); newChat(); } } : {}),
     focusInput: () => { ui.openChat(); focusComposer(); requestAnimationFrame(focusComposer); },
   }, { shortcuts: shortcutOverrides, shouldIgnore: shouldIgnoreShortcut });
 
+  // Full screen is a modal: the page is inert, Tab stays inside, Escape returns to the previous layout.
+  useModalSurface(shell, { active: ui.open && fullscreen, onEscape: ui.restoreMode });
+
   const clear = onClear ?? chat?.clear;
   const placement: CSSProperties = sidebar
     ? (fillsRow ? { flex: '1 1 0%', minWidth: 0 } : { width: ui.collapsed ? railWidth : width })
-    // Before the window is measured it opens bottom right, as it will afterwards.
-    : windowStyle ?? { position: 'fixed', width: floatingWidth, height: floatingHeight, right: `min(${right}px, max(0px, calc((100vw - 500px) / 2)))`, bottom };
+    : fullscreen
+      ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', maxWidth: 'none', maxHeight: 'none' }
+      // Before the window is measured it opens bottom right, as it will afterwards.
+      : windowStyle ?? { position: 'fixed', width: floatingWidth, height: floatingHeight, right: `min(${right}px, max(0px, calc((100vw - 500px) / 2)))`, bottom };
+  // A closed full screen reopens in `defaultMode`, so the bubble follows that layout.
+  const bubble = floating || (fullscreen && !ui.open && ui.defaultMode === 'floating');
 
   return <>
-    {!sidebar && showBubble && button({ action: 'bubble', label: labels.title, title: withShortcut(labels.title, shortcuts.toggle), pressed: ui.open, onClick: ui.toggleChat, children: icons.assistant })}
+    {bubble && showBubble && button({ action: 'bubble', label: labels.title, title: withShortcut(labels.title, shortcuts.toggle), pressed: ui.open, onClick: ui.toggleChat, children: icons.assistant })}
     <aside ref={shell} aria-label={labels.title} data-component="assistant-shell" data-assistant-shell data-mode={ui.mode}
       data-collapsed={(sidebar && ui.collapsed) || undefined} data-unstyled={chat?.unstyled || undefined}
-      className={cx(classNames.root, sidebar ? classNames.sidebar : classNames.floating)}
+      className={cx(classNames.root, sidebar ? classNames.sidebar : floating && classNames.floating)}
       style={{
         ...chat?.themeVars, ...style,
         display: ui.open ? 'flex' : 'none', flexDirection: 'column', maxWidth: '100vw',
@@ -407,7 +425,7 @@ export function AssistantShell({
           if (shell.current) shell.current.style.width = `${value}px`;
           if (insetProperty) document.documentElement.style.setProperty(insetProperty, `${value}px`);
         }} />}
-      {!sidebar && WINDOW_EDGES.map(edge => <div key={edge} aria-hidden data-component="assistant-shell-window-handle"
+      {floating && WINDOW_EDGES.map(edge => <div key={edge} aria-hidden data-component="assistant-shell-window-handle"
         className={classNames.windowHandle} style={edgeStyle(edge)} {...getResizeHandleProps(edge)} />)}
 
       {sidebar && ui.collapsed && <div data-element="rail" className={classNames.rail}>
@@ -417,10 +435,11 @@ export function AssistantShell({
         </button>
         {button({ action: 'close', label: labels.close, title: labels.close, onClick: ui.closeChat, children: icons.close })}
       </div>}
-      <div data-element="frame" style={{ display: sidebar && ui.collapsed ? 'none' : 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0 }}>
+      <div data-element="frame" style={{ display: sidebar && ui.collapsed ? 'none' : 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0 }}
+        {...(fullscreen ? { role: 'dialog', 'aria-modal': true, 'aria-label': labels.title } : {})}>
         <header data-element="header" className={classNames.header}
-          style={sidebar ? undefined : { cursor: 'grab', touchAction: 'none' }}
-          {...(sidebar ? {} : { tabIndex: 0, 'aria-label': labels.windowHeader, ...dragHandleProps })}>
+          style={floating ? { cursor: 'grab', touchAction: 'none' } : undefined}
+          {...(floating ? { tabIndex: 0, 'aria-label': labels.windowHeader, ...dragHandleProps } : {})}>
           {headerStart}
           <span data-element="icon">{icons.assistant}</span>
           {headerTitle ?? (sessionsSupported
@@ -432,7 +451,7 @@ export function AssistantShell({
           {showClearButton && clear && button({ action: 'clear', label: labels.clear, title: labels.clear, onClick: clear, children: icons.clear })}
           {sidebar
             ? button({ action: 'collapse', label: labels.collapse, title: withShortcut(labels.collapse, shortcuts.toggleCollapse), onClick: () => ui.setCollapsed(true), children: icons.collapse })
-            : button({ action: 'dock', label: labels.dock, title: withShortcut(labels.dock, shortcuts.toggleLayout), onClick: () => ui.setMode('sidebar'), children: icons.dock })}
+            : floating && button({ action: 'dock', label: labels.dock, title: withShortcut(labels.dock, shortcuts.toggleLayout), onClick: () => ui.setMode('sidebar'), children: icons.dock })}
           {button({ action: 'close', label: labels.close, title: withShortcut(labels.close, shortcuts.toggle), onClick: ui.closeChat, children: icons.close })}
         </header>
         <div data-element="body" className={classNames.body} style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0 }}>

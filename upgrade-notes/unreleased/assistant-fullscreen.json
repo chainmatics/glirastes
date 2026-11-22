@@ -11,6 +11,7 @@
     "patterns": ["'fullscreen'"]
   },
   "surface": [
-    "glirastes/react#AssistantLayout.restoreMode"
+    "glirastes/react#AssistantLayout.restoreMode",
+    "glirastes/react#AssistantShellLabels.fullscreen"
   ]
 }
