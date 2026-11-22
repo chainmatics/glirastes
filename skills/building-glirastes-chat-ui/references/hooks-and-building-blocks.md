@@ -128,7 +128,8 @@ Defaults keep today's markup; everything below is opt-in.
   composer is locked. The `SuggestionBar` and `staticChips` show nowhere
   then; use `composer.starters` for an empty chat. The bar itself honours
   `enabled: false` and shows only the latest turn's follow-ups (else
-  `staticChips`).
+  `staticChips`). `useSuggestions().chips` still returns chips with
+  `enabled: false`: a bar of your own checks the config itself.
 - `components.TurnNotice` receives `{ text, status, placement, outcome? }` (`status` is a
   `TurnNoticeStatus`)
   (`placement` is `'log'` inside the log, `'message'` outside; `outcome` the
