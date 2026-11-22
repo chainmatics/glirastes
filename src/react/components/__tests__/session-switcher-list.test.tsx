@@ -120,6 +120,18 @@ describe('SessionSwitcher variant="list"', () => {
     await waitFor(() => expect(value.removeSession).toHaveBeenCalledWith('old'));
   });
 
+  it('keys in the delete dialog stay in the dialog', () => {
+    mount(chat(), { variant: 'list' });
+    fireEvent.click(within(rows()[1]!.closest('li')!).getByRole('button', { name: 'Delete conversation' }));
+    const dialog = screen.getByRole('alertdialog');
+    const confirm = within(dialog).getByRole('button', { name: 'Delete conversation' });
+    confirm.focus();
+    const event = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+    act(() => { confirm.dispatchEvent(event); });
+    expect(document.activeElement).toBe(confirm);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it('Escape in the rename input does not leak', () => {
     const parent = vi.fn();
     render(<ChatContext.Provider value={chat()}><div onKeyDown={e => parent(e.key)}>

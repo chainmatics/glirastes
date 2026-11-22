@@ -601,6 +601,8 @@ export function AssistantShell({
         }}
         onKeyDown={event => {
           if (event.key !== 'Escape' || !drawer || event.defaultPrevented) return;
+          // An Escape from a portaled dialog (delete confirm) bubbles here through React; it belongs to that dialog.
+          if (!event.currentTarget.contains(event.target as Node)) return;
           // The drawer owns this Escape; the next one leaves full screen.
           event.preventDefault();
           closeDrawer('toggle');

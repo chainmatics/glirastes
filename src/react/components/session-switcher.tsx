@@ -196,6 +196,8 @@ export function SessionSwitcher({
     // Arrow keys move between "new chat" and the chats; edit and delete are reached with Tab.
     const onListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      // Keys from the portaled delete dialog bubble here through React; they are not ours.
+      if (!event.currentTarget.contains(event.target as Node)) return;
       if ((event.target as HTMLElement).tagName === 'INPUT') return;
       const stops = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>(
         '[data-element="new-session"], [data-element="row-main"]',

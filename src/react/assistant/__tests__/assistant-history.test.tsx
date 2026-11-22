@@ -178,6 +178,19 @@ describe('history column in full screen', () => {
     expect(state()).toMatchObject({ mode: 'sidebar' });
   });
 
+  it('Escape in the delete dialog does not close the drawer', async () => {
+    narrow = true;
+    await mount();
+    await go('fullscreen');
+    fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
+    await frame();
+    fireEvent.click(within(column()!).getAllByRole('button', { name: 'Delete conversation' })[0]!);
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.keyDown(within(dialog).getAllByRole('button')[0]!, { key: 'Escape' });
+    expect(column()!.hidden).toBe(false);
+    expect(state()).toMatchObject({ mode: 'fullscreen' });
+  });
+
   it('a pick closes the drawer and focuses the composer', async () => {
     narrow = true;
     const value = chat();
