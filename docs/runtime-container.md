@@ -6,15 +6,15 @@ configuration; they do not write a Node server. A suitable existing Node/Next.js
 server can continue embedding the SDK instead. `glirastes/server/http` is an
 alias for the framework-neutral handler exports previously named `/server/nextjs`.
 
-The official image is `ghcr.io/chainmatics/glirastes-runtime:0.22.0` for
+The official image is `ghcr.io/chainmatics/glirastes-runtime:0.23.0` for
 Linux amd64. Use a pinned version (or digest) with matching artifact SDK version;
 ARM users can build the supplied Dockerfile locally.
 
-Start with the [public image and artifact commands](https://github.com/chainmatics/glirastes/blob/v0.22.0/containers/runtime/README.md),
-the [PHP walkthrough](https://github.com/chainmatics/glirastes/blob/v0.22.0/examples/php-runtime/README.md), its
-[JSON configuration](https://github.com/chainmatics/glirastes/blob/v0.22.0/examples/php-runtime/runtime.example.json) and
-[Docker Compose](https://github.com/chainmatics/glirastes/blob/v0.22.0/examples/php-runtime/compose.yaml). The image is public and
-does not require registry login. The [release record](https://github.com/chainmatics/glirastes/blob/v0.22.0/docs/acceptance/2026-11-15-runtime-container-v1.md)
+Start with the [public image and artifact commands](https://github.com/chainmatics/glirastes/blob/v0.23.0/containers/runtime/README.md),
+the [PHP walkthrough](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/README.md), its
+[JSON configuration](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/runtime.example.json) and
+[Docker Compose](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/compose.yaml). The image is public and
+does not require registry login. The [release record](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/2026-11-15-runtime-container-v1.md)
 separates container tests, publication and the embedded SDK's production rollout.
 
 ## Responsibilities and deployment
