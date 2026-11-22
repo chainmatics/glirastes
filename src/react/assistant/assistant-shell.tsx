@@ -460,6 +460,9 @@ export function AssistantShell({
     return () => { if (insetProperty) document.documentElement.style.removeProperty(insetProperty); if (main) main.hidden = false; };
   }, [inset, narrow, sidebar, ui.open, ui.collapsed, shell, mainSelector, insetProperty]);
 
+  // Full screen is a modal: the page is inert, Tab stays inside, Escape returns to the previous layout.
+  // Declared before the open effect, so on close the page loses `inert` before focus goes back to the opener.
+  useModalSurface(shell, { active: ui.open && fullscreen, onEscape: ui.restoreMode });
   const focusComposer = useCallback(() => {
     const composer = shell.current?.querySelector<HTMLElement>('[contenteditable="true"],[contenteditable=""],textarea');
     (composer ?? shell.current?.querySelector<HTMLElement>('button'))?.focus();
@@ -544,8 +547,6 @@ export function AssistantShell({
     if (normal.length && !normal.includes(defaultMode)) setDefaultMode(normal[0]!);
   }, [modeKey, mode, defaultMode, open, restoreMode, setMode, setDefaultMode]);
 
-  // Full screen is a modal: the page is inert, Tab stays inside, Escape returns to the previous layout.
-  useModalSurface(shell, { active: ui.open && fullscreen, onEscape: ui.restoreMode });
 
   const clear = onClear ?? chat?.clear;
   const fallbackLabels = DEFAULT_ASSISTANT_SHELL_LABELS;

@@ -15,7 +15,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('PointerEvent', MouseEvent);
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); document.documentElement.removeAttribute('lang'); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.documentElement.removeAttribute('lang'); });
 
 const frame = () => act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
 function Probe() {
@@ -100,6 +100,48 @@ describe('full screen in the assistant shell', () => {
     expect(main().hasAttribute('inert')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
     expect(state()).toMatchObject({ open: true, mode: 'floating' });
+  });
+
+  it('closing from full screen gives focus back to the opener once the page is no longer inert', async () => {
+    // jsdom does not enforce inert; refuse focus on inert elements as a browser does.
+    const focus = HTMLElement.prototype.focus;
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      if (this.closest('[inert]')) return;
+      focus.call(this, options);
+    });
+    await mount();
+    const opener = screen.getByRole('button', { name: 'Ask AI' });
+    opener.focus();
+    fireEvent.click(opener);
+    await frame();
+    await go('fullscreen');
+    await frame();
+    expect(opener.closest('[inert]')).not.toBeNull();
+    fireEvent.keyDown(window, { key: 'i', code: 'KeyI', ctrlKey: true });
+    if (state().open) fireEvent.keyDown(window, { key: 'i', code: 'KeyI', metaKey: true });
+    expect(state()).toMatchObject({ open: false });
+    expect(opener.closest('[inert]')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('Escape and a later close still give focus back to the opener', async () => {
+    const focus = HTMLElement.prototype.focus;
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      if (this.closest('[inert]')) return;
+      focus.call(this, options);
+    });
+    await mount();
+    const opener = screen.getByRole('button', { name: 'Ask AI' });
+    opener.focus();
+    fireEvent.click(opener);
+    await frame();
+    await go('fullscreen');
+    await frame();
+    escape(screen.getByRole('textbox', { name: 'Draft' }));
+    await frame();
+    expect(state()).toMatchObject({ mode: 'sidebar', open: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(document.activeElement).toBe(opener);
   });
 
   it('same composer in every layout', async () => {
