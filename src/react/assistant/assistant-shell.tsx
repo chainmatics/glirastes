@@ -514,6 +514,13 @@ export function AssistantShell({
     const frame = requestAnimationFrame(() => (historyRef.current?.querySelector<HTMLElement>('button:not(:disabled), [href], input, [tabindex]:not([tabindex="-1"])') ?? historyRef.current)?.focus());
     return () => cancelAnimationFrame(frame);
   }, [drawer, drawerOpen]);
+  // Shrinking below the breakpoint turns the column into a closed drawer; focus inside it goes to the toggle.
+  // Before `useInert`, while the focused element is still inside the column.
+  useLayoutEffect(() => {
+    if (!narrowScreen || !historyRef.current?.contains(document.activeElement)) return;
+    focusAfterHistory.current = 'toggle';
+    setFocusRequest(n => n + 1);
+  }, [narrowScreen]);
   useInert(historyRef, !historyShown);
   useInert(frameRef, drawer && drawerOpen);
   useEffect(() => {

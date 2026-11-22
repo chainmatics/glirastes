@@ -244,6 +244,16 @@ describe('history column in full screen', () => {
     expect(column()!.style.position).not.toBe('absolute');
   });
 
+  it('shrinking below 900 px with focus in the column moves focus to the toggle', async () => {
+    await mount();
+    await go('fullscreen');
+    screen.getByRole('button', { name: 'New chat' }).focus();
+    narrow = true;
+    act(() => { listeners.forEach(listener => listener()); });
+    expect(column()!.hidden).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Show chats' }));
+  });
+
   it('the conversation is not remounted when the column appears', async () => {
     await mount();
     await go('sidebar');
