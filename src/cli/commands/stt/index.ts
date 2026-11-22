@@ -1,25 +1,32 @@
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 import { isFoundationDiagnosticError } from '../../../diagnostics/index.js';
 import { resolveSttModelDir, STT_ATTRIBUTION_TEXT } from '../../../server/stt-local/models.js';
 import { parseToolArgs, ToolsUsageError, type ToolArgsSpec } from '../tools/args.js';
 import { pullSttModels, type SttPullDependencies } from './pull.js';
+import { provideAudioWorklet } from './worklet.js';
 
 export type { SttPullDependencies, SttPullResult } from './pull.js';
 export { pullSttModels } from './pull.js';
+export { AUDIO_WORKLET_COMMAND, AUDIO_WORKLET_FILE, provideAudioWorklet } from './worklet.js';
 
 /** Every `glirastes stt` subcommand with its flags and values; the shipped skills are linted against it. */
 export const STT_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
   pull: { flags: ['--json'], values: ['--dir', '--mirror'] },
+  worklet: { flags: ['--json'], values: ['--out', '--root'] },
 };
 
 export const STT_USAGE = [
   'Usage: glirastes stt pull [--dir <path>] [--mirror <url>] [--json]',
   '         download the sha256-pinned local speech models (Parakeet TDT 0.6b v3 int8, Silero VAD) for glirastes/server/stt-local',
+  '       glirastes stt worklet [--out <dir>] [--root <path>] [--json]',
+  '         copy the audio worklet voice input needs into public/ (or --out), served at /audio-worklet-processor.js',
 ].join('\n');
 
 export async function runSttCommand(
   argv: readonly string[],
   d: SttPullDependencies & {
+    /** For tests: the worklet file to copy instead of the packaged one. */
+    workletSource?: string;
     log?: (line: string) => void;
     error?: (line: string) => void;
     /** Calls `abort` on Ctrl-C or a stop signal; returns the unsubscribe. Default SIGINT and SIGTERM. */
@@ -29,6 +36,7 @@ export async function runSttCommand(
   const log = d.log ?? ((line: string) => { console.log(line); });
   const error = d.error ?? ((line: string) => { console.error(line); });
   const [subcommand, ...rest] = argv;
+  if (subcommand === 'worklet') return runWorklet(rest, d.workletSource, log, error);
   if (subcommand !== 'pull') {
     error(STT_USAGE);
     return 2;
@@ -64,6 +72,40 @@ export async function runSttCommand(
     throw caught;
   } finally {
     unsubscribe();
+  }
+}
+
+async function runWorklet(
+  rest: readonly string[],
+  source: string | undefined,
+  log: (line: string) => void,
+  error: (line: string) => void,
+): Promise<number> {
+  const json = rest.includes('--json');
+  try {
+    const args = parseToolArgs(rest, STT_SUBCOMMANDS.worklet!);
+    const root = resolve(args.values.get('--root') ?? process.cwd());
+    const out = args.values.get('--out');
+    const result = await provideAudioWorklet({
+      root,
+      ...(out !== undefined ? { out } : {}),
+      ...(source !== undefined ? { source } : {}),
+    });
+    const shown = relative(root, result.path).split(sep).join('/');
+    if (json) log(JSON.stringify({ path: shown, status: result.status }));
+    else log(`${result.status === 'written' ? 'Wrote' : 'Up to date:'} ${shown}`);
+    return 0;
+  } catch (caught) {
+    if (caught instanceof ToolsUsageError) {
+      error(`${caught.message}\n${STT_USAGE}`);
+      return 2;
+    }
+    if (isFoundationDiagnosticError(caught)) {
+      if (json) log(JSON.stringify(caught.toJSON()));
+      else error(`${caught.code}: ${caught.message}\n${caught.remediation}`);
+      return 1;
+    }
+    throw caught;
   }
 }
 

@@ -427,6 +427,85 @@ describe('createDoctorReport', () => {
     log.mockRestore();
   });
 
+  describe('voice input worklet', () => {
+    const CHAT = "import { AiChatProvider } from 'glirastes/react';\n"
+      + 'export function Chat() { return <AiChatProvider transport={t} voice={{ enabled: true }} />; }\n';
+
+    it('adds no check for an app without voice input', async () => {
+      const rootDir = await fixture();
+      const report = await createDoctorReport({ rootDir });
+      expect(report.checks.map(({ name }) => name)).not.toContain('voice-worklet');
+    });
+
+    it('fails with the concrete fix when voice is used and the worklet is not provided', async () => {
+      const rootDir = await fixture();
+      await mkdir(join(rootDir, 'src/components'), { recursive: true });
+      await writeFile(join(rootDir, 'src/components/chat.tsx'), CHAT);
+
+      const report = await createDoctorReport({ rootDir });
+
+      expect(report.status).toBe('fail');
+      expect(report.checks).toContainEqual({
+        name: 'voice-worklet', status: 'fail', code: 'E-SETUP-034', remediation: 'provide-audio-worklet',
+      });
+      const text = formatDoctorReport(report);
+      expect(text).toContain('✗ Voice input audio worklet');
+      expect(text).toContain('glirastes stt worklet');
+      expect(text).toContain('predev');
+      expect(formatDoctorReport(report, { verbose: true })).toContain('Voice input audio worklet (E-SETUP-034)');
+    });
+
+    it.each([
+      ['the file in public/', async (rootDir: string) => {
+        await mkdir(join(rootDir, 'public'), { recursive: true });
+        await writeFile(join(rootDir, 'public/audio-worklet-processor.js'), '// worklet\n');
+      }],
+      ['the copy step in package.json', async (rootDir: string) => {
+        const path = join(rootDir, 'package.json');
+        const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+        await writeFile(path, JSON.stringify({ ...manifest, scripts: { predev: 'glirastes stt worklet && next dev' } }));
+      }],
+    ])('passes with %s', async (_label, provide) => {
+      const rootDir = await fixture();
+      await mkdir(join(rootDir, 'src'), { recursive: true });
+      await writeFile(join(rootDir, 'src/voice.ts'), "import { RecordedSttAdapter } from 'glirastes/react';\nexport const stt = new RecordedSttAdapter();\n");
+      await provide(rootDir);
+      const report = await createDoctorReport({ rootDir });
+      expect(report.checks).toContainEqual({ name: 'voice-worklet', status: 'pass', code: 'E-SETUP-108', remediation: 'none' });
+    });
+
+    it('checks a custom worklet path and only warns about an absolute URL', async () => {
+      const rootDir = await fixture();
+      await mkdir(join(rootDir, 'src'), { recursive: true });
+      const write = (url: string) => writeFile(join(rootDir, 'src/voice.ts'),
+        `import { RecordedSttAdapter } from 'glirastes/react';\nexport const stt = new RecordedSttAdapter({ workletUrl: '${url}' });\n`);
+      await write('/static/pcm.js');
+      await mkdir(join(rootDir, 'public/static'), { recursive: true });
+      await writeFile(join(rootDir, 'public/static/pcm.js'), '// worklet\n');
+      expect((await createDoctorReport({ rootDir })).checks)
+        .toContainEqual(expect.objectContaining({ name: 'voice-worklet', status: 'pass' }));
+      await write('https://cdn.example.test/pcm.js');
+      expect((await createDoctorReport({ rootDir })).checks).toContainEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'verify-audio-worklet-url',
+      });
+    });
+
+    it('reports the check in the JSON output of the CLI', async () => {
+      const rootDir = await fixture();
+      await mkdir(join(rootDir, 'src'), { recursive: true });
+      await writeFile(join(rootDir, 'src/chat.tsx'), CHAT);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await runCli(['doctor', '--root', rootDir, '--json']);
+        const report = JSON.parse(String(log.mock.calls[0]?.[0])) as { checks: Array<{ name: string; status: string }> };
+        expect(report.checks).toContainEqual(expect.objectContaining({ name: 'voice-worklet', status: 'fail' }));
+      } finally {
+        log.mockRestore();
+        process.exitCode = 0;
+      }
+    });
+  });
+
   describe('apps without Next.js', () => {
     const key = 'gl_abcdefghijklmnopqrstuvwxyz123456';
 

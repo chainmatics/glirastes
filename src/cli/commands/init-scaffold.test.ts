@@ -35,7 +35,8 @@ describe('glirastes init scaffold', () => {
     });
     expect(LocalPromptBundleSchema.parse(JSON.parse(await app.read('.glirastes/prompt-bundle.json'))).appId).toBe(APP_ID);
     expect(JSON.parse(await app.read('package.json')).scripts).toEqual({
-      predev: 'glirastes tools refresh --keep-going', prebuild: 'glirastes tools refresh',
+      predev: 'glirastes stt worklet && glirastes tools refresh --keep-going',
+      prebuild: 'glirastes stt worklet && glirastes tools refresh',
     });
     expect(await app.read('AGENTS.md')).toContain('run `glirastes tools refresh`');
     const out: string[] = [];
@@ -69,7 +70,10 @@ describe('glirastes init scaffold', () => {
     expect(scaffold.notes).toContain('package.json already has a prebuild script; add "glirastes tools refresh" to it.');
     const packageRaw = await app.read('package.json');
     expect(packageRaw).toContain('\n    "scripts": {');
-    expect(JSON.parse(packageRaw).scripts).toEqual({ prebuild: 'tsc -p .', predev: 'glirastes tools refresh --keep-going' });
+    expect(JSON.parse(packageRaw).scripts).toEqual({
+      prebuild: 'glirastes stt worklet && tsc -p .',
+      predev: 'glirastes stt worklet && glirastes tools refresh --keep-going',
+    });
     const agents = await readFile(app.path('AGENTS.md'), 'utf8');
     expect(agents.startsWith('# Agents\n\nUse bun.\n\n<!-- glirastes:tools -->')).toBe(true);
     expect(agents.split(AGENT_HINT_START)).toHaveLength(2);
@@ -85,6 +89,37 @@ describe('glirastes init scaffold', () => {
     expect(preview.notes).toEqual(['No Next.js app: integrating-glirastes-web describes .glirastes/tools.json for this stack.']);
     await expect(vite.read('.glirastes/prompt-bundle.json')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(vite.read('AGENTS.md')).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 60_000);
+
+  it('chains the worklet copy into the scripts of a Vite app once', async () => {
+    const vite = await createAppFixture({ 'package.json': JSON.stringify({
+      name: 'vite-board',
+      dependencies: { react: '19' },
+      devDependencies: { vite: '7' },
+      scripts: { predev: 'node seed.mjs' },
+    }) }, { withoutToolsConfig: true, withoutPromptBundle: true });
+    await scaffoldToolsInputs({ root: vite.root, host: 'codex', createAppId: () => APP_ID });
+    expect(JSON.parse(await vite.read('package.json')).scripts).toEqual({
+      predev: 'glirastes stt worklet && node seed.mjs',
+      prebuild: 'glirastes stt worklet && glirastes tools refresh',
+    });
+    const again = await scaffoldToolsInputs({ root: vite.root, host: 'codex' });
+    expect(again.written).not.toContain('package.json');
+  }, 60_000);
+
+  it('adds no worklet step to an app without a public folder framework, and tells a React app how to serve it', async () => {
+    const vue = await createAppFixture({ 'package.json': JSON.stringify({ name: 'vue-board', dependencies: { vue: '3' } }) },
+      { withoutToolsConfig: true, withoutPromptBundle: true });
+    await scaffoldToolsInputs({ root: vue.root, host: 'codex', createAppId: () => APP_ID });
+    expect(JSON.parse(await vue.read('package.json')).scripts).toEqual({
+      predev: 'glirastes tools refresh --keep-going', prebuild: 'glirastes tools refresh',
+    });
+    const react = await createAppFixture({ 'package.json': JSON.stringify({ name: 'own-react', dependencies: { react: '19' } }) },
+      { withoutToolsConfig: true, withoutPromptBundle: true });
+    const scaffold = await scaffoldToolsInputs({ root: react.root, host: 'codex', dryRun: true, createAppId: () => APP_ID });
+    expect(scaffold.notes).toContain(
+      'Voice input needs the audio worklet served at /audio-worklet-processor.js: add "glirastes stt worklet --out <static folder>" to the script that builds the app.',
+    );
   }, 60_000);
 
   it.skipIf(process.platform === 'win32')('keeps the permissions of the developer\'s package.json and instruction file', async () => {

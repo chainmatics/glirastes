@@ -6,13 +6,16 @@ import { TOOLS_PATHS } from '../../codegen/tools/config.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import { writeArtifactSetAtomically } from './atomic-artifact-write.js';
 import { detectWorkspaceSources } from './workspace-sources.js';
+import { AUDIO_WORKLET_COMMAND } from './stt/worklet.js';
 
 /**
  * What `glirastes init` writes deterministically before the coding agent
  * starts (spec 4.3, 4.6, 4.8): the tools configuration with the app id that
  * Platform pairing later adopts, the prompt bundle every refresh needs, the
- * predev/prebuild scripts and a short hint in the agent instructions.
- * Existing files and scripts are never replaced.
+ * predev/prebuild scripts (with the voice worklet copy for apps that serve
+ * `public/`) and a short hint in the agent instructions.
+ * Existing files and scripts are never replaced; the worklet copy is chained
+ * in front of an existing predev/prebuild script.
  */
 export interface InitScaffold {
   /** The one app id of this app; tool ids derive from it. */
@@ -52,6 +55,14 @@ const SCRIPTS: ReadonlyArray<readonly [string, string]> = [
   ['predev', 'glirastes tools refresh --keep-going'],
   ['prebuild', 'glirastes tools refresh'],
 ];
+
+/**
+ * Frameworks that serve `public/` at the site root, so `glirastes stt worklet`
+ * (default `--out public`) puts the voice input's audio worklet at
+ * `/audio-worklet-processor.js`. Cheap and idempotent, so init chains it for
+ * every such app: voice is one config flag away, and without the file it fails.
+ */
+const PUBLIC_DIR_FRAMEWORKS = ['next', 'vite', 'react-scripts'] as const;
 
 interface PackageJson {
   name?: unknown;
@@ -209,15 +220,26 @@ export async function scaffoldToolsInputs(options: {
 
   if (packageRaw !== undefined) {
     const scripts = { ...packageJson.scripts };
+    const servesPublicDir = PUBLIC_DIR_FRAMEWORKS.some((name) => name in dependencies);
     let changed = false;
     for (const [name, command] of SCRIPTS) {
       const existing = scripts[name];
       if (existing === undefined) {
-        scripts[name] = command;
+        scripts[name] = servesPublicDir ? `${AUDIO_WORKLET_COMMAND} && ${command}` : command;
         changed = true;
-      } else if (!existing.includes('glirastes tools refresh')) {
+        continue;
+      }
+      if (!existing.includes('glirastes tools refresh')) {
         notes.push(`package.json already has a ${name} script; add "${command}" to it.`);
       }
+      // Chained in front, never replacing the developer's own step.
+      if (servesPublicDir && !existing.includes(AUDIO_WORKLET_COMMAND)) {
+        scripts[name] = `${AUDIO_WORKLET_COMMAND} && ${existing}`;
+        changed = true;
+      }
+    }
+    if (!servesPublicDir && 'react' in dependencies) {
+      notes.push(`Voice input needs the audio worklet served at /audio-worklet-processor.js: add "${AUDIO_WORKLET_COMMAND} --out <static folder>" to the script that builds the app.`);
     }
     if (changed) {
       add('package.json', `${JSON.stringify({ ...packageJson, scripts }, null, indentationOf(packageRaw))}\n`);

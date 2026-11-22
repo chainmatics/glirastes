@@ -16,6 +16,7 @@ const LABELS = new Map([
   ['connection-environment-bound', 'Connection scope'],
   ['runtime-mode', 'Runtime connection settings'],
   ['agent-skills', 'Installed agent skills'],
+  ['voice-worklet', 'Voice input audio worklet'],
 ]);
 
 const NEXT_ACTIONS = new Map([
@@ -57,6 +58,10 @@ const NEXT_ACTIONS = new Map([
     'Run glirastes tools refresh to bring the installed agent skills up to this SDK, then commit them with .glirastes/installed-skills.json.'],
   ['review-edited-agent-skills',
     'Some installed agent skills were edited and differ from this SDK. Run glirastes tools check for the names, then merge the update or replace them with glirastes install --force.'],
+  ['provide-audio-worklet',
+    'The app uses voice input, but /audio-worklet-processor.js is not provided, so every recording fails. Run glirastes stt worklet (copies it into public/) and chain it into the predev and prebuild scripts, e.g. "predev": "glirastes stt worklet && next dev"; glirastes init does this for Next.js and Vite. Serving it elsewhere: set workletUrl (voice config or adapter constructor).'],
+  ['verify-audio-worklet-url',
+    'Voice input loads its audio worklet from an absolute URL this offline check cannot reach. Make sure it answers with the file of glirastes/react/audio-worklet-processor.js, or serve it locally with glirastes stt worklet.'],
   ['align-explicit-runtime-mode',
     'Ask your coding agent to align the local runtime settings with the intended connection. Do not silently switch a connected app to standalone.'],
 ]);
