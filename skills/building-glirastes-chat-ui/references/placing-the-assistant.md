@@ -90,7 +90,8 @@ then names the open chat. A header button hides and shows the column. Below
 900 px viewport width it is a drawer (`role="dialog"`, named after
 `labels.history`): focus moves into it, the conversation is
 inert, and Escape, the backdrop or a pick close it (a pick focuses the
-composer). `historyPane={false}` removes the column, any node replaces it:
+composer). `historyPane={false}` removes the column, `null` keeps the default
+list, any other node replaces it:
 
 ```tsx
 <AssistantWorkspace chat={<AiChatPanel />} modes={['sidebar', 'floating', 'fullscreen']}

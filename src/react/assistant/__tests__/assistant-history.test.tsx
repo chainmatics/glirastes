@@ -134,6 +134,13 @@ describe('history column in full screen', () => {
     expect(frameEl().querySelector('header [data-component="session-switcher"]')).not.toBeNull();
   });
 
+  it('historyPane={null} keeps the default list and the chat title', async () => {
+    await mount(chat(), { historyPane: null });
+    await go('fullscreen');
+    expect(within(column()!).getByRole('navigation', { name: 'Chats' })).toBeTruthy();
+    expect(frameEl().querySelector('header [data-element="title"]')!.textContent).toBe('Open orders');
+  });
+
   it('an own historyPane replaces the list', async () => {
     await mount(chat({ sessionsSupported: false }), { historyPane: <p>Own pane</p> });
     await go('fullscreen');

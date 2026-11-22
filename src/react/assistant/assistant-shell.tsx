@@ -217,8 +217,8 @@ export interface AssistantShellProps {
   modes?: ReadonlyArray<AssistantLayoutMode>;
   /**
    * Left column in full screen. Default: the chat list (`SessionSwitcher
-   * variant="list"`) when the chat keeps several; `false` shows none; any
-   * node replaces it. 260 px wide; below 900 px viewport width a drawer
+   * variant="list"`) when the chat keeps several, also for `null`; `false`
+   * shows none; any other node replaces it. 260 px wide; below 900 px viewport width a drawer
    * opened from the header.
    */
   historyPane?: ReactNode | false;
@@ -639,7 +639,7 @@ export function AssistantShell({
           })}
           {headerStart}
           <span data-element="icon">{icons.assistant}</span>
-          {headerTitle ?? (hasPane && historyPane === undefined
+          {headerTitle ?? (hasPane && historyPane == null
             // The chat list is next to the conversation, so the header names the open chat.
             ? <span data-element="title" title={activeChatTitle}>{activeChatTitle}</span>
             : sessionsSupported
