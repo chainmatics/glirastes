@@ -65,6 +65,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     attachments,
     approvalDisplay,
     queue,
+    suggestions,
   } = context;
   // Starters replace the static suggestion chips on an empty chat.
   const startersShown = messages.length === 0 && (composerContextOf(context).composer?.starters?.length ?? 0) > 0;
@@ -220,7 +221,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
 
       {startersShown && <ChatStarters />}
       {composerContextOf(context).composer?.clarificationChips && <ClarificationChips />}
-      {!isLoading && !showTypingIndicator && !startersShown && <SuggestionBar />}
+      {!isLoading && !showTypingIndicator && !startersShown && suggestions?.placement !== 'message' && <SuggestionBar />}
       {queue?.enabled && ChatQueueComponent && <ChatQueueComponent />}
       <InputComponent />
     </div>

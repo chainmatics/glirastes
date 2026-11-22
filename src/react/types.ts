@@ -955,6 +955,15 @@ export interface SuggestionsConfig {
   autoSuggest?: boolean;
   staticChips?: string[];
   rotationInterval?: number;
+  /**
+   * Where the model's follow-up questions show. `'composer'` (default): the
+   * rotating `SuggestionBar` above the input, as before. `'message'`: the
+   * latest answer's follow-ups as buttons under it (heading
+   * `followUpsLabel`), hidden while a turn runs, an approval or clarification
+   * is open, or after a stop or error; no `SuggestionBar` then, so
+   * `staticChips` show nowhere (use `composer.starters` for an empty chat).
+   */
+  placement?: 'composer' | 'message';
 }
 
 // ============================================================================
@@ -1405,6 +1414,8 @@ export interface ChatLocale {
   messageSourcesLabel?: string;
   /** Working time of a completed turn under its last answer; supports `{duration}` ("3.2 s", "1 min 5 s"). */
   messageDurationLabel?: string;
+  /** Heading of the follow-ups under the latest answer (`suggestions.placement: 'message'`). */
+  followUpsLabel?: string;
 
   // Floating widget / chat window chrome
   chatTitle: string;                 // default header title ("AI Assistant")

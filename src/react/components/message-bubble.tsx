@@ -311,6 +311,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     mentionPrefix,
     composer,
     messageFooter,
+    suggestions,
   } = useComposerContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
@@ -630,7 +631,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
 
   /** The answer's footer (`messageFooter`), null when it is off or not an answer. */
   function footerNode(): ReactNode {
-    if (!isAssistant || !messageFooter) return null;
+    if (!isAssistant || (!messageFooter && suggestions?.placement !== 'message')) return null;
     const index = messages ? messages.findIndex((entry) => entry.id === message.id) : -1;
     const next = index >= 0 ? messages![index + 1] : undefined;
     return (
@@ -639,6 +640,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         text={hasTextContent ? cleanTextParts.filter((text) => text.trim()).join('\n\n') : fallbackSummary}
         hasText={hasTextContent || Boolean(fallbackSummary)}
         isLastOfTurn={!next || next.role === 'user'}
+        isLatest={isLatestMessage}
         turnOutcome={turnOutcome}
         active={turnActive}
       />

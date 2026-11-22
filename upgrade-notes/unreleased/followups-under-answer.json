@@ -1,0 +1,18 @@
+{
+  "id": "followups-under-answer",
+  "kind": "optional",
+  "summary": "suggestions.placement: 'message' shows the model's follow-up questions as buttons under the latest answer (heading 'Ask next') instead of the rotating chip above the composer; hidden while a turn runs, an approval or clarification is open, or after a stop or error.",
+  "howTo": "suggestions={{ placement: 'message', count: 3 }}. The SuggestionBar and staticChips are not shown then; use composer.starters for an empty chat. The server needs followups enabled (suggest_followups). Heading text: followUpsLabel.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": ["glirastes/react"]
+  },
+  "adoptedWhen": {
+    "patterns": ["placement\\s*:\\s*['\"]message['\"]"]
+  },
+  "surface": [
+    "glirastes/react#SuggestionsConfig.placement",
+    "glirastes/react#ChatLocale.followUpsLabel",
+    "locale#followUpsLabel"
+  ]
+}

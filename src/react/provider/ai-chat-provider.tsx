@@ -125,6 +125,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   messageSourceOneLabel: '1 source',
   messageSourcesLabel: '{count} sources',
   messageDurationLabel: 'Done in {duration}',
+  followUpsLabel: 'Ask next',
   moreItemsLabel: 'more',
   showAllItemsLabel: 'Show all {count}',
   showMoreLabel: 'Show more',

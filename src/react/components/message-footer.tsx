@@ -2,6 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { useComposerContext } from '../provider/composer-context.js';
 import { fillTemplate } from '../utils/fill-template.js';
 import { readMessageSources } from '../utils/message-sources.js';
+import { readMessageFollowups } from '../utils/followup-suggestions.js';
+import { findOpenClarification } from '../utils/clarification.js';
 import { copyMessageToClipboard } from '../utils/copy-message.js';
 import type { ChatMessage, TurnOutcome } from '../types.js';
 
@@ -108,28 +110,55 @@ export interface MessageFooterProps {
   hasText: boolean;
   /** The next message is a user message, or there is none. */
   isLastOfTurn: boolean;
+  /** The message is the last one of the chat. */
+  isLatest: boolean;
   turnOutcome: TurnOutcome | null;
   /** The answer of the running request (latest message while loading). */
   active: boolean;
 }
 
+const ENDED_PIPELINE = new Set(['aborted', 'error', 'safety-stop']);
+
 /**
- * Internal: the footer under an assistant answer (`messageFooter`). Running:
- * elapsed time and stop. Done: copy, sources, the turn's working time.
- * Renders nothing when no part applies.
+ * The follow-ups shown under this answer (`suggestions.placement: 'message'`):
+ * only under the latest answer of a completed turn while nothing runs and no
+ * approval or clarification is open.
  */
-export function MessageFooter({ message, text, hasText, isLastOfTurn, turnOutcome, active }: MessageFooterProps): ReactNode {
-  const { messageFooter, locale, language, stop } = useComposerContext();
+function useFollowups(message: ChatMessage, isLatest: boolean, turnOutcome: TurnOutcome | null): string[] {
+  const { suggestions, isLoading, pendingApprovals, messages, pipelineState } = useComposerContext();
+  const count = suggestions?.count ?? 3;
+  const candidates = useMemo(
+    () => (suggestions?.placement === 'message' && message.role === 'assistant' ? readMessageFollowups(message, count) : []),
+    [suggestions?.placement, message, count],
+  );
+  if (candidates.length === 0 || suggestions?.enabled === false || !isLatest || isLoading) return [];
+  if ((pendingApprovals?.length ?? 0) > 0) return [];
+  if (findOpenClarification(messages ?? [message])) return [];
+  if (turnOutcome && turnOutcome.status !== 'completed') return [];
+  if (pipelineState && ENDED_PIPELINE.has(pipelineState.status)) return [];
+  return candidates;
+}
+
+/**
+ * Internal: the footer under an assistant answer. With `messageFooter`:
+ * running, elapsed time and stop; done, copy, sources and the turn's working
+ * time. With `suggestions.placement: 'message'` the follow-ups of the latest
+ * answer. Renders nothing when no part applies.
+ */
+export function MessageFooter({ message, text, hasText, isLastOfTurn, isLatest, turnOutcome, active }: MessageFooterProps): ReactNode {
+  const { messageFooter, locale, language, stop, canCompose, selectSuggestion } = useComposerContext();
   const sourcesId = useId();
+  const followupsId = useId();
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const sources = useMemo(
     () => (messageFooter?.sources && !active ? readMessageSources(message.parts) : []),
     [messageFooter?.sources, active, message.parts],
   );
-  if (!messageFooter || message.role !== 'assistant') return null;
+  const followups = useFollowups(message, isLatest, turnOutcome);
+  if (message.role !== 'assistant') return null;
 
   if (active) {
-    if (!messageFooter.duration && !messageFooter.stop) return null;
+    if (!messageFooter || (!messageFooter.duration && !messageFooter.stop)) return null;
     return (
       <div data-component="message-footer" data-state="running">
         <div data-element="footer-actions">
@@ -142,37 +171,40 @@ export function MessageFooter({ message, text, hasText, isLastOfTurn, turnOutcom
     );
   }
 
-  const showCopy = messageFooter.copy && hasText;
+  const showCopy = Boolean(messageFooter?.copy) && hasText;
   const showSources = sources.length > 0;
-  const showDuration = messageFooter.duration && isLastOfTurn && turnOutcome?.status === 'completed'
+  const showDuration = Boolean(messageFooter?.duration) && isLastOfTurn && turnOutcome?.status === 'completed'
     && typeof turnOutcome.durationMs === 'number';
-  if (!showCopy && !showSources && !showDuration) return null;
+  const showFollowups = followups.length > 0;
+  if (!showCopy && !showSources && !showDuration && !showFollowups) return null;
   const sourcesLabel = sources.length === 1
     ? locale.messageSourceOneLabel ?? '1 source'
     : fillTemplate(locale.messageSourcesLabel ?? '{count} sources', { count: String(sources.length) });
   return (
     <div data-component="message-footer" data-state="done">
-      <div data-element="footer-actions">
-        {showCopy && <CopyButton text={text} />}
-        {showSources && (
-          <button
-            type="button"
-            data-action="sources"
-            aria-expanded={sourcesOpen}
-            aria-controls={sourcesId}
-            onClick={() => setSourcesOpen((open) => !open)}
-          >
-            {sourcesLabel}
-          </button>
-        )}
-        {showDuration && (
-          <span data-element="duration">
-            {fillTemplate(locale.messageDurationLabel ?? 'Done in {duration}', {
-              duration: formatDuration(turnOutcome!.durationMs!, language),
-            })}
-          </span>
-        )}
-      </div>
+      {(showCopy || showSources || showDuration) && (
+        <div data-element="footer-actions">
+          {showCopy && <CopyButton text={text} />}
+          {showSources && (
+            <button
+              type="button"
+              data-action="sources"
+              aria-expanded={sourcesOpen}
+              aria-controls={sourcesId}
+              onClick={() => setSourcesOpen((open) => !open)}
+            >
+              {sourcesLabel}
+            </button>
+          )}
+          {showDuration && (
+            <span data-element="duration">
+              {fillTemplate(locale.messageDurationLabel ?? 'Done in {duration}', {
+                duration: formatDuration(turnOutcome!.durationMs!, language),
+              })}
+            </span>
+          )}
+        </div>
+      )}
       {showSources && (
         <ul id={sourcesId} data-element="sources" hidden={!sourcesOpen}>
           {sources.map((source) => (
@@ -185,6 +217,22 @@ export function MessageFooter({ message, text, hasText, isLastOfTurn, turnOutcom
             </li>
           ))}
         </ul>
+      )}
+      {showFollowups && (
+        <div data-element="follow-ups" role="group" aria-labelledby={followupsId}>
+          <p id={followupsId} data-element="follow-ups-heading">{locale.followUpsLabel ?? 'Ask next'}</p>
+          {followups.map((followup) => (
+            <button
+              key={followup}
+              type="button"
+              data-action="follow-up"
+              disabled={canCompose === false}
+              onClick={() => selectSuggestion(followup)}
+            >
+              {followup}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

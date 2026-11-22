@@ -34,6 +34,7 @@ export const deChatLocale: ChatLocale = {
   messageSourceOneLabel: '1 Quelle',
   messageSourcesLabel: '{count} Quellen',
   messageDurationLabel: 'Fertig in {duration}',
+  followUpsLabel: 'Weiterfragen',
   moreItemsLabel: 'weitere',
   showAllItemsLabel: 'Alle {count} anzeigen',
   showMoreLabel: 'Mehr anzeigen',
