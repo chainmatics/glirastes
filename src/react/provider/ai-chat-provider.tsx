@@ -945,6 +945,14 @@ export function AiChatProvider({
   const onTurnEndRef = useRef(onTurnEnd);
   onTurnEndRef.current = onTurnEnd;
   const [, setTurnEndCheck] = useState(0);
+  // The working time of the bound turn (`TurnOutcome.durationMs`): the time its requests ran so far, the start
+  // of the running one (null between runs), and whether an outcome was recorded for it (a new run then starts afresh).
+  const turnTimeRef = useRef<{ userMessageId: string; workedMs: number; runStartedAt: number | null; recorded: boolean } | null>(null);
+  const turnWorkedMs = useCallback((): number | null => {
+    const time = turnTimeRef.current;
+    if (!time || time.runStartedAt === null) return null;
+    return Math.max(0, time.workedMs + Date.now() - time.runStartedAt);
+  }, []);
   /** Where the outcome of the running or last request goes, and whether that chat is the one open. */
   const requestTurn = useCallback(() => {
     const bound = requestTurnRef.current ?? {
@@ -965,12 +973,22 @@ export function AiChatProvider({
     const target = requestTurn();
     if (!target) return;
     const { userMessageId } = target;
+    // Measured now, not when the update applies: a stop records during the run.
+    const time = turnTimeRef.current;
+    let durationMs: number | undefined;
+    if (time && time.userMessageId === userMessageId) {
+      durationMs = Math.round(time.workedMs + (time.runStartedAt === null ? 0 : Math.max(0, Date.now() - time.runStartedAt)));
+      time.recorded = true;
+    }
     const apply = (prev: ReadonlyMap<string, TurnOutcome>, notify = false) => {
       if (notify) turnEndQueuedRef.current.delete(userMessageId);
       const current = prev.get(userMessageId);
       if (current?.status === status || (onlyIfNone && current)) return prev;
       const next = new Map(prev);
-      next.set(userMessageId, { userMessageId, status, reason, at: new Date().toISOString() });
+      next.set(userMessageId, {
+        userMessageId, status, reason, at: new Date().toISOString(),
+        ...(durationMs === undefined ? {} : { durationMs }),
+      });
       // A change of the open chat's outcome: `onTurnEnd` reports it once the turn is over (idempotent, so a
       // StrictMode double call of this updater sets the same entry).
       if (notify) turnEndPendingRef.current.set(userMessageId, { sessionId: target.sessionId, status, reason });
@@ -2454,6 +2472,11 @@ export function AiChatProvider({
     const ended = outcomeRunEndRef.current && !isLoading;
     outcomeRunEndRef.current = isLoading;
     if (!ended) return;
+    const time = turnTimeRef.current;
+    if (time && time.runStartedAt !== null) {
+      time.workedMs += Math.max(0, Date.now() - time.runStartedAt);
+      time.runStartedAt = null;
+    }
     if (status === 'error' || transportError) {
       recordTurnOutcome('error', 'request-failed');
       return;
@@ -2477,7 +2500,17 @@ export function AiChatProvider({
     if (!started) return;
     const userMessageId = latestUserMessageId(rawMessagesRef.current as unknown as ChatMessage[]);
     requestTurnRef.current = { sessionId: loadedSessionIdRef.current, userMessageId };
-    if (!userMessageId) return;
+    if (!userMessageId) {
+      turnTimeRef.current = null;
+      return;
+    }
+    // The same turn goes on (after an approval): its time adds up. Another turn, or a new attempt of one that
+    // ended (a retry): measured afresh.
+    const time = turnTimeRef.current;
+    const now = Date.now();
+    turnTimeRef.current = time && time.userMessageId === userMessageId && !time.recorded
+      ? { ...time, runStartedAt: now }
+      : { userMessageId, workedMs: 0, runStartedAt: now, recorded: false };
     setTurnOutcomes((prev) => {
       if (!prev.has(userMessageId)) return prev;
       const next = new Map(prev);
@@ -2933,6 +2966,7 @@ export function AiChatProvider({
       onCompletionSelect,
       mentionPrefix,
       drafts,
+      turnWorkedMs,
       interactions: interactionRegistry,
       pendingCommand,
       submitPendingCommand,

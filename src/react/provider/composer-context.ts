@@ -20,6 +20,12 @@ export interface ComposerContextValue {
   mentionPrefix?: (type: string) => string;
   /** The unsent composer text per chat, owned by this provider instance. */
   drafts?: ComposerDraftController;
+  /**
+   * While a request runs: the working time of its turn so far in ms (earlier
+   * runs of the same turn included, approval waits not); `null` when nothing
+   * runs. A getter, so the provider does not re-render while time passes.
+   */
+  turnWorkedMs?: () => number | null;
 }
 
 /** The internal composer fields of a chat context value (absent outside the provider). */

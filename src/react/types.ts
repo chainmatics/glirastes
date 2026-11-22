@@ -727,7 +727,7 @@ export type TurnOutcomeReason = 'finished' | 'stopped' | 'send-now' | 'request-f
  * chat's requests do not carry it). It belongs to the chat and user message
  * its request was started for, also when another chat was opened meanwhile.
  * A new request for the same user message (a retry) replaces it with the
- * outcome of the new attempt. Status and reason only.
+ * outcome of the new attempt. Status, reason and the turn's working time.
  */
 export interface TurnOutcome {
   /** Id of the user message that started the turn. */
@@ -736,6 +736,12 @@ export interface TurnOutcome {
   reason: TurnOutcomeReason;
   /** ISO time it was recorded. */
   at: string;
+  /**
+   * Working time of the turn in ms: the time its requests ran (a run after an
+   * approval adds to the first; waiting for the user does not count),
+   * measured in the browser. Absent on outcomes stored by an older version.
+   */
+  durationMs?: number;
 }
 
 /** The second argument of `onTurnEnd`. */
