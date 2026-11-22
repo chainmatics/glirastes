@@ -305,11 +305,12 @@ describe('composer plus menu', () => {
     render(<WithGroups />);
     // The menu shows once the source rows are in (no empty box while it searches).
     fireEvent.click(plusButton());
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'All templates' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'All templates' }, { timeout: 5_000 }));
     const editor = screen.getByRole('textbox');
     expect(editor.textContent).toBe('/');
     expect(document.activeElement).toBe(editor);
-    await waitFor(() => expect(screen.getByRole('option', { name: /Summarize/ })).toBeTruthy());
+    // Generous timeout: the debounced search ran late under full-suite load once.
+    await waitFor(() => expect(screen.getByRole('option', { name: /Summarize/ })).toBeTruthy(), { timeout: 5_000 });
     expect(screen.queryByRole('option', { name: /All templates/ })).toBeNull();
     fireEvent.keyDown(editor, { key: 'Escape' });
     expect(editor.textContent).toBe('');
