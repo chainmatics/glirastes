@@ -147,6 +147,8 @@ export interface UseDeepgramTranscriptionReturn {
   isRecording: boolean;
   isConnecting: boolean;
   error: string | null;
+  /** `'audio-worklet-unavailable'` when the audio worklet did not load. */
+  errorCode?: import('./stt/controller.js').SttSessionSnapshot['errorCode'];
   transcript: string;
   interimTranscript: string;
   displayTranscript: string;
@@ -167,6 +169,11 @@ export interface VoiceInputButtonProps {
   workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
   getToken?: () => MaybePromise<string | null | undefined>;
+  /**
+   * The app's own speech provider instead of the Deepgram stream, for example
+   * a `RecordedSttAdapter`. Keep one instance across renders.
+   */
+  adapter?: import('./stt/controller.js').SttProviderAdapter;
   onError?: (error: string) => void;
 }
 
@@ -1452,6 +1459,20 @@ export interface ChatLocale {
 
   // Speech-to-text
   retryRecordingAriaLabel: string;
+  /** Voice button while idle. */
+  voiceStartAriaLabel?: string;
+  /** Voice button while it records (a press stops). */
+  voiceStopAriaLabel?: string;
+  /** Voice button while the microphone and the provider start. */
+  voiceConnectingAriaLabel?: string;
+  /** Voice button while the recording is turned into text. */
+  voiceTranscribingAriaLabel?: string;
+  /** Cancel button of the recording bar. */
+  voiceCancelAriaLabel?: string;
+  /** Alert under the composer when a recording failed. */
+  voiceFailedText?: string;
+  /** Alert when the audio worklet file could not be loaded (not served). */
+  voiceUnavailableText?: string;
 
   // `@` and `/` suggestions
   completionListLabel: string;

@@ -1168,6 +1168,9 @@
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="voice-input-addon"],
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="retry-recording"] {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 40px;
   min-height: 40px;
   padding: 0 0.625rem;
@@ -1188,6 +1191,13 @@
 }
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="recording-bar"] {
   min-width: 0;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="voice-error"] {
+  align-self: center;
+  max-width: 16rem;
+  color: var(--cm-danger);
+  font-size: 0.75rem;
+  line-height: 1.3;
 }
 /* The inline bar is `width: 100%` (inline style). Next to the editor, mic and
    Send it would get ~100px at 375px wide, too little for the live words. A
