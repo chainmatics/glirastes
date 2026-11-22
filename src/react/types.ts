@@ -1072,6 +1072,12 @@ export interface ComposerConfig {
    */
   starters?: ReadonlyArray<string | ChatStarter>;
   /**
+   * The options of an open clarification (`ask_clarification`) as chips
+   * above the composer; the card in the message then keeps the question and
+   * the free-text answer without its option buttons. Default `false`.
+   */
+  clarificationChips?: boolean;
+  /**
    * Turns an icon name into an element: the string `icon` of completion
    * entries (`MentionResult.icon`, `ChatCommandDefinition.icon`,
    * `ChatEntityDefinition.icon`) and of starters. `context.type` is the
@@ -1388,6 +1394,8 @@ export interface ChatLocale {
   composerHintClose?: string;
   /** Accessible name of the starter chips group; default `Suggestions`. */
   startersLabel?: string;
+  /** Accessible name of the clarification chips group; default `Answer options`. */
+  clarificationChipsLabel?: string;
   attachmentsLabel: string;
   removeAttachmentLabel: string;      // supports `{name}`
   openAttachmentLabel: string;        // supports `{name}`
@@ -2483,6 +2491,8 @@ export interface ClarificationCardProps {
   /** False once answered or when a newer message exists. */
   interactive: boolean;
   onAnswer: (answer: { text: string; optionId?: string }) => void;
+  /** Renders the option buttons; default true. False with `composer.clarificationChips` (the options are chips above the composer). */
+  showOptions?: boolean;
   className?: string;
 }
 

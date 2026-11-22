@@ -6,6 +6,7 @@ import { ChatInput } from './chat-input.js';
 import { MentionInput } from './mention-input.js';
 import { SuggestionBar } from './suggestion-bar.js';
 import { ChatStarters } from './chat-starters.js';
+import { ClarificationChips } from './clarification-chips.js';
 import { composerContextOf } from '../provider/composer-context.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { BulkApprovalCard as DefaultBulkApprovalCard } from './bulk-approval-card.js';
@@ -218,6 +219,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
       )}
 
       {startersShown && <ChatStarters />}
+      {composerContextOf(context).composer?.clarificationChips && <ClarificationChips />}
       {!isLoading && !showTypingIndicator && !startersShown && <SuggestionBar />}
       {queue?.enabled && ChatQueueComponent && <ChatQueueComponent />}
       <InputComponent />

@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '../../types.js';
 import { MessageBubble } from '../message-bubble.js';
+import { ClarificationCard } from '../clarification-card.js';
+import { ClarificationChips } from '../clarification-chips.js';
 
 const clarificationMessage = {
   id: 'assistant-1',
@@ -169,5 +171,42 @@ describe('structured clarification card', () => {
     render(<MessageBubble message={legacy} />);
     expect(screen.getByRole('group', { name: 'Wen meinst du?' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Alice' })).toBeTruthy();
+  });
+
+  it('showOptions false renders no option buttons', () => {
+    setContext([clarificationMessage]);
+    const request = {
+      question: 'Welche Aufgabe?', target: 'object' as const, allowFreeText: true,
+      options: [{ id: 'task-1', label: 'Bericht schreiben' }],
+    };
+    const { unmount } = render(<ClarificationCard toolCallId="call-1" request={request} interactive onAnswer={() => {}} showOptions={false} />);
+    expect(screen.getByRole('group', { name: 'Welche Aufgabe?' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Bericht schreiben' })).toBeNull();
+    expect(document.querySelector('[data-element="options"]')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Deine Antwort' })).toBeTruthy();
+    unmount();
+    render(<ClarificationCard toolCallId="call-1" request={request} interactive onAnswer={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Bericht schreiben' })).toBeTruthy();
+  });
+
+  it('the bubble passes showOptions false when composer.clarificationChips is on', () => {
+    setContext([clarificationMessage], { composer: { clarificationChips: true } });
+    render(<MessageBubble message={clarificationMessage} />);
+    expect(screen.getByRole('group', { name: 'Welche Aufgabe soll ich löschen?' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Release prüfen/ })).toBeNull();
+  });
+
+  it('clarification chips are disabled while the composer is locked', () => {
+    const send = setContext([clarificationMessage], {
+      composer: { clarificationChips: true }, canCompose: false,
+    });
+    render(<ClarificationChips />);
+    const buttons = Array.from(document.querySelectorAll('[data-component="clarification-chips"] button')) as HTMLButtonElement[];
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      expect(button.disabled).toBe(true);
+      fireEvent.click(button);
+    }
+    expect(send).not.toHaveBeenCalled();
   });
 });

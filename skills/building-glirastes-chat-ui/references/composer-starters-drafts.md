@@ -8,6 +8,7 @@ before.
 
 - Hint line
 - Starters
+- Clarification chips
 
 ## Hint line
 
@@ -63,3 +64,23 @@ const composer = useMemo<ComposerConfig>(() => ({
   `[data-component="chat-starters"][role="group"]` (name
   `locale.startersLabel`, `Suggestions` / `Vorschläge`) with
   `button[data-element="starter"]`.
+
+## Clarification chips
+
+`composer: { clarificationChips: true }` shows the options of an open
+clarification (the model's `ask_clarification`) as chips above the
+composer. The card in the message keeps the question and the free-text
+answer, without its option buttons (`ClarificationCardProps.showOptions`
+is `false`; a custom `components.ClarificationCard` should honor it).
+Default `false`.
+
+- A chip sends the same answer message as the card's option button, so the
+  original request resumes.
+- No chips while a turn runs, once the clarification is answered (a chip,
+  the card or any typed message) or when it has no options (free text only).
+- Disabled while the composer is locked.
+- Own panel: render `<ClarificationChips />` above the composer. Markup:
+  `[data-component="clarification-chips"][role="group"]` (name
+  `locale.clarificationChipsLabel`, `Answer options` / `Antwortmöglichkeiten`)
+  with `button[data-element="option"][data-option-id]`, `title` = the
+  option's description.

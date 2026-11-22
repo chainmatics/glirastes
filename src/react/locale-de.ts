@@ -141,6 +141,7 @@ export const deChatLocale: ChatLocale = {
   composerHintPick: 'Vorschlag übernehmen',
   composerHintClose: 'Schließen',
   startersLabel: 'Vorschläge',
+  clarificationChipsLabel: 'Antwortmöglichkeiten',
   attachmentsLabel: 'Anhänge',
   removeAttachmentLabel: '{name} entfernen',
   openAttachmentLabel: '{name} öffnen',

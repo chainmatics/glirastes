@@ -1,0 +1,22 @@
+{
+  "id": "composer-clarification-chips",
+  "kind": "optional",
+  "summary": "composer.clarificationChips shows the options of an open clarification as chips above the composer; the card in the message then keeps question and free text only (ClarificationCardProps.showOptions). ClarificationChips renders them in own panels.",
+  "howTo": "Set composer: { clarificationChips: true } on AiChatProvider. A chip sends the same answer as the card's option button; chips hide while a turn runs, once answered and for free-text-only clarifications, and are disabled while the composer is locked. A custom components.ClarificationCard receives showOptions (false while chips are on) and should leave its option buttons out then. Own panels render <ClarificationChips /> above the composer; group name locale.clarificationChipsLabel. See references/composer-starters-drafts.md#clarification-chips.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": ["glirastes/react"],
+    "patterns": ["ClarificationCard\\s*:"]
+  },
+  "adoptedWhen": {
+    "patterns": ["clarificationChips\\s*:\\s*true", "ClarificationChips"]
+  },
+  "surface": [
+    "glirastes/react#ComposerConfig.clarificationChips",
+    "glirastes/react#ClarificationChips",
+    "glirastes/react#ClarificationChipsProps.*",
+    "glirastes/react#ClarificationCardProps.showOptions",
+    "glirastes/react#ChatLocale.clarificationChipsLabel",
+    "locale#clarificationChipsLabel"
+  ]
+}

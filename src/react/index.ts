@@ -291,6 +291,7 @@ export { ChatQueue, useChatQueue } from './components/chat-queue.js';
 export { MentionInput } from './components/mention-input.js';
 export { ComposerHint, type ComposerHintProps } from './components/composer-hint.js';
 export { ChatStarters, type ChatStartersProps } from './components/chat-starters.js';
+export { ClarificationChips, type ClarificationChipsProps } from './components/clarification-chips.js';
 export { RichMentionInput } from './components/rich-mention-input.js';
 export { ChatWindow } from './components/chat-window.js';
 export { ApprovalCard } from './components/approval-card.js';

@@ -201,6 +201,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   composerHintPick: 'Pick suggestion',
   composerHintClose: 'Close',
   startersLabel: 'Suggestions',
+  clarificationChipsLabel: 'Answer options',
   attachmentsLabel: 'Attachments',
   removeAttachmentLabel: 'Remove {name}',
   openAttachmentLabel: 'Open {name}',
