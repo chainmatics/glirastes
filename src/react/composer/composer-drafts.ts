@@ -1,4 +1,4 @@
-import type { ComposerDraft, ComposerDraftStorage } from '../types.js';
+import type { ComposerDraft, ComposerDraftStorage, MentionData } from '../types.js';
 
 /**
  * Internal: the unsent composer text of each chat, owned by one
@@ -43,10 +43,18 @@ function same(left: ComposerDraft | null | undefined, right: ComposerDraft | nul
   return left.text === right.text && JSON.stringify(left.mentions ?? []) === JSON.stringify(right.mentions ?? []);
 }
 
-function isDraft(value: unknown): value is ComposerDraft {
-  const draft = value as Partial<ComposerDraft> | null;
-  return typeof draft === 'object' && draft !== null && typeof draft.text === 'string'
-    && (draft.mentions === undefined || Array.isArray(draft.mentions));
+function isMention(value: unknown): value is MentionData {
+  const mention = value as Partial<MentionData> | null;
+  return typeof mention === 'object' && mention !== null
+    && typeof mention.id === 'string' && typeof mention.type === 'string' && typeof mention.label === 'string';
+}
+
+/** A stored draft as the editor can take it: text, and only well-formed pills. */
+function readDraft(value: unknown): ComposerDraft | null {
+  const draft = value as { text?: unknown; mentions?: unknown } | null;
+  if (typeof draft !== 'object' || draft === null || typeof draft.text !== 'string') return null;
+  const mentions = Array.isArray(draft.mentions) ? draft.mentions.filter(isMention) : [];
+  return normalize({ text: draft.text, mentions });
 }
 
 /** `storage` is read on every use, so the provider can hand in the current `session.draft`. */
@@ -101,7 +109,7 @@ export function createComposerDraftController(
       } catch {
         return null;
       }
-      const draft = isDraft(loaded) ? normalize(loaded) : null;
+      const draft = readDraft(loaded);
       // Typed or saved meanwhile: what is in memory now wins.
       if (draft && !memory.has(sessionId) && !dirty.has(sessionId)) memory.set(sessionId, draft);
       return memory.get(sessionId) ?? null;

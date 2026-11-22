@@ -280,6 +280,22 @@ describe('composer drafts in storage', () => {
   });
 });
 
+describe('corrupt stored drafts', () => {
+  it('a stored draft with broken mentions restores its text and the valid pills only', async () => {
+    const chat = transport();
+    const storage = memoryStorage();
+    storage.setItem('app:u1:draft:default', JSON.stringify({
+      text: 'Alt @bug-sieben',
+      mentions: [null, 'x', { id: 7 }, { id: '7', type: 'person', label: 'Bug sieben', prefix: '@', slug: 'bug-sieben' }],
+    }));
+    const session = createLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    render(<Host chat={chat} session={session} />);
+    await ready();
+    await waitFor(() => expect(text()).toContain('Alt'));
+    expect(editor().querySelector('[data-mention-id="7"]')).not.toBeNull();
+  });
+});
+
 describe('forgotten drafts stay gone', () => {
   const drafted = (storage: ReturnType<typeof memoryStorage>) => [...storage.data.keys()].filter((key) => key.includes(':draft:'));
 
