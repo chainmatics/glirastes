@@ -34,7 +34,10 @@ let workDir: string;
 let consumer: string;
 
 const specifier = (subpath: string) => (subpath === '.' ? 'glirastes' : `glirastes/${subpath.slice(2)}`);
-const codeSubpaths = () => Object.keys(manifest.exports).filter((subpath) => !subpath.endsWith('.css'));
+/** Files a browser loads by URL (the audio worklet runs in an AudioWorkletGlobalScope), not modules for Node. */
+const ASSET_SUBPATHS = new Set(['./react/audio-worklet-processor.js']);
+const codeSubpaths = () => Object.keys(manifest.exports)
+  .filter((subpath) => !subpath.endsWith('.css') && !ASSET_SUBPATHS.has(subpath));
 const requireSubpaths = () => codeSubpaths().filter((subpath) => {
   const target = manifest.exports[subpath];
   return typeof target === 'object' && target.require !== undefined;
@@ -109,6 +112,17 @@ describe('package pack install', () => {
   it('ships the stylesheet subpath', () => {
     expect(existsSync(join(consumer, 'node_modules/glirastes', String(manifest.exports['./react/styles.css'])))).toBe(true);
   });
+
+  it('ships the audio worklet asset, resolvable through its export', async () => {
+    const file = join(consumer, 'node_modules/glirastes', String(manifest.exports['./react/audio-worklet-processor.js']));
+    expect(existsSync(file)).toBe(true);
+    const { stdout } = await run(
+      process.execPath,
+      ['--input-type=module', '-e', "console.log(import.meta.resolve('glirastes/react/audio-worklet-processor.js'))"],
+      { cwd: consumer },
+    );
+    expect(stdout.trim().endsWith('/node_modules/glirastes/dist/react/audio-worklet-processor.js')).toBe(true);
+  }, 30_000);
 
   it('runs the installed CLI', async () => {
     const bin = join(consumer, 'node_modules/glirastes', manifest.bin.glirastes!);

@@ -183,6 +183,7 @@
     },
     "./react/styles.css": "./dist/react/styles.css",
     "./react/pills.css": "./dist/react/pills.css",
+    "./react/audio-worklet-processor.js": "./dist/react/audio-worklet-processor.js",
     "./embed": {
       "types": "./dist/embed/index.d.ts",
       "default": "./dist/embed/index.js"

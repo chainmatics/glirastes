@@ -36,6 +36,18 @@ describe('public foundation subpaths', () => {
       .toBe(expectedDefault);
   });
 
+  it('exports the voice input audio worklet file', async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { exports: Record<string, unknown> };
+    expect(packageJson.exports['./react/audio-worklet-processor.js'])
+      .toBe('./dist/react/audio-worklet-processor.js');
+    // The worklet is loaded by the browser as a module of its own: no imports.
+    const source = await readFile(new URL('./react/audio-worklet-processor.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/^import\s/m);
+    expect(source).toContain("registerProcessor('audio-processor'");
+  });
+
   it('ships local STT ESM only with an exactly pinned optional peer', async () => {
     const [packageJson, cjsConfig, serverSource, shims] = await Promise.all([
       readFile(new URL('../package.json', import.meta.url), 'utf8').then((text) => JSON.parse(text) as {
