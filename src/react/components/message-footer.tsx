@@ -10,23 +10,33 @@ import type { ChatMessage, TurnOutcome } from '../types.js';
 const COPY_RESET_MS = 2000;
 const TICK_MS = 100;
 
+const numberFormats = new Map<string, Intl.NumberFormat>();
+
 function numberFormat(language: string | undefined): Intl.NumberFormat {
-  const options = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
-  try {
-    // Without a chat language the texts are English, so is the number.
-    return new Intl.NumberFormat(language ?? 'en', options);
-  } catch {
-    return new Intl.NumberFormat('en', options);
+  // Without a chat language the texts are English, so is the number.
+  const key = language ?? 'en';
+  let format = numberFormats.get(key);
+  if (!format) {
+    const options = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
+    try {
+      format = new Intl.NumberFormat(key, options);
+    } catch {
+      format = new Intl.NumberFormat('en', options);
+    }
+    numberFormats.set(key, format);
   }
+  return format;
 }
 
 /**
- * A duration for the footer: under a minute in tenths of a second, floored
- * (`3.2 s`, German `3,2 s`), from a minute on in whole seconds (`1 min 5 s`).
+ * A duration for the footer: under a tenth of a second `< 0.1 s`, under a minute in tenths of a second,
+ * floored (`3.2 s`, German `3,2 s`), from a minute on in whole seconds (`1 min 5 s`).
  */
 export function formatDuration(ms: number, language?: string): string {
   const safe = Number.isFinite(ms) && ms > 0 ? ms : 0;
-  if (safe < 60_000) return `${numberFormat(language).format(Math.floor(safe / 100) / 10)} s`;
+  const format = numberFormat(language);
+  if (safe < 100) return `< ${format.format(0.1)} s`;
+  if (safe < 60_000) return `${format.format(Math.floor(safe / 100) / 10)} s`;
   const minutes = Math.floor(safe / 60_000);
   const seconds = Math.floor((safe % 60_000) / 1000);
   return `${minutes} min ${seconds} s`;

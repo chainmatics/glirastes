@@ -107,9 +107,10 @@ Defaults keep today's markup; everything below is opt-in.
   over the https links the answer cites (its Markdown links, AI SDK
   `source-url` parts, tool output `sources` / `citations`; no credentials,
   deduplicated, at most 20, opened with `noopener noreferrer`); `duration`
-  shows "Done in 3.2 s" under the last answer of a completed turn from
-  `TurnOutcome.durationMs` (the time the turn's requests ran, approval waits
-  excluded, measured in the browser and stored with the outcome). Running:
+  shows "Done in 3.2 s" (under 0.1 s "< 0.1 s") under the last answer of a
+  completed turn from `TurnOutcome.durationMs` (the time the turn's requests
+  ran, a UI action continuation included, approval waits excluded, measured
+  in the browser and stored with the outcome). Running:
   the elapsed time (`aria-hidden`) and a stop button (`stopButton`). Locale
   keys `copyMessageLabel`, `copiedMessageLabel`, `copyMessageFailedLabel`,
   `messageSourceOneLabel`, `messageSourcesLabel` (`{count}`),

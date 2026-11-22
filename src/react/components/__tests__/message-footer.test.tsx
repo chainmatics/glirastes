@@ -60,7 +60,10 @@ describe('formatDuration', () => {
   it('tenths under a minute, whole seconds above', () => {
     expect(formatDuration(3240, 'en')).toBe('3.2 s');
     expect(formatDuration(3240, 'de')).toBe('3,2 s');
-    expect(formatDuration(0)).toBe('0.0 s');
+    expect(formatDuration(0)).toBe('< 0.1 s');
+    expect(formatDuration(99, 'en')).toBe('< 0.1 s');
+    expect(formatDuration(99, 'de')).toBe('< 0,1 s');
+    expect(formatDuration(100, 'en')).toBe('0.1 s');
     expect(formatDuration(59_999, 'en')).toBe('59.9 s');
     expect(formatDuration(65_400, 'en')).toBe('1 min 5 s');
     expect(formatDuration(3240, 'not a language!')).toBe('3.2 s');
