@@ -1624,9 +1624,6 @@
 [data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"]:focus-within [data-element="row-delete"] {
   opacity: 1;
 }
-@media (prefers-reduced-motion: reduce) {
-  [data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) :is([data-element="session-row"], [data-element="row-edit"], [data-element="row-delete"]) { transition: none; }
-}
 
 /* ---------- Confirm dialog ---------- */
 
@@ -1754,6 +1751,9 @@
   [data-component="confirm-dialog-backdrop"]:where(:not([data-unstyled], [data-unstyled] *)),
   [data-component="confirm-dialog"]:where(:not([data-unstyled], [data-unstyled] *)) {
     animation: none;
+  }
+  [data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) :is([data-element="session-row"], [data-element="row-edit"], [data-element="row-delete"]) {
+    transition: none;
   }
 }
 
