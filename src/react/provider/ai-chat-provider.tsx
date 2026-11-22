@@ -13,6 +13,7 @@ import type { ComposerContextValue } from './composer-context.js';
 import type {
   ActivityLogConfig,
   ActivityLogDetails,
+  MessageFooterConfig,
   ApprovalDisplayConfig,
   AiChatProviderConfig,
   ChatMessage,
@@ -118,6 +119,12 @@ export const DEFAULT_LOCALE: ChatLocale = {
   approvalSubjectsUncheckedWarning: 'These could not be checked right now: {ids}.',
   approvalReferenceIdNote: 'Referenced, not checked.',
   approvalPreviewUncheckedNote: 'The preview could not be loaded.',
+  copyMessageLabel: 'Copy',
+  copiedMessageLabel: 'Copied',
+  copyMessageFailedLabel: 'Copy failed',
+  messageSourceOneLabel: '1 source',
+  messageSourcesLabel: '{count} sources',
+  messageDurationLabel: 'Done in {duration}',
   moreItemsLabel: 'more',
   showAllItemsLabel: 'Show all {count}',
   showMoreLabel: 'Show more',
@@ -696,6 +703,7 @@ export function AiChatProvider({
   toolRenderers,
   toolResults: userToolResults,
   activityLog: userActivityLog,
+  messageFooter: userMessageFooter,
   attachments: userAttachments,
   voice: userVoice,
   session,
@@ -796,6 +804,16 @@ export function AiChatProvider({
     noticeScope: activityNoticeScope,
   }), [activityExpandWhileRunning, activityRunningProgress, activityNoticePlacement, activityDetails, activityGrouping,
     activityNoticeScope]);
+  // Keyed on the four switches, so an inline `messageFooter={{ … }}` does not re-render every message.
+  const footerOn = userMessageFooter === true || (typeof userMessageFooter === 'object' && userMessageFooter !== null);
+  const footerParts: MessageFooterConfig = typeof userMessageFooter === 'object' && userMessageFooter !== null ? userMessageFooter : {};
+  const footerCopy = footerParts.copy !== false;
+  const footerSources = footerParts.sources !== false;
+  const footerDuration = footerParts.duration !== false;
+  const footerStop = footerParts.stop !== false;
+  const messageFooterConfig = useMemo<Required<MessageFooterConfig> | null>(() => (footerOn
+    ? { copy: footerCopy, sources: footerSources, duration: footerDuration, stop: footerStop }
+    : null), [footerOn, footerCopy, footerSources, footerDuration, footerStop]);
   const toolRendererRegistry = useMemo(
     () => (toolRenderers && toolRenderers.length > 0
       ? createToolResultRendererRegistry(toolRenderers)
@@ -2861,6 +2879,7 @@ export function AiChatProvider({
       toolLabels,
       toolResults: toolResultConfig,
       activityLog: activityLogConfig,
+      messageFooter: messageFooterConfig,
       toolRendererRegistry,
       attachments: attachmentOptions,
       voice: voiceConfig,
@@ -2964,6 +2983,7 @@ export function AiChatProvider({
       toolLabels,
       toolResultConfig,
       activityLogConfig,
+      messageFooterConfig,
       approvalSubjects,
       approvalDisplayConfig,
       toolRendererRegistry,

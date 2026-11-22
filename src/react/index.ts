@@ -65,6 +65,7 @@ export type {
   ToolResultDisplayConfig,
   // Message layout
   ActivityLogConfig,
+  MessageFooterConfig,
   // Message queue
   QueuedMessage,
   ChatQueueConfig,

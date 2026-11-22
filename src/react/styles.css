@@ -727,6 +727,63 @@
   opacity: 0.55;
 }
 
+/* ---------- Message footer (`messageFooter`, follow-ups under the answer) ---------- */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] {
+  margin-top: 0.5rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="footer-actions"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--cm-text-muted);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="footer-actions"] button {
+  padding: 0.125rem 0.375rem;
+  background: transparent;
+  border: 0;
+  border-radius: var(--cm-radius-sm);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="footer-actions"] button:hover {
+  background: var(--cm-primary-tint);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] button:focus-visible,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] a:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 1px;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="elapsed"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="duration"] {
+  font-variant-numeric: tabular-nums;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="sources"] {
+  margin: 0.375rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="sources"][hidden] {
+  display: none;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="source"] {
+  display: flex;
+  gap: 0.375rem;
+  padding: 0.125rem 0;
+  color: var(--cm-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="source"]:hover [data-element="source-label"] {
+  text-decoration: underline;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-footer"] [data-element="source-domain"] {
+  color: var(--cm-text-muted);
+}
+
 /* ---------- Tool result ---------- */
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="tool-result"] {
   margin: 0.375rem 0;

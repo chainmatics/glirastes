@@ -1,4 +1,4 @@
-import type { CompletionItem, CompletionSelectContext, ComposerConfig } from '../types.js';
+import type { CompletionItem, CompletionSelectContext, ComposerConfig, MessageFooterConfig } from '../types.js';
 import type { ResolvedChatTrigger } from '../completions/triggers.js';
 import type { ComposerDraftController } from '../composer/composer-drafts.js';
 import { useChatContext, type ChatContextValue } from './chat-context.js';
@@ -26,6 +26,8 @@ export interface ComposerContextValue {
    * runs. A getter, so the provider does not re-render while time passes.
    */
   turnWorkedMs?: () => number | null;
+  /** The resolved `messageFooter` (every part a boolean), null when it is off. */
+  messageFooter?: Required<MessageFooterConfig> | null;
 }
 
 /** The internal composer fields of a chat context value (absent outside the provider). */

@@ -21,6 +21,7 @@ import { clarificationAnswerMessage, readClarificationPart } from '../utils/clar
 import { ClarificationCard as DefaultClarificationCard } from './clarification-card.js';
 import { ActivityLog, TurnNotice as DefaultTurnNotice } from './activity-log.js';
 import { PlanChecklist } from './plan-checklist.js';
+import { MessageFooter } from './message-footer.js';
 import { readActivitySteps, readLatestPlan, type ActivityDetailSource, type ActivityStep, type ActivityStepStatus } from '../utils/activity.js';
 import { PLAN_TOOL_NAME } from '../../contracts/plan.js';
 import { RendererBoundary } from '../tool-renderers/renderer-boundary.js';
@@ -309,6 +310,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     turnOutcomes,
     mentionPrefix,
     composer,
+    messageFooter,
   } = useComposerContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
@@ -626,6 +628,23 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     );
   }
 
+  /** The answer's footer (`messageFooter`), null when it is off or not an answer. */
+  function footerNode(): ReactNode {
+    if (!isAssistant || !messageFooter) return null;
+    const index = messages ? messages.findIndex((entry) => entry.id === message.id) : -1;
+    const next = index >= 0 ? messages![index + 1] : undefined;
+    return (
+      <MessageFooter
+        message={message}
+        text={hasTextContent ? cleanTextParts.filter((text) => text.trim()).join('\n\n') : fallbackSummary}
+        hasText={hasTextContent || Boolean(fallbackSummary)}
+        isLastOfTurn={!next || next.role === 'user'}
+        turnOutcome={turnOutcome}
+        active={turnActive}
+      />
+    );
+  }
+
   // `activityLog.grouping: 'sections'`: a log per run of steps, at its place between the texts.
   const sections = (activityLog?.grouping ?? 'message') === 'sections' && isAssistant && activitySteps.length > 0
     ? activitySections(message.parts, textEntries.map((entry, i) => ({ index: entry.index, node: textNodes[i] ?? null })), readSteps)
@@ -679,6 +698,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
       )
       : null,
     toolResults: toolResultNodes.some((node) => node !== null) ? <>{toolResultNodes}</> : null,
+    footer: footerNode(),
   };
   const textNodeAt = new Map(textEntries.map((entry, i) => [entry.index, textNodes[i] ?? null] as const));
   const parts = message.parts.map((part, index): MessagePartEntry => {
@@ -717,6 +737,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     attachments: scoped(nodes.attachments),
     text: scoped(nodes.text),
     toolResults: scoped(nodes.toolResults),
+    footer: scoped(nodes.footer),
   };
 }
 
@@ -764,6 +785,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
             {nodes.toolResults}
           </>
         )}
+      {nodes.footer}
     </>
   );
   const Arrange = components.MessageParts;
