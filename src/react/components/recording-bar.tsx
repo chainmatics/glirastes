@@ -4,6 +4,7 @@ import { ChatContext } from '../provider/chat-context.js';
 import type { RecordingBarProps } from '../types.js';
 import { CancelButton, StopButton } from './recording-controls.js';
 import { StreamWaveform } from './stream-waveform.js';
+import { voiceText } from './voice-ui.js';
 
 function joinClassNames(...values: Array<string | undefined>): string {
   return values.filter(Boolean).join(' ');
@@ -73,6 +74,9 @@ function RecordingBarInner({
   variant,
   className,
 }: RecordingBarProps) {
+  const locale = useContext(ChatContext)?.locale;
+  const cancelLabel = voiceText(locale, 'voiceCancelAriaLabel');
+  const stopLabel = voiceText(locale, 'voiceStopAriaLabel');
   const handleCancel = useCallback(() => onCancel(), [onCancel]);
   const handleStop = useCallback(() => onStop(), [onStop]);
 
@@ -88,7 +92,7 @@ function RecordingBarInner({
         ...(variant === 'inline' ? { width: '100%', height: '36px' } : {}),
       }}
     >
-      <CancelButton onClick={handleCancel} ariaLabel="Aufnahme abbrechen" title="Aufnahme abbrechen" />
+      <CancelButton onClick={handleCancel} ariaLabel={cancelLabel} title={cancelLabel} />
 
       <div data-part="wave-container" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
         {isConnecting ? <LoadingDots /> : <StreamWaveform stream={stream} />}
@@ -96,7 +100,7 @@ function RecordingBarInner({
 
       <InterimTranscript text={transcript} />
 
-      <StopButton onClick={handleStop} ariaLabel="Aufnahme stoppen" title="Aufnahme stoppen" />
+      <StopButton onClick={handleStop} ariaLabel={stopLabel} title={stopLabel} />
     </div>
   );
 }

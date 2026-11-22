@@ -80,6 +80,7 @@ import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
 import { STEP_FAILURE_TEXTS_EN } from '../utils/step-failure.js';
+import { VOICE_TEXTS_EN } from '../components/voice-ui.js';
 import { latestUserMessageId, readStoredTurnOutcomes, withStoredTurnOutcomes } from '../utils/turn-outcomes.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
@@ -192,7 +193,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   recentChatsLabel: 'Recent chats',
   clarificationInputLabel: 'Your answer',
   clarificationSubmitButton: 'Answer',
-  retryRecordingAriaLabel: 'Retry recording',
+  ...VOICE_TEXTS_EN,
   completionListLabel: 'Suggestions',
   completionResultsLabel: '{count} suggestions',
   completionEmptyLabel: 'No matches. @ for things, / for commands',

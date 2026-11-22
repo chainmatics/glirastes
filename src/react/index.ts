@@ -211,6 +211,11 @@ export {
   createDeepgramSegmentParser,
   type DeepgramSttAdapterOptions,
 } from './stt/deepgram.js';
+export {
+  AudioWorkletLoadError,
+  AUDIO_WORKLET_UNAVAILABLE,
+  isAudioWorkletLoadError,
+} from './stt/worklet-error.js';
 export { useDragResizePanel } from './hooks/use-drag-resize-panel.js';
 export type {
   UseDragResizePanelOptions,

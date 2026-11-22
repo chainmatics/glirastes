@@ -294,4 +294,29 @@ describe('shipped note detection', () => {
       evidence: [{ file: 'app/locale.ts', line: 4 }],
     });
   });
+  it('voice-worklet-required is a must for voice apps until the copy step exists', async () => {
+    const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === 'voice-worklet-required')!;
+    expect(note.kind).toBe('breaking');
+    const chat = "import { AiChatProvider } from 'glirastes/react';\nexport const c = <AiChatProvider voice={{ enabled: true }} />;\n";
+    expect(evaluateNote(note, scanOf({ 'app/chat.tsx': chat })).status).toBe('affected');
+    expect(evaluateNote(note, scanOf({
+      'app/stt.ts': "import { RecordedSttAdapter } from 'glirastes/stt';\nexport const a = new RecordedSttAdapter();\n",
+    })).status).toBe('affected');
+    expect(evaluateNote(note, scanOf({
+      'app/chat.tsx': "import { AiChatProvider } from 'glirastes/react';\nexport const c = <AiChatProvider />;\n",
+    })).status).toBe('not-affected');
+    for (const script of [
+      'glirastes stt worklet && glirastes tools refresh --keep-going',
+      'cp node_modules/glirastes/dist/react/audio-worklet-processor.js public/',
+    ]) {
+      expect(evaluateNote(note, scanOf({
+        'app/chat.tsx': chat,
+        'package.json': JSON.stringify({ scripts: { predev: script } }),
+      })).status, script).toBe('adopted');
+    }
+    expect(evaluateNote(note, scanOf({
+      'app/chat.tsx': chat,
+      'public/audio-worklet-processor.js': "class AudioProcessor {}\nregisterProcessor('audio-processor', AudioProcessor);\n",
+    })).status).toBe('adopted');
+  });
 });

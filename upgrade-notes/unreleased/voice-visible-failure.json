@@ -1,0 +1,49 @@
+{
+  "id": "voice-visible-failure",
+  "kind": "recommended",
+  "summary": "Voice input no longer fails silently: a failed recording shows a localized alert next to the mic button, a worklet that does not load is logged with its URL. The mic, stop and retry buttons show icons with localized aria-labels instead of the words mic, stop and retry.",
+  "howTo": "Tests or CSS that find the voice button by its text 'mic'/'stop'/'retry' now use its aria-label ('Start voice input', 'Stop recording', 'Transcribing…', 'Retry recording'; German in deChatLocale) or [data-component=\"voice-input-addon\"][data-state]. The alert is span[role=alert][data-element=\"voice-error\"] with voiceFailedText or voiceUnavailableText; the recording bar's buttons use voiceCancelAriaLabel and voiceStopAriaLabel. A custom SttProviderAdapter can declare acceptsWorkletUrl and read input.workletUrl in connect(); otherwise voice.workletUrl is ignored for it with a one-time console warning. AudioWorkletLoadError and SttSessionSnapshot.errorCode ('audio-worklet-unavailable') tell the worklet failure apart. VoiceInputButton takes adapter.",
+  "skill": "building-glirastes-chat-ui#speech-worklet",
+  "affectedWhen": {
+    "symbols": [
+      "VoiceInputAddon",
+      "VoiceInputButton",
+      "RecordedSttAdapter",
+      "DeepgramSttAdapter",
+      "useDeepgramTranscription",
+      "SttProviderAdapter"
+    ],
+    "patterns": [
+      "\\bvoice\\s*[:=]\\s*\\{\\{?[^{}]*\\benabled\\s*:\\s*true\\b"
+    ]
+  },
+  "surface": [
+    "glirastes/react#AUDIO_WORKLET_UNAVAILABLE",
+    "glirastes/stt#AUDIO_WORKLET_UNAVAILABLE",
+    "glirastes/react#AudioWorkletLoadError",
+    "glirastes/stt#AudioWorkletLoadError",
+    "glirastes/react#isAudioWorkletLoadError",
+    "glirastes/stt#isAudioWorkletLoadError",
+    "glirastes/react#ChatLocale.voiceCancelAriaLabel",
+    "locale#voiceCancelAriaLabel",
+    "glirastes/react#ChatLocale.voiceConnectingAriaLabel",
+    "locale#voiceConnectingAriaLabel",
+    "glirastes/react#ChatLocale.voiceFailedText",
+    "locale#voiceFailedText",
+    "glirastes/react#ChatLocale.voiceStartAriaLabel",
+    "locale#voiceStartAriaLabel",
+    "glirastes/react#ChatLocale.voiceStopAriaLabel",
+    "locale#voiceStopAriaLabel",
+    "glirastes/react#ChatLocale.voiceTranscribingAriaLabel",
+    "locale#voiceTranscribingAriaLabel",
+    "glirastes/react#ChatLocale.voiceUnavailableText",
+    "locale#voiceUnavailableText",
+    "*#SttProviderAdapter.acceptsWorkletUrl",
+    "*#SttSessionSnapshot.errorCode",
+    "glirastes/react#UseDeepgramTranscriptionReturn.errorCode",
+    "glirastes/react#UseSttOptions.workletUrl",
+    "glirastes/react#UseSttReturn.errorCode",
+    "glirastes/react#VoiceInputButtonProps.adapter",
+    "glirastes/stt#SttSessionControllerOptions.workletUrl"
+  ]
+}

@@ -271,6 +271,6 @@ describe('runSttCommand', () => {
     expect(await runSttCommand(['push'], lines)).toBe(2);
     expect(await runSttCommand(['pull', '--bogus'], lines)).toBe(2);
     expect(lines.err.join('\n')).toContain(STT_USAGE.split('\n')[0]);
-    expect(STT_SUBCOMMANDS).toEqual({ pull: { flags: ['--json'], values: ['--dir', '--mirror'] } });
+    expect(STT_SUBCOMMANDS.pull).toEqual({ flags: ['--json'], values: ['--dir', '--mirror'] });
   });
 });

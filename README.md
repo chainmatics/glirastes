@@ -146,7 +146,8 @@ npx --no-install glirastes init
 ```
 
 `init` writes `.glirastes/tools.json`, `.glirastes/prompt-bundle.json`, the
-`predev` / `prebuild` scripts (`glirastes tools refresh`) and a short hint in
+`predev` / `prebuild` scripts (`glirastes tools refresh`, plus the voice
+worklet copy `glirastes stt worklet` for Next.js, Vite and Create React App) and a short hint in
 `AGENTS.md` / `CLAUDE.md`, installs the [agent skills](#agent-skills) and hands
 the integration to your coding agent. Existing files are never replaced.
 
@@ -363,6 +364,31 @@ two jobs:
 
 See the skill [`building-glirastes-chat-ui`](skills/building-glirastes-chat-ui/SKILL.md).
 
+### Voice input needs the audio worklet
+
+Every recording loads `/audio-worklet-processor.js` (package export
+`glirastes/react/audio-worklet-processor.js`); without it voice input fails
+with an error next to the mic button and a `console.error` naming the URL.
+`glirastes init` sets this up for Next.js, Vite and Create React App. In an
+existing app, chain the copy step in front of your scripts:
+
+```json
+"scripts": {
+  "predev": "glirastes stt worklet && glirastes tools refresh --keep-going",
+  "prebuild": "glirastes stt worklet && glirastes tools refresh"
+}
+```
+
+- `glirastes stt worklet` copies the file into `public/`. A Vite app with its
+  own `root` or `publicDir` passes that folder: `glirastes stt worklet --out
+  web/static`. Served at another path, set `voice.workletUrl`.
+- yarn berry and pnpm may skip `pre*` scripts; when you start `next dev` or
+  `vite` directly, run `glirastes stt worklet` once first.
+- The copy is a build output: `public/audio-worklet-processor.js` can be
+  Git-ignored (`glirastes init` adds it to an existing `.gitignore`).
+- `glirastes doctor` checks the file at the configured or default URL when the
+  app uses voice input.
+
 ## Standalone and Connected
 
 | | Standalone | Connected |
@@ -425,6 +451,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes/server/nextjs` | Next.js handlers: `createAiChatHandler`, `createChatInteractionsHandler`, `createRecordingTranscriptionHandler` (alias `glirastes/adapter/nextjs`) |
 | `glirastes/server/testing` | Test helpers for tool setups without model calls (ESM only) |
 | `glirastes/react` | Chat UI, provider, hooks, client actions, navigation bridge, STT |
+| `glirastes/react/audio-worklet-processor.js` | Audio worklet file voice input loads (serve it at `/audio-worklet-processor.js`) |
 | `glirastes/react/vercel` | AI SDK transport and `VercelAiChat` |
 | `glirastes/react/styles.css` | Shipped chat styles |
 | `glirastes/stt` | Provider-neutral STT controller and adapters |

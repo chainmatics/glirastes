@@ -169,7 +169,9 @@ export const CLI_USAGE =
   + '       glirastes upgrade <report|ack> [options]\n'
   + '         see what changed in the SDK since this app was last reviewed, acknowledge the review\n'
   + '       glirastes stt pull [--dir <path>] [--mirror <url>] [--json]\n'
-  + '         download the sha256-pinned local speech models for glirastes/server/stt-local\n';
+  + '         download the sha256-pinned local speech models for glirastes/server/stt-local\n'
+  + '       glirastes stt worklet [--out <dir>] [--root <path>] [--json]\n'
+  + '         copy the audio worklet voice input needs into public/ (served at /audio-worklet-processor.js)\n';
 
 const HELP_FLAGS = new Set(['--help', '-h', 'help']);
 

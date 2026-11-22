@@ -31,8 +31,9 @@ second, hand-maintained catalogue.
    (`src/app/api` by default, `{ "kind": "next-app", "apiDir": "app/api" }`
    otherwise), `next-pages` for navigation, `url-filters` for nuqs or
    `searchParams` filters, `react-actions` for `useAiClientAction`. Keep the
-   `predev` (`glirastes tools refresh --keep-going`) and `prebuild`
-   (`glirastes tools refresh`) scripts; `glirastes tools refresh --watch` next
+   `predev` (`glirastes stt worklet && glirastes tools refresh --keep-going`)
+   and `prebuild` (`glirastes stt worklet && glirastes tools refresh`) scripts;
+   the worklet copy serves voice input's audio worklet. `glirastes tools refresh --watch` next
    to `next dev` keeps the tools current while you edit.
 2. Server-only `resolvePrincipal(request)` returns the verified `subjectId`,
    `tenantId`, roles and attributes from the real session, or `undefined` for
