@@ -49,6 +49,24 @@ describe('"Continue" after a budget stop', () => {
     expect(chat.sent).toEqual([]);
   });
 
+  it('continues once for a double click and not while a request runs', async () => {
+    const chat = stoppedChat();
+    let settle: () => void = () => {};
+    const go = vi.fn(() => new Promise<void>((resolve) => { settle = resolve; }));
+    const base = Object.getOwnPropertyDescriptor(StreamingChat.prototype, 'transport')!.get!;
+    Object.defineProperty(chat, 'transport', { get: () => ({ ...base.call(chat), continueAfterBudgetStop: go }) });
+    render(<Host chat={chat} />);
+    const button = await screen.findByRole('button', { name: 'Continue' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(go).toHaveBeenCalledTimes(1);
+    await act(async () => { settle(); });
+    // A running request: the context call does nothing.
+    act(() => { chat.resume(); });
+    act(() => { ctx.continueAfterBudgetStop!(); });
+    expect(go).toHaveBeenCalledTimes(1);
+  });
+
   it('says "Weitermachen" in German', async () => {
     const chat = stoppedChat();
     withContinue(chat);

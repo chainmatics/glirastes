@@ -48,21 +48,44 @@ export interface TurnToolCall {
   state: 'done' | 'failed' | 'declined' | 'open';
 }
 
-/** The tool calls of the running turn in the history, in order. */
-export function turnToolCallsOf(messages: ReadonlyArray<unknown>): TurnToolCall[] {
-  const calls: TurnToolCall[] = [];
+/** The parts of the running turn's assistant messages, in order. */
+function turnParts(messages: ReadonlyArray<unknown>): Part[] {
+  const parts: Part[] = [];
   for (const message of currentTurn(messages)) {
     if (message.role !== 'assistant' || !Array.isArray(message.parts)) continue;
-    for (const part of message.parts) {
-      if (!isRecord(part)) continue;
-      const toolName = toolNameOf(part);
-      if (!toolName) continue;
-      const state = part.state === 'output-available'
-        ? (isRecord(part.output) && toolResultFailure(part.output) !== undefined ? 'failed' : 'done')
-        : part.state === 'output-error' ? 'failed'
-          : part.state === 'output-denied' ? 'declined' : 'open';
-      calls.push({ ...(typeof part.toolCallId === 'string' ? { id: part.toolCallId } : {}), toolName, input: part.input, state });
-    }
+    for (const part of message.parts) if (isRecord(part)) parts.push(part);
+  }
+  return parts;
+}
+
+/** The tool calls of the running turn in the history, in order. */
+export function turnToolCallsOf(messages: ReadonlyArray<unknown>): TurnToolCall[] {
+  return toolCallsIn(turnParts(messages));
+}
+
+/**
+ * The tool calls of the running turn before its latest budget stop (every
+ * segment the handler stopped), empty for a turn without a stop. A later
+ * request of the turn (a continuation, an approval or UI outcome after it)
+ * must not run a write call of these again.
+ */
+export function turnToolCallsBeforeLatestStop(messages: ReadonlyArray<unknown>): TurnToolCall[] {
+  const parts = turnParts(messages);
+  let stopAt = parts.length - 1;
+  while (stopAt >= 0 && !readBudgetStopPart(parts[stopAt])) stopAt -= 1;
+  return stopAt < 0 ? [] : toolCallsIn(parts.slice(0, stopAt));
+}
+
+function toolCallsIn(parts: ReadonlyArray<Part>): TurnToolCall[] {
+  const calls: TurnToolCall[] = [];
+  for (const part of parts) {
+    const toolName = toolNameOf(part);
+    if (!toolName) continue;
+    const state = part.state === 'output-available'
+      ? (isRecord(part.output) && toolResultFailure(part.output) !== undefined ? 'failed' : 'done')
+      : part.state === 'output-error' ? 'failed'
+        : part.state === 'output-denied' ? 'declined' : 'open';
+    calls.push({ ...(typeof part.toolCallId === 'string' ? { id: part.toolCallId } : {}), toolName, input: part.input, state });
   }
   return calls;
 }
@@ -116,8 +139,8 @@ export function blockedCallFingerprints(
 /** The tool result a blocked call gets instead of running. Its text is for the model and the activity log. */
 export const REPEATED_WRITE_REFUSAL = Object.freeze({
   success: false,
-  error: 'Not run again: this action already ran in this request before it was stopped (same tool and arguments). '
-    + 'Do not repeat it; continue with the open steps.',
+  error: 'Not run again: this action was already attempted in this turn before it was stopped (same tool and arguments); '
+    + 'it may have succeeded or failed. Do not retry it; tell the user it was already attempted and continue with the open steps.',
 });
 
 /**
@@ -130,6 +153,8 @@ export function withBudgetContinuationGuard(
   tools: Record<string, unknown>,
   blocked: ReadonlySet<string>,
   isReadOnly: (toolName: string) => boolean,
+  /** Called for each refused call (e.g. to count it as a tool error of the turn's budget). */
+  onRefused?: (toolName: string, input: unknown) => void,
 ): Record<string, unknown> {
   if (blocked.size === 0) return tools;
   const guarded: Record<string, unknown> = {};
@@ -160,9 +185,11 @@ export function withBudgetContinuationGuard(
             },
           }
         : {}),
-      execute: async (input: unknown, ...rest: unknown[]) => (
-        isBlocked(input) ? { ...REPEATED_WRITE_REFUSAL } : execute(input, ...rest)
-      ),
+      execute: async (input: unknown, ...rest: unknown[]) => {
+        if (!isBlocked(input)) return execute(input, ...rest);
+        onRefused?.(name, input);
+        return { ...REPEATED_WRITE_REFUSAL };
+      },
     };
   }
   return guarded;
@@ -176,9 +203,11 @@ export function budgetContinuationInstruction(calls: ReadonlyArray<TurnToolCall>
   const listed = [...counts].map(([name, count]) => (count > 1 ? `${name} (${count}x)` : name)).join(', ');
   return [
     'The user asked you to continue the request above, which was stopped at a limit before it was finished.',
-    listed ? `These tool calls already ran in it: ${listed}. Their results are above.` : '',
+    listed
+      ? `These tool calls were already attempted in this turn (each may have succeeded or failed): ${listed}. Their results are above.`
+      : '',
     'Do only the steps that are still open, then answer the original request completely.',
-    'Do not call a tool again with the same arguments; never repeat an action that changes data.',
+    'Do not call a tool again with the same arguments; never retry an action that changes data, tell the user it was already attempted instead.',
   ].filter(Boolean).join(' ');
 }
 

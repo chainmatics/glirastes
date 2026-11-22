@@ -705,7 +705,7 @@ Done so far: List tasks, Show calendar.
 
 Still open: Draft the weekly plan.
 
-Choose “Continue” or write “continue” to go on with the open steps.
+Use the button below to go on with the open steps.
 ```
 
 A turn that showed no text of the model before the stop (only tool calls) gets
@@ -724,8 +724,12 @@ After the closing sentence the notice says what was done and what is open:
   nothing succeeded.
 - **Open** lists the plan items that are not completed when the turn used
   `update_plan`; otherwise it says that the question is not answered yet.
-- The last line tells the user how to go on: the chat's "Continue" button or
-  typing "continue".
+- The last line tells the user how to go on: the button below (not named, so a
+  custom `continueButton` label cannot differ from it). It suggests no typed
+  message while the button is offered: a typed message is a new turn without
+  the repeat guard described next. Only after the last continuation the line
+  suggests typing "continue". A client without the button (an own UI without
+  `continueAfterBudgetStop`) sets `continueHint` to its own text.
 
 The summary is built in the handler from the stream of this request and the
 history; it names labels and plan titles only, never tool arguments or
@@ -748,22 +752,41 @@ history again, without a new user message, with
 - runs the same turn again (same `turnId`, same pinned snapshot) with a fresh
   budget, as every request has;
 - adds, for this request only, a user-role instruction for the model that
-  lists the tool calls that already ran (names and counts, no arguments) and
-  asks it to do only the open steps and never repeat an action that changes
-  data;
+  lists the tool calls already attempted before the stop (names and counts,
+  no arguments; each may have succeeded or failed) and asks it to do only the
+  open steps and never retry an action that changes data;
 - guards every tool that is not read-only: a call whose fingerprint (tool
-  plus normalized arguments) ran in the stopped turn is not run again and
-  asks for no approval; the model gets the tool error `Not run again: this
-  action already ran in this request before it was stopped (same tool and
-  arguments). Do not repeat it; continue with the open steps.` Read-only
-  means a GET or HEAD tool without approval; in a managed turn the pinned
-  manifest (`safe-read`, GET or HEAD) and policy (no approval) decide. A
-  call that was refused at its approval did not run and is not blocked;
+  plus normalized arguments) was attempted before the turn's latest stop,
+  successful, failed or without a result (a failed write may have applied in
+  part), is not run again and asks for no approval; the model gets the tool
+  error `Not run again: this action was already attempted in this turn before
+  it was stopped (same tool and arguments); it may have succeeded or failed.
+  Do not retry it; tell the user it was already attempted and continue with
+  the open steps.` Read-only means a GET or HEAD tool without approval; in a
+  managed turn the pinned manifest (`safe-read`, GET or HEAD) and policy (no
+  approval) decide. A call that was refused at its approval did not run and
+  is not blocked. In a managed turn a refusal counts as a tool error toward
+  `maxConsecutiveErrors` and as a fingerprint toward `maxRepeatedFingerprint`;
 - streams the continued answer into the same assistant message.
+
+The guard and the instruction (then in the system prompt, so the resumed
+history stays as it is) stay on for every later request of the stopped turn:
+an approval or a UI outcome the continued run waits for. A write approved
+after the stop runs once as approved.
+
+Each continuation is a request of its own with a fresh budget. Time, tokens
+and cost of one user question can therefore reach four times the per-request
+limits (the first run and three continuations). A managed policy has no
+setting yet to forbid or limit continuations; an app that must not allow them
+answers `glirastesContinuation` itself (or uses a `customStreamHandler`, which
+never continues).
 
 A turn can be continued three times (`MAX_BUDGET_CONTINUATIONS`); the stop
 after that is no longer continuable and its notice only suggests typing
-"continue" (a new user message, a new turn). `onFinish` reports
+"continue". A typed message is a new user message and a new turn: it gets a
+fresh budget too, but no repeat guard and no instruction, so the model may
+call a write of the stopped turn again (approvals and the app's own checks
+still apply). `onFinish` reports
 `continuation: 'budget'`; the metric event reports the continued run as a
 normal `turn.finished` (the Platform contract knows only `approval` and
 `ui-outcome` continuations). An app whose backend validates the chat request
@@ -802,7 +825,7 @@ replaces single keys:
 | `done` | `Done so far: {items}.` |
 | `open` | `Still open: {items}.` |
 | `openUnanswered` | `Still open: your question is not answered yet.` |
-| `continueHint` | `Choose “Continue” or write “continue” to go on with the open steps.` |
+| `continueHint` | `Use the button below to go on with the open steps.` |
 | `continueTypedHint` | `Write “continue” to go on with the open steps.` |
 
 ```ts

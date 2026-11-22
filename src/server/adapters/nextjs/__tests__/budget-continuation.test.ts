@@ -123,7 +123,7 @@ describe('the stop notice of a turn stopped at a limit', () => {
       'I could not finish this request: the step limit for this request was reached (3 steps).',
       'Done so far: tasks_list.',
       'Still open: Team prüfen, Material prüfen.',
-      'Choose “Continue” or write “continue” to go on with the open steps.',
+      'Use the button below to go on with the open steps.',
     ].join('\n\n'));
   });
 
@@ -136,7 +136,9 @@ describe('the stop notice of a turn stopped at a limit', () => {
     const [notice] = noticeOf(turn.chunks);
     expect(notice).toContain('Erledigt: tasks_list, tasks_archive.');
     expect(notice).toContain('Offen: Deine Frage ist noch nicht beantwortet.');
-    expect(notice).toContain('Wähle „Weitermachen“ oder schreib „weiter“');
+    expect(notice).toContain('Nutze den Button unten, um mit den offenen Schritten fortzufahren.');
+    // While the button is offered the notice suggests no typed message (that would be a new turn without the repeat guard).
+    expect(notice).not.toContain('weiter');
   });
 
   it('writes a continuable data-budget-stop part right before the notice', async () => {
@@ -176,7 +178,7 @@ describe('continuing a stopped turn', () => {
     const instruction = prompt.at(-1)!;
     expect(instruction.role).toBe('user');
     const words = JSON.stringify(instruction.content);
-    expect(words).toContain('These tool calls already ran in it: tasks_list. Their results are above.');
+    expect(words).toContain('These tool calls were already attempted in this turn (each may have succeeded or failed): tasks_list. Their results are above.');
     expect(words).toContain('Do only the steps that are still open');
     expect(noticeOf(next.chunks)).toEqual([]);
     expect(next.onFinish.mock.calls[0]![0]).toMatchObject({ continuation: 'budget', wasTruncated: false });
@@ -206,6 +208,115 @@ describe('continuing a stopped turn', () => {
     expect(tools.list).toHaveBeenCalledTimes(3);
     const refused = next.chunks.find((chunk) => chunk.type === 'tool-output-available' && chunk.toolCallId === 'd1');
     expect(refused).toMatchObject({ output: { success: false, error: expect.stringContaining('Not run again') } });
+  });
+
+  it('keeps refusing a write of the stopped turn in the approval request after the continuation', async () => {
+    const archive = vi.fn(async (input: unknown) => ({ success: true, archived: input }));
+    const remove = vi.fn(async (input: unknown) => ({ success: true, deleted: input }));
+    const tools = {
+      tools: {
+        tasks_archive: defineTool({
+          id: 'tasks.archive', description: 'Archive a task.', method: 'POST',
+          inputSchema: z.object({ id: z.string() }).strict(), execute: archive,
+        }),
+        tasks_delete: defineTool({
+          id: 'tasks.delete', description: 'Delete a task.', method: 'DELETE', needsApproval: true,
+          inputSchema: z.object({ id: z.string() }).strict(), execute: remove,
+        }),
+      },
+    } as unknown as ReturnType<typeof registry>;
+    const config = { approvalSecret: 'budget-continuation-secret-32-chars!!' };
+    const stoppedAssistant = {
+      id: 'a1', role: 'assistant',
+      parts: [
+        { type: 'step-start' },
+        { type: 'tool-tasks_archive', toolCallId: 'c1', state: 'output-available', input: { id: 't1' }, output: { success: true } },
+        { type: 'data-budget-stop', data: { v: 1, continuable: true } },
+        { type: 'text', text: 'I could not finish this request.' },
+      ],
+    } as unknown as UIMessage;
+    const history = [userMessage('u1', 'Archiviere t1 und lösche t9'), stoppedAssistant];
+
+    // The continuation asks for the approval of a new write.
+    const continued = await run({
+      steps: [[call('d1', 'tasks_delete', { id: 't9' })]],
+      messages: history, body: { glirastesContinuation: 'budget' }, tools, config,
+    });
+    expect(continued.chunks.some((chunk) => chunk.type === 'tool-approval-request')).toBe(true);
+    const streamed = await assistantMessage(continued.chunks);
+    const merged = JSON.parse(JSON.stringify({ ...stoppedAssistant, parts: [...stoppedAssistant.parts, ...streamed.parts] })) as UIMessage;
+    const answered = {
+      ...merged,
+      parts: merged.parts.map((part) => {
+        const record = part as Part;
+        return record.state === 'approval-requested'
+          ? { ...record, state: 'approval-responded', approval: { id: (record.approval as { id: string }).id, approved: true } }
+          : record;
+      }),
+    } as UIMessage;
+
+    // The approval request runs the approved delete; the model then retries the old archive.
+    const approval = await run({
+      steps: [[call('e1', 'tasks_archive', { id: 't1' })], text('b', 'Fertig.')],
+      messages: [history[0]!, answered], tools, config,
+    });
+
+    expect(approval.response.status).toBe(200);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(archive).not.toHaveBeenCalled();
+    expect(approval.chunks.find((chunk) => chunk.type === 'tool-output-available' && chunk.toolCallId === 'e1'))
+      .toMatchObject({ output: { success: false, error: expect.stringContaining('already attempted in this turn') } });
+    // The model is told what was attempted in this request too.
+    expect(JSON.stringify(approval.model.doStreamCalls[0]!.prompt)).toContain('already attempted in this turn');
+  });
+
+  it('counts a refused repeat as a tool error of a managed turn', async () => {
+    const archive = vi.fn(async () => ({ success: true }));
+    const tools = {
+      tools: {
+        tasks_archive: defineTool({
+          id: ARCHIVE_TASK_ID, description: 'Archive a task.', inputSchema: z.object({ id: z.string() }).strict(), execute: archive,
+        }),
+      },
+    } as unknown as ReturnType<typeof registry>;
+    const stoppedAssistant = {
+      id: 'a1', role: 'assistant',
+      parts: [
+        { type: 'step-start' },
+        { type: 'tool-tasks_archive', toolCallId: 'c1', state: 'output-available', input: { id: 't1' }, output: { success: true } },
+        { type: 'data-budget-stop', data: { v: 1, continuable: true } },
+        { type: 'text', text: 'I could not finish this request.' },
+      ],
+    } as unknown as UIMessage;
+    const next = await run({
+      steps: [
+        [call('d1', 'tasks_archive', { id: 't1' })],
+        [call('d2', 'tasks_archive', { id: 't1' })],
+        [call('d3', 'tasks_archive', { id: 't1' })],
+        [call('d4', 'tasks_archive', { id: 't1' })],
+        text('b', 'Should not run.'),
+      ],
+      messages: [userMessage('u1', 'Archiviere t1'), stoppedAssistant],
+      body: { glirastesContinuation: 'budget' },
+      tools,
+      config: {
+        maxSteps: undefined,
+        approvalSecret: 'budget-continuation-secret-32-chars!!',
+        managedRuntime: {
+          resolvePrincipal: async () => principal(),
+          resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({
+            turnId, agentRevision, manifestRevision, policyRevision: policyRevision(), principal: principal(), localLimits,
+          }),
+          loadRevocations: async () => [],
+        },
+      },
+    });
+
+    expect(next.response.status).toBe(200);
+    expect(archive).not.toHaveBeenCalled();
+    // Three refusals in a row reach maxConsecutiveErrors (3) and the repeat limit: the turn stops.
+    const stop = next.chunks.find((chunk) => chunk.type === 'data-pipeline-state' && (chunk.data as Part).status === 'safety-stop');
+    expect((stop?.data as Part | undefined)?.message).toContain('maxConsecutiveErrors');
   });
 
   it('refuses the field without a continuable stop at the end of the history', async () => {

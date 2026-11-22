@@ -79,12 +79,15 @@ import {
   type StopNotice,
 } from './budget-stop-notice.js';
 import { finalSummaryInstruction } from '../../../runtime/tool-denial.js';
+import { createExecutionFingerprint } from '../../../runtime/fingerprint.js';
 import {
   blockedCallFingerprints,
   budgetContinuationInstruction,
   budgetStopPart,
   budgetStopSummary,
   readBudgetContinuation,
+  REPEATED_WRITE_REFUSAL,
+  turnToolCallsBeforeLatestStop,
   turnToolCallsOf,
   withBudgetContinuationGuard,
   type TurnToolCall,
@@ -675,9 +678,27 @@ async function defaultStreamHandler(
   const turnCalls = turnToolCallsOf(ctx.messages);
   const builtinSet = new Set<string>([...builtinNames, ...NON_DOMAIN_TOOL_NAMES]);
   const isReadOnly = (name: string) => isReadOnlyTurnTool(ctx, name);
-  // A budget continuation never runs a write call of the stopped turn again (fail closed).
-  const guardedTools = request.continuation === 'budget'
-    ? withBudgetContinuationGuard(vercelTools, blockedCallFingerprints(turnCalls.filter((call) => !builtinSet.has(call.toolName)), isReadOnly), isReadOnly)
+  // Once the handler stopped this turn at a limit, no later request of it (the continuation,
+  // an approval or UI outcome after it) runs a write call attempted before the latest stop again (fail closed).
+  const callsBeforeStop = turnToolCallsBeforeLatestStop(ctx.messages);
+  const stoppedTurn = request.continuation === 'budget' || callsBeforeStop.length > 0;
+  const turnTracker = ctx.managedTurn?.tracker;
+  const guardedTools = stoppedTurn
+    ? withBudgetContinuationGuard(
+        vercelTools,
+        blockedCallFingerprints(callsBeforeStop.filter((call) => !builtinSet.has(call.toolName)), isReadOnly),
+        isReadOnly,
+        // A refusal is a tool error of the turn: maxConsecutiveErrors and loop detection see it.
+        turnTracker
+          ? (name, input) => {
+              const toolId = (ctx.tools[name] as { _toolId?: unknown } | undefined)?._toolId;
+              turnTracker.recordFingerprint(createExecutionFingerprint({
+                toolId: typeof toolId === 'string' ? toolId : name, arguments: input ?? null, result: REPEATED_WRITE_REFUSAL,
+              }));
+              turnTracker.recordError();
+            }
+          : undefined,
+      )
     : vercelTools;
   // The outcome marker goes on last, after every wrapper shaped the result.
   const markedTools = uiOutcomes ? withUiOutcomeMarkers(guardedTools, ctx.tools, uiOutcomes) : guardedTools;
@@ -689,15 +710,21 @@ async function defaultStreamHandler(
   // Fixed notes after the app's own prompt: no ids in answers, and with
   // discovery that the offered tools are a start set `find_tools` widens.
   const uiOutcomeNote = uiOutcomes && !uiOutcomes.capReached ? [UI_OUTCOME_SYSTEM_NOTE] : [];
+  // A later request of a stopped turn (approval, UI outcome after a continuation): the same
+  // instruction as the continuation's, in the system prompt so the resumed history stays as it is.
+  const stoppedTurnNote = stoppedTurn && request.continuation !== 'budget'
+    ? [budgetContinuationInstruction(callsBeforeStop, builtinSet)]
+    : [];
+  const notes = [...uiOutcomeNote, ...stoppedTurnNote];
   const systemPrompt = ctx.systemPrompt
     ? [
         ctx.systemPrompt,
         ...(hideIds ? [HIDE_IDS_PROMPT] : []),
         ...(ctx.toolDiscovery ? [FIND_TOOLS_PROMPT] : []),
-        ...uiOutcomeNote,
+        ...notes,
       ].join('\n\n')
-    // The outcome note holds without an app prompt too: the request ends before the model could answer.
-    : uiOutcomeNote[0] ?? ctx.systemPrompt;
+    // The notes hold without an app prompt too.
+    : notes.length > 0 ? notes.join('\n\n') : ctx.systemPrompt;
   const idLabels: IdLabels = new Map();
   // Declared identity of the turn's tools (field names only): history, hideIds and the browser.
   const toolEntities = entityDeclarationsOfTools(ctx.tools);
@@ -736,7 +763,7 @@ async function defaultStreamHandler(
     : preparedMessages;
   // A budget continuation: what already ran and to do only the open steps (this request only, never part of the chat).
   const modelMessages = request.continuation === 'budget'
-    ? [...withMemory, { role: 'user', content: budgetContinuationInstruction(turnCalls, builtinSet) }]
+    ? [...withMemory, { role: 'user', content: budgetContinuationInstruction(callsBeforeStop, builtinSet) }]
     : withMemory;
   // Executed approvals are visible output for the stream and the metric alike.
   const resumedApprovals = resumesToolApprovals(modelMessages);

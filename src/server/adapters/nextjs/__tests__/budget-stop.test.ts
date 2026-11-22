@@ -178,7 +178,7 @@ describe('the pilot: paging through a result until the input token budget is use
       expected,
       'Done so far: tasks_list.',
       'Still open: your question is not answered yet.',
-      'Choose “Continue” or write “continue” to go on with the open steps.',
+      'Use the button below to go on with the open steps.',
     ].join('\n\n'));
     expect(textsOf(message).at(-2)).toBe(INTERIM);
     expect(JSON.stringify(turn.chunks)).not.toContain('Should not run.');

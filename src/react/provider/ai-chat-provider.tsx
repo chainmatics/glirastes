@@ -2801,16 +2801,27 @@ export function AiChatProvider({
 
   // "Continue" after a budget stop: the history again, with the continuation marker (no new message).
   const canContinueAfterBudgetStop = typeof resolvedTransport.continueAfterBudgetStop === 'function';
+  // Set from the click until the request is sent: a double click continues once.
+  const continuingRef = useRef(false);
   const continueAfterBudgetStop = useCallback(() => {
     const transportNow = transportRef.current;
     const go = transportNow.continueAfterBudgetStop;
-    if (typeof go !== 'function') return;
+    // Only from a settled chat: never while a request runs or another continuation starts.
+    if (typeof go !== 'function' || continuingRef.current || transportNow.status !== 'ready') return;
+    continuingRef.current = true;
     setSuggestionChips([]);
     setPipelineSteps([]);
     setPipelineState(null);
-    void Promise.resolve(go.call(transportNow)).catch(() => {
-      console.warn('[glirastes] The stopped turn could not be continued');
-    });
+    const failed = () => { console.warn('[glirastes] The stopped turn could not be continued'); };
+    let sent: void | PromiseLike<void>;
+    try {
+      sent = go.call(transportNow);
+    } catch {
+      failed();
+      continuingRef.current = false;
+      return;
+    }
+    void Promise.resolve(sent).catch(failed).finally(() => { continuingRef.current = false; });
   }, []);
 
   // Pending approvals as array (for context consumers)
