@@ -1,0 +1,22 @@
+{
+  "id": "composer-starters",
+  "kind": "optional",
+  "summary": "composer.starters shows starter chips above the composer on an empty chat; a click fills the composer (send: true sends). ChatStarters renders them in own panels; while they show, suggestions.staticChips are hidden.",
+  "howTo": "Set composer: { starters: ['Was ist neu?', { label, prompt, description, icon, send }] } on AiChatProvider. A click puts prompt (default label) into the composer and focuses it; send: true sends at once. Chips are disabled while the composer is locked and disappear with the first message. String icons render through composer.renderIcon(name, { type: 'starter' }). If you used suggestions.staticChips as starters, move them to composer.starters: the static chips are hidden on an empty chat while starters show. Own panels render <ChatStarters /> above the composer. Group name: locale.startersLabel. See references/composer-starters-drafts.md#starters.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": ["glirastes/react"],
+    "patterns": ["staticChips"]
+  },
+  "adoptedWhen": {
+    "patterns": ["starters\\s*:"]
+  },
+  "surface": [
+    "glirastes/react#ChatStarter.*",
+    "glirastes/react#ChatStarters",
+    "glirastes/react#ChatStartersProps.*",
+    "glirastes/react#ComposerConfig.starters",
+    "glirastes/react#ChatLocale.startersLabel",
+    "locale#startersLabel"
+  ]
+}

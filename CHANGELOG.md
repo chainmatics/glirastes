@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Chat composer: `composer.starters` (`ChatStarter`: `label`, `prompt`, `description`, `icon`, `send`) shows starter chips above the composer on an empty chat; a click fills the composer and focuses it, `send: true` sends. Disabled while the composer is locked; `suggestions.staticChips` are hidden while starters show. `ChatStarters` for own panels; locale key `startersLabel`. Default off.
 - Chat composer: `composer.hint` shows a keyboard hint line under the composer ("↵ Send · ⇧ ↵ New line", the list keys while a completion list is open; `aria-hidden`, hidden on touch devices). `ComposerHint` for own composers with `ChatComposerInput.completionOpen`; `RichMentionInputProps.onListOpenChange`; locale keys `composerHintSend`, `composerHintNewline`, `composerHintNavigate`, `composerHintPick`, `composerHintClose`. Default off.
 - Chat composer: "+" menu rows show an icon and a description (`ComposerToolbarItem.description`, `ChatTriggerDefinition.icon`/`description`; a `trigger:<char>` button shows the trigger's icon). `composer.renderIcon(name, { type, trigger })` renders string icon names of completion entries (new `CompletionItem.icon`, `ChatCommandDefinition.icon`, `ChatEntityDefinition.icon`) in the default list item and in `plusMenu.source` rows; `plusMenu.source` rows now show the entry's `description`.
 

@@ -286,6 +286,44 @@
   border-color: var(--cm-primary);
 }
 
+
+/* ---------- Starter and clarification chips above the composer ---------- */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-starters"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  padding: 0.5rem 1rem 0;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-starters"] [data-element="starter"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--cm-bg-muted);
+  border: 1px solid var(--cm-border);
+  border-radius: 9999px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--cm-text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-starters"] [data-element="starter"]:hover:not(:disabled) {
+  background: var(--cm-bubble-user);
+  border-color: var(--cm-primary);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-starters"] [data-element="starter"]:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-starters"] [data-element="starter"]:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-starters"] [data-element="starter-icon"] {
+  display: inline-flex;
+  color: var(--cm-text-muted);
+}
 /* ---------- Typing indicator ---------- */
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="typing-indicator"] {
   display: flex;

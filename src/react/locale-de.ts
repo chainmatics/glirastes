@@ -140,6 +140,7 @@ export const deChatLocale: ChatLocale = {
   composerHintNavigate: 'Navigieren',
   composerHintPick: 'Vorschlag übernehmen',
   composerHintClose: 'Schließen',
+  startersLabel: 'Vorschläge',
   attachmentsLabel: 'Anhänge',
   removeAttachmentLabel: '{name} entfernen',
   openAttachmentLabel: '{name} öffnen',

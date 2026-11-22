@@ -1031,6 +1031,19 @@ export interface ComposerToolbarItem {
   hidden?: boolean | ((controls: ChatComposerInputControls) => boolean);
 }
 
+/** A starter chip on an empty chat (`composer.starters`). */
+export interface ChatStarter {
+  label: string;
+  /** Text for the composer (or the message with `send`); default `label`. */
+  prompt?: string;
+  /** Shown as the chip's tooltip (`title`). */
+  description?: string;
+  /** An element, or an icon name for `composer.renderIcon` (context type `starter`). */
+  icon?: ReactNode;
+  /** Send at once instead of filling the composer. Default false. */
+  send?: boolean;
+}
+
 /** Layout and app items of the composer (`AiChatProvider` `composer`). */
 export interface ComposerConfig {
   /**
@@ -1050,6 +1063,14 @@ export interface ComposerConfig {
    * Default `false`.
    */
   hint?: boolean;
+  /**
+   * Starter chips above the composer while the chat has no messages; a
+   * string is `{ label }`. A click puts the prompt into the composer (appends
+   * to text already there) and focuses it; `send: true` sends it instead.
+   * While they show, `suggestions.staticChips` are hidden. For page-aware
+   * starters build the list with `useMemo` from app state.
+   */
+  starters?: ReadonlyArray<string | ChatStarter>;
   /**
    * Turns an icon name into an element: the string `icon` of completion
    * entries (`MentionResult.icon`, `ChatCommandDefinition.icon`,
@@ -1365,6 +1386,8 @@ export interface ChatLocale {
   composerHintPick?: string;
   /** Hint line while a list is open: Escape; default `Close`. */
   composerHintClose?: string;
+  /** Accessible name of the starter chips group; default `Suggestions`. */
+  startersLabel?: string;
   attachmentsLabel: string;
   removeAttachmentLabel: string;      // supports `{name}`
   openAttachmentLabel: string;        // supports `{name}`

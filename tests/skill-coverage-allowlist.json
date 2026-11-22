@@ -472,7 +472,6 @@
   "StyledMessageBubbleProps": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "StyledMessageList": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "StyledMessageListProps": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
-  "SuggestionsConfig": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "TOOL_CONTRACT_REJECTED_STATUSES": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "TOOL_POLICY_RULES_VERSION": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "TechnicalRuntimeEvent": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
