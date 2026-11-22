@@ -1891,7 +1891,7 @@
 }
 /* Full screen: a modal over the page; the conversation keeps a reading width. */
 [data-component="assistant-shell"][data-mode="fullscreen"]:where(:not([data-unstyled], [data-unstyled] *)) {
-  z-index: 1000;
+  z-index: var(--cm-chat-fullscreen-z, 1000);
   border: 0;
   border-radius: 0;
   box-shadow: none;

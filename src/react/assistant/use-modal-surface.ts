@@ -42,7 +42,7 @@ export function focusableIn(surface: HTMLElement): HTMLElement[] {
  * `ref` up to <body> inert (restoring each element's own previous value
  * afterwards), keeps Tab inside `ref`, and calls `onEscape` for an Escape
  * nobody else consumed. Elements added to <body> later (portaled dialogs)
- * are left alone.
+ * and elements marked `data-cm-keep-interactive` are left alone.
  */
 export function useModalSurface(ref: RefObject<HTMLElement | null>, options: { active: boolean; onEscape(): void }): void {
   const { active } = options;
@@ -58,6 +58,8 @@ export function useModalSurface(ref: RefObject<HTMLElement | null>, options: { a
     for (let node: HTMLElement = surface; node !== document.body && node.parentElement; node = node.parentElement) {
       for (const sibling of Array.from(node.parentElement.children)) {
         if (sibling === node || !(sibling instanceof HTMLElement) || sibling.hasAttribute('inert')) continue;
+        // The app keeps toasters or its own portal roots usable over full screen.
+        if (sibling.hasAttribute('data-cm-keep-interactive')) continue;
         sibling.setAttribute('inert', '');
         madeInert.push(sibling);
       }

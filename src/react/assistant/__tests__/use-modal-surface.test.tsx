@@ -51,6 +51,16 @@ describe('useModalSurface', () => {
     expect(document.body.style.overflow).toBe('scroll');
   });
 
+  it('page parts marked data-cm-keep-interactive stay usable', () => {
+    const toaster = document.body.appendChild(document.createElement('div'));
+    toaster.setAttribute('data-cm-keep-interactive', '');
+    const { header, rerender } = setup(true);
+    expect(header.hasAttribute('inert')).toBe(true);
+    expect(toaster.hasAttribute('inert')).toBe(false);
+    rerender(false);
+    expect(toaster.hasAttribute('inert')).toBe(false);
+  });
+
   it('a dialog added later is not inert', () => {
     setup(true);
     const dialog = document.body.appendChild(document.createElement('div'));

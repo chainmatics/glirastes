@@ -67,8 +67,13 @@ opens detached first.
   it), `restoreMode()` and alt+shift+D return to `defaultMode`; mod+I closes,
   and the next opening uses `defaultMode` again. `setMode('fullscreen')` never
   becomes the opening layout; an open full screen survives a reload.
-- A UI action that navigates may call `restoreMode()` so the user sees the
-  page it opened.
+- Stacking: full screen sits at `--cm-chat-fullscreen-z` (default 1000).
+  A UI action that shows page UI (navigation, an app dialog or drawer) calls
+  `restoreMode()` first, or that UI sits above the variable. Page elements
+  that exist before full screen opens (toaster or portal roots) become inert;
+  mark the ones that must stay usable with `data-cm-keep-interactive`. Inside
+  a transformed or `z-index`ed ancestor the shell cannot rise above the page
+  around it; place it at the top of the layout.
 - The conversation keeps a reading width: `--cm-chat-max-width` (default
   960px) in the app's CSS.
 - `renderButton` also draws the layout trigger and the chat column toggle:
