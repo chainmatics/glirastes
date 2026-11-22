@@ -1,0 +1,20 @@
+{
+  "id": "assistant-history-pane",
+  "kind": "optional",
+  "summary": "In full screen AssistantShell shows the chat list as a left column (a drawer below 900 px) when the chat keeps several; historyPane={false} removes it, a node replaces it.",
+  "howTo": "Nothing to do for the default: with modes including 'fullscreen' and a chat that keeps several conversations, full screen shows SessionSwitcher variant=\"list\" in a 260 px column and names the open chat in the header. historyPane={false} keeps the header switcher instead; historyPane={<MyPane />} renders an own column. Labels history, showHistory, hideHistory (German ships); icon history.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": ["AssistantShell", "AssistantWorkspace"]
+  },
+  "adoptedWhen": {
+    "patterns": ["historyPane"]
+  },
+  "surface": [
+    "glirastes/react#AssistantShellProps.historyPane",
+    "glirastes/react#AssistantWorkspaceProps.historyPane",
+    "glirastes/react#AssistantShellLabels.history",
+    "glirastes/react#AssistantShellLabels.showHistory",
+    "glirastes/react#AssistantShellLabels.hideHistory"
+  ]
+}

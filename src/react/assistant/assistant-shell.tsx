@@ -1,7 +1,7 @@
 'use client';
 
 import '../styles.css';
-import { useCallback, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChatContext } from '../provider/chat-context.js';
 import { formatShortcut, useChatShortcuts, type ChatShortcutMap } from '../hooks/use-chat-shortcuts.js';
 import { useFloatingPanel, type FloatingResizeEdge } from '../hooks/use-floating-panel.js';
@@ -65,6 +65,11 @@ export interface AssistantShellLabels {
   floating?: string;
   /** The full-screen layout, e.g. in the layout menu. */
   fullscreen?: string;
+  /** Title of the chat column in full screen. */
+  history?: string;
+  /** Toggle of the chat column. */
+  showHistory?: string;
+  hideHistory?: string;
 }
 
 export interface AssistantShellClassNames {
@@ -97,6 +102,9 @@ export const DEFAULT_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freez
   sidebar: 'Sidebar',
   floating: 'Window',
   fullscreen: 'Full screen',
+  history: 'Chats',
+  showHistory: 'Show chats',
+  hideHistory: 'Hide chats',
 });
 
 export const DE_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freeze({
@@ -114,6 +122,9 @@ export const DE_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freeze({
   sidebar: 'Seitenleiste',
   floating: 'Fenster',
   fullscreen: 'Vollbild',
+  history: 'Chats',
+  showHistory: 'Chats einblenden',
+  hideHistory: 'Chats ausblenden',
 });
 
 /** The built-in labels for the language of the page; an app's own `labels` still override them. */
@@ -204,6 +215,42 @@ export interface AssistantShellProps {
    * otherwise the first entry).
    */
   modes?: ReadonlyArray<AssistantLayoutMode>;
+  /**
+   * Left column in full screen. Default: the chat list (`SessionSwitcher
+   * variant="list"`) when the chat keeps several; `false` shows none; any
+   * node replaces it. 260 px wide; below 900 px viewport width a drawer
+   * opened from the header.
+   */
+  historyPane?: ReactNode | false;
+}
+
+const NARROW_SCREEN = '(max-width: 899.98px)';
+/** Whether a media query matches; false on the server and without `matchMedia` (jsdom). */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const list = window.matchMedia(query);
+    const update = () => setMatches(list.matches);
+    update();
+    if (typeof list.addEventListener === 'function') {
+      list.addEventListener('change', update);
+      return () => list.removeEventListener('change', update);
+    }
+    list.addListener?.(update);
+    return () => list.removeListener?.(update);
+  }, [query]);
+  return matches;
+}
+
+/** `inert` as a DOM attribute, the same in React 18 and 19. */
+function useInert(ref: { current: HTMLElement | null }, inert: boolean) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    if (inert) element.setAttribute('inert', '');
+    else element.removeAttribute('inert');
+  });
 }
 
 const DEFAULT_MODES: ReadonlyArray<AssistantLayoutMode> = ['sidebar', 'floating'];
@@ -343,6 +390,7 @@ export function AssistantShell({
   minPageWidth = 0,
   railWidth = 44,
   modes: modesProp,
+  historyPane,
 }: AssistantShellProps) {
   const ui = useAssistantLayout();
   const chat = useContext(ChatContext);
@@ -426,6 +474,48 @@ export function AssistantShell({
     return () => { cancelAnimationFrame(frame); if (previous?.isConnected) previous.focus(); };
   }, [ui.open, ui.collapsed, ui.mode, focusComposer, shell]);
 
+  // Chat column in full screen: a column on wide screens, a drawer below 900 px.
+  const narrowScreen = useMediaQuery(NARROW_SCREEN);
+  const historyId = `assistant-history-${useId().replace(/:/g, '')}`;
+  const historyRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [historyHidden, setHistoryHidden] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const focusHistoryToggle = useCallback(() => {
+    shell.current?.querySelector<HTMLElement>(`[aria-controls="${historyId}"], [data-action="history"]`)?.focus();
+  }, [shell, historyId]);
+  // Focus moves once the drawer is closed and the conversation is no longer inert.
+  const focusAfterHistory = useRef<'toggle' | 'composer' | null>(null);
+  const [, setFocusRequest] = useState(0);
+  const closeDrawer = useCallback((refocus: 'toggle' | 'composer') => {
+    focusAfterHistory.current = refocus;
+    setDrawerOpen(false);
+    setFocusRequest(n => n + 1);
+  }, []);
+  const pickedFromHistory = useCallback(() => closeDrawer('composer'), [closeDrawer]);
+  const pane = !fullscreen || historyPane === false ? null
+    : historyPane ?? (sessionsSupported ? <SessionSwitcher variant="list" onSelect={pickedFromHistory} /> : null);
+  const hasPane = pane !== null && pane !== undefined;
+  const drawer = hasPane && narrowScreen;
+  const historyShown = hasPane && (narrowScreen ? drawerOpen : !historyHidden);
+  // Leaving full screen or growing past the breakpoint closes the drawer.
+  useEffect(() => { if (!fullscreen || !narrowScreen) setDrawerOpen(false); }, [fullscreen, narrowScreen]);
+  useEffect(() => {
+    if (!drawer || !drawerOpen) return;
+    const frame = requestAnimationFrame(() => historyRef.current?.querySelector<HTMLElement>('button:not(:disabled), [href], input, [tabindex]:not([tabindex="-1"])')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [drawer, drawerOpen]);
+  useInert(historyRef, !historyShown);
+  useInert(frameRef, drawer && drawerOpen);
+  useEffect(() => {
+    const target = focusAfterHistory.current;
+    if (!target || drawerOpen) return;
+    focusAfterHistory.current = null;
+    if (target === 'toggle') focusHistoryToggle();
+    else focusComposer();
+  });
+  const activeChatTitle = chat?.sessions?.find(session => session.id === chat.activeSessionId)?.title || chat?.locale?.newChatLabel || labels.title;
+
   // A chat that keeps several conversations starts a new one by itself.
   const newChat = onNewChat ?? (sessionsSupported && chat?.createSession ? () => { void chat.createSession(); } : undefined);
   const shortcuts = useChatShortcuts({
@@ -481,7 +571,7 @@ export function AssistantShell({
       className={cx(classNames.root, sidebar ? classNames.sidebar : floating && classNames.floating)}
       style={{
         ...chat?.themeVars, ...style,
-        display: ui.open ? 'flex' : 'none', flexDirection: 'column', maxWidth: '100vw',
+        display: ui.open ? 'flex' : 'none', flexDirection: hasPane ? 'row' : 'column', maxWidth: '100vw',
         ...(sidebar ? { position: 'relative', flexShrink: 0, height: '100%', maxHeight: '100%' } : { position: 'fixed', maxHeight: '100dvh' }),
         ...placement,
       }}>
@@ -500,14 +590,40 @@ export function AssistantShell({
         </button>
         {button({ action: 'close', label: labels.close, title: labels.close, onClick: ui.closeChat, children: icons.close })}
       </div>}
-      <div data-element="frame" style={{ display: sidebar && ui.collapsed ? 'none' : 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0 }}
+      {hasPane && <div ref={historyRef} data-element="history" data-drawer={drawer || undefined} id={historyId} hidden={!historyShown}
+        style={{
+          display: historyShown ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, minWidth: 0, overflowY: 'auto', boxSizing: 'border-box',
+          ...(drawer ? { position: 'absolute', top: 0, bottom: 0, left: 0, width: 'min(280px, calc(100% - 48px))', zIndex: 4 } : { flex: '0 0 260px', width: 260 }),
+        }}
+        onKeyDown={event => {
+          if (event.key !== 'Escape' || !drawer || event.defaultPrevented) return;
+          // The drawer owns this Escape; the next one leaves full screen.
+          event.preventDefault();
+          closeDrawer('toggle');
+        }}>
+        <div data-element="history-title" aria-hidden="true">{labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history}</div>
+        {pane}
+      </div>}
+      {drawer && drawerOpen && <div data-element="history-backdrop" aria-hidden="true"
+        style={{ position: 'absolute', inset: 0, zIndex: 3 }} onClick={() => closeDrawer('toggle')} />}
+      <div ref={frameRef} data-element="frame" style={{ display: sidebar && ui.collapsed ? 'none' : 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0, ...(hasPane ? { minWidth: 0 } : {}) }}
         {...(fullscreen ? { role: 'dialog', 'aria-modal': true, 'aria-label': labels.title } : {})}>
         <header data-element="header" className={classNames.header}
           style={floating ? { cursor: 'grab', touchAction: 'none' } : undefined}
           {...(floating ? { tabIndex: 0, 'aria-label': labels.windowHeader, ...dragHandleProps } : {})}>
+          {hasPane && button({
+            action: 'history', label: historyShown ? labels.hideHistory ?? DEFAULT_ASSISTANT_SHELL_LABELS.hideHistory! : labels.showHistory ?? DEFAULT_ASSISTANT_SHELL_LABELS.showHistory!,
+            title: historyShown ? labels.hideHistory ?? DEFAULT_ASSISTANT_SHELL_LABELS.hideHistory! : labels.showHistory ?? DEFAULT_ASSISTANT_SHELL_LABELS.showHistory!,
+            expanded: historyShown, controls: historyId,
+            onClick: () => { if (drawer) { if (drawerOpen) closeDrawer('toggle'); else setDrawerOpen(true); } else setHistoryHidden(hidden => !hidden); },
+            children: icons.history ?? DEFAULT_ASSISTANT_SHELL_ICONS.history,
+          })}
           {headerStart}
           <span data-element="icon">{icons.assistant}</span>
-          {headerTitle ?? (sessionsSupported
+          {headerTitle ?? (hasPane && historyPane === undefined
+            // The chat list is next to the conversation, so the header names the open chat.
+            ? <span data-element="title" title={activeChatTitle}>{activeChatTitle}</span>
+            : sessionsSupported
             // A chat that keeps several conversations lists them where the title would be.
             ? <SessionSwitcher fallbackTitle={labels.title} />
             : <span data-element="title">{labels.title}</span>)}

@@ -1959,6 +1959,33 @@
   font-size: 0.75rem;
   font-weight: 500;
 }
+/* Chat column in full screen; below 900 px a drawer over the conversation. Geometry is inline. */
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="history"] {
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--cm-bg-muted);
+  border-right: 1px solid var(--cm-border);
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="history"][data-drawer] {
+  box-shadow: 0 16px 40px -12px rgba(17, 24, 39, 0.35);
+  animation: assistant-history-in 150ms ease-out;
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="history-title"] {
+  padding: 0 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--cm-text);
+}
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="history-backdrop"] {
+  background: rgba(17, 24, 39, 0.3);
+}
+@keyframes assistant-history-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="history"][data-drawer] { animation: none; }
+}
 /* Layout menu: the trigger looks like the other header buttons, the menu is a small popover under it. */
 [data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="mode-picker"] > [data-action] {
   display: inline-flex;
