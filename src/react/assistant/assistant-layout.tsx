@@ -2,15 +2,19 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-/** Docked on the right of the page, or a detached window above it. */
-export type AssistantLayoutMode = 'sidebar' | 'floating';
+/** Docked on the right of the page, a detached window above it, or the whole viewport. */
+export type AssistantLayoutMode = 'sidebar' | 'floating' | 'fullscreen';
+
+type NormalMode = Exclude<AssistantLayoutMode, 'fullscreen'>;
+const isNormalMode = (mode: unknown): mode is NormalMode => mode === 'sidebar' || mode === 'floating';
 
 export interface AssistantLayoutState {
   open: boolean;
   mode: AssistantLayoutMode;
   /**
    * The layout the assistant opens in. Detaching or docking the open
-   * assistant updates it, so a closed window comes back as a window.
+   * assistant updates it, so a closed window comes back as a window. Never
+   * `'fullscreen'`: full screen returns here.
    */
   defaultMode: AssistantLayoutMode;
   /** Sidebar folded to a narrow rail. */
@@ -35,7 +39,9 @@ export const DEFAULT_ASSISTANT_LAYOUT_LIMITS: AssistantLayoutLimits = Object.fre
 });
 
 function limitsOf(limits?: Partial<AssistantLayoutLimits>): AssistantLayoutLimits {
-  return { ...DEFAULT_ASSISTANT_LAYOUT_LIMITS, ...limits };
+  const merged = { ...DEFAULT_ASSISTANT_LAYOUT_LIMITS, ...limits };
+  // Full screen is never the layout the assistant opens in.
+  return isNormalMode(merged.defaultMode) ? merged : { ...merged, defaultMode: DEFAULT_ASSISTANT_LAYOUT_LIMITS.defaultMode };
 }
 
 export function clampAssistantWidth(width: number, limits?: Partial<AssistantLayoutLimits>): number {
@@ -54,10 +60,10 @@ export function parseAssistantLayout(raw: string | null, limits?: Partial<Assist
   try {
     const value = JSON.parse(raw ?? 'null');
     if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback;
-    const mode = value.mode === 'floating' || value.mode === 'sidebar' ? value.mode : fallback.mode;
-    const defaultMode = value.defaultMode === 'floating' || value.defaultMode === 'sidebar'
+    const mode = isNormalMode(value.mode) || value.mode === 'fullscreen' ? value.mode : fallback.mode;
+    const defaultMode = isNormalMode(value.defaultMode)
       ? value.defaultMode
-      : value.mode === 'floating' || value.mode === 'sidebar' ? value.mode : fallback.defaultMode;
+      : isNormalMode(value.mode) ? value.mode : fallback.defaultMode;
     return {
       open: typeof value.open === 'boolean' ? value.open : false,
       mode,
@@ -75,9 +81,14 @@ export interface AssistantLayout extends AssistantLayoutState {
   openChat(): void;
   closeChat(): void;
   toggleChat(): void;
-  /** Switches the layout and remembers it for the next opening. */
+  /**
+   * Switches the layout and remembers it for the next opening. Full screen
+   * opens the assistant and keeps the layout it came from as `defaultMode`.
+   */
   setMode(mode: AssistantLayoutMode): void;
-  /** Sets the layout the next opening uses, without moving an open assistant. */
+  /** Leaves full screen for the layout the assistant opens in (`defaultMode`). No-op in the other layouts. */
+  restoreMode(): void;
+  /** Sets the layout the next opening uses, without moving an open assistant. `'fullscreen'` is ignored. */
   setDefaultMode(mode: AssistantLayoutMode): void;
   setCollapsed(value: boolean): void;
   toggleCollapsed(): void;
@@ -128,15 +139,20 @@ export function AssistantLayoutProvider({
   const toggleChat = useCallback(() => setState(s => s.open && s.collapsed && s.mode === 'sidebar'
     ? { ...s, collapsed: false }
     : { ...s, open: !s.open, mode: s.open ? s.mode : s.defaultMode, collapsed: false }), []);
-  const setMode = useCallback((mode: AssistantLayoutMode) => setState(s => ({ ...s, mode, defaultMode: mode })), []);
-  const setDefaultMode = useCallback((mode: AssistantLayoutMode) => setState(s => ({ ...s, defaultMode: mode, mode: s.open ? s.mode : mode })), []);
+  const setMode = useCallback((mode: AssistantLayoutMode) => setState(s => isNormalMode(mode)
+    ? { ...s, mode, defaultMode: mode }
+    : { ...s, open: true, mode, collapsed: false }), []);
+  const restoreMode = useCallback(() => setState(s => s.mode === 'fullscreen' ? { ...s, mode: s.defaultMode } : s), []);
+  const setDefaultMode = useCallback((mode: AssistantLayoutMode) => setState(s => isNormalMode(mode)
+    ? { ...s, defaultMode: mode, mode: s.open ? s.mode : mode }
+    : s), []);
   const setCollapsed = useCallback((collapsed: boolean) => setState(s => ({ ...s, collapsed })), []);
   const toggleCollapsed = useCallback(() => setState(s => ({ ...s, collapsed: !s.collapsed })), []);
   const setWidth = useCallback((width: number) => setState(s => ({ ...s, width: clampAssistantWidth(width, limits) })), [limits]);
 
   const value = useMemo<AssistantLayout>(
-    () => ({ ...state, limits, openChat, closeChat, toggleChat, setMode, setDefaultMode, setCollapsed, toggleCollapsed, setWidth }),
-    [state, limits, openChat, closeChat, toggleChat, setMode, setDefaultMode, setCollapsed, toggleCollapsed, setWidth],
+    () => ({ ...state, limits, openChat, closeChat, toggleChat, setMode, restoreMode, setDefaultMode, setCollapsed, toggleCollapsed, setWidth }),
+    [state, limits, openChat, closeChat, toggleChat, setMode, restoreMode, setDefaultMode, setCollapsed, toggleCollapsed, setWidth],
   );
   return <AssistantLayoutContext.Provider value={value}>{children}</AssistantLayoutContext.Provider>;
 }
