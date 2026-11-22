@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Chat composer: `onCompletionSelect` returning `true` also removes the typed trigger and query when the handler put text or a pill before them (`setText`, `insertMention` at the start); when the trigger text became ambiguous nothing is removed.
+
 ## [0.22.0] - 2026-11-21
 
 ### Added
