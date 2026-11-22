@@ -1,17 +1,22 @@
 {
   "id": "assistant-fullscreen",
   "kind": "optional",
-  "summary": "AssistantLayoutMode gains 'fullscreen' and useAssistantLayout() gains restoreMode(). AssistantShell renders full screen as a modal and offers it when its modes list includes 'fullscreen'.",
-  "howTo": "Add 'fullscreen' to AssistantShell/AssistantWorkspace modes. setMode('fullscreen') opens full screen, restoreMode() or Escape returns to defaultMode. Code that switches exhaustively over AssistantLayoutMode or uses Record<AssistantLayoutMode, …> must handle 'fullscreen'.",
+  "summary": "AssistantShell renders full screen as a modal and offers it when its modes list includes 'fullscreen'; useAssistantLayout().setMode('fullscreen') opens it, restoreMode() leaves it.",
+  "howTo": "Add 'fullscreen' to AssistantShell/AssistantWorkspace modes; setMode('fullscreen') opens full screen, restoreMode() or Escape returns to defaultMode.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
-    "symbols": ["AssistantLayoutMode", "useAssistantLayout"]
+    "symbols": [
+      "AssistantLayoutMode",
+      "useAssistantLayout"
+    ]
   },
   "adoptedWhen": {
-    "patterns": ["'fullscreen'"]
+    "patterns": [
+      "modes\\s*=\\s*\\{[^}]*['\"]fullscreen['\"]",
+      "setMode\\(\\s*['\"]fullscreen['\"]"
+    ]
   },
   "surface": [
-    "glirastes/react#AssistantLayout.restoreMode",
     "glirastes/react#AssistantShellLabels.fullscreen"
   ]
 }
