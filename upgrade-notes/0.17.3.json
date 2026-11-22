@@ -1,0 +1,62 @@
+{
+  "version": "0.17.3",
+  "notes": [
+    {
+      "id": "chat-locale-keys-0-17-3",
+      "kind": "breaking",
+      "summary": "ChatLocale gained required keys in 0.17.3. A hand-written full ChatLocale object no longer compiles and misses texts until it has them. Partial<ChatLocale> overrides are unaffected.",
+      "howTo": "Add these keys to every full ChatLocale object: activityExpectedLabel. English and German defaults ship with the SDK; the locale prop of AiChatProvider takes Partial<ChatLocale>, so partial overrides need no change.",
+      "skill": "building-glirastes-chat-ui#configuration",
+      "adoptedWhen": {
+        "patterns": [
+          "\\bactivityExpectedLabel\\s*:"
+        ]
+      },
+      "affectedWhen": {
+        "patterns": [
+          ":\\s*ChatLocale\\b",
+          "\\bsatisfies\\s+ChatLocale\\b",
+          "\\bas\\s+ChatLocale\\b",
+          "(?<![\\w$])<ChatLocale>",
+          ",\\s*ChatLocale>"
+        ]
+      }
+    },
+    {
+      "id": "activity-step-status-expected",
+      "kind": "breaking",
+      "summary": "ActivityStepStatus gained 'expected'. A failure output (success: false or an error text) is no longer 'done': it is 'expected' (neutral) or 'error'. An exhaustive switch or Record over the type no longer compiles.",
+      "howTo": "Add a case for 'expected' to every exhaustive switch or Record<ActivityStepStatus, ...>: show it neutrally, never as failed. A step is 'expected' when the output has success: false and either expectedFailure: true (any status) or an integer status from 400 to 499 other than 408 and 429, unless the SDK's endpoint caller refused the path itself (Endpoint path is not allowed / must be relative). Every other failure output (5xx, 408, 429, no status, an error text without success: false) is 'error'. Tests that assert activity-log summary text or the check icon for failed outputs need updating. Display only: maxConsecutiveErrors and metrics still follow classifyToolFailure.",
+      "skill": "building-glirastes-chat-ui#tool-results-and-approvals",
+      "affectedWhen": {
+        "symbols": [
+          "ActivityStepStatus",
+          "readActivitySteps"
+        ]
+      }
+    },
+    {
+      "id": "ui-tool-handoff-message",
+      "kind": "recommended",
+      "summary": "UI tools no longer tell the model 'Action executed.': the message says the action was handed to the app and its outcome is unknown. The default chat no longer shows a result block for UI tools.",
+      "howTo": "A custom ToolResultBlock or onToolResult that renders message of UI tools now shows this model-facing note to users: skip message for UI tools or declare your own successMessage on defineUiTool. Tests that expect 'Action executed.' need updating.",
+      "skill": "building-glirastes-chat-ui#ui-actions",
+      "affectedWhen": {
+        "symbols": [
+          "ToolResultBlock",
+          "onToolResult"
+        ],
+        "patterns": [
+          "Action executed\\."
+        ]
+      }
+    },
+    {
+      "id": "tools-refresh-nearest-tsconfig",
+      "kind": "recommended",
+      "summary": "glirastes tools refresh now reads the tsconfig.json nearest to each source's scanned folder. In a monorepo, contracts imported through app-level path aliases resolve, so tools can become enabled and tools check reports drift.",
+      "howTo": "Run glirastes tools refresh, review the diff (previously disabled tools may be enabled, contracts typed) and commit it. Name a specific file with the new tsconfig option on a source in .glirastes/tools.json. The finding ui-action-import-unresolved names an import that still cannot be resolved.",
+      "skill": "maintaining-glirastes-tools#findings-and-what-resolves-them"
+    }
+  ]
+}

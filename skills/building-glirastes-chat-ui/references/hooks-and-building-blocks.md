@@ -366,8 +366,14 @@ flag itself. The activity log shows the outcome per step (locale keys
 gets UI results as `{ handedOff: true, message, uiAction }` without
 `success`: a renderer or `onToolResult` that checks `success` checks
 `handedOff` too. Without the flag the server sends the 0.17.3
-`{ success: true, … }`. Details:
-`docs/ui-action-outcomes.md` of the package.
+`{ success: true, … }`. With the flag the server's fixed system note
+(`UI_OUTCOME_SYSTEM_NOTE`) tells the model not to claim success before the
+outcome and not to announce a UI action in text before calling it, so no
+interim sentence stays above a refused action. The server's `onFinish` fires
+once per request, so a UI turn calls it at least twice (every continuation
+after reported outcomes carries `continuation: 'ui-outcome'`, at most 3 per
+turn; an answered approval `'approval'`): count turns on the calls without
+`continuation`. Details: `docs/ui-action-outcomes.md` of the package.
 
 | `code` | When |
 | --- | --- |

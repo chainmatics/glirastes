@@ -1,0 +1,75 @@
+{
+  "version": "0.15.0",
+  "notes": [
+    {
+      "id": "managed-turn-authorized-tools-only",
+      "kind": "recommended",
+      "summary": "A managed turn now offers the model only the tools the current principal may use, and resolvePrincipal and loadRevocations run once per model step and per find_tools search, not once per request.",
+      "howTo": "Keep resolvePrincipal and loadRevocations cheap (cache per request) because they now run before every model step. A custom streamHandler gets the reduced tools and authorizedToolNames; a legacy intentRouter gets only the allowed tool names. routing, pipelineResult and turnSnapshot stay unfiltered app data: do not forward them to a model. To get the previous tool set pass authorizedToolsOnly: false to createAiChatHandler; the guard still decides every call. A managed-guard denial (principal_role_denied, policy_tool_denied, ...) is now a tool error the turn continues after, not a stream error. Turns without managedRuntime are unchanged.",
+      "skill": "integrating-glirastes-nextjs#tools-and-routing",
+      "affectedWhen": {
+        "symbols": [
+          "managedRuntime",
+          "chatTurn",
+          "createGlirastes"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "authorizedToolsOnly"
+        ]
+      }
+    },
+    {
+      "id": "endpoint-failure-status-and-body",
+      "kind": "recommended",
+      "summary": "A failed endpoint tool call now hands the model the HTTP status and the backend's response body (up to 4000 characters) next to success: false, error and retryable.",
+      "howTo": "Check what your backend puts into error responses: stack traces, internal ids or other data now reach the model (through a configured PII shield). Trim error bodies in the backend, or, from 0.17.0, declare outputDeniedFields or outputAllowedFields to reduce them. Code that reads tool results gets the new fields status, body and bodyTruncated. Loop detection fingerprints such a failure by status, not by its error text.",
+      "skill": "integrating-glirastes-nextjs#tools-and-routing",
+      "affectedWhen": {
+        "symbols": [
+          "createAiChatHandler",
+          "chatTurn"
+        ]
+      }
+    },
+    {
+      "id": "classify-tool-failure",
+      "kind": "optional",
+      "summary": "classifyToolFailure on createAiChatHandler and createGlirastes marks a failed backend call as expected (e.g. a 403 for a user without the role), so it does not count toward maxConsecutiveErrors or as a metric error.",
+      "howTo": "Pass classifyToolFailure: ({ toolName, status, body }) => (status === 403 ? 'expected' : 'error'). Expected failures are counted locally as expectedToolFailureCount in onFinish. Not configurable in the runtime container.",
+      "skill": "integrating-glirastes-nextjs#callbacks-and-observability",
+      "affectedWhen": {
+        "symbols": [
+          "createAiChatHandler",
+          "chatTurn"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "classifyToolFailure"
+        ]
+      }
+    },
+    {
+      "id": "openapi-3-0-and-opt-in-selection",
+      "kind": "optional",
+      "summary": "The openapi tool source and the runtime container build read OpenAPI 3.0 JSON (what @nestjs/swagger writes), take selection: 'opt-in' with x-glirastes-tool markers, and read x-glirastes-name, x-glirastes-group and x-glirastes-roles.",
+      "howTo": "Point an openapi source in .glirastes/tools.json at a 3.0 or 3.1 JSON export. To generate tools only for marked operations set selection: 'opt-in' and mark them with x-glirastes-tool: true (NestJS: @ApiExtension('x-glirastes-tool', true)). x-glirastes-roles sets the code default of allowedRoles; tool-policy.json and the Platform only narrow it. Run glirastes tools refresh afterwards. See docs/tool-policy.md.",
+      "skill": "maintaining-glirastes-tools#openapi-and-configured-runtime-updates",
+      "affectedWhen": {
+        "imports": [
+          "@nestjs/swagger"
+        ],
+        "patterns": [
+          "\"openapi\"\\s*:\\s*\"3\\.[01]"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "x-glirastes-(tool|name|group|roles)\\b"
+        ]
+      }
+    }
+  ]
+}

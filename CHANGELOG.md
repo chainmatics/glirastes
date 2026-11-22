@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The fixed system note sent while the browser reports UI action outcomes (`UI_OUTCOME_SYSTEM_NOTE`, `glirastes/contracts`) gains one sentence: `Do not announce a UI action in text before you call it; say what happened once its outcome is reported.` Before, a model often wrote an interim sentence such as "Ich hebe den Auftrag hervor." before the UI tool call, and when the browser then refused the action that sentence stayed above the failure text. It is an instruction to the model, not a guarantee. Only requests that use the outcome protocol (the default for `glirastes/react` and `glirastes/embed`) get the note; the system prompt of those requests changes once, so a cached prompt prefix is rebuilt.
+
+### Documentation
+
+- Upgrade notes for 0.15.0 to 0.17.3: `glirastes upgrade report` listed these versions as "Unclassified (no upgrade notes, read the changelog)". They now carry classified notes, among them the required `ChatLocale` keys and new `ActivityStepStatus` members of 0.17.x, `ToolSearchIndex.rank`, the 0.17.0 stop notice (English unless `locale: 'de-DE'`), the tool result bound with `read_result`, per-tool-call `onError` and the authorized tool set of managed turns. A test keeps every released version since 0.14.0 classified.
+- Counting turns in `onFinish`: it fires once per request, so a UI tool turn with the outcome protocol calls it at least twice: once more for every request that continues the turn after reported outcomes (`continuation: 'ui-outcome'`, at most `MAX_UI_OUTCOME_CONTINUATIONS`, 3) or answered approvals (`'approval'`). The `onFinish` type, `docs/ui-action-outcomes.md` ("Counting turns"), `docs/managed-runtime-sync.md` and the `integrating-glirastes-nextjs` handler reference now show how to count one logical turn and add up its tokens.
+
 ## [0.23.0] - 2026-11-22
 
 ### Added

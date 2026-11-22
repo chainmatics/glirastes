@@ -147,6 +147,34 @@ with `awaitsOutcome` there to not run them twice.
   `uiToolResultShape: 'handoff'`).
 - Strict body validation in front of the chat endpoint allows
   `glirastesUiOutcomes`.
-- Count turns by requests without `continuation` (or by `turnId`), not by
-  `onFinish`.
+- Count turns by requests without `continuation` (or by `turnId` in the
+  metric events), not by the number of `onFinish` calls: `onFinish` fires
+  once per request, so a UI turn calls it at least twice (see "Counting turns"
+  below).
 - `uiActionOutcomes: 'off'` plus `uiToolResultShape: 'legacy'` restores 0.17.3.
+
+## Counting turns
+
+`onFinish` of `createAiChatHandler` fires once per request. With the outcome
+protocol a turn that calls a UI tool takes at least two requests: a request
+that ends with `awaitingUiOutcome: true` is followed by one with
+`continuation: 'ui-outcome'`, once per reported step, at most
+`MAX_UI_OUTCOME_CONTINUATIONS` (3) per turn. An answered approval adds a
+request with `continuation: 'approval'`, also in the same turn as UI outcomes.
+Count one logical turn per request without `continuation` and add the usage
+of every request to it:
+
+```ts
+createAiChatHandler({
+  // ...
+  onFinish: (event) => {
+    if (!event.continuation) metrics.turns += 1; // one logical turn
+    metrics.requests += 1;
+    metrics.totalTokens += event.usage.totalTokens; // continuations cost too
+  },
+});
+```
+
+`onFinish` carries no turn id. The content-free `metrics` events report a
+continuation as `turn.continued` with an opaque `turnId` (see
+`docs/managed-runtime-sync.md`, Runtime metrics).
