@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type { ChatCompletionProvider, ChatMessage, ChatTransport, ComposerConfig, SuggestionsConfig } from '../../types.js';
 import { AiChatPanel } from '../ai-chat-panel.js';
+import { ChatStarters } from '../chat-starters.js';
+import { ChatContext, type ChatContextValue } from '../../provider/chat-context.js';
 
 function transport(status: ChatTransport['status'] = 'ready', messages: ChatMessage[] = []): ChatTransport {
   return {
@@ -134,5 +136,27 @@ describe('starter chips', () => {
     render(<Panel chat={transport()} completion={false} composer={{ starters: [{ label: 'Neu', prompt: 'Was ist neu?' }] }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Neu' }));
     expect(editorText(false)).toBe('Was ist neu?');
+  });
+
+  it('starters are disabled while an approval or a command is open', () => {
+    const base = {
+      messages: [], locale: { startersLabel: 'Suggestions' }, send: vi.fn(), isLoading: false, canCompose: true,
+      composer: { starters: ['Was ist neu?'] },
+    };
+    const button = () => screen.getByRole('button', { name: 'Was ist neu?' }) as HTMLButtonElement;
+    const { rerender } = render(
+      <ChatContext.Provider value={{ ...base, pendingApprovals: [] } as unknown as ChatContextValue}><ChatStarters /></ChatContext.Provider>,
+    );
+    expect(button().disabled).toBe(false);
+    rerender(
+      <ChatContext.Provider value={{ ...base, pendingApprovals: [{ approvalId: 'a1' }] } as unknown as ChatContextValue}><ChatStarters /></ChatContext.Provider>,
+    );
+    expect(button().disabled).toBe(true);
+    fireEvent.click(button());
+    expect(base.send).not.toHaveBeenCalled();
+    rerender(
+      <ChatContext.Provider value={{ ...base, pendingApprovals: [], pendingCommand: { id: 'c1' } } as unknown as ChatContextValue}><ChatStarters /></ChatContext.Provider>,
+    );
+    expect(button().disabled).toBe(true);
   });
 });
