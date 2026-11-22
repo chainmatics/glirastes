@@ -19,6 +19,11 @@ export {
   type DeepgramSttAdapterOptions,
 } from '../react/stt/deepgram.js';
 export {
+  AudioWorkletLoadError,
+  AUDIO_WORKLET_UNAVAILABLE,
+  isAudioWorkletLoadError,
+} from '../react/stt/worklet-error.js';
+export {
   applySttSegment,
   createSttTranscript,
   type SttSegment,

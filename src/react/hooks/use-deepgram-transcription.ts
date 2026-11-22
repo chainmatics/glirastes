@@ -24,6 +24,7 @@ export function useDeepgramTranscription(
   const stt = useStt({
     adapter,
     language: options.language ?? 'de',
+    workletUrl: options.workletUrl,
     onInterimTranscript: options.onInterimTranscript,
     onError: options.onError,
   });
@@ -33,6 +34,7 @@ export function useDeepgramTranscription(
     isRecording: stt.isRecording,
     isConnecting: stt.isConnecting,
     error: stt.error,
+    errorCode: stt.errorCode ?? null,
     transcript: stt.finalTranscript,
     interimTranscript: stt.interimTranscript,
     displayTranscript: stt.displayTranscript,
