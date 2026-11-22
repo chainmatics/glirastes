@@ -46,7 +46,7 @@ import { describeApprovalCall } from '../utils/describe-approval.js';
 import { createApprovalDescriptionGenerator } from '../utils/create-approval-description.js';
 import { languageLocale, parseToolPresentation, usePageLanguage, type ToolPresentation } from '../utils/tool-presentation.js';
 import { resolveToolResultConfig } from '../utils/tool-result-config.js';
-import { extractTrailingFollowupSuggestions } from '../utils/followup-suggestions.js';
+import { readMessageFollowups } from '../utils/followup-suggestions.js';
 import { clarificationAnswerMessage, findOpenClarification } from '../utils/clarification.js';
 import { createCompletionSearch } from '../completions/completion-search.js';
 import { createMentionPrefixLookup, resolveChatTriggers } from '../completions/triggers.js';
@@ -1826,50 +1826,10 @@ export function AiChatProvider({
 
     const count = suggestionsConfig.count ?? 3;
     let latestFollowups: string[] | null = null;
-
     for (let messageIndex = rawMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-      const message = rawMessages[messageIndex];
-      if (message.role !== 'assistant') continue;
-
-      let structuredFollowups: string[] | null = null;
-      for (const part of message.parts) {
-        if (!('type' in part)) continue;
-        const partType = (part as { type: string }).type;
-
-        if (partType !== 'tool-suggest_followups') continue;
-
-        const toolPart = part as { output?: unknown; state?: string };
-        if (toolPart.state !== 'output-available' || !isRecord(toolPart.output)) {
-          continue;
-        }
-
-        const result = toolPart.output;
-        if (!Array.isArray(result.followups)) continue;
-
-        const followups = result.followups.filter(
-          (f: unknown): f is string => typeof f === 'string' && f.trim().length > 0
-        );
-
-        if (followups.length > 0) {
-          structuredFollowups = followups.slice(0, count);
-        }
-      }
-
-      if (structuredFollowups && structuredFollowups.length > 0) {
-        latestFollowups = structuredFollowups;
-      } else {
-        for (const part of message.parts) {
-          if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') {
-            continue;
-          }
-          const extracted = extractTrailingFollowupSuggestions(part.text, count);
-          if (extracted.suggestions.length > 0) {
-            latestFollowups = extracted.suggestions;
-          }
-        }
-      }
-
-      if (latestFollowups && latestFollowups.length > 0) {
+      const followups = readMessageFollowups(rawMessages[messageIndex] as { role: string; parts: unknown[] }, count);
+      if (followups.length > 0) {
+        latestFollowups = followups;
         break;
       }
     }
