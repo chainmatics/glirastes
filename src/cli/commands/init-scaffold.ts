@@ -6,7 +6,7 @@ import { TOOLS_PATHS } from '../../codegen/tools/config.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import { writeArtifactSetAtomically } from './atomic-artifact-write.js';
 import { detectWorkspaceSources } from './workspace-sources.js';
-import { AUDIO_WORKLET_COMMAND } from './stt/worklet.js';
+import { AUDIO_WORKLET_COMMAND, AUDIO_WORKLET_FILE } from './stt/worklet.js';
 
 /**
  * What `glirastes init` writes deterministically before the coding agent
@@ -237,6 +237,12 @@ export async function scaffoldToolsInputs(options: {
         scripts[name] = `${AUDIO_WORKLET_COMMAND} && ${existing}`;
         changed = true;
       }
+    }
+    // The copy is a build output: list it in an existing .gitignore, never create one.
+    const gitignore = servesPublicDir ? await readText(join(root, '.gitignore')) : undefined;
+    if (gitignore !== undefined && !/^\/?(?:public\/)?audio-worklet-processor\.js\s*$/m.test(gitignore)) {
+      const separator = gitignore === '' ? '' : gitignore.endsWith('\n') ? '\n' : '\n\n';
+      add('.gitignore', `${gitignore}${separator}# Copied by ${AUDIO_WORKLET_COMMAND}\n/public/${AUDIO_WORKLET_FILE}\n`);
     }
     if (!servesPublicDir && 'react' in dependencies) {
       notes.push(`Voice input needs the audio worklet served at /audio-worklet-processor.js: add "${AUDIO_WORKLET_COMMAND} --out <static folder>" to the script that builds the app.`);

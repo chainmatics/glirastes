@@ -107,6 +107,25 @@ describe('glirastes init scaffold', () => {
     expect(again.written).not.toContain('package.json');
   }, 60_000);
 
+  it('lists the copied worklet in an existing .gitignore once, and creates none', async () => {
+    const vite = await createAppFixture({
+      'package.json': JSON.stringify({ name: 'vite-board', dependencies: { react: '19' }, devDependencies: { vite: '7' } }),
+      '.gitignore': 'node_modules\n',
+    }, { withoutToolsConfig: true, withoutPromptBundle: true });
+    const first = await scaffoldToolsInputs({ root: vite.root, host: 'codex', createAppId: () => APP_ID });
+    expect(first.written).toContain('.gitignore');
+    expect(await vite.read('.gitignore')).toBe('node_modules\n\n# Copied by glirastes stt worklet\n/public/audio-worklet-processor.js\n');
+    const again = await scaffoldToolsInputs({ root: vite.root, host: 'codex' });
+    expect(again.written).not.toContain('.gitignore');
+
+    const bare = await createAppFixture({
+      'package.json': JSON.stringify({ name: 'next-board', dependencies: { next: '16', react: '19' } }),
+    }, { withoutToolsConfig: true, withoutPromptBundle: true });
+    const result = await scaffoldToolsInputs({ root: bare.root, host: 'codex', createAppId: () => APP_ID });
+    expect(result.written).not.toContain('.gitignore');
+    await expect(bare.read('.gitignore')).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 60_000);
+
   it('adds no worklet step to an app without a public folder framework, and tells a React app how to serve it', async () => {
     const vue = await createAppFixture({ 'package.json': JSON.stringify({ name: 'vue-board', dependencies: { vue: '3' } }) },
       { withoutToolsConfig: true, withoutPromptBundle: true });

@@ -41,10 +41,9 @@ describe('provideAudioWorklet', () => {
     expect(await readFile(join(root, 'static', AUDIO_WORKLET_FILE), 'utf8')).toContain('registerProcessor');
   });
 
-  it('finds the worklet shipped with the package by default', async () => {
-    // The packaged file exists after `bun run build`; the test then copies it.
-    const built = join(process.cwd(), 'dist/react', AUDIO_WORKLET_FILE);
-    if (!existsSync(built)) return;
+  // The packaged file exists only after `bun run build`; the gate builds first.
+  const built = join(process.cwd(), 'dist/react', AUDIO_WORKLET_FILE);
+  it.skipIf(!existsSync(built))('finds the worklet shipped with the package by default (needs bun run build)', async () => {
     const result = await provideAudioWorklet({ root });
     const copied = await readFile(result.path, 'utf8');
     expect(copied).toContain("registerProcessor('audio-processor'");
