@@ -430,29 +430,39 @@ the chat window keys, `usePushToTalkHotkey` a hold-to-talk combination, and
 
 ## Speech worklet
 
-`DeepgramSttAdapter` and `RecordedSttAdapter` capture microphone audio in an
-AudioWorklet loaded from `DEFAULT_AUDIO_WORKLET_URL`
-(`/audio-worklet-processor.js`, exported from `glirastes/react` and
-`glirastes/stt`). The package ships the file at
-`node_modules/glirastes/dist/react/audio-worklet-processor.js`; the host must
-serve it at that path. Copy it into `public/` on dev and build:
+Required for every voice input: `VoiceInputAddon` (the chat's `voice` config),
+`VoiceInputButton`, `useDeepgramTranscription`, `DeepgramSttAdapter` and
+`RecordedSttAdapter` all capture microphone audio in an AudioWorklet loaded from
+`DEFAULT_AUDIO_WORKLET_URL` (`/audio-worklet-processor.js`, exported from
+`glirastes/react` and `glirastes/stt`). Without the served file every recording
+fails. The package exports the file as `glirastes/react/audio-worklet-processor.js`.
+
+`glirastes stt worklet` copies it into `public/` (or `--out <dir>`), leaves an
+identical copy alone and works on every OS. `glirastes init` chains it in front
+of `predev` and `prebuild` for Next.js, Vite and Create React App; for an
+existing app add it yourself, in front of the existing commands:
 
 ```json
 "scripts": {
-  "predev": "cp node_modules/glirastes/dist/react/audio-worklet-processor.js public/",
-  "prebuild": "cp node_modules/glirastes/dist/react/audio-worklet-processor.js public/"
+  "predev": "glirastes stt worklet && glirastes tools refresh --keep-going",
+  "prebuild": "glirastes stt worklet && glirastes tools refresh"
 }
 ```
 
-Cross-platform alternative (also works on Windows; `public/` must exist):
+`glirastes doctor` fails (`voice-worklet`, `E-SETUP-034`) when the app uses
+voice input and neither `public/audio-worklet-processor.js` nor a script that
+copies it exists.
 
-```json
-"predev": "node -e \"require('fs').copyFileSync('node_modules/glirastes/dist/react/audio-worklet-processor.js','public/audio-worklet-processor.js')\""
-```
+When the file cannot be loaded, the chat shows `voiceUnavailableText` as an
+alert next to the mic button and logs the URL with `console.error`; the
+recording ends in the `failed` phase with `errorCode` set to
+`AUDIO_WORKLET_UNAVAILABLE` (`'audio-worklet-unavailable'`); the adapter throws an
+`AudioWorkletLoadError` (`url`, `cause`; test with `isAudioWorkletLoadError`),
+all from `glirastes/react` and `glirastes/stt`.
 
-Merge these two entries with the existing `predev` and `prebuild` scripts
-rather than replacing them.
-
-Served elsewhere: set `voice.workletUrl` on the chat (the built-in voice input
-passes it to its adapter), or construct `new DeepgramSttAdapter({ workletUrl, getToken })`
-or `new RecordedSttAdapter({ workletUrl })` and pass it as `voice.adapter`; keep that instance stable.
+Served elsewhere: set `voice.workletUrl` on the chat. It reaches the built-in
+adapter and an own `DeepgramSttAdapter` or `RecordedSttAdapter` passed as
+`voice.adapter` (their `acceptsWorkletUrl`); an adapter's own
+`workletUrl` constructor option wins. A custom adapter without
+`acceptsWorkletUrl` ignores `voice.workletUrl` and the chat warns once in the
+console; pass the URL to its constructor. Keep an adapter instance stable.

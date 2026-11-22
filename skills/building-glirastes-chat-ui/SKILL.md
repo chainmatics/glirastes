@@ -350,7 +350,7 @@ tap-to-toggle. Pass `voice.routeKey` (for example the pathname) so navigation
 stops recording and keeps the speech as draft; back/forward, session switches and
 unmount release the microphone as well. `voice.adapter` plugs in another provider
 (an `SttProviderAdapter`; `DeepgramSttAdapter` and `RecordedSttAdapter` ship in
-`glirastes/stt`; the Deepgram worklet file must be served, see [speech worklet](references/hooks-and-building-blocks.md#speech-worklet)); keep its identity stable.
+`glirastes/stt`); keep its identity stable. Every voice input (`RecordedSttAdapter` too) needs the audio worklet served: chain `glirastes stt worklet` into `predev`/`prebuild`, see [speech worklet](references/hooks-and-building-blocks.md#speech-worklet).
 
 A finished recording (`RecordedSttAdapter`, `audio/wav` to
 `/api/ai/speech-recognize`) needs one route to the app's transcription service,
