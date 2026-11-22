@@ -1382,6 +1382,8 @@ export interface ChatLocale {
   sessionArchiveMessage: string;     // supports `{title}`
   renameSessionAriaLabel: string;
   renameSessionPlaceholder: string;
+  chatHistoryLabel?: string;         // name of the list variant's navigation
+  recentChatsLabel?: string;         // heading above the list variant's rows
 
   // Structured clarification
   clarificationInputLabel: string;

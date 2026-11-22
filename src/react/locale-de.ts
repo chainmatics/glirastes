@@ -117,6 +117,8 @@ export const deChatLocale: ChatLocale = {
   sessionArchiveMessage: '„{title}“ wird archiviert.',
   renameSessionAriaLabel: 'Unterhaltung umbenennen',
   renameSessionPlaceholder: 'Titel der Unterhaltung',
+  chatHistoryLabel: 'Chats',
+  recentChatsLabel: 'Letzte Chats',
   clarificationInputLabel: 'Deine Antwort',
   clarificationSubmitButton: 'Antworten',
   retryRecordingAriaLabel: 'Aufnahme wiederholen',

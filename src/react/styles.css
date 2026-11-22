@@ -1561,6 +1561,73 @@
   color: var(--cm-text-muted);
 }
 
+/* Session switcher as an always visible list (variant="list"), e.g. the chat column in full screen. */
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  gap: 0.25rem;
+  pointer-events: auto;
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="new-session"] {
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-bg);
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="new-session"]:disabled,
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-main"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="history-label"] {
+  padding: 0.75rem 0.5rem 0.25rem;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cm-text-muted);
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-list"] {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-height: 0;
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"] {
+  gap: 0.25rem;
+  padding: 0 0.25rem 0 0;
+  border-radius: var(--cm-radius-sm);
+  cursor: default;
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-main"] {
+  appearance: none;
+  display: block;
+  padding: 0.5rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="row-title"] {
+  display: block;
+  font-weight: 500;
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"][data-active] [data-element="row-title"] {
+  font-weight: 600;
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"][data-editing] {
+  padding: 0.5rem;
+}
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"]:focus-within [data-element="row-edit"],
+[data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="session-row"]:focus-within [data-element="row-delete"] {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) :is([data-element="session-row"], [data-element="row-edit"], [data-element="row-delete"]) { transition: none; }
+}
+
 /* ---------- Confirm dialog ---------- */
 
 [data-component="confirm-dialog-backdrop"]:where(:not([data-unstyled], [data-unstyled] *)) {
