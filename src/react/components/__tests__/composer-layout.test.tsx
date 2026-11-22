@@ -16,7 +16,7 @@ const person = defineChatEntity({
 });
 const TRIGGERS = [{ char: '@', label: 'Mention' }];
 
-let sent: ReturnType<typeof vi.fn>;
+let sent: ReturnType<typeof vi.fn<ChatTransport['sendMessage']>>;
 function transport(): ChatTransport {
   return {
     messages: [], status: 'ready', error: null,
@@ -41,7 +41,7 @@ const stacked: ComposerConfig = { layout: 'stacked', toolbar: { start: ['plus', 
 const kind = (el: Element) => el.getAttribute('data-component') ?? el.getAttribute('data-action') ?? el.tagName.toLowerCase();
 
 beforeEach(() => {
-  sent = vi.fn(async () => {});
+  sent = vi.fn<ChatTransport['sendMessage']>(async () => {});
   Element.prototype.scrollIntoView = vi.fn();
 });
 afterEach(async () => {

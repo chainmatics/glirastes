@@ -10,7 +10,7 @@ function Surface({ active, onEscape = () => {}, children }: { active: boolean; o
   const ref = useRef<HTMLElement>(null);
   useModalSurface(ref, { active, onEscape });
   return <section ref={ref} data-testid="surface">{children ?? <>
-    <button>First</button><button hidden>Hidden</button><div inert=""><button>Inert</button></div>
+    <button>First</button><button hidden>Hidden</button><div ref={el => { el?.setAttribute('inert', ''); }}><button>Inert</button></div>
     <button disabled>Disabled</button><button>Last</button>
   </>}</section>;
 }
