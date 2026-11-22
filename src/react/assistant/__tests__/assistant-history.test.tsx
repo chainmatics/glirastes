@@ -164,6 +164,20 @@ describe('history column in full screen', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Show chats' }));
   });
 
+  it('while a reply streams the drawer itself takes focus', async () => {
+    narrow = true;
+    await mount(chat({ isLoading: true, isSessionChangeBlocked: true }));
+    await go('fullscreen');
+    fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
+    await frame();
+    // Every chat button is disabled, so focus does not stay behind the drawer on the inert conversation.
+    expect(document.activeElement).toBe(column());
+    expect(column()!.tabIndex).toBe(-1);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(column()!.hidden).toBe(true);
+    expect(state()).toMatchObject({ mode: 'fullscreen' });
+  });
+
   it('drawer escape', async () => {
     narrow = true;
     await mount();

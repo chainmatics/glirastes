@@ -505,7 +505,8 @@ export function AssistantShell({
   useEffect(() => { if (!fullscreen || !narrowScreen) setDrawerOpen(false); }, [fullscreen, narrowScreen]);
   useEffect(() => {
     if (!drawer || !drawerOpen) return;
-    const frame = requestAnimationFrame(() => historyRef.current?.querySelector<HTMLElement>('button:not(:disabled), [href], input, [tabindex]:not([tabindex="-1"])')?.focus());
+    // While a reply streams every chat button is disabled; the drawer itself then holds focus.
+    const frame = requestAnimationFrame(() => (historyRef.current?.querySelector<HTMLElement>('button:not(:disabled), [href], input, [tabindex]:not([tabindex="-1"])') ?? historyRef.current)?.focus());
     return () => cancelAnimationFrame(frame);
   }, [drawer, drawerOpen]);
   useInert(historyRef, !historyShown);
@@ -593,7 +594,7 @@ export function AssistantShell({
         </button>
         {button({ action: 'close', label: labels.close, title: labels.close, onClick: ui.closeChat, children: icons.close })}
       </div>}
-      {hasPane && <div ref={historyRef} data-element="history" data-drawer={drawer || undefined} id={historyId} hidden={!historyShown}
+      {hasPane && <div ref={historyRef} data-element="history" data-drawer={drawer || undefined} id={historyId} hidden={!historyShown} tabIndex={-1}
         {...(drawer && drawerOpen ? { role: 'dialog', 'aria-modal': true, 'aria-label': labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history } : {})}
         style={{
           display: historyShown ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, minWidth: 0, overflowY: 'auto', boxSizing: 'border-box',
