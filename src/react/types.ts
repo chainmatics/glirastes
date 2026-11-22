@@ -455,7 +455,11 @@ export interface ChatTriggerDefinition {
   char: string;
   /** Name of the trigger in composer menus. */
   label?: string;
-  /** Shown before the label in the "+" menu and instead of the char on a `trigger:<char>` button. */
+  /**
+   * Shown before the label in the "+" menu and instead of the char on a
+   * `trigger:<char>` button. An element: a string shows as text (it does not
+   * go through `composer.renderIcon`).
+   */
   icon?: ReactNode;
   /** Short text under the label in the "+" menu. */
   description?: string;
@@ -1029,6 +1033,7 @@ export type ComposerToolbarBuiltin = 'attach' | 'mic' | 'actions' | 'extra' | 's
 export interface ComposerToolbarItem {
   /** Accessible name of the button; its text when there is no `icon`. */
   label: string;
+  /** An element; a string shows as text (it does not go through `composer.renderIcon`). */
   icon?: ReactNode;
   /** Short text under the label when the item is a row of the "+" menu. */
   description?: string;
