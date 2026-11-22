@@ -2,7 +2,7 @@
   "id": "completion-select-prepend-cleanup",
   "kind": "optional",
   "summary": "onCompletionSelect returning true now also removes the typed trigger and query when the handler put text or a pill before them; when the text became ambiguous nothing is removed.",
-  "howTo": "Nothing to change. A handler that worked around the leftover trigger (for example by deleting '#query' itself after setText or insertMention before it) can drop that workaround. When the trigger text occurs more than once after the handler rebuilt the editor, the SDK removes nothing, so the handler keeps control of the text.",
+  "howTo": "Nothing to change. A handler that worked around the leftover trigger (for example by deleting '#query' itself after setText or insertMention before it) can drop that workaround. After a rebuild the SDK removes the trigger text only when it occurs exactly once as a whole word (so '#bug-7' put in for '#bu' is never cut); when it occurs more than once it removes nothing, so the handler keeps control of the text.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
     "imports": ["glirastes/react"],

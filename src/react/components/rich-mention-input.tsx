@@ -109,12 +109,11 @@ export function pickCompletionOf(handle: RichMentionInputHandle | null | undefin
 }
 
 /**
- * Text the editor holds at a position counted over all its text nodes, so it
- * can be found again after an app handler rebuilt the nodes (`setText`,
- * `appendText`) or split them (`insertMention`).
+ * The typed trigger and query, so they can be found again after an app
+ * handler rebuilt the nodes (`setText`, `appendText`) or split them
+ * (`insertMention`).
  */
 interface TextSnapshot {
-  start: number;
   text: string;
   /** A live range over the text: it follows text a handler inserts before it. */
   range?: Range;
@@ -125,33 +124,6 @@ function textNodesOf(editor: HTMLElement): Text[] {
   const nodes: Text[] = [];
   for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
   return nodes;
-}
-
-function textOffsetOf(editor: HTMLElement, node: Text, offset: number): number {
-  let total = 0;
-  for (const current of textNodesOf(editor)) {
-    if (current === node) return total + offset;
-    total += current.length;
-  }
-  return -1;
-}
-
-/**
- * Deletes the snapshot's text when it is still at its place (outside a pill)
- * and, when spaces then meet on both sides, one of them. Returns the text
- * node and offset where it was, or null when the text is gone.
- */
-function deleteSnapshot(editor: HTMLElement, snapshot: TextSnapshot): { node: Text; offset: number } | null {
-  let total = 0;
-  for (const node of textNodesOf(editor)) {
-    const local = snapshot.start - total;
-    total += node.length;
-    if (local < 0 || local > node.length) continue;
-    if (node.data.slice(local, local + snapshot.text.length) !== snapshot.text) continue;
-    if (inChip(node)) return null;
-    return deleteTextAt(node, local, snapshot.text.length);
-  }
-  return null;
 }
 
 function inChip(node: Node): boolean {
@@ -168,9 +140,10 @@ function deleteTextAt(node: Text, local: number, length: number): { node: Text; 
 /**
  * Removes the typed trigger and query after a handled pick, wherever the
  * app's handler moved them: (1) the live range when it still spans exactly
- * the text (handlers that insert before it), (2) the old offset, (3) the
- * text at a word start when it occurs exactly once outside pills. Zero or
- * several matches delete nothing.
+ * the text (handlers that insert before it), else (2) the text when it occurs
+ * exactly once outside pills as a whole word (a space, the start or the end
+ * of a text node on both sides). Zero or several matches delete nothing, so
+ * text the handler put in (`#bug-7` for `#bu`) is never cut.
  */
 function removeTypedTrigger(editor: HTMLElement, snapshot: TextSnapshot): { node: Text; offset: number } | null {
   const { range } = snapshot;
@@ -184,13 +157,13 @@ function removeTypedTrigger(editor: HTMLElement, snapshot: TextSnapshot): { node
   ) {
     return deleteTextAt(range.startContainer as Text, range.startOffset, snapshot.text.length);
   }
-  const byOffset = deleteSnapshot(editor, snapshot);
-  if (byOffset) return byOffset;
   let found: { node: Text; local: number } | null = null;
   for (const node of textNodesOf(editor)) {
     if (inChip(node)) continue;
     for (let local = node.data.indexOf(snapshot.text); local >= 0; local = node.data.indexOf(snapshot.text, local + 1)) {
+      const end = local + snapshot.text.length;
       if (local > 0 && !isSpace(node.data[local - 1])) continue;
+      if (end < node.length && !isSpace(node.data[end])) continue;
       if (found) return null;
       found = { node, local };
     }
@@ -930,8 +903,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       const editor = editableRef.current;
       if (!editor) return null;
       if (armed && editor.contains(armed.node) && armed.node.data.slice(armed.start, armed.start + armed.text.length) === armed.text) {
-        const start = textOffsetOf(editor, armed.node, armed.start);
-        return start < 0 ? null : { start, text: armed.text, range: liveRange(armed.node, armed.start, armed.start + armed.text.length) };
+        return { text: armed.text, range: liveRange(armed.node, armed.start, armed.start + armed.text.length) };
       }
       const selection = editorSelection(editor);
       if (!selection || selection.rangeCount === 0) return null;
@@ -943,8 +915,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         const char = text[i]!;
         if (isSpace(char)) break;
         if (triggers.has(char) && (i === 0 || isSpace(text[i - 1]))) {
-          const start = textOffsetOf(editor, node, i);
-          return start < 0 ? null : { start, text: text.slice(i, range.startOffset), range: liveRange(node, i, range.startOffset) };
+          return { text: text.slice(i, range.startOffset), range: liveRange(node, i, range.startOffset) };
         }
       }
       return null;

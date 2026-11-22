@@ -312,6 +312,36 @@ describe('completion pick behavior (select)', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
+  it('a handler that prepends the picked token keeps it whole and loses only the typed trigger', async () => {
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((_item, { controls }) => {
+      controls.setText(`#bug-7 ${controls.value}`);
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, '#bu');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(editor.textContent).toBe('#bug-7 ');
+  });
+
+  it('the old place of the trigger does not decide when the text occurs twice', async () => {
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((_item, { controls }) => {
+      controls.setText(`${controls.value} #bu`);
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, '#bu');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(editor.textContent).toBe('#bu #bu');
+  });
+
   it('a handled pick in the middle of the text leaves one space', async () => {
     render(<Composer chat={transport()} onCompletionSelect={() => true} />);
     const editor = screen.getByRole('textbox', { name: 'Type a message...' });

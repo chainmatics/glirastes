@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Chat composer: `useChatComposer()` (`insertText`, `setDraft`, `chatAbout`, `clear`, `focus`) also fills the plain chat input (no completion, no attachments); mentions arrive there as their text.
-- Chat composer: `onCompletionSelect` returning `true` also removes the typed trigger and query when the handler put text or a pill before them (`setText`, `insertMention` at the start); when the trigger text became ambiguous nothing is removed.
+- Chat composer: `onCompletionSelect` returning `true` also removes the typed trigger and query when the handler put text or a pill before them (`setText`, `insertMention` at the start); after a rebuild only a single whole-word occurrence is removed (inserted text such as `#bug-7` is never cut), several remove nothing.
 
 ## [0.22.0] - 2026-11-21
 
