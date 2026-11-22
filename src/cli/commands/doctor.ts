@@ -161,6 +161,9 @@ async function voiceWorkletCheck(rootDir: string): Promise<DoctorCheck | null> {
   }
   if (!inspection.voice) return null;
   if (inspection.status === 'pass') return check('voice-worklet', 'pass', 'E-SETUP-108');
+  if (inspection.status === 'copy-pending') {
+    return check('voice-worklet', 'warn', 'E-SETUP-108', 'run-audio-worklet-copy');
+  }
   if (inspection.status === 'unverifiable') {
     return check('voice-worklet', 'warn', 'E-SETUP-108', 'verify-audio-worklet-url');
   }

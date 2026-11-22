@@ -2,7 +2,7 @@
   "id": "voice-worklet-required",
   "kind": "breaking",
   "summary": "Voice input needs the audio worklet file served at /audio-worklet-processor.js; without it every recording fails. Required for every app with voice input, RecordedSttAdapter included. New: glirastes stt worklet copies it, and glirastes doctor fails without it.",
-  "howTo": "Chain the copy step in front of your scripts: \"predev\": \"glirastes stt worklet && <existing predev>\" and the same for prebuild. It copies glirastes/react/audio-worklet-processor.js (new package export) into public/ (--out <dir> for another static folder) and leaves an identical copy alone. Re-running glirastes init adds it for Next.js, Vite and Create React App. Served at another path: set voice.workletUrl (it now also reaches an own RecordedSttAdapter or DeepgramSttAdapter passed as voice.adapter) or the adapter's workletUrl. Check with glirastes doctor (check voice-worklet).",
+  "howTo": "Chain the copy step in front of your scripts: \"predev\": \"glirastes stt worklet && <existing predev>\" and the same for prebuild. It copies glirastes/react/audio-worklet-processor.js (new package export) into public/ (--out <dir> for another static folder) and leaves an identical copy alone. Re-running glirastes init adds it for Next.js, Vite and Create React App. Served at another path: set voice.workletUrl (it now also reaches an own RecordedSttAdapter or DeepgramSttAdapter passed as voice.adapter) or the adapter's workletUrl. A Vite app with its own root or publicDir passes --out <that folder>. The copy can be Git-ignored. yarn berry and pnpm may skip pre* scripts: when next dev or vite is started directly, run glirastes stt worklet once first. Check with glirastes doctor (check voice-worklet).",
   "skill": "building-glirastes-chat-ui#speech-worklet",
   "affectedWhen": {
     "symbols": [
@@ -20,7 +20,8 @@
     "patterns": [
       "glirastes stt worklet",
       "dist/react/audio-worklet-processor\\.js",
-      "glirastes/react/audio-worklet-processor\\.js"
+      "glirastes/react/audio-worklet-processor\\.js",
+      "registerProcessor\\('audio-processor'"
     ]
   }
 }

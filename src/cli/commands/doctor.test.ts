@@ -451,41 +451,76 @@ describe('createDoctorReport', () => {
       const text = formatDoctorReport(report);
       expect(text).toContain('✗ Voice input audio worklet');
       expect(text).toContain('glirastes stt worklet');
-      expect(text).toContain('predev');
+      expect(text).toContain('"predev": "glirastes stt worklet && <existing predev>"');
+      expect(text).not.toContain('next dev"');
+      expect(text).toContain('Next.js, Vite and Create React App');
       expect(formatDoctorReport(report, { verbose: true })).toContain('Voice input audio worklet (E-SETUP-034)');
     });
 
-    it.each([
-      ['the file in public/', async (rootDir: string) => {
-        await mkdir(join(rootDir, 'public'), { recursive: true });
-        await writeFile(join(rootDir, 'public/audio-worklet-processor.js'), '// worklet\n');
-      }],
-      ['the copy step in package.json', async (rootDir: string) => {
-        const path = join(rootDir, 'package.json');
-        const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
-        await writeFile(path, JSON.stringify({ ...manifest, scripts: { predev: 'glirastes stt worklet && next dev' } }));
-      }],
-    ])('passes with %s', async (_label, provide) => {
-      const rootDir = await fixture();
+    const useVoice = async (rootDir: string, options = '') => {
       await mkdir(join(rootDir, 'src'), { recursive: true });
-      await writeFile(join(rootDir, 'src/voice.ts'), "import { RecordedSttAdapter } from 'glirastes/react';\nexport const stt = new RecordedSttAdapter();\n");
-      await provide(rootDir);
-      const report = await createDoctorReport({ rootDir });
-      expect(report.checks).toContainEqual({ name: 'voice-worklet', status: 'pass', code: 'E-SETUP-108', remediation: 'none' });
+      await writeFile(join(rootDir, 'src/voice.ts'),
+        `import { RecordedSttAdapter } from 'glirastes/react';\nexport const stt = new RecordedSttAdapter(${options});\n`);
+    };
+    const serve = async (rootDir: string, path = 'audio-worklet-processor.js') => {
+      await mkdir(join(rootDir, 'public', path, '..'), { recursive: true });
+      await writeFile(join(rootDir, 'public', path), "registerProcessor('audio-processor', class {});\n");
+    };
+    const scripts = async (rootDir: string, value: Record<string, string>, extra: Record<string, unknown> = {}) => {
+      const path = join(rootDir, 'package.json');
+      const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+      await writeFile(path, JSON.stringify({ ...manifest, ...extra, scripts: value }));
+    };
+    const voiceCheck = async (rootDir: string) => (await createDoctorReport({ rootDir })).checks
+      .find(({ name }) => name === 'voice-worklet');
+
+    it('passes when the file is served at the default URL', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await serve(rootDir);
+      expect(await voiceCheck(rootDir)).toEqual({ name: 'voice-worklet', status: 'pass', code: 'E-SETUP-108', remediation: 'none' });
     });
 
-    it('checks a custom worklet path and only warns about an absolute URL', async () => {
+    it('only warns when a copy step exists but the file is not there yet (next dev started directly)', async () => {
       const rootDir = await fixture();
-      await mkdir(join(rootDir, 'src'), { recursive: true });
-      const write = (url: string) => writeFile(join(rootDir, 'src/voice.ts'),
-        `import { RecordedSttAdapter } from 'glirastes/react';\nexport const stt = new RecordedSttAdapter({ workletUrl: '${url}' });\n`);
-      await write('/static/pcm.js');
-      await mkdir(join(rootDir, 'public/static'), { recursive: true });
-      await writeFile(join(rootDir, 'public/static/pcm.js'), '// worklet\n');
-      expect((await createDoctorReport({ rootDir })).checks)
-        .toContainEqual(expect.objectContaining({ name: 'voice-worklet', status: 'pass' }));
-      await write('https://cdn.example.test/pcm.js');
-      expect((await createDoctorReport({ rootDir })).checks).toContainEqual({
+      await useVoice(rootDir);
+      await scripts(rootDir, { predev: 'glirastes stt worklet && glirastes tools refresh --keep-going' });
+      const report = await createDoctorReport({ rootDir });
+      expect(report.checks).toContainEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'run-audio-worklet-copy',
+      });
+      const text = formatDoctorReport(report);
+      expect(text).toContain('! Voice input audio worklet');
+      expect(text).toContain('pnpm');
+      await serve(rootDir);
+      expect((await voiceCheck(rootDir))?.status).toBe('pass');
+    });
+
+    it('reads the copy step from the scripts only, not from the rest of the manifest', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await scripts(rootDir, {}, { description: 'serves audio-worklet-processor.js via glirastes stt worklet' });
+      expect((await voiceCheck(rootDir))?.status).toBe('fail');
+    });
+
+    it('treats a copy step with another --out folder as unverifiable', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await scripts(rootDir, { prebuild: 'glirastes stt worklet --out static' });
+      expect(await voiceCheck(rootDir)).toEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'verify-audio-worklet-url',
+      });
+    });
+
+    it('checks a configured worklet path, not the default file, and only warns about an absolute URL', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir, "{ workletUrl: '/static/pcm.js?v=2' }");
+      await serve(rootDir);
+      expect((await voiceCheck(rootDir))?.status).toBe('fail');
+      await serve(rootDir, 'static/pcm.js');
+      expect((await voiceCheck(rootDir))?.status).toBe('pass');
+      await useVoice(rootDir, "{ workletUrl: 'https://cdn.example.test/pcm.js' }");
+      expect(await voiceCheck(rootDir)).toEqual({
         name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'verify-audio-worklet-url',
       });
     });

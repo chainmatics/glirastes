@@ -306,7 +306,7 @@ describe('shipped note detection', () => {
       'app/chat.tsx': "import { AiChatProvider } from 'glirastes/react';\nexport const c = <AiChatProvider />;\n",
     })).status).toBe('not-affected');
     for (const script of [
-      'glirastes stt worklet && next dev',
+      'glirastes stt worklet && glirastes tools refresh --keep-going',
       'cp node_modules/glirastes/dist/react/audio-worklet-processor.js public/',
     ]) {
       expect(evaluateNote(note, scanOf({
@@ -314,5 +314,9 @@ describe('shipped note detection', () => {
         'package.json': JSON.stringify({ scripts: { predev: script } }),
       })).status, script).toBe('adopted');
     }
+    expect(evaluateNote(note, scanOf({
+      'app/chat.tsx': chat,
+      'public/audio-worklet-processor.js': "class AudioProcessor {}\nregisterProcessor('audio-processor', AudioProcessor);\n",
+    })).status).toBe('adopted');
   });
 });
