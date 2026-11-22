@@ -30,11 +30,11 @@ upgrade the app's zod only for the SDK. `pg` (`>=8.11 <9`) is used only by the
 ## Container input contract
 
 The official public image is
-`ghcr.io/chainmatics/glirastes-runtime:0.22.0` for Linux amd64; no registry login
+`ghcr.io/chainmatics/glirastes-runtime:0.23.0` for Linux amd64; no registry login
 is required. Pin the approved digest in production and match its exact SDK
 version in artifact generation and the browser package. The
-[image guide](https://github.com/chainmatics/glirastes/blob/v0.22.0/containers/runtime/README.md)
-and [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.22.0/examples/php-runtime)
+[image guide](https://github.com/chainmatics/glirastes/blob/v0.23.0/containers/runtime/README.md)
+and [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.23.0/examples/php-runtime)
 are optional source references; the contracts below remain available offline.
 
 Provide `.glirastes/tools.json` with schemaVersion 1, a stable unique UUID appId,
