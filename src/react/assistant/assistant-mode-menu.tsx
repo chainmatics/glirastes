@@ -83,7 +83,8 @@ export function AssistantModeMenu({ modes, current, label, entries, renderTrigge
         event.stopPropagation();
         close(true);
         break;
-      case 'Tab': setOpen(false); break;
+      // Back on the trigger before the browser's Tab runs, so Tab moves on from there.
+      case 'Tab': close(true); break;
       case 'Enter':
       case ' ': {
         event.preventDefault();

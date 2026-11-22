@@ -105,8 +105,11 @@ describe('layout menu', () => {
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('menu')).toBeNull();
     key(trigger(), 'ArrowDown');
+    expect(document.activeElement!.getAttribute('role')).toBe('menuitemradio');
     key(document.activeElement!, 'Tab');
     expect(screen.queryByRole('menu')).toBeNull();
+    // Focus is back on the trigger before the browser's Tab moves on from it.
+    expect(document.activeElement).toBe(trigger());
   });
 
   it('renderButton draws the trigger with expanded and controls', async () => {
