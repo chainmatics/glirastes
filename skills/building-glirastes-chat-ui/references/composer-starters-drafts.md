@@ -104,3 +104,24 @@ The composer's unsent text belongs to its chat (no config needed):
 - `ComposerDraft` (`{ text, mentions? }`) is the stored shape.
 - Works for the pill composer and the plain input; the legacy `mentions`
   input has no drafts.
+
+### Drafts across reloads
+
+With `createLocalSessionStore` the drafts also survive a reload:
+
+- Stored in the same browser storage and key prefix as the chats:
+  `${storageKey}:draft:<chatId>`, JSON `{ text, mentions }`. Attachments
+  are never stored.
+- Written at most every 300 ms, on a chat switch, on `pagehide` and when the
+  provider unmounts. A draft over 20,000 characters stays in memory only
+  (the stored one is removed, so no older version comes back).
+- Gone once sent, emptied, or when its chat is removed, cleared or evicted
+  (`maxSessions`); `clearLocalSessionStore` on sign-out removes them with the
+  chats. Include the user in `storageKey`, as for the chats.
+- `drafts: false` keeps drafts in memory only.
+- A draft read from storage after the user already typed in that chat is
+  dropped; what is typed wins.
+- Own `SessionConfig` stores (server-backed) can add
+  `draft: ComposerDraftStorage` with `load(id)` and `save(id, draft | null)`
+  (`null` removes it). Errors from either are ignored; the draft then lives
+  in memory only.

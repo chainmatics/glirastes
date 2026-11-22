@@ -593,6 +593,13 @@ export interface SessionConfig {
 
   /** Attachment files kept next to the chats, so the provider can reuse them. */
   attachments?: AttachmentBlobStore;
+
+  /**
+   * Where each chat's unsent composer text is kept, so it survives a reload.
+   * `createLocalSessionStore` supplies one; without it drafts live in memory
+   * as long as the provider.
+   */
+  draft?: ComposerDraftStorage;
 }
 
 // ============================================================================
@@ -1038,6 +1045,17 @@ export interface ComposerToolbarItem {
 export interface ComposerDraft {
   text: string;
   mentions?: ReadonlyArray<MentionData>;
+}
+
+/**
+ * Keeps unsent composer drafts per chat (`SessionConfig.draft`). The provider
+ * writes at most every 300 ms and on `pagehide`; a draft over 20,000
+ * characters is not written (`save(id, null)` instead). Errors are ignored.
+ */
+export interface ComposerDraftStorage {
+  load(conversationId: string): ComposerDraft | null | Promise<ComposerDraft | null>;
+  /** `null` removes the draft (sent or emptied). */
+  save(conversationId: string, draft: ComposerDraft | null): void | Promise<void>;
 }
 
 /** A starter chip on an empty chat (`composer.starters`). */

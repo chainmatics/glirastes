@@ -136,6 +136,7 @@ export type {
   ChatComposerInputControls,
   ComposerConfig,
   ComposerDraft,
+  ComposerDraftStorage,
   ChatStarter,
   ComposerPlusMenuConfig,
   ComposerToolbarBuiltin,

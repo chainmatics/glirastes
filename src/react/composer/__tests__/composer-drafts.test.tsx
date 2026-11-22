@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiChatPanel } from '../../components/ai-chat-panel.js';
 import { MentionInput } from '../../components/mention-input.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
-import type { ChatCompletionProvider, ChatMessage, ChatTransport, SessionConfig } from '../../types.js';
+import type { ChatCompletionProvider, ChatMessage, ChatTransport, ComposerDraft, ComposerDraftStorage, SessionConfig } from '../../types.js';
+import { createLocalSessionStore } from '../../utils/local-session-store.js';
 
 function transport(): ChatTransport {
   return {
@@ -179,5 +180,94 @@ describe('composer draft per chat', () => {
     view.rerender(<Host chat={chat} session={sessions('A')} completion={false} />);
     await ready();
     expect(text()).toBe('plain A');
+  });
+});
+
+function memoryStorage() {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => { data.set(key, value); },
+    removeItem: (key: string) => { data.delete(key); },
+  };
+}
+
+function spyDraft(load: ComposerDraftStorage['load'] = () => null) {
+  return { load: vi.fn(load), save: vi.fn((_id: string, _draft: ComposerDraft | null) => {}) };
+}
+
+function withDraft(activeId: string, draft: ComposerDraftStorage): SessionConfig {
+  return { activeId, load: async () => [], save: () => {}, draft };
+}
+
+const pause = (ms: number) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+
+describe('composer drafts in storage', () => {
+  it('a draft is back after a reload', async () => {
+    const chat = transport();
+    const storage = memoryStorage();
+    const session = createLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    const view = render(<Host chat={chat} session={session} />);
+    await ready();
+    typeInto(editor(), 'nach dem Neuladen');
+    view.unmount();
+    expect(JSON.parse(storage.data.get('app:u1:draft:default')!)).toMatchObject({ text: 'nach dem Neuladen' });
+    const reloaded = createLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    render(<Host chat={chat} session={reloaded} />);
+    await ready();
+    await waitFor(() => expect(text()).toBe('nach dem Neuladen'));
+  });
+
+  it('writes are debounced and flushed on switch', async () => {
+    const chat = transport();
+    const draft = spyDraft();
+    const view = render(<Host chat={chat} session={withDraft('A', draft)} />);
+    await ready();
+    for (const value of ['a', 'ab', 'abc', 'abcd', 'abcde']) typeInto(editor(), value);
+    expect(draft.save).not.toHaveBeenCalled();
+    await pause(400);
+    expect(draft.save).toHaveBeenCalledTimes(1);
+    expect(draft.save).toHaveBeenLastCalledWith('A', { text: 'abcde' });
+    typeInto(editor(), 'abcdef');
+    view.rerender(<Host chat={chat} session={withDraft('B', draft)} />);
+    await ready();
+    await pause(400);
+    expect(draft.save).toHaveBeenCalledWith('A', { text: 'abcdef' });
+  });
+
+  it('pagehide flushes', async () => {
+    const chat = transport();
+    const draft = spyDraft();
+    render(<Host chat={chat} session={withDraft('A', draft)} />);
+    await ready();
+    typeInto(editor(), 'gleich weg');
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    expect(draft.save).toHaveBeenCalledWith('A', { text: 'gleich weg' });
+  });
+
+  it('a 20001-character draft is not written', async () => {
+    const chat = transport();
+    const draft = spyDraft();
+    render(<Host chat={chat} session={withDraft('A', draft)} completion={false} />);
+    await ready();
+    typeInto(editor(), 'x'.repeat(20_001));
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    expect(draft.save.mock.calls.some(([, value]) => value !== null)).toBe(false);
+    // An older, shorter version must not come back after a reload.
+    expect(draft.save).toHaveBeenCalledWith('A', null);
+    expect(text()).toHaveLength(20_001);
+  });
+
+  it('a late load does not overwrite typing', async () => {
+    const chat = transport();
+    let resolve!: (draft: ComposerDraft | null) => void;
+    const draft = spyDraft(() => new Promise<ComposerDraft | null>((done) => { resolve = done; }));
+    render(<Host chat={chat} session={withDraft('A', draft)} />);
+    await ready();
+    expect(draft.load).toHaveBeenCalledWith('A');
+    typeInto(editor(), 'schon getippt');
+    await act(async () => { resolve({ text: 'alter Entwurf' }); });
+    expect(text()).toBe('schon getippt');
   });
 });

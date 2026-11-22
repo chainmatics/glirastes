@@ -1022,8 +1022,17 @@ export function AiChatProvider({
   const mentionPrefix = useMemo(() => createMentionPrefixLookup(triggers), [triggers]);
   // Drafts live as long as this provider: an identity change remounts it and starts empty.
   const draftsRef = useRef<ComposerDraftController | null>(null);
-  if (!draftsRef.current) draftsRef.current = createComposerDraftController();
+  if (!draftsRef.current) draftsRef.current = createComposerDraftController(() => sessionRef.current?.draft);
   const drafts = draftsRef.current;
+  // Pending draft writes reach the storage before the page goes away or the provider unmounts.
+  useEffect(() => {
+    const flush = () => drafts.flush();
+    if (typeof window !== 'undefined') window.addEventListener('pagehide', flush);
+    return () => {
+      if (typeof window !== 'undefined') window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [drafts]);
   // What `session.save` gets as its third argument: only when a trigger claims `types`, so saves stay as before otherwise.
   const saveOptionsRef = useRef<{ mentionPrefix: (type: string) => string } | undefined>(undefined);
   saveOptionsRef.current = mentionPrefix === inferMentionPrefix ? undefined : { mentionPrefix };

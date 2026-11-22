@@ -446,7 +446,6 @@
   "SelectedTools": "Pre-Foundation root-barrel API (hand-written tool definitions, pipeline, PII); Foundation apps derive tools with glirastes tools refresh.",
   "SemanticChange": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "SemanticChangeClassification": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
-  "SessionConfig": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "SessionSummary": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "SignedPromptBinding": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "SignedPromptBindingSchema": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",

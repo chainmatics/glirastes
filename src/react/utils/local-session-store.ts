@@ -1,4 +1,4 @@
-import type { ChatMessage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
+import type { ChatMessage, ComposerDraft, ComposerDraftStorage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
 import { attachmentIdOf } from '../../contracts/attachments.js';
 import { fileToDataUrl, omitAttachmentData } from './attachments.js';
 import { createIndexedDbAttachmentStore, dataUrlToBlob, type AttachmentBlobStore } from './attachment-blob-store.js';
@@ -31,6 +31,12 @@ export interface LocalSessionStoreOptions {
    * is set; `null` keeps no files.
    */
   attachmentStore?: AttachmentBlobStore | null;
+  /**
+   * Keep each chat's unsent composer text (`${storageKey}:draft:<id>`), so it
+   * survives a reload; gone once sent or when the chat is removed, cleared or
+   * evicted. Attachments are never kept. Default: true.
+   */
+  drafts?: boolean;
   now?: () => number;
   createId?: () => string;
 }
@@ -179,6 +185,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const activeKey = `${options.storageKey}:active`;
   const indexKey = `${options.storageKey}:sessions`;
   const messagesKey = (id: string) => `${options.storageKey}:messages:${id}`;
+  const draftKey = (id: string) => `${options.storageKey}:draft:${id}`;
   type Entry = SessionSummary & { createdAt: number; updatedAt: number; named?: boolean; trimmed?: boolean };
 
   const read = (key: string): unknown => {
@@ -221,6 +228,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     const ordered = sorted(list);
     for (const removed of ordered.slice(maxSessions)) {
       drop(messagesKey(removed.id));
+      drop(draftKey(removed.id));
       void deleteFiles(removed.id);
     }
     const kept = ordered.slice(0, maxSessions);
@@ -251,8 +259,21 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     }));
   };
 
+  const draft: ComposerDraftStorage = {
+    load(conversationId) {
+      const stored = read(draftKey(conversationId)) as Partial<ComposerDraft> | null;
+      if (typeof stored !== 'object' || stored === null || typeof stored.text !== 'string') return null;
+      return { text: stored.text, ...(Array.isArray(stored.mentions) ? { mentions: stored.mentions } : {}) };
+    },
+    save(conversationId, value) {
+      if (value) write(draftKey(conversationId), { text: value.text, mentions: value.mentions ?? [] });
+      else drop(draftKey(conversationId));
+    },
+  };
+
   return {
     ...(files ? { attachments: files } : {}),
+    ...(options.drafts === false ? {} : { draft }),
     get defaultActiveId() {
       const active = read(activeKey);
       const list = entries();
@@ -270,6 +291,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     },
     async remove(conversationId) {
       drop(messagesKey(conversationId));
+      drop(draftKey(conversationId));
       const remaining = entries().filter((entry) => entry.id !== conversationId);
       if (remaining.length === 0) drop(indexKey);
       else persist(remaining);
@@ -346,6 +368,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     async clear(conversationId) {
       const id = conversationId ?? DEFAULT_ID;
       drop(messagesKey(id));
+      drop(draftKey(id));
       persist(entries().map((entry) => (entry.id === id ? { ...entry, messageCount: 0 } : entry)));
       await deleteFiles(id);
     },

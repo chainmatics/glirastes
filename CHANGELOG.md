@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `createLocalSessionStore` keeps each chat's unsent composer text in the browser storage (`${storageKey}:draft:<id>`), so it survives a reload; removed when sent, when the chat is removed, cleared or evicted, and by `clearLocalSessionStore`. `drafts: false` turns it off. Own stores can add `SessionConfig.draft` (`ComposerDraftStorage`); writes are debounced (300 ms) and flushed on switch, `pagehide` and unmount; drafts over 20,000 characters are not written.
 - Chat composer: the unsent text belongs to its chat (`ComposerDraft`). Switching chats shows that chat's draft instead of carrying the text over; the draft survives a remount of the input inside the same provider and is cleared by sending. Pills keep their ids; attachments are not part of a draft. Drafts live as long as the `AiChatProvider` instance.
 
 ### Fixed
