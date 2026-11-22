@@ -103,7 +103,8 @@ Defaults keep today's markup; everything below is opt-in.
   writes the rendered answer as HTML with inline styles (pastes into
   Word/Outlook; lists, tables, links; mention chips keep their names) plus
   plain text, falling back to text only, and shows "Copied" / "Copy failed"
-  (`aria-live`); `sources` is a toggle (`aria-expanded`, `aria-controls`)
+  (`aria-live`); a `components.Markdown` of your own copies as rich text only
+  when its root has `data-component="markdown"`, else the plain Markdown; `sources` is a toggle (`aria-expanded`, `aria-controls`)
   over the https links the answer cites (its Markdown links, AI SDK
   `source-url` parts, tool output `sources` / `citations`; no credentials,
   deduplicated, at most 20, opened with `noopener noreferrer`); `duration`
