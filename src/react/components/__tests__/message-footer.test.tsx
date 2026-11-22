@@ -5,7 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiChatProviderConfig, MessagePartsProps } from '../../types.js';
 import { formatDuration } from '../message-footer.js';
-import { ctx, Host, StreamingChat } from '../../__tests__/streaming-chat.js';
+import { ctx, Host, memoryStorage, StreamingChat } from '../../__tests__/streaming-chat.js';
+import { createLocalSessionStore } from '../../utils/local-session-store.js';
 
 const START = new Date('2026-11-22T10:00:00.000Z').getTime();
 const LINKS = 'Read [Docs](https://example.com/a) and [Spec](https://www.example.org/b).';
@@ -197,6 +198,28 @@ describe('message footer', () => {
     expect(chat.stop).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(footer()?.getAttribute('data-state')).toBe('done'));
     expect(document.querySelector('[data-element="elapsed"]')).toBeNull();
+  });
+
+  it('a session change in flight keeps the done footer', async () => {
+    const store = createLocalSessionStore({ storageKey: 'footer-mutation', storage: memoryStorage(), attachmentStore: null });
+    let release: () => void = () => {};
+    const create = store.create!;
+    store.create = async (options) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return create(options);
+    };
+    const chat = new StreamingChat();
+    render(<Host chat={chat} config={{ messageFooter: true, session: store }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('question'); });
+    act(() => chat.finish([text('Answer')]));
+    expect(footer()?.getAttribute('data-state')).toBe('done');
+    let creating: Promise<unknown> = Promise.resolve();
+    await act(async () => { creating = ctx.createSession(); });
+    expect(ctx.isLoading).toBe(true);
+    expect(footer()?.getAttribute('data-state')).toBe('done');
+    expect(button('stop')).toBeNull();
+    await act(async () => { release(); await creating; });
   });
 
   it('the running footer becomes the done footer after finish', async () => {

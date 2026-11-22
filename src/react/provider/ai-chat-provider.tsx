@@ -2963,6 +2963,7 @@ export function AiChatProvider({
       mentionPrefix,
       drafts,
       turnWorkedMs,
+      isTurnRunning: isLoading || awaitedOutcomes > 0,
       interactions: interactionRegistry,
       pendingCommand,
       submitPendingCommand,

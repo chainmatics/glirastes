@@ -26,6 +26,11 @@ export interface ComposerContextValue {
    * runs. A getter, so the provider does not re-render while time passes.
    */
   turnWorkedMs?: () => number | null;
+  /**
+   * A request runs or a UI action outcome it waits for is open: `isLoading`
+   * without the session load and session changes it also covers.
+   */
+  isTurnRunning?: boolean;
   /** The resolved `messageFooter` (every part a boolean), null when it is off. */
   messageFooter?: Required<MessageFooterConfig> | null;
 }

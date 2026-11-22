@@ -135,13 +135,14 @@ const ENDED_PIPELINE = new Set(['aborted', 'error', 'safety-stop']);
  * approval or clarification is open.
  */
 function useFollowups(message: ChatMessage, isLatest: boolean, turnOutcome: TurnOutcome | null): string[] {
-  const { suggestions, isLoading, pendingApprovals, messages, pipelineState } = useComposerContext();
+  const { suggestions, isLoading, isTurnRunning, pendingApprovals, messages, pipelineState } = useComposerContext();
   const count = suggestions?.count ?? 3;
   const candidates = useMemo(
     () => (suggestions?.placement === 'message' && message.role === 'assistant' ? readMessageFollowups(message, count) : []),
     [suggestions?.placement, message, count],
   );
-  if (candidates.length === 0 || suggestions?.enabled === false || !isLatest || isLoading) return [];
+  // A session change does not hide them (they are disabled while the composer is locked).
+  if (candidates.length === 0 || suggestions?.enabled === false || !isLatest || (isTurnRunning ?? isLoading)) return [];
   if ((pendingApprovals?.length ?? 0) > 0) return [];
   if (findOpenClarification(messages ?? [message])) return [];
   if (turnOutcome && turnOutcome.status !== 'completed') return [];

@@ -312,6 +312,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     composer,
     messageFooter,
     suggestions,
+    isTurnRunning,
   } = useComposerContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
@@ -643,7 +644,8 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         isLastOfTurn={!next || next.role === 'user'}
         isLatest={isLatestMessage}
         turnOutcome={turnOutcome}
-        active={turnActive}
+        // A session change (create, delete, load) is not a running turn.
+        active={isLatestMessage && (isTurnRunning ?? isLoading)}
       />
     );
   }
