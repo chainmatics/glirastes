@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Next.js handler: `createAiChatHandler` warns once at creation when `followups` is set without `pipeline`; the `suggest_followups` tool exists only in pipeline mode, so the setting did nothing silently before. Tool registration is unchanged.
 - Chat: the `SuggestionBar` honours `suggestions.enabled: false` (no follow-up or static chip shows), and a turn that brings no follow-ups drops the previous turn's chips instead of showing them again; the static chips (or none) show then. Follow-ups are read from the latest turn only.
 - Assistant: the sidebar width handle announces (`aria-valuemax`) and stops (End key, drag) at the widest width that can actually render in the row, instead of `maxWidth`.
 - Chat composer: `useChatComposer()` (`insertText`, `setDraft`, `chatAbout`, `clear`, `focus`) also fills the plain chat input (no completion, no attachments); mentions arrive there as their text.
