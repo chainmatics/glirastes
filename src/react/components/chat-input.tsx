@@ -14,6 +14,8 @@ import { MentionInput } from './mention-input.js';
 import { ComposerToolbarLayout } from './composer-toolbar.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
 import { createTextareaComposerHandle } from './textarea-composer-handle.js';
+import { ComposerHint } from './composer-hint.js';
+import { composerContextOf } from '../provider/composer-context.js';
 import { useChatComposerTarget } from '../composer/chat-composer.js';
 import type { ChatAttachment, ChatComposerInputControls, ChatInputProps, RichMentionInputHandle } from '../types.js';
 
@@ -32,7 +34,9 @@ export function ChatInput(props: ChatInputProps) {
 
 function PlainChatInput({ className, onSubmit }: ChatInputProps) {
   const visible = useContext(ChatWindowVisibilityContext);
-  const { send, stop, isLoading, canCompose: composable, queue, classNames, locale, components, voice } = useChatContext();
+  const context = useChatContext();
+  const { send, stop, isLoading, canCompose: composable, queue, classNames, locale, components, voice } = context;
+  const hint = composerContextOf(context).composer?.hint === true;
   // A hand-built context without `canCompose` locks while loading, as before.
   const canCompose = composable ?? !isLoading;
   const [value, setValue] = useState('');
@@ -170,6 +174,7 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
           />
         )}
       />
+      {hint && <ComposerHint />}
     </form>
   );
 }

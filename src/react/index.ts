@@ -288,6 +288,7 @@ export { useTurnOutcome, useTurnOutcomes } from './hooks/use-turn-outcome.js';
 export { ChatInput } from './components/chat-input.js';
 export { ChatQueue, useChatQueue } from './components/chat-queue.js';
 export { MentionInput } from './components/mention-input.js';
+export { ComposerHint, type ComposerHintProps } from './components/composer-hint.js';
 export { RichMentionInput } from './components/rich-mention-input.js';
 export { ChatWindow } from './components/chat-window.js';
 export { ApprovalCard } from './components/approval-card.js';

@@ -66,6 +66,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   const canCompose = composable ?? !isLoading;
   const { onSubmit, initialValue } = options;
   const [value, setValue] = useState('');
+  const [completionOpen, setCompletionOpen] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentProblem, setAttachmentProblem] = useState<AttachmentProblem | null>(null);
   const attachmentsRef = useRef(attachments);
@@ -188,6 +189,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
 
   const inputProps = useMemo<ChatComposerInput['inputProps']>(() => ({
     onChange: setValue,
+    onListOpenChange: setCompletionOpen,
     onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
     // Only a non-default list: a `triggers` prop the app sets on the input must not be overridden by the default.
@@ -262,6 +264,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     removeAttachment,
     openFilePicker,
     attachmentInputProps,
+    completionOpen,
     submit,
     stop,
     setText,

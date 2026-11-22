@@ -209,6 +209,28 @@
   color: var(--cm-text-muted);
 }
 
+
+/* ---------- Composer hint line (composer.hint) ---------- */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-input"]:has(> [data-component="composer-hint"]) {
+  flex-wrap: wrap;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-hint"] {
+  flex: 1 1 100%;
+  margin-top: -0.25rem;
+  color: var(--cm-text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  text-align: right;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-hint"] kbd {
+  font: inherit;
+}
+@media (hover: none) and (pointer: coarse) {
+  [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-hint"] {
+    display: none;
+  }
+}
+
 /* ---------- Send / stop buttons ---------- */
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-action="send"] {
   padding: 0.5rem 1rem;

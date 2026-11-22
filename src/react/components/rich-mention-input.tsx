@@ -320,6 +320,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onFiles,
       onBackspaceEmpty,
       allowEmptySubmit = false,
+      onListOpenChange,
     },
     ref,
   ) {
@@ -348,6 +349,17 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // -1: the result itself; 0..n: one of its entity actions.
     const [selectedAction, setSelectedAction] = useState(-1);
     const [isSearching, setIsSearching] = useState(false);
+
+    // `onListOpenChange` on every change of the shown list, not on mount (closed).
+    const listShown = hasMentionSupport && dropdownOpen && searchResults.length > 0;
+    const listShownRef = useRef(false);
+    const onListOpenChangeRef = useRef(onListOpenChange);
+    onListOpenChangeRef.current = onListOpenChange;
+    useEffect(() => {
+      if (listShownRef.current === listShown) return;
+      listShownRef.current = listShown;
+      onListOpenChangeRef.current?.(listShown);
+    }, [listShown]);
     const listboxId = useId();
     const [isFocused, setIsFocused] = useState(false);
 

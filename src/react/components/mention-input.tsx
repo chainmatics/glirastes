@@ -3,6 +3,7 @@ import { MentionChipList } from './mention-chip.js';
 import { RichMentionInput, pickCompletionOf } from './rich-mention-input.js';
 import { VoiceInputAddon } from './voice-input-addon.js';
 import { ComposerToolbarLayout } from './composer-toolbar.js';
+import { ComposerHint } from './composer-hint.js';
 import { AttachmentButton as DefaultAttachmentButton, AttachmentTray as DefaultAttachmentTray } from './attachments.js';
 import { useChatComposerInput } from '../hooks/use-chat-composer-input.js';
 import { useChatContext } from '../provider/chat-context.js';
@@ -39,7 +40,7 @@ function ProviderMentionInput({
   renderActions,
   renderSubmit,
 }: MentionInputProps) {
-  const { classNames, locale, components, voice, triggers, canCompose: composable, queue } = useComposerContext();
+  const { classNames, locale, components, voice, triggers, canCompose: composable, queue, composer: composerConfig } = useComposerContext();
   const composer = useChatComposerInput({
     onSubmit: onSubmit ? (message) => onSubmit(message) : undefined,
     initialValue,
@@ -121,6 +122,7 @@ function ProviderMentionInput({
           )}
         />
       </form>
+      {composerConfig?.hint && <ComposerHint completionOpen={composer.completionOpen} />}
     </div>
   );
 }

@@ -1045,6 +1045,12 @@ export interface ComposerConfig {
   /** Rows of the `plus` toolbar item; without it the default rows. */
   plusMenu?: ComposerPlusMenuConfig;
   /**
+   * A keyboard hint line under the composer ("↵ Send · ⇧ ↵ New line", the
+   * list keys while a completion list is open); hidden on touch devices.
+   * Default `false`.
+   */
+  hint?: boolean;
+  /**
    * Turns an icon name into an element: the string `icon` of completion
    * entries (`MentionResult.icon`, `ChatCommandDefinition.icon`,
    * `ChatEntityDefinition.icon`) and of starters. `context.type` is the
@@ -1349,6 +1355,16 @@ export interface ChatLocale {
   plusMenuButtonLabel?: string;
   /** The `attach` row of the "+" menu; default `Attach file`. */
   plusMenuAttachLabel?: string;
+  /** Hint line (`composer.hint`): what Enter does; default `Send`. */
+  composerHintSend?: string;
+  /** Hint line: what Shift+Enter does; default `New line`. */
+  composerHintNewline?: string;
+  /** Hint line while a list is open: the arrow keys; default `Navigate`. */
+  composerHintNavigate?: string;
+  /** Hint line while a list is open: Enter; default `Pick suggestion`. */
+  composerHintPick?: string;
+  /** Hint line while a list is open: Escape; default `Close`. */
+  composerHintClose?: string;
   attachmentsLabel: string;
   removeAttachmentLabel: string;      // supports `{name}`
   openAttachmentLabel: string;        // supports `{name}`
@@ -2216,9 +2232,11 @@ export interface ChatComposerInput extends ChatComposerInputControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers' | 'onListOpenChange'>;
   /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
   readonly attachmentInputProps: ChatAttachmentInputProps;
+  /** A completion list of the editor is open (e.g. for `ComposerHint`). */
+  readonly completionOpen: boolean;
   readonly pendingCommand: PendingChatCommand | null;
   submitPendingCommand(values: Readonly<Record<string, string>>, valueLabels?: Readonly<Record<string, string>>): boolean;
   cancelPendingCommand(): void;
@@ -2320,6 +2338,8 @@ export interface RichMentionInputProps {
   onBackspaceEmpty?: () => void;
   /** Enter submits an empty editor, e.g. while attachments wait. */
   allowEmptySubmit?: boolean;
+  /** The completion list opened (`true`) or closed (`false`); not called on mount. */
+  onListOpenChange?: (open: boolean) => void;
 }
 
 export interface ChatWindowHeaderRenderProps {
