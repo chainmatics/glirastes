@@ -155,7 +155,7 @@ Since 0.18.1 the order is fixed (0.17.x and the 0.18.0 image: timing-dependent):
 | Key | What it does |
 | --- | --- |
 | `pipeline` | Pro `AiPipeline` from `glirastes/server`; replaces guardrails and intent router routing |
-| `followups` | follow-up suggestions; needs `pipeline` |
+| `followups` | follow-up suggestions; needs `pipeline` (without it no `suggest_followups` tool, a warning at creation) |
 | `intentRouter` | deprecated; use `pipeline` |
 | `telemetry` | legacy remote sink; refused together with `managedRuntime` (use `metrics`) |
 | `lancer` | legacy prompt and model overrides; not on the Foundation path |

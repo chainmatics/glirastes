@@ -119,8 +119,9 @@ Defaults keep today's markup; everything below is opt-in.
   Nothing of it leaves the browser.
 - Follow-ups under the answer: `suggestions.placement: 'message'` (default
   `'composer'`, the rotating `SuggestionBar`) shows the latest answer's
-  follow-ups (`suggest_followups`, needs `followups` on the server, or its
-  trailing suggestion list; `suggestions.count`, default 3) as buttons in a
+  follow-ups (`suggest_followups`, needs `followups` together with
+  `pipeline` on the server, which warns once otherwise; or its trailing
+  suggestion list; `suggestions.count`, default 3) as buttons in a
   `role="group"` headed `followUpsLabel` ("Ask next") inside the footer, also
   without `messageFooter`. A click sends. Hidden while a turn runs, an
   approval or clarification is open, after a stop, error or safety stop,

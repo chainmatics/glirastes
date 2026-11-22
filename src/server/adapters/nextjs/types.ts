@@ -303,7 +303,8 @@ export interface AiChatHandlerConfig {
 
   /**
    * Followups configuration. Pro feature — requires pipeline from glirastes/server.
-   * Only used with pipeline mode.
+   * Only used with pipeline mode: without `pipeline` the model gets no
+   * `suggest_followups` tool and the handler warns once at creation.
    */
   followups?: FollowupsConfig;
 
