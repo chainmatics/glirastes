@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { computeApiSurface, githubSlug } from '../scripts/api-surface.js';
 import { evaluateNote } from './cli/commands/upgrade/detect.js';
 import { loadUpgradeNotes, surfaceCovers } from './cli/commands/upgrade/notes.js';
+import { createUpgradeReport } from './cli/commands/upgrade/report.js';
 import { SDK_VERSION } from './runtime/sdk-version.js';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -208,6 +209,19 @@ describe('upgrade notes guard', () => {
       'existing key (e.g. a new optional parameter) belongs in the note\'s `howTo`, and a key added and removed',
       'again before release belongs in no note.',
     ].join('\n')).toEqual([]);
+  });
+
+  it('every released version since 0.14.0 has a notes file, so the report lists none as unclassified', async () => {
+    const report = await createUpgradeReport({
+      rootDir: repoRoot,
+      from: '0.14.0',
+      sdkVersion: SDK_VERSION,
+      notesDir,
+      changelogPath: join(repoRoot, 'CHANGELOG.md'),
+      keptSkills: [],
+      scan: async () => ({ files: [] }),
+    });
+    expect(report.unclassified).toEqual([]);
   });
 
   it('every note\'s skill and anchor exist in skills/', async () => {
