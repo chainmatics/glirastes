@@ -179,6 +179,14 @@ export interface ChatContextValue {
   truncation: TruncationInfo | null;
   continueTruncation: () => void;
   dismissTruncation: () => void;
+  /**
+   * Continues the latest turn after the server stopped it at a limit
+   * ("Continue" under the stop notice): sends the history again with
+   * `glirastesContinuation: 'budget'`; the server runs only the open steps
+   * with a fresh budget and never repeats a write call. Absent when the
+   * transport cannot (`ChatTransport.continueAfterBudgetStop`).
+   */
+  continueAfterBudgetStop?: () => void;
 
   // Mentions
   mentionQuery: string;

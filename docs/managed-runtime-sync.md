@@ -655,9 +655,9 @@ its use, and the chat shows the limit:
 | Dimension | Model (`Tool call not executed: <limit>. Do not retry in this turn; tell the user which requests are still open.`) | Chat |
 | --- | --- | --- |
 | `maxToolCalls` | `the limit of 8 tool calls per turn is reached (8 used)` | `Tool call limit for this turn reached (8).` |
-| `maxModelSteps` | `the limit of 6 model steps per turn is reached (6 used)` | `Step limit for this turn reached (6).` |
+| `maxModelSteps` | `the limit of 10 model steps per turn is reached (10 used)` | `Step limit for this turn reached (10).` |
 | `totalTimeoutMs` | `the time limit of 60 s per turn is reached (61.2 s elapsed)` | `Time limit for this turn reached (60 s).` |
-| `maxInputTokens` | `the limit of 40000 input tokens per turn is reached (41002 used)` | `Input token limit for this turn reached (40000).` |
+| `maxInputTokens` | `the limit of 60000 input tokens per turn is reached (61002 used)` | `Input token limit for this turn reached (60000).` |
 | `maxOutputTokens` | `the limit of 4000 output tokens per turn is reached (4100 used)` | `Output token limit for this turn reached (4000).` |
 | `maxEstimatedCostUsd` | `the cost limit of 0.5 USD per turn is reached (0.5123 USD used)` | `Cost limit for this turn reached (0.5 USD).` |
 | `maxRepeatedFingerprint` | `the limit of 3 identical tool calls with the same result per turn is reached (3 repeats)` | `Limit for repeated identical tool calls reached (3).` |
@@ -699,19 +699,98 @@ short. It names the reached limit and its value, never usage of other
 dimensions, tool data or principal data:
 
 ```text
-I had to stop here: the limit for this request was reached (input tokens: 40,000). The answer above may be incomplete.
+I had to stop here: the limit for this request was reached (input tokens: 60,000). The answer above may be incomplete.
+
+Done so far: List tasks, Show calendar.
+
+Still open: Draft the weekly plan.
+
+Use the button below to go on with the open steps.
 ```
 
 A turn that showed no text of the model before the stop (only tool calls) gets
 the other form, since there is no answer above to speak of:
 
 ```text
-I could not finish this request: the limit for this request was reached (input tokens: 40,000).
+I could not finish this request: the limit for this request was reached (input tokens: 60,000).
 ```
 
-Neither form invites the user to "continue": a result handle of the stopped
-turn has expired by then, so the next turn would load the data again and may
-reach the same limit.
+After the closing sentence the notice says what was done and what is open:
+
+- **Done** lists the successful tool calls of the turn (also of earlier
+  requests of the same turn) by their activity label (`toolPresentation`),
+  else the tool name, each once, at most eight. Built-in tools (`update_plan`,
+  `find_tools`, `read_result`, ...) are left out. The line is missing when
+  nothing succeeded.
+- **Open** lists the plan items that are not completed when the turn used
+  `update_plan`; otherwise it says that the question is not answered yet.
+- The last line tells the user how to go on: the button below (not named, so a
+  custom `continueButton` label cannot differ from it). It suggests no typed
+  message while the button is offered: a typed message is a new turn without
+  the repeat guard described next. Only after the last continuation the line
+  suggests typing "continue". A client without the button (an own UI without
+  `continueAfterBudgetStop`) sets `continueHint` to its own text.
+
+The summary is built in the handler from the stream of this request and the
+history; it names labels and plan titles only, never tool arguments or
+results, and nothing of it reaches the Platform.
+
+##### Continuing a stopped turn
+
+Right before the notice text the handler writes a `data-budget-stop` part
+(`{ v: 1, continuable }`, kept in the assistant message). `glirastes/react`
+shows a "Continue" button (German "Weitermachen", the locale key
+`continueButton`; a real `<button>` with `data-action="continue-after-stop"`
+under the latest answer) when the answer ends with a continuable stop and the
+transport supports it (`useVercelAiChatTransport` does). A click sends the
+history again, without a new user message, with
+`glirastesContinuation: 'budget'` in the request body. The handler then:
+
+- accepts it only when the history ends with a continuable stop and nothing
+  after it; otherwise it answers `400 { error: 'Nothing to continue' }` (fail
+  closed). A `customStreamHandler` gets no continuation (always `400`);
+- runs the same turn again (same `turnId`, same pinned snapshot) with a fresh
+  budget, as every request has;
+- adds, for this request only, a user-role instruction for the model that
+  lists the tool calls already attempted before the stop (names and counts,
+  no arguments; each may have succeeded or failed) and asks it to do only the
+  open steps and never retry an action that changes data;
+- guards every tool that is not read-only: a call whose fingerprint (tool
+  plus normalized arguments) was attempted before the turn's latest stop,
+  successful, failed or without a result (a failed write may have applied in
+  part), is not run again and asks for no approval; the model gets the tool
+  error `Not run again: this action was already attempted in this turn before
+  it was stopped (same tool and arguments); it may have succeeded or failed.
+  Do not retry it; tell the user it was already attempted and continue with
+  the open steps.` Read-only means a GET or HEAD tool without approval; in a
+  managed turn the pinned manifest (`safe-read`, GET or HEAD) and policy (no
+  approval) decide. A call that was refused at its approval did not run and
+  is not blocked. In a managed turn a refusal counts as a tool error toward
+  `maxConsecutiveErrors` and as a fingerprint toward `maxRepeatedFingerprint`;
+- streams the continued answer into the same assistant message.
+
+The guard and the instruction (then in the system prompt, so the resumed
+history stays as it is) stay on for every later request of the stopped turn:
+an approval or a UI outcome the continued run waits for. A write approved
+after the stop runs once as approved.
+
+Each continuation is a request of its own with a fresh budget. Time, tokens
+and cost of one user question can therefore reach four times the per-request
+limits (the first run and three continuations). A managed policy has no
+setting yet to forbid or limit continuations; an app that must not allow them
+answers `glirastesContinuation` itself (or uses a `customStreamHandler`, which
+never continues).
+
+A turn can be continued three times (`MAX_BUDGET_CONTINUATIONS`); the stop
+after that is no longer continuable and its notice only suggests typing
+"continue". A typed message is a new user message and a new turn: it gets a
+fresh budget too, but no repeat guard and no instruction, so the model may
+call a write of the stopped turn again (approvals and the app's own checks
+still apply). `onFinish` reports
+`continuation: 'budget'`; the metric event reports the continued run as a
+normal `turn.finished` (the Platform contract knows only `approval` and
+`ui-outcome` continuations). An app whose backend validates the chat request
+body strictly must allow the `glirastesContinuation` field.
 
 The texts come from one table keyed by reason. `closing` and
 `closingWithoutAnswer` are the whole notice with `{reason}`; each reason has a text with `{limit}` (the number formatted
@@ -743,6 +822,11 @@ replaces single keys:
 | `maxEstimatedCostUsd` | `the cost limit for this request was reached ({limit} USD)` |
 | `maxRepeatedFingerprint` | `the same tool call kept returning the same result (limit: {limit})` |
 | `maxConsecutiveErrors` | `too many tool calls failed in a row (limit: {limit})` |
+| `done` | `Done so far: {items}.` |
+| `open` | `Still open: {items}.` |
+| `openUnanswered` | `Still open: your question is not answered yet.` |
+| `continueHint` | `Use the button below to go on with the open steps.` |
+| `continueTypedHint` | `Write “continue” to go on with the open steps.` |
 
 ```ts
 createAiChatHandler({
@@ -772,9 +856,16 @@ quadratically. In a test with 45 entries of about 3,000 characters read in
 pages of 10 (each page cut to 16,000 characters), the model calls cost about
 0.1k, 0.7k, 4.7k, 8.7k, 12.6k and 16.6k input tokens (estimated at four
 characters per token, without a real system prompt and tool definitions):
-each page adds about 4k to every later call, and the sixth call passes the
-default `maxInputTokens` of 40,000. The page fetched by the last call is
-never seen by the model.
+each page adds about 4k to every later call: the sixth call passes 40,000 and
+the seventh the default `maxInputTokens` of 60,000. The page fetched by the
+last call is never seen by the model.
+
+The local defaults (`DEFAULT_LOCAL_LIMITS`, the runtime container's `limits`)
+are 10 model steps, 8 tool calls, 60 s per turn, 15 s per tool, 60,000 input
+and 4,000 output tokens, 0.5 USD, 3 repeated fingerprints and 3 consecutive
+errors. Before 0.24 they were 6 model steps and 40,000 input tokens; an app
+that relies on those sets them explicitly
+(`localLimits: { maxModelSteps: 6, maxInputTokens: 40_000 }`).
 
 To allow more tool calls per turn, raise the local limit:
 `createGlirastes({ localLimits: { maxToolCalls: 16 } })` (the runtime

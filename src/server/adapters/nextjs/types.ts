@@ -638,8 +638,10 @@ export interface AiChatHandlerConfig {
     expectedToolFailureCount: number;
     /**
      * Set when this request continued a turn instead of starting one:
-     * answered approvals (`'approval'`) or reported UI outcomes
-     * (`'ui-outcome'`). `onFinish` fires once per request, so count turns
+     * answered approvals (`'approval'`), reported UI outcomes
+     * (`'ui-outcome'`) or the user's "Continue" after a budget stop
+     * (`'budget'`, a fresh budget; the runtime metrics report it as a
+     * finished turn). `onFinish` fires once per request, so count turns
      * by the requests without it. A UI tool turn with the outcome protocol
      * takes at least two requests (one more with `'ui-outcome'` per reported
      * step, at most `MAX_UI_OUTCOME_CONTINUATIONS`), and each answered
@@ -653,7 +655,7 @@ export interface AiChatHandlerConfig {
      * }
      * ```
      */
-    continuation?: 'approval' | 'ui-outcome';
+    continuation?: 'approval' | 'ui-outcome' | 'budget';
     /**
      * Set when the request ended to wait for the outcome of a UI action; a
      * continuation with `continuation: 'ui-outcome'` follows (unless the

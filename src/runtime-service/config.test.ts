@@ -55,6 +55,13 @@ describe("runtime service trust configuration", () => {
       expect(() => parseRuntimeConfig(c)).toThrow();
     }
   });
+  it("defaults the limits to the embedded local limits", () => {
+    expect(parseRuntimeConfig(raw()).limits).toMatchObject({
+      maxModelSteps: 10, maxToolCalls: 8, totalTimeoutMs: 60_000, maxInputTokens: 60_000,
+      maxOutputTokens: 4000, maxEstimatedCostUsd: 0.5,
+    });
+    expect(parseRuntimeConfig({ ...raw(), limits: {} }).limits).toMatchObject({ maxModelSteps: 10, maxInputTokens: 60_000 });
+  });
   it("accepts limits.approvalLookups strictly (or false) and leaves it unset by default", () => {
     expect(parseRuntimeConfig(raw()).limits.approvalLookups).toBeUndefined();
     const withLookups = (value: unknown) => ({ ...raw(), limits: { approvalLookups: value } });

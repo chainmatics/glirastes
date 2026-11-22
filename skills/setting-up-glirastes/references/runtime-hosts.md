@@ -110,6 +110,11 @@ default 8, `read_result` included; capped by agent revision and policy) the
 remaining calls get `Tool call not executed: the limit of 8 tool calls per
 turn is reached (8 used). ...`, the chat shows `Tool call limit for this turn
 reached (8).` and the turn ends with one final answer.
+A turn that reaches `limits.maxModelSteps` (default 10, before 0.24 it was 6)
+or `limits.maxInputTokens` (default 60,000, before 40,000) ends with a stop
+notice that lists what was done and what is open; the chat's "Continue" button
+continues it without repeating a write call (see `docs/managed-runtime-sync.md`,
+"Continuing a stopped turn"). Set both limits explicitly to keep the old values.
 
 The identity endpoint validates the selected cookie/bearer credential and returns
 exactly `{"userId":"42","tenantId":"business-a","roles":["editor"]}`.

@@ -4,12 +4,19 @@ export type LocalLimits = Partial<Omit<ExecutionBudget, 'delegation'>> & {
   delegation?: Partial<DelegationBudget>;
 };
 
+/**
+ * Defaults of the local budget. 10 model steps: a typical read-plus-planning
+ * request (a plan, three reads, plan updates, the answer) needs 7 to 8.
+ * Built-in tools such as `update_plan` count no tool call, so 8 tool calls
+ * stay enough for it. 60,000 input tokens: every step sends the turn again,
+ * so 10 steps of such a request use about 50,000 (6 steps measured 27,000).
+ */
 export const DEFAULT_LOCAL_LIMITS: ExecutionBudget = {
-  maxModelSteps: 6,
+  maxModelSteps: 10,
   maxToolCalls: 8,
   totalTimeoutMs: 60_000,
   toolTimeoutMs: 15_000,
-  maxInputTokens: 40_000,
+  maxInputTokens: 60_000,
   maxOutputTokens: 4_000,
   maxEstimatedCostUsd: 0.5,
   maxRepeatedFingerprint: 3,

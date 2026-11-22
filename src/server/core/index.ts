@@ -1047,6 +1047,8 @@ export function toolToAiTool(
 
   return {
     _toolId: tool.id,
+    // Strictly read-only (a GET or HEAD call that needs no approval): a budget continuation may run it again.
+    ...(method !== undefined && readOnly && !requiresApproval ? { _readOnly: true as const } : {}),
     // A UI tool whose own actions take part in the outcome protocol (`defineUiTool({ outcome: 'confirm' })`).
     ...(tool.uiTool?.outcome === 'confirm' ? { _uiOutcome: 'confirm' as const } : {}),
     // Declared identity, for history compaction, hideIds and the browser (field names only).

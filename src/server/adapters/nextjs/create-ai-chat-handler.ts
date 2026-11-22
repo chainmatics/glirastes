@@ -76,8 +76,22 @@ import {
   withStopNotice,
   type BudgetStopLimit,
   type BudgetStopTexts,
+  type StopNotice,
 } from './budget-stop-notice.js';
 import { finalSummaryInstruction } from '../../../runtime/tool-denial.js';
+import { createExecutionFingerprint } from '../../../runtime/fingerprint.js';
+import {
+  blockedCallFingerprints,
+  budgetContinuationInstruction,
+  budgetStopPart,
+  budgetStopSummary,
+  readBudgetContinuation,
+  REPEATED_WRITE_REFUSAL,
+  turnToolCallsBeforeLatestStop,
+  turnToolCallsOf,
+  withBudgetContinuationGuard,
+  type TurnToolCall,
+} from './budget-continuation.js';
 import type { BudgetLimitState } from '../../../runtime/budget.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
 import { assertToolMiddleware, type ToolMiddleware } from '../../core/tool-middleware.js';
@@ -89,6 +103,7 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   type UIMessage,
+  type UIMessageChunk,
 } from 'ai';
 import type {
   AiChatErrorInfo,
@@ -584,8 +599,34 @@ function orderToolsForCaching(
 interface RequestTurnState {
   /** Set when the client reports UI outcomes and the handler's mode is not `off`. */
   uiOutcomes?: UiOutcomePlan;
-  /** Set when the request continues a turn. */
-  continuation?: TurnContinuation;
+  /** Set when the request continues a turn: approvals, UI outcomes, or a budget stop (`'budget'`, local only). */
+  continuation?: TurnContinuation | 'budget';
+  /**
+   * Whether a stop of this request may be offered as continuable: the
+   * built-in stream handler serves it and the request is no direct command.
+   */
+  budgetContinuable?: boolean;
+}
+
+/**
+ * Whether a tool of the turn only reads: a GET or HEAD call that needs no
+ * approval (`_readOnly` of the converted tool); in a managed turn the pinned
+ * manifest and policy say so (`safe-read`, no approval, GET or HEAD).
+ * Everything else, also an unknown tool, counts as a write.
+ */
+function isReadOnlyTurnTool(ctx: StreamHandlerContext, name: string): boolean {
+  const tool = ctx.tools[name] as { _toolId?: unknown; _readOnly?: unknown } | undefined;
+  if (!tool) return false;
+  const snapshot = ctx.managedTurn?.snapshot;
+  // Unmanaged: the converted tool says it (GET or HEAD, no approval).
+  if (!snapshot) return tool._readOnly === true;
+  // Managed: the pinned revisions decide; the approval follows the policy.
+  const entry = snapshot.manifestRevision.tools.find((candidate) => candidate.toolId === tool._toolId);
+  if (!entry) return false;
+  const policy = snapshot.policyRevision.toolPolicies.find((candidate) => candidate.toolId === entry.toolId);
+  const method = (entry as { method?: string }).method?.toUpperCase();
+  return entry.riskClass === 'safe-read' && (method === 'GET' || method === 'HEAD')
+    && (!policy || (policy.riskClass === 'safe-read' && !policy.requiresApproval));
 }
 
 /**
@@ -633,8 +674,34 @@ async function defaultStreamHandler(
   if (Object.keys(builtinTools).length > 0) {
     Object.assign(vercelTools, wrapToolsForVercelAi(builtinTools));
   }
+  // Calls of the turn so far (earlier requests of it); local only.
+  const turnCalls = turnToolCallsOf(ctx.messages);
+  const builtinSet = new Set<string>([...builtinNames, ...NON_DOMAIN_TOOL_NAMES]);
+  const isReadOnly = (name: string) => isReadOnlyTurnTool(ctx, name);
+  // Once the handler stopped this turn at a limit, no later request of it (the continuation,
+  // an approval or UI outcome after it) runs a write call attempted before the latest stop again (fail closed).
+  const callsBeforeStop = turnToolCallsBeforeLatestStop(ctx.messages);
+  const stoppedTurn = request.continuation === 'budget' || callsBeforeStop.length > 0;
+  const turnTracker = ctx.managedTurn?.tracker;
+  const guardedTools = stoppedTurn
+    ? withBudgetContinuationGuard(
+        vercelTools,
+        blockedCallFingerprints(callsBeforeStop.filter((call) => !builtinSet.has(call.toolName)), isReadOnly),
+        isReadOnly,
+        // A refusal is a tool error of the turn: maxConsecutiveErrors and loop detection see it.
+        turnTracker
+          ? (name, input) => {
+              const toolId = (ctx.tools[name] as { _toolId?: unknown } | undefined)?._toolId;
+              turnTracker.recordFingerprint(createExecutionFingerprint({
+                toolId: typeof toolId === 'string' ? toolId : name, arguments: input ?? null, result: REPEATED_WRITE_REFUSAL,
+              }));
+              turnTracker.recordError();
+            }
+          : undefined,
+      )
+    : vercelTools;
   // The outcome marker goes on last, after every wrapper shaped the result.
-  const markedTools = uiOutcomes ? withUiOutcomeMarkers(vercelTools, ctx.tools, uiOutcomes) : vercelTools;
+  const markedTools = uiOutcomes ? withUiOutcomeMarkers(guardedTools, ctx.tools, uiOutcomes) : guardedTools;
   const orderedTools = ctx.toolDiscovery
     ? orderToolsForCaching(markedTools, ctx.toolDiscovery.activeToolNames())
     : markedTools;
@@ -643,15 +710,21 @@ async function defaultStreamHandler(
   // Fixed notes after the app's own prompt: no ids in answers, and with
   // discovery that the offered tools are a start set `find_tools` widens.
   const uiOutcomeNote = uiOutcomes && !uiOutcomes.capReached ? [UI_OUTCOME_SYSTEM_NOTE] : [];
+  // A later request of a stopped turn (approval, UI outcome after a continuation): the same
+  // instruction as the continuation's, in the system prompt so the resumed history stays as it is.
+  const stoppedTurnNote = stoppedTurn && request.continuation !== 'budget'
+    ? [budgetContinuationInstruction(callsBeforeStop, builtinSet)]
+    : [];
+  const notes = [...uiOutcomeNote, ...stoppedTurnNote];
   const systemPrompt = ctx.systemPrompt
     ? [
         ctx.systemPrompt,
         ...(hideIds ? [HIDE_IDS_PROMPT] : []),
         ...(ctx.toolDiscovery ? [FIND_TOOLS_PROMPT] : []),
-        ...uiOutcomeNote,
+        ...notes,
       ].join('\n\n')
-    // The outcome note holds without an app prompt too: the request ends before the model could answer.
-    : uiOutcomeNote[0] ?? ctx.systemPrompt;
+    // The notes hold without an app prompt too.
+    : notes.length > 0 ? notes.join('\n\n') : ctx.systemPrompt;
   const idLabels: IdLabels = new Map();
   // Declared identity of the turn's tools (field names only): history, hideIds and the browser.
   const toolEntities = entityDeclarationsOfTools(ctx.tools);
@@ -685,9 +758,13 @@ async function defaultStreamHandler(
       : { maxContextMessages: ctx.maxContextMessages, history: ctx.history, ...(toolEntities ? { entities: toolEntities } : {}), ...historyExtras },
   );
   // User role, not system: memory is background a user could have written.
-  const modelMessages = ctx.memory?.preamble
+  const withMemory = ctx.memory?.preamble
     ? [{ role: 'user', content: ctx.memory.preamble }, ...preparedMessages]
     : preparedMessages;
+  // A budget continuation: what already ran and to do only the open steps (this request only, never part of the chat).
+  const modelMessages = request.continuation === 'budget'
+    ? [...withMemory, { role: 'user', content: budgetContinuationInstruction(callsBeforeStop, builtinSet) }]
+    : withMemory;
   // Executed approvals are visible output for the stream and the metric alike.
   const resumedApprovals = resumesToolApprovals(modelMessages);
   const promptMessages = promptCaching
@@ -748,7 +825,11 @@ async function defaultStreamHandler(
    * limit without a final answer: stopped without a summary call, a summary
    * that failed or said nothing, or the turn's time limit.
    */
-  const stopNotice = (terminal: 'finish' | 'error' | 'abort', hadText: boolean): string | undefined => {
+  const stopNotice = (
+    terminal: 'finish' | 'error' | 'abort',
+    hadText: boolean,
+    requestCalls: TurnToolCall[],
+  ): StopNotice<UIMessageChunk> => {
     let limits: ReadonlyArray<BudgetStopLimit> | null = null;
     if (terminal === 'abort') {
       // Only the turn timeout aborts a request the browser did not cancel.
@@ -762,7 +843,23 @@ async function defaultStreamHandler(
     } else if (finalSummary && !finalSummary.answered) {
       limits = finalSummary.budget;
     }
-    return limits && limits.length > 0 ? budgetStopText(limits, budgetStopTexts, ctx.locale, hadText) : undefined;
+    if (!limits || limits.length === 0) return undefined;
+    const stop = budgetStopPart(ctx.messages, request.budgetContinuable === true);
+    // The calls of earlier requests of the turn, then this request's (a call resumed here replaces its earlier entry).
+    const ids = new Set(requestCalls.flatMap((call) => (call.id ? [call.id] : [])));
+    const calls = [...turnCalls.filter((call) => !call.id || !ids.has(call.id)), ...requestCalls];
+    const labels = ctx.toolPresentation?.tools;
+    const summary = budgetStopSummary({
+      calls,
+      labelOf: (name) => labels?.[name]?.label ?? name,
+      hiddenNames: builtinSet,
+      texts: budgetStopTexts,
+      continuable: stop.data.continuable,
+    });
+    return {
+      text: [budgetStopText(limits, budgetStopTexts, ctx.locale, hadText), summary].join('\n\n'),
+      before: [stop as UIMessageChunk],
+    };
   };
 
   let providerErrorReported = false;
@@ -1634,11 +1731,20 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (clientActions) toolContext.runtime = { ...toolContext.runtime, clientActions };
       const requestStart = Date.now();
       const turnId = deriveSessionId(messages);
-      // A request without a new user message continues the turn (approvals, UI outcomes).
-      const continuation = directCommand ? undefined : turnContinuationOf(requestMessages);
+      // "Continue" after a budget stop: only for a history that ends with a continuable stop (fail closed).
+      const budgetContinuation = directCommand ? undefined : readBudgetContinuation(body.value, requestMessages);
+      if (budgetContinuation === 'invalid' || (budgetContinuation && customStreamHandler)) {
+        return new Response(
+          JSON.stringify({ error: 'Nothing to continue' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      // A request without a new user message continues the turn (approvals, UI outcomes, a budget stop).
+      const continuation = directCommand ? undefined : budgetContinuation ?? turnContinuationOf(requestMessages);
       // Only the built-in stream handler marks, stops and explains; others get no marker.
       const requestState: RequestTurnState = {
         ...(continuation ? { continuation } : {}),
+        budgetContinuable: !customStreamHandler && !directCommand,
         ...(!customStreamHandler && uiActionOutcomes !== 'off' && readUiOutcomesFlag(body.value)
           ? {
               uiOutcomes: {
@@ -1721,7 +1827,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             sink: metrics,
             snapshot: managedTurn?.snapshot,
             startedAtMs: requestStart,
-            ...(continuation
+            // A budget continuation is a request the user asked for: a finished turn for the
+            // Platform, whose contract knows only approval and UI outcome continuations.
+            ...(continuation && continuation !== 'budget'
               ? {
                   continuation,
                   // Keyed like approvals: the configured approval secret is
@@ -1841,8 +1949,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // through the manifest-checked index.
         const builtinToolNames = handlerBuiltinNames.filter((name) =>
           ALWAYS_ON_BUILTINS.includes(name) || initialToolNames.includes(name));
-        // A UI outcome continuation keeps the tools the turn already called, also those `find_tools` added.
-        if (continuation === 'ui-outcome') {
+        // A UI outcome or budget continuation keeps the tools the turn already called, also those `find_tools` added.
+        if (continuation === 'ui-outcome' || continuation === 'budget') {
           initialToolNames = [...new Set([...initialToolNames, ...currentTurnToolNames(requestMessages)])];
         }
         if (!managedTurn) {

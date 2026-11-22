@@ -128,10 +128,13 @@ async function runTurn(options: {
   return { chunks, model, events, onFinish, messages };
 }
 
-/** The texts of the stop notice in the stream. */
+/** The closing sentence of the stop notice (its first paragraph; the done / open summary follows). */
+const closingOf = (text: unknown) => String(text).split('\n\n')[0];
+
+/** The closing sentences of the stop notices in the stream. */
 const notices = (chunks: Part[]) => chunks
   .filter((chunk) => chunk.type === 'text-delta' && chunk.id === NOTICE_ID)
-  .map((chunk) => chunk.delta);
+  .map((chunk) => closingOf(chunk.delta));
 
 /** The assistant message the browser keeps from the stream. */
 async function assistantMessage(chunks: Part[]): Promise<UIMessage> {
@@ -169,7 +172,14 @@ describe('the pilot: paging through a result until the input token budget is use
     const expected = notice('the limit for this request was reached (input tokens: 40,000)');
     expect(notices(turn.chunks)).toEqual([expected]);
     const message = await assistantMessage(turn.chunks);
-    expect(textsOf(message).at(-1)).toBe(expected);
+    expect(closingOf(textsOf(message).at(-1))).toBe(expected);
+    // What ran and what is open follow the closing sentence.
+    expect(textsOf(message).at(-1)).toBe([
+      expected,
+      'Done so far: tasks_list.',
+      'Still open: your question is not answered yet.',
+      'Use the button below to go on with the open steps.',
+    ].join('\n\n'));
     expect(textsOf(message).at(-2)).toBe(INTERIM);
     expect(JSON.stringify(turn.chunks)).not.toContain('Should not run.');
     // Status, metrics and onFinish are unchanged.
@@ -277,7 +287,7 @@ describe('a turn stopped at a tool limit, with the final summary call', () => {
     const errorAt = turn.chunks.findIndex((chunk) => chunk.type === 'error');
     expect(errorAt).toBeGreaterThan(noticeAt);
     const message = await assistantMessage(turn.chunks);
-    expect(textsOf(message).at(-1)).toBe(notice('the limit for this request was reached (tool calls: 2)'));
+    expect(closingOf(textsOf(message).at(-1))).toBe(notice('the limit for this request was reached (tool calls: 2)'));
   });
 });
 

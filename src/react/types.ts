@@ -99,6 +99,13 @@ export interface ChatTransport {
   addToolOutput?(output: { tool: string; toolCallId: string; output: unknown }): void | PromiseLike<void>;
   /** Sends the history again without a new message (a turn continued on a page the UI action loaded). */
   continueTurn?(): void | PromiseLike<void>;
+  /**
+   * Sends the history again without a new message and with
+   * `glirastesContinuation: 'budget'` in the body: continues a turn the
+   * server stopped at a limit (the "Continue" button under its stop notice).
+   * Without it the chat offers no button.
+   */
+  continueAfterBudgetStop?(): void | PromiseLike<void>;
   /** Called by the provider: whether it reports outcomes through this transport. */
   setUiOutcomeReporting?(enabled: boolean): void;
   /**
@@ -799,6 +806,12 @@ export interface MessagePartNodes {
   text: ReactNode;
   /** Tool result blocks, custom renderers and clarification cards. */
   toolResults: ReactNode;
+  /**
+   * The "Continue" button under a stop notice of the built-in chat handler
+   * (`data-budget-stop`, continuable) on the latest answer; null otherwise.
+   * Rendered before the footer.
+   */
+  continuation?: ReactNode;
   /**
    * The answer's footer (`messageFooter`: copy, sources, duration, stop),
    * rendered last; null when nothing shows. Always set by the SDK.

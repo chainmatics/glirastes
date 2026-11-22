@@ -13,7 +13,7 @@ export const deChatLocale: ChatLocale = {
   rejectButton: 'Abbrechen',
   approveAllButton: 'Alle ausführen',
   rejectAllButton: 'Alle abbrechen',
-  continueButton: 'Fortfahren',
+  continueButton: 'Weitermachen',
   dismissButton: 'Schließen',
   cancelButton: 'Abbrechen',
   confirmButton: 'Bestätigen',
