@@ -85,6 +85,15 @@ describe('history column in full screen', () => {
     expect(header.querySelector('[data-component="session-switcher"]')).toBeNull();
   });
 
+  it('the full-screen dialog contains the chat column and the conversation', async () => {
+    await mount();
+    await go('fullscreen');
+    const dialog = screen.getByRole('dialog', { name: 'AI assistant' });
+    expect(dialog.contains(column())).toBe(true);
+    expect(dialog.contains(frameEl())).toBe(true);
+    expect(column()!.hasAttribute('role')).toBe(false);
+  });
+
   it('the toggle hides and shows the column', async () => {
     await mount();
     await go('fullscreen');
@@ -141,12 +150,16 @@ describe('history column in full screen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
     expect(column()!.hidden).toBe(false);
     expect(column()!.style.position).toBe('absolute');
+    expect(column()!.getAttribute('role')).toBe('dialog');
+    expect(column()!.getAttribute('aria-modal')).toBe('true');
+    expect(column()!.getAttribute('aria-label')).toBe('Chats');
     await frame();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'New chat' }));
     expect(frameEl().hasAttribute('inert')).toBe(true);
     expect(document.querySelector('[data-element="history-backdrop"]')).not.toBeNull();
     fireEvent.click(document.querySelector('[data-element="history-backdrop"]')!);
     expect(column()!.hidden).toBe(true);
+    expect(column()!.hasAttribute('role')).toBe(false);
     expect(frameEl().hasAttribute('inert')).toBe(false);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Show chats' }));
   });

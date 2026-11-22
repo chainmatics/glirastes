@@ -38,7 +38,7 @@ async function mount(child: React.ReactNode = <textarea aria-label="Draft" />) {
   </AssistantLayoutProvider>);
   await frame();
 }
-const shell = () => screen.getByRole('complementary', { hidden: true });
+const shell = () => document.querySelector<HTMLElement>('[data-component="assistant-shell"]')!;
 const main = () => document.querySelector<HTMLElement>('[data-assistant-main]')!;
 const escape = (target: Element) => fireEvent.keyDown(target, { key: 'Escape' });
 
@@ -52,7 +52,10 @@ describe('full screen in the assistant shell', () => {
     expect(aside.style.inset).toBe('0px');
     const dialog = screen.getByRole('dialog', { name: 'AI assistant' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(dialog.getAttribute('data-element')).toBe('frame');
+    // The whole shell is the dialog, so nothing interactive in full screen sits outside it.
+    expect(dialog).toBe(aside);
+    expect(dialog.contains(document.querySelector('[data-element="frame"]'))).toBe(true);
+    expect(document.querySelector('[data-element="frame"]')!.hasAttribute('role')).toBe(false);
     expect(document.querySelector('[data-component="assistant-shell-resize"]')).toBeNull();
     expect(document.querySelector('[data-resize-edge]')).toBeNull();
     expect(document.querySelector('[data-component="assistant-shell-window-handle"]')).toBeNull();
@@ -168,6 +171,8 @@ describe('full screen in the assistant shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
     expect(state()).toMatchObject({ open: true, mode });
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('complementary', { name: 'AI assistant' })).toBe(shell());
+    expect(shell().hasAttribute('aria-modal')).toBe(false);
     const frameEl = document.querySelector('[data-element="frame"]')!;
     expect(frameEl.hasAttribute('role')).toBe(false);
     expect(frameEl.hasAttribute('aria-modal')).toBe(false);

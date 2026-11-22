@@ -567,7 +567,9 @@ export function AssistantShell({
 
   return <>
     {bubble && showBubble && button({ action: 'bubble', label: labels.title, title: withShortcut(labels.title, shortcuts.toggle), pressed: ui.open, onClick: ui.toggleChat, children: icons.assistant })}
+    {/* In full screen the whole shell is the dialog, so the chat column and the conversation are both inside it. */}
     <aside ref={shell} aria-label={labels.title} data-component="assistant-shell" data-assistant-shell data-mode={ui.mode}
+      {...(fullscreen ? { role: 'dialog', 'aria-modal': true } : {})}
       data-collapsed={(sidebar && ui.collapsed) || undefined} data-unstyled={chat?.unstyled || undefined}
       className={cx(classNames.root, sidebar ? classNames.sidebar : floating && classNames.floating)}
       style={{
@@ -592,6 +594,7 @@ export function AssistantShell({
         {button({ action: 'close', label: labels.close, title: labels.close, onClick: ui.closeChat, children: icons.close })}
       </div>}
       {hasPane && <div ref={historyRef} data-element="history" data-drawer={drawer || undefined} id={historyId} hidden={!historyShown}
+        {...(drawer && drawerOpen ? { role: 'dialog', 'aria-modal': true, 'aria-label': labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history } : {})}
         style={{
           display: historyShown ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, minWidth: 0, overflowY: 'auto', boxSizing: 'border-box',
           ...(drawer ? { position: 'absolute', top: 0, bottom: 0, left: 0, width: 'min(280px, calc(100% - 48px))', zIndex: 4 } : { flex: '0 0 260px', width: 260 }),
@@ -607,8 +610,7 @@ export function AssistantShell({
       </div>}
       {drawer && drawerOpen && <div data-element="history-backdrop" aria-hidden="true"
         style={{ position: 'absolute', inset: 0, zIndex: 3 }} onClick={() => closeDrawer('toggle')} />}
-      <div ref={frameRef} data-element="frame" style={{ display: sidebar && ui.collapsed ? 'none' : 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0, ...(hasPane ? { minWidth: 0 } : {}) }}
-        {...(fullscreen ? { role: 'dialog', 'aria-modal': true, 'aria-label': labels.title } : {})}>
+      <div ref={frameRef} data-element="frame" style={{ display: sidebar && ui.collapsed ? 'none' : 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0, ...(hasPane ? { minWidth: 0 } : {}) }}>
         <header data-element="header" className={classNames.header}
           style={floating ? { cursor: 'grab', touchAction: 'none' } : undefined}
           {...(floating ? { tabIndex: 0, 'aria-label': labels.windowHeader, ...dragHandleProps } : {})}>

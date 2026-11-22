@@ -61,8 +61,8 @@ opens detached first.
   in the order of `modes`, arrow keys, Escape closes only the menu) instead of
   detach/dock. One entry (`modes={['sidebar']}`) removes the layout control
   and the layout shortcut. A stored layout outside `modes` falls back.
-- Full screen is a modal: the frame is `role="dialog" aria-modal="true"`
-  named after `labels.title`, the page is inert and does not scroll, Tab
+- Full screen is a modal: the shell (chat column and conversation) is
+  `role="dialog" aria-modal="true"` named after `labels.title`, the page is inert and does not scroll, Tab
   stays inside. Escape (when no completion list, menu, rename or dialog owns
   it), `restoreMode()` and alt+shift+D return to `defaultMode`; mod+I closes,
   and the next opening uses `defaultMode` again. `setMode('fullscreen')` never
@@ -82,7 +82,8 @@ opens detached first.
 In full screen a chat that keeps several conversations gets a 260 px column
 left of the conversation with `SessionSwitcher variant="list"`; the header
 then names the open chat. A header button hides and shows the column. Below
-900 px viewport width it is a drawer: focus moves into it, the conversation is
+900 px viewport width it is a drawer (`role="dialog"`, named after
+`labels.history`): focus moves into it, the conversation is
 inert, and Escape, the backdrop or a pick close it (a pick focuses the
 composer). `historyPane={false}` removes the column, any node replaces it:
 
