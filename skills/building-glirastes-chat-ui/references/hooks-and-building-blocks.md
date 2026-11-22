@@ -92,13 +92,49 @@ Defaults keep today's markup; everything below is opt-in.
   `turn-notice` right after its question. `'latest'` is the behaviour
   before 0.20.0 (latest turn only). An app that draws its own notice sets
   `'latest'` or `components.TurnNotice: () => null`, else both show.
+  `hiddenTools` (default `[]`) lists model-facing tool names (`'ui_action_toast'`,
+  `'ui_action_refresh'`) that never show: no step, no summary count, no
+  section split, and they do not hide the typing indicator; the tool still
+  runs and its UI action still fires.
+- Message footer: `messageFooter` (`true`, or `MessageFooterConfig` with
+  `copy` / `sources` / `duration` / `stop`, each true once the footer is on;
+  default off) renders `<div data-component="message-footer"
+  data-state="done|running">` last in each assistant bubble. Done: `copy`
+  writes the rendered answer as HTML with inline styles (pastes into
+  Word/Outlook; lists, tables, links; mention chips keep their names) plus
+  plain text, falling back to text only, and shows "Copied" / "Copy failed"
+  (`aria-live`); `sources` is a toggle (`aria-expanded`, `aria-controls`)
+  over the https links the answer cites (its Markdown links, AI SDK
+  `source-url` parts, tool output `sources` / `citations`; no credentials,
+  deduplicated, at most 20, opened with `noopener noreferrer`); `duration`
+  shows "Done in 3.2 s" under the last answer of a completed turn from
+  `TurnOutcome.durationMs` (the time the turn's requests ran, approval waits
+  excluded, measured in the browser and stored with the outcome). Running:
+  the elapsed time (`aria-hidden`) and a stop button (`stopButton`). Locale
+  keys `copyMessageLabel`, `copiedMessageLabel`, `copyMessageFailedLabel`,
+  `messageSourceOneLabel`, `messageSourcesLabel` (`{count}`),
+  `messageDurationLabel` (`{duration}`). A custom `MessageParts` that does not
+  render `children` places `footer` (`MessagePartNodes.footer`) itself.
+  Nothing of it leaves the browser.
+- Follow-ups under the answer: `suggestions.placement: 'message'` (default
+  `'composer'`, the rotating `SuggestionBar`) shows the latest answer's
+  follow-ups (`suggest_followups`, needs `followups` on the server, or its
+  trailing suggestion list; `suggestions.count`, default 3) as buttons in a
+  `role="group"` headed `followUpsLabel` ("Ask next") inside the footer, also
+  without `messageFooter`. A click sends. Hidden while a turn runs, an
+  approval or clarification is open, after a stop, error or safety stop,
+  under older answers and with `enabled: false`; disabled while the
+  composer is locked. The `SuggestionBar` and `staticChips` show nowhere
+  then; use `composer.starters` for an empty chat. The bar itself honours
+  `enabled: false` and shows only the latest turn's follow-ups (else
+  `staticChips`).
 - `components.TurnNotice` receives `{ text, status, placement, outcome? }` (`status` is a
   `TurnNoticeStatus`)
   (`placement` is `'log'` inside the log, `'message'` outside; `outcome` the
   turn's `TurnOutcome` when one is recorded). The default
   is exported as `TurnNotice` for wrapping.
 - Turn outcomes: `useTurnOutcome(message)` returns the `TurnOutcome`
-  (`{ userMessageId, status, reason, at }`; `TurnOutcomeStatus` `completed` |
+  (`{ userMessageId, status, reason, at, durationMs? }`; `TurnOutcomeStatus` `completed` |
   `aborted` | `safety-stop` | `error`, `TurnOutcomeReason` `finished` |
   `stopped` | `send-now` | `request-failed` | `pipeline`) of the turn a user
   or assistant message belongs to, or null; `useTurnOutcomes()` all of them
@@ -124,7 +160,7 @@ Defaults keep today's markup; everything below is opt-in.
   end. A throw or a rejected promise is caught. Details: `docs/concepts.md`.
 - `components.MessageParts` arranges the parts inside the bubble root and
   receives `message`, the nodes (`MessagePartNodes`) `plan`, `activity`, `notice`, `attachments`,
-  `text`, `toolResults` (each `null` when absent) and `children` (all of them
+  `text`, `toolResults`, `footer` (each `null` when absent) and `children` (all of them
   in the default order) and `turnOutcome`. `useMessageParts(message)` returns the same nodes
   plus `visible` and `turnOutcome` for a custom `MessageBubble`.
 - `parts` (in `MessagePartsProps` and from `useMessageParts`): every part of
