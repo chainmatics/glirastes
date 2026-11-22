@@ -16,6 +16,12 @@ export interface ComposerDraftController {
   load(sessionId: string): Promise<ComposerDraft | null>;
   /** Writes pending changes to storage at once. */
   flush(): void;
+  /**
+   * Drops the chat's draft from memory and cancels its pending write (the
+   * store removes the stored one). With `gone` (chat removed), later changes
+   * for it are ignored until the chat is shown again (`load`).
+   */
+  forget(sessionId: string, options?: { gone?: boolean }): void;
 }
 
 /** Writes wait this long after the last change. */
@@ -49,6 +55,7 @@ export function createComposerDraftController(
 ): ComposerDraftController {
   const memory = new Map<string, ComposerDraft>();
   const dirty = new Map<string, ComposerDraft | null>();
+  const gone = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const flush = () => {
@@ -72,6 +79,7 @@ export function createComposerDraftController(
   return {
     get: (sessionId) => memory.get(sessionId),
     set(sessionId, draft) {
+      if (gone.has(sessionId)) return;
       const next = normalize(draft);
       if (same(memory.get(sessionId), next)) return;
       if (next) memory.set(sessionId, next);
@@ -82,6 +90,7 @@ export function createComposerDraftController(
       timer = setTimeout(flush, DRAFT_SAVE_DELAY_MS);
     },
     async load(sessionId) {
+      gone.delete(sessionId);
       const held = memory.get(sessionId);
       if (held) return held;
       const target = storage();
@@ -98,5 +107,14 @@ export function createComposerDraftController(
       return memory.get(sessionId) ?? null;
     },
     flush,
+    forget(sessionId, options) {
+      memory.delete(sessionId);
+      dirty.delete(sessionId);
+      if (options?.gone) gone.add(sessionId);
+      if (dirty.size === 0 && timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
   };
 }

@@ -2262,6 +2262,8 @@ export function AiChatProvider({
     if (streamActiveRef.current) requestTurnRef.current = { sessionId: null, userMessageId: null };
     setLastRejection(null);
     setMessages([]);
+    // A pending draft write must not bring the cleared chat's draft back.
+    drafts.forget(activeSessionId);
     void Promise.resolve(sessionRef.current?.clear?.(activeSessionId));
     processedToolCallsRef.current.clear();
     handledApprovalIdsRef.current.clear();
@@ -2395,6 +2397,8 @@ export function AiChatProvider({
       if (!cfg?.remove) return;
       sessionMutationRef.current = true;
       setIsSessionMutating(true);
+      // Before the store call: a pending draft write must not land after the delete.
+      drafts.forget(id, { gone: true });
       try {
         await cfg.remove(id);
         // Re-fetch first so the fallback target reflects reality

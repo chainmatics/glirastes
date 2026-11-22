@@ -6,7 +6,8 @@ import { AiChatPanel } from '../../components/ai-chat-panel.js';
 import { MentionInput } from '../../components/mention-input.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type { ChatCompletionProvider, ChatMessage, ChatTransport, ComposerDraft, ComposerDraftStorage, SessionConfig } from '../../types.js';
-import { createLocalSessionStore } from '../../utils/local-session-store.js';
+import { clearLocalSessionStore, createLocalSessionStore } from '../../utils/local-session-store.js';
+import { useChatContext } from '../../provider/chat-context.js';
 
 function transport(): ChatTransport {
   return {
@@ -41,8 +42,15 @@ function Host({ chat, session, completion = true, shown = true, initialValue }: 
   return (
     <AiChatProvider transport={chat} session={session} {...(completion ? { completionProviders: providers } : {})}>
       {shown && (initialValue === undefined ? <AiChatPanel /> : <MentionInput initialValue={initialValue} />)}
+      <Actions />
     </AiChatProvider>
   );
+}
+
+let actions: { removeSession: (id: string) => Promise<void>; clear: () => void } | null = null;
+function Actions() {
+  actions = useChatContext();
+  return null;
 }
 
 const editor = () => screen.getByRole('textbox');
@@ -269,5 +277,53 @@ describe('composer drafts in storage', () => {
     typeInto(editor(), 'schon getippt');
     await act(async () => { resolve({ text: 'alter Entwurf' }); });
     expect(text()).toBe('schon getippt');
+  });
+});
+
+describe('forgotten drafts stay gone', () => {
+  const drafted = (storage: ReturnType<typeof memoryStorage>) => [...storage.data.keys()].filter((key) => key.includes(':draft:'));
+
+  async function typed(storage: ReturnType<typeof memoryStorage>) {
+    const chat = transport();
+    let next = 0;
+    const session = createLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null, createId: () => `s${++next}` });
+    const view = render(<Host chat={chat} session={session} />);
+    await ready();
+    return { view, session };
+  }
+
+  it('a keystroke and then deleting the chat within 300 ms stores nothing', async () => {
+    const storage = memoryStorage();
+    const { session } = await typed(storage);
+    const created = await session.create!();
+    typeInto(editor(), 'gleich gelöscht');
+    await act(async () => { await actions!.removeSession('default'); });
+    await pause(400);
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    expect(drafted(storage)).toEqual([]);
+    expect(created.id).toBe('s1');
+  });
+
+  it('a keystroke and then clearing the chat within 300 ms stores nothing', async () => {
+    const storage = memoryStorage();
+    await typed(storage);
+    typeInto(editor(), 'gleich geleert');
+    act(() => { actions!.clear(); });
+    await pause(400);
+    expect(drafted(storage)).toEqual([]);
+  });
+
+  it('a keystroke, then clearLocalSessionStore, then unmount stores nothing', async () => {
+    const storage = memoryStorage();
+    const { view } = await typed(storage);
+    typeInto(editor(), 'abgemeldet');
+    await clearLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    view.unmount();
+    await pause(400);
+    expect(drafted(storage)).toEqual([]);
+    // A store created after the sign-out keeps drafts again.
+    const fresh = createLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    await fresh.draft!.save('default', { text: 'neu' });
+    expect(drafted(storage)).toEqual(['app:u1:draft:default']);
   });
 });

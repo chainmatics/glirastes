@@ -42,6 +42,14 @@ export interface LocalSessionStoreOptions {
 }
 
 const DEFAULT_ID = 'default';
+
+/**
+ * Bumped by `clearLocalSessionStore` per `storageKey`: a store created before
+ * the clear writes no drafts any more, so a pending write of the signed-out
+ * user cannot bring a draft back.
+ */
+const generations = new Map<string, number>();
+const generationOf = (storageKey: string) => generations.get(storageKey) ?? 0;
 const TITLE_LENGTH = 40;
 
 function browserStorage(): KeyValueStorage | null {
@@ -114,12 +122,16 @@ function isSummary(value: unknown): value is SessionSummary & { createdAt: numbe
     && typeof entry.createdAt === 'number' && typeof entry.updatedAt === 'number';
 }
 
-/** Forgets every chat of this `storageKey` (every key starting with `${storageKey}:`), files included, e.g. on sign-out. */
+/**
+ * Forgets every chat of this `storageKey` (every key starting with `${storageKey}:`), files included, e.g. on sign-out.
+ * Stores created before the call write no drafts any more; create a new one for the next sign-in.
+ */
 export async function clearLocalSessionStore(options: {
   storageKey: string;
   storage?: KeyValueStorage | null;
   attachmentStore?: AttachmentBlobStore | null;
 }): Promise<void> {
+  generations.set(options.storageKey, generationOf(options.storageKey) + 1);
   const storage = options.storage === undefined ? browserStorage() : options.storage;
   const prefix = `${options.storageKey}:`;
   try {
@@ -259,6 +271,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     }));
   };
 
+  const generation = generationOf(options.storageKey);
   const draft: ComposerDraftStorage = {
     load(conversationId) {
       const stored = read(draftKey(conversationId)) as Partial<ComposerDraft> | null;
@@ -266,6 +279,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
       return { text: stored.text, ...(Array.isArray(stored.mentions) ? { mentions: stored.mentions } : {}) };
     },
     save(conversationId, value) {
+      if (generationOf(options.storageKey) !== generation) return;
       if (value) write(draftKey(conversationId), { text: value.text, mentions: value.mentions ?? [] });
       else drop(draftKey(conversationId));
     },

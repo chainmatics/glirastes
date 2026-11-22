@@ -117,7 +117,9 @@ With `createLocalSessionStore` the drafts also survive a reload:
   (the stored one is removed, so no older version comes back).
 - Gone once sent, emptied, or when its chat is removed, cleared or evicted
   (`maxSessions`); `clearLocalSessionStore` on sign-out removes them with the
-  chats. Include the user in `storageKey`, as for the chats.
+  chats, and stores created before it write no drafts any more (a pending
+  write cannot bring one back; create a new store for the next sign-in).
+  Include the user in `storageKey`, as for the chats.
 - `drafts: false` keeps drafts in memory only.
 - A draft read from storage after the user already typed in that chat is
   dropped; what is typed wins.
