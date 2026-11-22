@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useImperativeHandle,
@@ -21,6 +22,8 @@ import type {
   RichMentionInputProps,
 } from '../types.js';
 import { normalizeTrigger } from '../completions/triggers.js';
+import { ChatContext } from '../provider/chat-context.js';
+import { composerContextOf } from '../provider/composer-context.js';
 import { sourceSearchOf } from '../completions/completion-search.js';
 import {
   inferMentionPrefix,
@@ -259,6 +262,9 @@ function charAfter(range: Range, editor: HTMLElement): string {
 
 function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: MentionDropdownItemProps) {
   const itemRef = useRef<HTMLButtonElement>(null);
+  // Standalone (outside a provider) there is no `composer.renderIcon`: no icon, as before.
+  const renderIcon = composerContextOf(useContext(ChatContext)).composer?.renderIcon;
+  const icon = result.icon && renderIcon ? renderIcon(result.icon, { type: result.type }) : null;
 
   useEffect(() => {
     if (isSelected && itemRef.current) {
@@ -276,6 +282,7 @@ function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: Menti
       data-mention-type={result.type}
       data-selected={isSelected ? 'true' : 'false'}
     >
+      {icon !== null && icon !== undefined && <span data-element="icon" aria-hidden="true">{icon}</span>}
       <span data-element="label">{result.label}</span>
       {result.description && (
         <span data-element="description">{result.description}</span>

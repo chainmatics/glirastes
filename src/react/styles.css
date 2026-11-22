@@ -750,6 +750,21 @@
   font-size: 12px;
   color: var(--cm-text-muted);
 }
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown-item"]:has(> [data-element="icon"]) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.5rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown-item"] > [data-element="icon"] {
+  display: inline-flex;
+  grid-row: span 2;
+  align-self: center;
+  color: var(--cm-text-muted);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown-item"]:has(> [data-element="icon"]) > [data-element="label"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown-item"]:has(> [data-element="icon"]) > [data-element="description"] {
+  grid-column: 2;
+}
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown"] [data-element="group-heading"] {
   padding: 0.5rem 0.75rem 0.125rem;
   font-size: 11px;
@@ -2046,6 +2061,24 @@
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-plus-menu"] [data-element="plus-menu-icon"] {
   display: inline-flex;
   color: var(--cm-text-muted);
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-plus-menu"] [data-element="plus-menu-item"]:has(> [data-element="plus-menu-description"]) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.5rem;
+  row-gap: 0.0625rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-plus-menu"] [data-element="plus-menu-item"]:has(> [data-element="plus-menu-description"]) > [data-element="plus-menu-icon"] {
+  grid-row: span 2;
+  align-self: center;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-plus-menu"] [data-element="plus-menu-item"]:has(> [data-element="plus-menu-description"]) > [data-element="plus-menu-label"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-plus-menu"] [data-element="plus-menu-description"] {
+  grid-column: 2;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="composer-plus-menu"] [data-element="plus-menu-description"] {
+  color: var(--cm-text-muted);
+  font-size: 0.75rem;
 }
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"][data-drag-over="true"],
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"][data-drag-over="true"] [data-element="editor"] {

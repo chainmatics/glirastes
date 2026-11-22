@@ -386,6 +386,8 @@ export interface CompletionItem {
   type: string;
   label: string;
   description?: string;
+  /** An icon name; rendered through `composer.renderIcon` (nothing without it). */
+  icon?: string;
   slug?: string;
   /**
    * Tool-backed commands: the catalog definition to run. Set it when `id` is
@@ -453,6 +455,10 @@ export interface ChatTriggerDefinition {
   char: string;
   /** Name of the trigger in composer menus. */
   label?: string;
+  /** Shown before the label in the "+" menu and instead of the char on a `trigger:<char>` button. */
+  icon?: ReactNode;
+  /** Short text under the label in the "+" menu. */
+  description?: string;
   /** Visible prefix of a picked pill; defaults to `char`. Commands keep `/`. */
   prefix?: string;
   /** Default pick behavior of the trigger's entries; default `chip`. */
@@ -1017,6 +1023,8 @@ export interface ComposerToolbarItem {
   /** Accessible name of the button; its text when there is no `icon`. */
   label: string;
   icon?: ReactNode;
+  /** Short text under the label when the item is a row of the "+" menu. */
+  description?: string;
   onSelect?: (controls: ChatComposerInputControls) => void;
   /** Renders the item yourself; wins over `icon` and `onSelect`. */
   render?: (controls: ChatComposerInputControls) => ReactNode;
@@ -1036,6 +1044,14 @@ export interface ComposerConfig {
   items?: Readonly<Record<string, ComposerToolbarItem>>;
   /** Rows of the `plus` toolbar item; without it the default rows. */
   plusMenu?: ComposerPlusMenuConfig;
+  /**
+   * Turns an icon name into an element: the string `icon` of completion
+   * entries (`MentionResult.icon`, `ChatCommandDefinition.icon`,
+   * `ChatEntityDefinition.icon`) and of starters. `context.type` is the
+   * entry's mention type (`starter` for starters), `context.trigger` the
+   * list's trigger char when known. Without it string icons render nothing.
+   */
+  renderIcon?: (name: string, context: { type: string; trigger?: string }) => ReactNode;
 }
 
 /**

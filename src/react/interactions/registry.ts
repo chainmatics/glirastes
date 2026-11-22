@@ -184,6 +184,7 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
             type: 'command',
             label,
             ...(description ? { description } : {}),
+            ...(command.icon ? { icon: command.icon } : {}),
             group,
             // A command mixed with free text goes to the model with its tool reference.
             ...(run.kind !== 'prompt' ? { definitionId: run.tool, ...(run.args ? { args: run.args } : {}) } : {}),
@@ -206,6 +207,7 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
             type: entity.type,
             label: card?.title ?? item.label,
             ...(description ? { description } : {}),
+            ...(entity.icon ? { icon: entity.icon } : {}),
             ...(entity.actions?.length
               ? { actions: entity.actions.map((action) => ({ id: action.id, label: chatText(action.label, locale) })) }
               : {}),

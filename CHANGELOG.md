@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Chat composer: "+" menu rows show an icon and a description (`ComposerToolbarItem.description`, `ChatTriggerDefinition.icon`/`description`; a `trigger:<char>` button shows the trigger's icon). `composer.renderIcon(name, { type, trigger })` renders string icon names of completion entries (new `CompletionItem.icon`, `ChatCommandDefinition.icon`, `ChatEntityDefinition.icon`) in the default list item and in `plusMenu.source` rows; `plusMenu.source` rows now show the entry's `description`.
+
 ### Fixed
 
 - Chat composer: `onCompletionSelect` returning `true` also removes the typed trigger and query when the handler put text or a pill before them (`setText`, `insertMention` at the start); when the trigger text became ambiguous nothing is removed.

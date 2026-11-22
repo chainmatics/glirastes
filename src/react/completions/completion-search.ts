@@ -172,6 +172,7 @@ export function createCompletionSearch(
           type: item.type,
           label: item.label.trim(),
           ...(item.description ? { description: item.description } : {}),
+          ...(typeof item.icon === 'string' && item.icon ? { icon: item.icon } : {}),
           ...(item.slug ? { slug: item.slug } : {}),
           ...(item.definitionId ? { definitionId: item.definitionId } : {}),
           ...(item.args ? { args: item.args } : {}),

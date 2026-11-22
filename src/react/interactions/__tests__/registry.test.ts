@@ -119,6 +119,17 @@ describe('createChatInteractionRegistry', () => {
     expect(await labels('oeffnen')).toEqual(['Übersicht öffnen']);
   });
 
+  it('carries the icon name of commands and entities to their hits', async () => {
+    const registry = createChatInteractionRegistry({
+      locale: 'en',
+      commands: [defineChatCommand({ id: 'help', label: 'Help', icon: 'life-buoy', run: { kind: 'tool', tool: 'help' } })],
+      entities: [defineChatEntity({ type: 'person', label: 'Person', icon: 'user', search: () => [{ id: 'a', label: 'Ann' }] })],
+    });
+    const search = createCompletionSearch(registry.providers);
+    expect((await search('hel', '/'))[0]).toMatchObject({ icon: 'life-buoy' });
+    expect((await search('an', '@'))[0]).toMatchObject({ icon: 'user' });
+  });
+
   it('names the group of every hit', async () => {
     const german = createCompletionSearch(createChatInteractionRegistry({ data, entities: [person], fetch: tasksFetch(), locale: 'de' }).providers);
     expect((await german('auf', '/'))[0]).toMatchObject({ group: 'Befehle' });

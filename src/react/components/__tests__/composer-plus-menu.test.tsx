@@ -384,3 +384,84 @@ describe('composer plus menu', () => {
   });
 });
 
+
+describe('composer plus menu descriptions and icons', () => {
+  function Rows({ composer, triggers, providers }: {
+    composer: ComposerConfig;
+    triggers?: ReadonlyArray<ChatTriggerDefinition>;
+    providers?: ReadonlyArray<ChatCompletionProvider>;
+  }) {
+    return (
+      <AiChatProvider
+        transport={transport()}
+        composer={composer}
+        {...(triggers ? { triggers: [...triggers] } : {})}
+        {...(providers ? { completionProviders: [...providers] } : {})}
+      >
+        <MentionInput />
+      </AiChatProvider>
+    );
+  }
+
+  it('a row shows the description of its item and links it', () => {
+    const onSelect = vi.fn();
+    render(<Rows composer={{
+      toolbar: { start: ['plus'], end: ['send'] },
+      items: { help: { label: 'Hilfe', description: 'Kurze Anleitung', onSelect } },
+      plusMenu: { items: ['help'] },
+    }} providers={[{ id: 'tickets', trigger: '#', search: () => [] }]} />);
+    openMenu();
+    const row = screen.getByRole('menuitem', { name: 'Hilfe' });
+    const description = row.querySelector('[data-element="plus-menu-description"]')!;
+    expect(description.textContent).toBe('Kurze Anleitung');
+    expect(row.getAttribute('aria-describedby')).toBe(description.id);
+    expect(description.id).not.toBe('');
+  });
+
+  it('a trigger row shows the trigger icon and description', () => {
+    render(<Rows
+      composer={{ toolbar: { start: ['plus'], end: ['send'] }, plusMenu: { items: ['trigger:#'] } }}
+      triggers={[{ char: '#', label: 'Tickets', icon: <svg data-testid="t-icon" />, description: 'Tickets suchen' }]}
+      providers={[{ id: 'tickets', trigger: '#', search: () => [] }]}
+    />);
+    openMenu();
+    const row = screen.getByRole('menuitem', { name: 'Tickets' });
+    const icon = row.querySelector('[data-element="plus-menu-icon"]')!;
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+    expect(icon.contains(screen.getByTestId('t-icon'))).toBe(true);
+    expect(row.querySelector('[data-element="plus-menu-description"]')!.textContent).toBe('Tickets suchen');
+  });
+
+  it('a source row shows the entry description and its icon through renderIcon', async () => {
+    const renderIcon = vi.fn((name: string) => <i data-icon={name} />);
+    render(<Rows
+      composer={{
+        toolbar: { start: ['plus'], end: ['send'] },
+        plusMenu: { items: [], source: { trigger: '/' } },
+        renderIcon,
+      }}
+      providers={[{
+        id: 'templates', trigger: '/',
+        search: () => [{ id: 'mail', type: 'template', label: 'Mail', description: 'Vorlage', icon: 'sparkle', select: 'text' }],
+      }]}
+    />);
+    fireEvent.click(plusButton());
+    const row = await screen.findByRole('menuitem', { name: 'Mail' });
+    expect(row.querySelector('i[data-icon="sparkle"]')).not.toBeNull();
+    expect(row.querySelector('[data-element="plus-menu-description"]')!.textContent).toBe('Vorlage');
+    expect(renderIcon).toHaveBeenCalledWith('sparkle', { type: 'template', trigger: '/' });
+  });
+
+  it('without description, icon and renderIcon a row is unchanged', () => {
+    render(<Rows
+      composer={{ toolbar: { start: ['plus'], end: ['send'] }, plusMenu: { items: ['trigger:#'] } }}
+      triggers={[{ char: '#', label: 'Tickets' }]}
+      providers={[{ id: 'tickets', trigger: '#', search: () => [] }]}
+    />);
+    openMenu();
+    const row = screen.getByRole('menuitem', { name: 'Tickets' });
+    expect(row.innerHTML).toBe('<span data-element="plus-menu-label">Tickets</span>');
+    expect(row.hasAttribute('aria-describedby')).toBe(false);
+    expect(row.hasAttribute('aria-labelledby')).toBe(false);
+  });
+});

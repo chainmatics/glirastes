@@ -149,6 +149,23 @@ describe('composer toolbar', () => {
     await waitFor(() => expect(screen.getByRole('option', { name: /Müller/ })).toBeTruthy());
   });
 
+  it('a trigger button with an icon shows the icon and keeps the label as its name', () => {
+    const triggers = [{ char: '@', label: 'Mention someone', icon: <svg data-testid="at-icon" /> }];
+    function WithIcon() {
+      const chatInteractions = useMemo(() => ({ entities: [person], commands }), []);
+      const composer = useMemo<ComposerConfig>(() => ({ toolbar: { end: ['trigger:@', 'send'] } }), []);
+      return (
+        <AiChatProvider transport={transport()} chatInteractions={chatInteractions} triggers={triggers} composer={composer}>
+          <MentionInput />
+        </AiChatProvider>
+      );
+    }
+    render(<WithIcon />);
+    const button = screen.getByRole('button', { name: 'Mention someone' });
+    expect(button.contains(screen.getByTestId('at-icon'))).toBe(true);
+    expect(button.textContent).toBe('');
+  });
+
   it('names a trigger button after its char when the trigger has no label', () => {
     render(<Setup composer={{ toolbar: { end: ['trigger:/', 'send'] } }}><MentionInput /></Setup>);
     expect(screen.getByRole('button', { name: '/' })).toBeTruthy();
