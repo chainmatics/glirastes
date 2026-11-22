@@ -68,6 +68,11 @@ describe('readMessageFollowups', () => {
     expect(readMessageFollowups({ role: 'assistant', parts: [trailing, followups(['A', 'B'])] }, 3)).toEqual(['A', 'B']);
   });
 
+  it('duplicates show once and do not count twice', () => {
+    expect(readMessageFollowups({ role: 'assistant', parts: [followups(['A', ' A ', 'B', 'A', 'C'])] }, 3)).toEqual(['A', 'B', 'C']);
+    expect(readMessageFollowups({ role: 'assistant', parts: [{ type: 'text', text: 'Done.\n\nSuggestions:\n- X\n- X\n- Y' }] }, 3)).toEqual(['X', 'Y']);
+  });
+
   it('the last structured call with entries wins', () => {
     expect(readMessageFollowups({
       role: 'assistant', parts: [followups(['A']), followups(['B']), followups([])],

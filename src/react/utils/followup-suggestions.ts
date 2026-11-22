@@ -52,10 +52,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Trimmed, each text once (they are button labels and React keys). */
+function unique(entries: readonly string[]): string[] {
+  return [...new Set(entries.map((entry) => entry.trim()))];
+}
+
 /**
  * The follow-ups of one assistant message: the last finished
  * `suggest_followups` call with non-blank strings, else the trailing list of
- * its last text part that has one; at most `count`. None for other roles.
+ * its last text part that has one; trimmed, each once, at most `count`. None
+ * for other roles.
  */
 export function readMessageFollowups(
   message: { role: string; parts: ReadonlyArray<unknown> },
@@ -66,9 +72,9 @@ export function readMessageFollowups(
   for (const part of message.parts) {
     if (!isRecord(part) || part.type !== 'tool-suggest_followups') continue;
     if (part.state !== 'output-available' || !isRecord(part.output) || !Array.isArray(part.output.followups)) continue;
-    const followups = part.output.followups.filter(
+    const followups = unique(part.output.followups.filter(
       (entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0,
-    );
+    ));
     if (followups.length > 0) structured = followups.slice(0, count);
   }
   if (structured.length > 0) return structured;
@@ -76,7 +82,7 @@ export function readMessageFollowups(
   for (const part of message.parts) {
     if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') continue;
     const extracted = extractTrailingFollowupSuggestions(part.text, count);
-    if (extracted.suggestions.length > 0) trailing = extracted.suggestions;
+    if (extracted.suggestions.length > 0) trailing = unique(extracted.suggestions);
   }
   return trailing;
 }
