@@ -1,0 +1,478 @@
+{
+  "version": "0.23.0",
+  "notes": [
+    {
+      "id": "activity-log-hidden-tools",
+      "kind": "optional",
+      "summary": "activityLog.hiddenTools lists tools (model-facing names) that never appear in the activity log, e.g. UI-only refresh or toast actions; they still run.",
+      "howTo": "activityLog={{ hiddenTools: ['ui_action_toast', 'ui_action_refresh'] }} (config.activityLog on <glirastes-chat>). Hidden tools are no step, no summary count, no section split and do not hide the typing indicator. A hand-built ChatContextValue (a test mock of useChatContext) sets activityLog.hiddenTools: [].",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "hiddenTools"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ActivityLogConfig.hiddenTools"
+      ]
+    },
+    {
+      "id": "assistant-fullscreen",
+      "kind": "optional",
+      "summary": "AssistantShell renders full screen as a modal and offers it when its modes list includes 'fullscreen'; useAssistantLayout().setMode('fullscreen') opens it, restoreMode() leaves it.",
+      "howTo": "Add 'fullscreen' to AssistantShell/AssistantWorkspace modes; setMode('fullscreen') opens full screen, restoreMode() or Escape returns to defaultMode. A UI action that shows page UI calls restoreMode() first or puts that UI above --cm-chat-fullscreen-z (default 1000); page portals that must stay usable carry data-cm-keep-interactive.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "AssistantLayoutMode",
+          "useAssistantLayout"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "modes\\s*=\\s*\\{[^}]*['\"]fullscreen['\"]",
+          "setMode\\(\\s*['\"]fullscreen['\"]"
+        ]
+      },
+      "surface": [
+        "glirastes/react#AssistantShellLabels.fullscreen"
+      ]
+    },
+    {
+      "id": "assistant-history-pane",
+      "kind": "optional",
+      "summary": "In full screen AssistantShell shows the chat list as a left column (a drawer below 900 px) when the chat keeps several; historyPane={false} removes it, a node replaces it.",
+      "howTo": "Nothing to do for the default: with modes including 'fullscreen' and a chat that keeps several conversations, full screen shows SessionSwitcher variant=\"list\" in a 260 px column and names the open chat in the header. historyPane={false} keeps the header switcher instead; historyPane={<MyPane />} renders an own column. Labels history, showHistory, hideHistory (German ships); icon history.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "AssistantShell",
+          "AssistantWorkspace"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "historyPane"
+        ]
+      },
+      "surface": [
+        "glirastes/react#AssistantShellProps.historyPane",
+        "glirastes/react#AssistantWorkspaceProps.historyPane",
+        "glirastes/react#AssistantShellLabels.history",
+        "glirastes/react#AssistantShellLabels.showHistory",
+        "glirastes/react#AssistantShellLabels.hideHistory"
+      ]
+    },
+    {
+      "id": "assistant-layout-modes",
+      "kind": "optional",
+      "summary": "AssistantShell and AssistantWorkspace take modes. With 'fullscreen' in it the header shows a layout menu (sidebar, window, full screen) instead of the detach/dock button; a single mode hides the layout control.",
+      "howTo": "Pass modes={['sidebar', 'floating', 'fullscreen']} to AssistantWorkspace or AssistantShell. A layout outside modes falls back (full screen to defaultMode, otherwise the first entry); one entry removes the layout control and the layout shortcut. A renderButton receives expanded and controls for the new 'mode' and 'history' buttons (map to aria-expanded / aria-controls, and aria-haspopup=\"menu\" for 'mode'). New optional labels layout, sidebar, floating and icons fullscreen, history.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "AssistantShellAction",
+          "AssistantShellButtonProps"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "modes\\s*=\\s*\\{"
+        ]
+      },
+      "surface": [
+        "glirastes/react#AssistantShellProps.modes",
+        "glirastes/react#AssistantWorkspaceProps.modes",
+        "glirastes/react#AssistantShellButtonProps.expanded",
+        "glirastes/react#AssistantShellButtonProps.controls",
+        "glirastes/react#AssistantShellLabels.layout",
+        "glirastes/react#AssistantShellLabels.sidebar",
+        "glirastes/react#AssistantShellLabels.floating",
+        "glirastes/react#AssistantShellIcons.fullscreen",
+        "glirastes/react#AssistantShellIcons.history"
+      ]
+    },
+    {
+      "id": "assistant-layout-unions-widened",
+      "kind": "breaking",
+      "summary": "Type-only: AssistantLayoutMode gains 'fullscreen', AssistantShellAction gains 'mode' and 'history', AssistantLayout gains required restoreMode. Exhaustive switches, Records keyed by these unions and hand-built AssistantLayout mocks stop compiling. Runtime is unchanged without modes.",
+      "howTo": "Add 'fullscreen' cases (AssistantLayoutMode), 'mode' and 'history' cases (AssistantShellAction, e.g. in renderButton) and restoreMode to hand-built AssistantLayout values.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "patterns": [
+          "Record<\\s*(?:AssistantLayoutMode|AssistantShellAction)\\b",
+          ":\\s*AssistantLayout\\b",
+          "\\bsatisfies\\s+AssistantLayout\\b",
+          "\\bas\\s+AssistantLayout\\b",
+          "case\\s+['\"](?:detach|dock|collapse)['\"]"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "case\\s+['\"](?:fullscreen|history)['\"]",
+          "\\brestoreMode\\s*:"
+        ]
+      },
+      "surface": [
+        "glirastes/react#AssistantLayout.restoreMode"
+      ]
+    },
+    {
+      "id": "assistant-min-page-width",
+      "kind": "optional",
+      "summary": "AssistantShell and AssistantWorkspace take minPageWidth: the docked assistant never grows so wide that the page gets less than that. The width handle now announces and stops at the widest width that can render.",
+      "howTo": "Pass minPageWidth={480} (omnify uses 520) to keep the page usable on laptops; the user's chosen width comes back on wider windows.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "AssistantShell",
+          "AssistantWorkspace"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "minPageWidth"
+        ]
+      },
+      "surface": [
+        "glirastes/react#AssistantShellProps.minPageWidth",
+        "glirastes/react#AssistantWorkspaceProps.minPageWidth"
+      ]
+    },
+    {
+      "id": "completion-select-prepend-cleanup",
+      "kind": "optional",
+      "summary": "onCompletionSelect returning true now also removes the typed trigger and query when the handler put text or a pill before them; when the text became ambiguous nothing is removed.",
+      "howTo": "Nothing to change. A handler that worked around the leftover trigger (for example by deleting '#query' itself after setText or insertMention before it) can drop that workaround. After a rebuild the SDK removes the trigger text only when it occurs exactly once as a whole word (so '#bug-7' put in for '#bu' is never cut); when it occurs more than once it removes nothing, so the handler keeps control of the text.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ],
+        "symbols": [
+          "onCompletionSelect"
+        ]
+      }
+    },
+    {
+      "id": "composer-clarification-chips",
+      "kind": "optional",
+      "summary": "composer.clarificationChips shows the options of an open clarification as chips above the composer; the card in the message then keeps question and free text only (ClarificationCardProps.showOptions). ClarificationChips renders them in own panels.",
+      "howTo": "Set composer: { clarificationChips: true } on AiChatProvider. A chip sends the same answer as the card's option button; chips hide while a turn runs, once answered and for free-text-only clarifications, and are disabled while the composer is locked. A custom components.ClarificationCard receives showOptions (false while chips are on) and should leave its option buttons out then. Own panels render <ClarificationChips /> above the composer; group name locale.clarificationChipsLabel. See references/composer-starters-drafts.md#clarification-chips.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ],
+        "patterns": [
+          "ClarificationCard\\s*:"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "clarificationChips\\s*:\\s*true",
+          "ClarificationChips"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ComposerConfig.clarificationChips",
+        "glirastes/react#ClarificationChips",
+        "glirastes/react#ClarificationChipsProps.*",
+        "glirastes/react#ClarificationCardProps.showOptions",
+        "glirastes/react#ChatLocale.clarificationChipsLabel",
+        "locale#clarificationChipsLabel"
+      ]
+    },
+    {
+      "id": "composer-draft-per-session",
+      "kind": "recommended",
+      "summary": "Visible change: composer text now belongs to its chat. Switching chats shows that chat's unsent text instead of carrying the text over, and the text survives a remount of the input.",
+      "howTo": "Nothing to configure. Tests or flows that expect the composer text to move into another chat after a session switch must switch back (or set the text again with useChatComposer().setDraft). Pills are kept with their ids; attachments are not part of a draft. Drafts live as long as the AiChatProvider instance: remount the provider with a key per verified identity so another user never sees them. Own session stores can use the ComposerDraft shape ({ text, mentions? }). See references/composer-starters-drafts.md#drafts.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ],
+        "symbols": [
+          "AiChatProvider"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ComposerDraft.*"
+      ]
+    },
+    {
+      "id": "composer-hint",
+      "kind": "optional",
+      "summary": "composer.hint shows a keyboard hint line under the composer (send, new line; the list keys while a completion list is open). ComposerHint renders it in own composers; RichMentionInput reports its list with onListOpenChange.",
+      "howTo": "Set composer: { hint: true } on AiChatProvider. Texts come from the locale keys composerHintSend, composerHintNewline, composerHintNavigate, composerHintPick and composerHintClose (German in deChatLocale). An own composer on useChatComposerInput renders <ComposerHint completionOpen={composer.completionOpen} />; composer.inputProps already passes onListOpenChange to RichMentionInput. The hint is aria-hidden and hidden on touch devices. See references/composer-starters-drafts.md#hint-line.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "hint\\s*:\\s*true",
+          "ComposerHint"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ComposerConfig.hint",
+        "glirastes/react#ComposerHint",
+        "glirastes/react#ComposerHintProps.*",
+        "glirastes/react#RichMentionInputProps.onListOpenChange",
+        "glirastes/react#ChatComposerInput.completionOpen",
+        "glirastes/react#ChatLocale.composerHintSend",
+        "glirastes/react#ChatLocale.composerHintNewline",
+        "glirastes/react#ChatLocale.composerHintNavigate",
+        "glirastes/react#ChatLocale.composerHintPick",
+        "glirastes/react#ChatLocale.composerHintClose",
+        "locale#composerHintSend",
+        "locale#composerHintNewline",
+        "locale#composerHintNavigate",
+        "locale#composerHintPick",
+        "locale#composerHintClose"
+      ]
+    },
+    {
+      "id": "composer-menu-descriptions-icons",
+      "kind": "optional",
+      "summary": "Composer \"+\" menu rows show an icon and a description (composer.items description, trigger icon and description); composer.renderIcon turns string icon names of completion entries into elements. Visible: plusMenu.source rows now show the entry's description.",
+      "howTo": "Add description to a composer.items entry or icon/description to a ChatTriggerDefinition to show them in the \"+\" menu; a trigger:<char> toolbar button then shows the icon instead of the char. Pass composer.renderIcon: (name, { type, trigger }) => element to render string icons of completion entries (CompletionItem.icon, ChatCommandDefinition.icon, ChatEntityDefinition.icon) in the default list item and in plusMenu.source rows; without it string icons render nothing, as before. Apps using plusMenu.source: rows of entries that have a description now show it under the label (styled with --cm-text-muted); drop the description from those entries if the menu should stay single-line. See references/composer-triggers-toolbar.md#row-descriptions-and-icons.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ],
+        "patterns": [
+          "plusMenu\\s*:"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "renderIcon"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ComposerToolbarItem.description",
+        "glirastes/react#ChatTriggerDefinition.icon",
+        "glirastes/react#ChatTriggerDefinition.description",
+        "glirastes/react#ComposerConfig.renderIcon",
+        "glirastes/react#CompletionItem.icon"
+      ]
+    },
+    {
+      "id": "composer-stacked-layout",
+      "kind": "optional",
+      "summary": "composer.layout: 'stacked' puts the editor on its own row and the toolbar items in a row under it; the default 'inline' keeps today's single row.",
+      "howTo": "Set composer: { layout: 'stacked', toolbar: { start: ['plus', 'trigger:@', 'trigger:/'], end: ['mic', 'send'] } } on AiChatProvider. The row is div[data-component=\"composer-toolbar\"][data-layout=\"stacked\"] with toolbar-start and toolbar-end. components.ComposerToolbar still replaces both layouts. See references/composer-triggers-toolbar.md#layout.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "layout\\s*:\\s*['\"]stacked['\"]"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ComposerConfig.layout"
+      ]
+    },
+    {
+      "id": "composer-starters",
+      "kind": "optional",
+      "summary": "composer.starters shows starter chips above the composer on an empty chat; a click fills the composer (send: true sends). ChatStarters renders them in own panels; while they show, suggestions.staticChips are hidden.",
+      "howTo": "Set composer: { starters: ['Was ist neu?', { label, prompt, description, icon, send }] } on AiChatProvider. A click puts prompt (default label) into the composer and focuses it; send: true sends at once. Chips are disabled while the composer is locked and disappear with the first message. String icons render through composer.renderIcon(name, { type: 'starter' }). If you used suggestions.staticChips as starters, move them to composer.starters: the static chips are hidden on an empty chat while starters show. Own panels render <ChatStarters /> above the composer. Group name: locale.startersLabel. See references/composer-starters-drafts.md#starters.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ],
+        "patterns": [
+          "staticChips"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "starters\\s*:"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ChatStarter.*",
+        "glirastes/react#ChatStarters",
+        "glirastes/react#ChatStartersProps.*",
+        "glirastes/react#ComposerConfig.starters",
+        "glirastes/react#ChatLocale.startersLabel",
+        "locale#startersLabel"
+      ]
+    },
+    {
+      "id": "followups-under-answer",
+      "kind": "optional",
+      "summary": "suggestions.placement: 'message' shows the model's follow-up questions as buttons under the latest answer (heading 'Ask next') instead of the rotating chip above the composer; hidden while a turn runs, an approval or clarification is open, or after a stop or error.",
+      "howTo": "suggestions={{ placement: 'message', count: 3 }}. The SuggestionBar and staticChips are not shown then; use composer.starters for an empty chat. Server follow-ups require pipeline: createAiChatHandler registers suggest_followups only with followups and pipeline and warns once at creation when followups is set without pipeline; without them the UI reads a trailing suggestion list of the answer. Heading text: followUpsLabel.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "placement\\s*:\\s*['\"]message['\"]"
+        ]
+      },
+      "surface": [
+        "glirastes/react#SuggestionsConfig.placement",
+        "glirastes/react#ChatLocale.followUpsLabel",
+        "locale#followUpsLabel"
+      ]
+    },
+    {
+      "id": "message-footer",
+      "kind": "optional",
+      "summary": "messageFooter adds a footer under each answer: copy as formatted and plain text, the https sources it cites, 'Done in 3.2 s', and the elapsed time with a stop button while it runs. Off by default; useMessageParts and MessageParts get it as footer.",
+      "howTo": "<VercelAiChat messageFooter /> or messageFooter={{ stop: false }}. A custom MessageParts that does not render children places parts.footer itself. Texts: copyMessageLabel, copiedMessageLabel, copyMessageFailedLabel, messageSourceOneLabel, messageSourcesLabel, messageDurationLabel (German in deChatLocale). Nothing is sent anywhere.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "messageFooter"
+        ]
+      },
+      "surface": [
+        "glirastes/react#MessageFooterConfig.*",
+        "glirastes/react#AiChatProviderConfig.messageFooter",
+        "glirastes/react#AiChatProviderProps.messageFooter",
+        "glirastes/react/vercel#VercelAiChatProps.messageFooter",
+        "glirastes/embed#GlirastesChatElementConfig.messageFooter",
+        "glirastes/react#MessagePartNodes.footer",
+        "glirastes/react#MessageParts.footer",
+        "glirastes/react#MessagePartsProps.footer",
+        "glirastes/react#ChatLocale.copyMessageLabel",
+        "glirastes/react#ChatLocale.copiedMessageLabel",
+        "glirastes/react#ChatLocale.copyMessageFailedLabel",
+        "glirastes/react#ChatLocale.messageSourceOneLabel",
+        "glirastes/react#ChatLocale.messageSourcesLabel",
+        "glirastes/react#ChatLocale.messageDurationLabel",
+        "locale#copyMessageLabel",
+        "locale#copiedMessageLabel",
+        "locale#copyMessageFailedLabel",
+        "locale#messageSourceOneLabel",
+        "locale#messageSourcesLabel",
+        "locale#messageDurationLabel"
+      ]
+    },
+    {
+      "id": "plain-input-composer-api",
+      "kind": "optional",
+      "summary": "useChatComposer (insertText, setDraft, chatAbout, clear, focus) now also fills the plain chat input; mentions arrive there as text.",
+      "howTo": "Nothing to change. Without chatInteractions or completionProviders the chat input is a plain textarea; useChatComposer operations used to be ignored there and now apply: insertText appends, setDraft replaces, clear empties, focus focuses, and insertMention/chatAbout put the mention's visible text (for example @Bug 7 or /Open tasks) at the caret. openCompletion still does nothing in the plain input, which has no list.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ],
+        "symbols": [
+          "useChatComposer"
+        ]
+      }
+    },
+    {
+      "id": "session-store-drafts",
+      "kind": "recommended",
+      "summary": "createLocalSessionStore now keeps each chat's unsent composer text in the same browser storage and key prefix as the chat, so it survives a reload; drafts: false turns it off. Own SessionConfig stores can add draft.",
+      "howTo": "Nothing to do with createLocalSessionStore: drafts are stored as `${storageKey}:draft:<chatId>` and removed when sent, when the chat is removed, cleared or evicted, and by clearLocalSessionStore on sign-out (stores created before it write no drafts any more, so create a new store for the next sign-in). Pass drafts: false to keep them in memory only. An own SessionConfig can add draft: { load(id), save(id, draft | null) } (ComposerDraftStorage); writes are debounced 300 ms and flushed on chat switch and pagehide, drafts over 20,000 characters are not written, errors are ignored. See references/composer-starters-drafts.md#drafts-across-reloads.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ],
+        "symbols": [
+          "createLocalSessionStore",
+          "SessionConfig"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "drafts:\\s*false",
+          "draft:\\s*\\{"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ComposerDraftStorage.*",
+        "glirastes/react#SessionConfig.draft",
+        "glirastes/react#LocalSessionStoreOptions.drafts"
+      ]
+    },
+    {
+      "id": "session-switcher-list",
+      "kind": "optional",
+      "summary": "SessionSwitcher takes variant=\"list\" for an always visible chat list (new chat, recent chats, rename, delete, arrow keys) and onSelect, called after a pick or a new chat.",
+      "howTo": "Render <SessionSwitcher variant=\"list\" onSelect={() => …} /> in an own side column; it needs a chat that keeps several conversations (renders nothing otherwise). Texts: locale.chatHistoryLabel (navigation name) and locale.recentChatsLabel (heading); German ships. onSelect also works on the default dropdown.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "SessionSwitcher"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "variant\\s*=\\s*[\"']list[\"']"
+        ]
+      },
+      "surface": [
+        "glirastes/react#SessionSwitcherProps.variant",
+        "glirastes/react#SessionSwitcherProps.onSelect",
+        "glirastes/react#ChatLocale.chatHistoryLabel",
+        "glirastes/react#ChatLocale.recentChatsLabel",
+        "locale#chatHistoryLabel",
+        "locale#recentChatsLabel"
+      ]
+    },
+    {
+      "id": "suggestion-bar-enabled-and-stale",
+      "kind": "recommended",
+      "summary": "Visible fix: the SuggestionBar now shows nothing with suggestions.enabled: false (it used to show follow-up and static chips anyway), and a turn that brings no follow-ups no longer keeps showing the previous turn's chips; the static chips (or none) show instead.",
+      "howTo": "Nothing to change if the bar should behave as configured. An app that set suggestions.enabled: false but relied on the chips showing anyway removes enabled: false. An app that relied on a turn's follow-ups staying visible after later turns keeps them itself (useSuggestions().chips, onTurnEnd) or sets staticChips as the fallback.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "patterns": [
+          "suggestions\\s*[=:]\\s*\\{\\{?[^}]*enabled\\s*:\\s*false",
+          "staticChips",
+          "suggest_followups",
+          "followups\\s*:\\s*\\{"
+        ]
+      }
+    },
+    {
+      "id": "turn-outcome-duration",
+      "kind": "optional",
+      "summary": "A recorded TurnOutcome now carries durationMs, the time the turn's requests ran (approval waits excluded), measured in the browser and stored with the outcome in the session store.",
+      "howTo": "Read outcome.durationMs in onTurnEnd or useTurnOutcome for your own timing display or local analytics; messageFooter shows it as 'Done in 3.2 s'. Tests that compare whole outcomes with toEqual need the new member.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react"
+        ]
+      },
+      "surface": [
+        "glirastes/react#TurnOutcome.durationMs"
+      ]
+    }
+  ]
+}

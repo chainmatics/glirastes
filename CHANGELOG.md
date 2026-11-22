@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-22
+
 ### Added
 
 - Chat composer: `composer.layout: 'stacked'` puts the editor on its own row and the toolbar items in a row under it (`div[data-component="composer-toolbar"][data-layout="stacked"]` with `toolbar-start` left and `toolbar-end` right); the default `'inline'` keeps today's single row. `components.ComposerToolbar` still wins.
@@ -1186,3 +1188,4 @@ No code changes — patch-level docs release.
 [0.20.0]: https://github.com/chainmatics/glirastes/compare/v0.19.0...v0.20.0
 [0.21.0]: https://github.com/chainmatics/glirastes/compare/v0.20.0...v0.21.0
 [0.22.0]: https://github.com/chainmatics/glirastes/compare/v0.21.0...v0.22.0
+[0.23.0]: https://github.com/chainmatics/glirastes/compare/v0.22.0...v0.23.0
