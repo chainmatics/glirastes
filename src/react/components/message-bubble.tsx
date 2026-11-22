@@ -22,7 +22,7 @@ import { ClarificationCard as DefaultClarificationCard } from './clarification-c
 import { ActivityLog, TurnNotice as DefaultTurnNotice } from './activity-log.js';
 import { PlanChecklist } from './plan-checklist.js';
 import { MessageFooter } from './message-footer.js';
-import { readActivitySteps, readLatestPlan, type ActivityDetailSource, type ActivityStep, type ActivityStepStatus } from '../utils/activity.js';
+import { readActivitySteps, readLatestPlan, withoutHiddenTools, type ActivityDetailSource, type ActivityStep, type ActivityStepStatus } from '../utils/activity.js';
 import { PLAN_TOOL_NAME } from '../../contracts/plan.js';
 import { RendererBoundary } from '../tool-renderers/renderer-boundary.js';
 import {
@@ -362,11 +362,12 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   const resultShown = (toolName: string) => shouldRenderToolResult(toolName, mode, allowlist);
   // The server's named kinds of its failure texts, from the whole message: a run of steps has no data parts.
   const stepFailureCodes = readStepFailurePartCodes(message.parts);
-  const readSteps = (parts: ReadonlyArray<unknown>): ActivityStep[] => readActivitySteps(
+  const hiddenTools = activityLog?.hiddenTools ?? [];
+  const readSteps = (parts: ReadonlyArray<unknown>): ActivityStep[] => withoutHiddenTools(readActivitySteps(
     parts,
     (toolName, status, source) => allowStepDetail(details, status, source, resultShown(toolName)),
     stepFailureCodes,
-  ).map((step) => (
+  ), hiddenTools).map((step) => (
     // A call the user approved that the server did not run: the reason is the SDK's own text.
     step.status === 'declined' && step.declinedBy === 'server' && !step.detail
       && (details === 'all' || details === 'auto')

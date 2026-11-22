@@ -230,3 +230,10 @@ export function readLatestPlan(parts: ReadonlyArray<unknown>): PlanItem[] | null
   }
   return null;
 }
+
+/** The steps without the tools the app hides from the log (`activityLog.hiddenTools`). */
+export function withoutHiddenTools(steps: ActivityStep[], hidden: ReadonlyArray<string> | undefined): ActivityStep[] {
+  if (!hidden || hidden.length === 0) return steps;
+  const names = new Set(hidden);
+  return steps.filter((step) => !names.has(step.toolName));
+}

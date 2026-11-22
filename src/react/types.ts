@@ -689,6 +689,12 @@ export interface ActivityLogConfig {
    * come before its text renders exactly as with `'message'`.
    */
   grouping?: 'message' | 'sections';
+  /**
+   * Model-facing tool names (e.g. `'ui_action_toast'`) that never show as a
+   * step, count in the summary or split a section. The tool still runs and
+   * its UI action still fires. Default `[]` (the SDK's built-ins stay hidden).
+   */
+  hiddenTools?: ReadonlyArray<string>;
 }
 
 /** Per-answer footer (`AiChatProvider` `messageFooter`). Each part defaults to true once the footer is on. */

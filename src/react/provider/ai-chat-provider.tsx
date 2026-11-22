@@ -92,6 +92,8 @@ import {
 
 import type { ApprovalDescriptionFn, ChatLocale, ToolLabelConfig } from '../types.js';
 
+const NO_HIDDEN_TOOLS: readonly string[] = Object.freeze([]);
+
 export const DEFAULT_LOCALE: ChatLocale = {
   placeholder: 'Type a message...',
   sendButton: 'Send',
@@ -796,6 +798,9 @@ export function AiChatProvider({
     : 'auto';
   const activityGrouping = userActivityLog?.grouping === 'sections' ? 'sections' : 'message';
   const activityNoticeScope = userActivityLog?.noticeScope === 'latest' ? 'latest' : 'every';
+  const activityHiddenKey = Array.isArray(userActivityLog?.hiddenTools)
+    ? userActivityLog!.hiddenTools!.filter((name): name is string => typeof name === 'string' && name.length > 0).join('\n')
+    : '';
   const activityLogConfig = useMemo<Required<ActivityLogConfig>>(() => ({
     expandWhileRunning: activityExpandWhileRunning,
     runningProgress: activityRunningProgress,
@@ -803,8 +808,9 @@ export function AiChatProvider({
     details: activityDetails,
     grouping: activityGrouping,
     noticeScope: activityNoticeScope,
+    hiddenTools: activityHiddenKey ? Object.freeze(activityHiddenKey.split('\n')) : NO_HIDDEN_TOOLS,
   }), [activityExpandWhileRunning, activityRunningProgress, activityNoticePlacement, activityDetails, activityGrouping,
-    activityNoticeScope]);
+    activityNoticeScope, activityHiddenKey]);
   // Keyed on the four switches, so an inline `messageFooter={{ … }}` does not re-render every message.
   const footerOn = userMessageFooter === true || (typeof userMessageFooter === 'object' && userMessageFooter !== null);
   const footerParts: MessageFooterConfig = typeof userMessageFooter === 'object' && userMessageFooter !== null ? userMessageFooter : {};
