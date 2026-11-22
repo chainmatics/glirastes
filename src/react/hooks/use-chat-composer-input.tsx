@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandArgumentsForm as DefaultCommandArgumentsForm } from '../components/command-arguments-form.js';
 import { useChatComposerTarget } from '../composer/chat-composer.js';
+import { useComposerDraft } from '../composer/use-composer-draft.js';
 import { useComposerContext } from '../provider/composer-context.js';
 import type {
   ChatAttachment,
@@ -76,6 +77,9 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   const initialApplied = useRef(false);
   const ArgumentsForm = components.CommandArgumentsForm ?? DefaultCommandArgumentsForm;
 
+  // The open chat's unsent text: restored before queued composer operations run.
+  const draft = useComposerDraft(inputRef, value, setValue);
+
   // Pills and drafts from `useChatComposer` (e.g. a "Chat about this" menu entry).
   useChatComposerTarget(inputRef, { onChange: setValue });
 
@@ -95,7 +99,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     const handle = inputRef.current;
     if (initialApplied.current || !handle) return;
     initialApplied.current = true;
-    if (!initialValue) return;
+    if (!initialValue || draft.restored()) return;
     const prefix = handle.getValue();
     handle.setValue(prefix ? `${prefix} ${initialValue}` : initialValue, handle.getMentions());
     setValue(handle.getValue());

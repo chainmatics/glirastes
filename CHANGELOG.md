@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chat composer: `composer.hint` shows a keyboard hint line under the composer ("↵ Send · ⇧ ↵ New line", the list keys while a completion list is open; `aria-hidden`, hidden on touch devices). `ComposerHint` for own composers with `ChatComposerInput.completionOpen`; `RichMentionInputProps.onListOpenChange`; locale keys `composerHintSend`, `composerHintNewline`, `composerHintNavigate`, `composerHintPick`, `composerHintClose`. Default off.
 - Chat composer: "+" menu rows show an icon and a description (`ComposerToolbarItem.description`, `ChatTriggerDefinition.icon`/`description`; a `trigger:<char>` button shows the trigger's icon). `composer.renderIcon(name, { type, trigger })` renders string icon names of completion entries (new `CompletionItem.icon`, `ChatCommandDefinition.icon`, `ChatEntityDefinition.icon`) in the default list item and in `plusMenu.source` rows; `plusMenu.source` rows now show the entry's `description`.
 
+### Changed
+
+- Chat composer: the unsent text belongs to its chat (`ComposerDraft`). Switching chats shows that chat's draft instead of carrying the text over; the draft survives a remount of the input inside the same provider and is cleared by sending. Pills keep their ids; attachments are not part of a draft. Drafts live as long as the `AiChatProvider` instance.
+
 ### Fixed
 
 - Chat composer: `useChatComposer()` (`insertText`, `setDraft`, `chatAbout`, `clear`, `focus`) also fills the plain chat input (no completion, no attachments); mentions arrive there as their text.

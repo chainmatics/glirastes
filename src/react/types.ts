@@ -1031,6 +1031,15 @@ export interface ComposerToolbarItem {
   hidden?: boolean | ((controls: ChatComposerInputControls) => boolean);
 }
 
+/**
+ * The unsent text of one chat's composer, with the pills in it. Attachments
+ * are never part of a draft.
+ */
+export interface ComposerDraft {
+  text: string;
+  mentions?: ReadonlyArray<MentionData>;
+}
+
 /** A starter chip on an empty chat (`composer.starters`). */
 export interface ChatStarter {
   label: string;

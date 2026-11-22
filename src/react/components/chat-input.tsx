@@ -17,6 +17,7 @@ import { createTextareaComposerHandle } from './textarea-composer-handle.js';
 import { ComposerHint } from './composer-hint.js';
 import { composerContextOf } from '../provider/composer-context.js';
 import { useChatComposerTarget } from '../composer/chat-composer.js';
+import { useComposerDraft } from '../composer/use-composer-draft.js';
 import type { ChatAttachment, ChatComposerInputControls, ChatInputProps, RichMentionInputHandle } from '../types.js';
 
 const NO_ATTACHMENTS: ReadonlyArray<ChatAttachment> = [];
@@ -45,6 +46,7 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
   // `useChatComposer` operations (insertText, setDraft, chatAbout, ...) reach the textarea through this handle.
   const handleRef = useRef<RichMentionInputHandle | null>(null);
   if (!handleRef.current) handleRef.current = createTextareaComposerHandle(textareaRef, setValue);
+  useComposerDraft(handleRef, value, setValue);
   useChatComposerTarget(handleRef, { onChange: setValue });
 
   useLayoutEffect(() => {

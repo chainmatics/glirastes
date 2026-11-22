@@ -57,6 +57,7 @@ import {
 } from '../interactions/registry.js';
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
+import { createComposerDraftController, type ComposerDraftController } from '../composer/composer-drafts.js';
 import { ChatMarkdownOptionsContext, NO_MARKDOWN_OPTIONS } from '../markdown-options.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
 import {
@@ -1019,6 +1020,10 @@ export function AiChatProvider({
   );
   const entityPrefix = triggers.find((trigger) => trigger.char === '@')?.prefix ?? '@';
   const mentionPrefix = useMemo(() => createMentionPrefixLookup(triggers), [triggers]);
+  // Drafts live as long as this provider: an identity change remounts it and starts empty.
+  const draftsRef = useRef<ComposerDraftController | null>(null);
+  if (!draftsRef.current) draftsRef.current = createComposerDraftController();
+  const drafts = draftsRef.current;
   // What `session.save` gets as its third argument: only when a trigger claims `types`, so saves stay as before otherwise.
   const saveOptionsRef = useRef<{ mentionPrefix: (type: string) => string } | undefined>(undefined);
   saveOptionsRef.current = mentionPrefix === inferMentionPrefix ? undefined : { mentionPrefix };
@@ -2912,6 +2917,7 @@ export function AiChatProvider({
       composer: composerConfig,
       onCompletionSelect,
       mentionPrefix,
+      drafts,
       interactions: interactionRegistry,
       pendingCommand,
       submitPendingCommand,
@@ -3011,6 +3017,7 @@ export function AiChatProvider({
       composerConfig,
       onCompletionSelect,
       mentionPrefix,
+      drafts,
       interactionRegistry,
       pendingCommand,
       submitPendingCommand,

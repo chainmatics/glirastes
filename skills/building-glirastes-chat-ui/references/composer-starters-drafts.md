@@ -9,6 +9,7 @@ before.
 - Hint line
 - Starters
 - Clarification chips
+- Drafts
 
 ## Hint line
 
@@ -84,3 +85,22 @@ Default `false`.
   `locale.clarificationChipsLabel`, `Answer options` / `Antwortmöglichkeiten`)
   with `button[data-element="option"][data-option-id]`, `title` = the
   option's description.
+
+## Drafts
+
+The composer's unsent text belongs to its chat (no config needed):
+
+- Switching chats shows the unsent text of the chat you switch to (empty
+  when it has none); the text of the chat you left waits there. It is no
+  longer carried over into the next chat.
+- The text survives a remount of the input (closing and reopening the chat
+  window, moving the panel) inside the same `AiChatProvider`.
+- Pills stay pills (same ids). Attachments are never part of a draft.
+- A sent message clears the draft. An `initialValue` applies only when the
+  chat has no draft.
+- Drafts live in the provider instance: when the app remounts the provider
+  for another user (it should, with a new `key` per verified identity), the
+  drafts of the previous user are gone.
+- `ComposerDraft` (`{ text, mentions? }`) is the stored shape.
+- Works for the pill composer and the plain input; the legacy `mentions`
+  input has no drafts.
