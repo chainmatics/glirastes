@@ -34,7 +34,7 @@ async function mount(child: React.ReactNode = <textarea aria-label="Draft" />) {
   render(<AssistantLayoutProvider>
     <Probe />
     <div><main data-assistant-main><AssistantToggle /></main>
-      <AssistantShell onClear={() => {}}>{child}</AssistantShell></div>
+      <AssistantShell onClear={() => {}} modes={['sidebar', 'floating', 'fullscreen']}>{child}</AssistantShell></div>
   </AssistantLayoutProvider>);
   await frame();
 }

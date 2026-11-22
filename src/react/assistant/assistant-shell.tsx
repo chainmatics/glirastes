@@ -7,11 +7,12 @@ import { formatShortcut, useChatShortcuts, type ChatShortcutMap } from '../hooks
 import { useFloatingPanel, type FloatingResizeEdge } from '../hooks/use-floating-panel.js';
 import { isGerman, usePageLanguage } from '../utils/tool-presentation.js';
 import { SessionSwitcher } from '../components/session-switcher.js';
-import { useAssistantLayout } from './assistant-layout.js';
+import { useAssistantLayout, type AssistantLayoutMode } from './assistant-layout.js';
+import { AssistantModeMenu } from './assistant-mode-menu.js';
 import { useModalSurface } from './use-modal-surface.js';
 
 /** A built-in button of the shell, for `renderButton`. */
-export type AssistantShellAction = 'bubble' | 'toggle' | 'detach' | 'dock' | 'collapse' | 'clear' | 'close';
+export type AssistantShellAction = 'bubble' | 'toggle' | 'detach' | 'dock' | 'collapse' | 'clear' | 'close' | 'mode' | 'history';
 
 export interface AssistantShellButtonProps {
   action: AssistantShellAction;
@@ -20,6 +21,10 @@ export interface AssistantShellButtonProps {
   /** Tooltip, with the shortcut where there is one. */
   title: string;
   pressed?: boolean;
+  /** `aria-expanded` of a button that opens a menu or a column (`mode`, `history`). */
+  expanded?: boolean;
+  /** Id of what the button opens, for `aria-controls`. */
+  controls?: string;
   onClick(): void;
   /** The icon, plus the visible label for `toggle`. */
   children: ReactNode;
@@ -33,6 +38,10 @@ export interface AssistantShellIcons {
   collapse: ReactNode;
   clear: ReactNode;
   close: ReactNode;
+  /** Full screen entry of the layout menu. */
+  fullscreen?: ReactNode;
+  /** Toggle of the chat column in full screen. */
+  history?: ReactNode;
 }
 
 export interface AssistantShellLabels {
@@ -49,6 +58,11 @@ export interface AssistantShellLabels {
   resize: string;
   /** Accessible name of the draggable header of the detached window. */
   windowHeader: string;
+  /** Name of the layout menu button. */
+  layout?: string;
+  /** Layout menu entries. */
+  sidebar?: string;
+  floating?: string;
   /** The full-screen layout, e.g. in the layout menu. */
   fullscreen?: string;
 }
@@ -79,6 +93,9 @@ export const DEFAULT_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freez
   close: 'Close',
   resize: 'AI assistant width',
   windowHeader: 'Chat window: arrow keys move, Alt and arrow keys resize, double click resets',
+  layout: 'Layout',
+  sidebar: 'Sidebar',
+  floating: 'Window',
   fullscreen: 'Full screen',
 });
 
@@ -93,6 +110,9 @@ export const DE_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freeze({
   close: 'Schließen',
   resize: 'Breite des KI-Assistenten',
   windowHeader: 'Chatfenster: Pfeiltasten verschieben, Alt und Pfeiltasten ändern die Größe, Doppelklick setzt zurück',
+  layout: 'Ansicht',
+  sidebar: 'Seitenleiste',
+  floating: 'Fenster',
   fullscreen: 'Vollbild',
 });
 
@@ -112,6 +132,8 @@ export const DEFAULT_ASSISTANT_SHELL_ICONS: AssistantShellIcons = {
   collapse: svg(<><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /><path d="m8 9 3 3-3 3" /></>),
   clear: svg(<><path d="M3 6h18" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></>),
   close: svg(<><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>),
+  fullscreen: svg(<><path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 15v6h-6" /><path d="M3 9V3h6" /></>),
+  history: svg(<><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></>),
 };
 
 export interface AssistantShellWindowOptions {
@@ -174,6 +196,21 @@ export interface AssistantShellProps {
   minPageWidth?: number;
   /** Width of the collapsed rail. Default: 44. */
   railWidth?: number;
+  /**
+   * Layouts the user can choose. Default `['sidebar', 'floating']`: the
+   * detach/dock button as before. With `'fullscreen'` a layout menu replaces
+   * detach/dock. One entry: no layout control and no layout shortcut. A
+   * current layout outside the list falls back (full screen → `restoreMode()`,
+   * otherwise the first entry).
+   */
+  modes?: ReadonlyArray<AssistantLayoutMode>;
+}
+
+const DEFAULT_MODES: ReadonlyArray<AssistantLayoutMode> = ['sidebar', 'floating'];
+const LAYOUT_MODES: ReadonlyArray<AssistantLayoutMode> = ['sidebar', 'floating', 'fullscreen'];
+function modesOf(modes: ReadonlyArray<AssistantLayoutMode> | undefined): ReadonlyArray<AssistantLayoutMode> {
+  const valid = (modes ?? DEFAULT_MODES).filter((mode, index, all) => LAYOUT_MODES.includes(mode) && all.indexOf(mode) === index);
+  return valid.length ? valid : DEFAULT_MODES;
 }
 
 const WINDOW_EDGES: FloatingResizeEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
@@ -194,13 +231,15 @@ const withShortcut = (label: string, combo: string | false) => combo ? `${label}
 const cx = (...names: Array<string | false | undefined>) => names.filter(Boolean).join(' ') || undefined;
 
 function defaultButton(unstyled: boolean | undefined) {
-  return function DefaultButton({ action, label, title, pressed, onClick, children, className }: AssistantShellButtonProps) {
+  return function DefaultButton({ action, label, title, pressed, expanded, controls, onClick, children, className }: AssistantShellButtonProps) {
     // Bubble and toggle live outside the shell, so they carry their own component name and styling switch.
     const standalone = action === 'bubble' || action === 'toggle';
     return (
       <button type="button" data-component={standalone ? `assistant-${action}` : undefined}
         data-action={standalone ? undefined : action} data-unstyled={(standalone && unstyled) || undefined}
-        className={className} aria-label={label} title={title} aria-pressed={pressed} onClick={onClick}>{children}</button>
+        className={className} aria-label={label} title={title} aria-pressed={pressed}
+        aria-haspopup={action === 'mode' ? 'menu' : undefined} aria-expanded={expanded} aria-controls={controls}
+        onClick={onClick}>{children}</button>
     );
   };
 }
@@ -303,6 +342,7 @@ export function AssistantShell({
   narrowWidth = 840,
   minPageWidth = 0,
   railWidth = 44,
+  modes: modesProp,
 }: AssistantShellProps) {
   const ui = useAssistantLayout();
   const chat = useContext(ChatContext);
@@ -318,6 +358,10 @@ export function AssistantShell({
   const sidebar = ui.mode === 'sidebar';
   const floating = ui.mode === 'floating';
   const fullscreen = ui.mode === 'fullscreen';
+  const modeKey = modesOf(modesProp).join(',');
+  const modes = modeKey.split(',') as AssistantLayoutMode[];
+  const layoutMenu = modes.includes('fullscreen') && modes.length > 1;
+  const switchesDock = !layoutMenu && modes.includes('sidebar') && modes.includes('floating');
   const width = Math.min(ui.width, available);
 
   const floatingWidth = windowOptions.width ?? ui.width;
@@ -386,20 +430,41 @@ export function AssistantShell({
   const newChat = onNewChat ?? (sessionsSupported && chat?.createSession ? () => { void chat.createSession(); } : undefined);
   const shortcuts = useChatShortcuts({
     toggle: ui.toggleChat,
-    toggleLayout: () => {
+    // One layout: no layout shortcut.
+    ...(modes.length > 1 ? { toggleLayout: () => {
       if (!ui.open) return;
       if (fullscreen) ui.restoreMode();
-      else ui.setMode(sidebar ? 'floating' : 'sidebar');
-    },
+      else if (modes.includes('sidebar') && modes.includes('floating')) ui.setMode(sidebar ? 'floating' : 'sidebar');
+    } } : {}),
     toggleCollapse: () => { if (ui.open && sidebar) ui.toggleCollapsed(); },
     ...(newChat ? { newChat: () => { ui.openChat(); newChat(); } } : {}),
     focusInput: () => { ui.openChat(); focusComposer(); requestAnimationFrame(focusComposer); },
   }, { shortcuts: shortcutOverrides, shouldIgnore: shouldIgnoreShortcut });
 
+  // A layout outside `modes` falls back: full screen to the previous layout, otherwise the first listed one.
+  const { mode, defaultMode, open, restoreMode, setMode, setDefaultMode } = ui;
+  useEffect(() => {
+    const allowed = modeKey.split(',') as AssistantLayoutMode[];
+    const normal: AssistantLayoutMode[] = allowed.filter(m => m !== 'fullscreen');
+    if (mode === 'fullscreen') {
+      if (open && !allowed.includes('fullscreen')) restoreMode();
+    } else if (open && !allowed.includes(mode)) {
+      setMode(normal[0] ?? 'fullscreen');
+    }
+    if (normal.length && !normal.includes(defaultMode)) setDefaultMode(normal[0]!);
+  }, [modeKey, mode, defaultMode, open, restoreMode, setMode, setDefaultMode]);
+
   // Full screen is a modal: the page is inert, Tab stays inside, Escape returns to the previous layout.
   useModalSurface(shell, { active: ui.open && fullscreen, onEscape: ui.restoreMode });
 
   const clear = onClear ?? chat?.clear;
+  const fallbackLabels = DEFAULT_ASSISTANT_SHELL_LABELS;
+  const layoutLabel = labels.layout ?? fallbackLabels.layout!;
+  const modeEntries: Record<AssistantLayoutMode, { label: string; icon: ReactNode }> = {
+    sidebar: { label: labels.sidebar ?? fallbackLabels.sidebar!, icon: icons.dock },
+    floating: { label: labels.floating ?? fallbackLabels.floating!, icon: icons.detach },
+    fullscreen: { label: labels.fullscreen ?? fallbackLabels.fullscreen!, icon: icons.fullscreen ?? DEFAULT_ASSISTANT_SHELL_ICONS.fullscreen },
+  };
   const placement: CSSProperties = sidebar
     ? (fillsRow ? { flex: '1 1 0%', minWidth: 0 } : { width: ui.collapsed ? railWidth : width })
     : fullscreen
@@ -447,11 +512,16 @@ export function AssistantShell({
             ? <SessionSwitcher fallbackTitle={labels.title} />
             : <span data-element="title">{labels.title}</span>)}
           {headerActions}
-          {sidebar && button({ action: 'detach', label: labels.detach, title: withShortcut(labels.detach, shortcuts.toggleLayout), onClick: () => ui.setMode('floating'), children: icons.detach })}
+          {layoutMenu && <AssistantModeMenu modes={modes} current={ui.mode} label={layoutLabel} entries={modeEntries} onPick={ui.setMode}
+            renderTrigger={({ expanded, controls, onClick }) => button({
+              action: 'mode', label: `${layoutLabel}: ${modeEntries[ui.mode].label}`, title: withShortcut(layoutLabel, shortcuts.toggleLayout),
+              expanded, controls, onClick, children: modeEntries[ui.mode].icon,
+            })} />}
+          {switchesDock && sidebar && button({ action: 'detach', label: labels.detach, title: withShortcut(labels.detach, shortcuts.toggleLayout), onClick: () => ui.setMode('floating'), children: icons.detach })}
           {showClearButton && clear && button({ action: 'clear', label: labels.clear, title: labels.clear, onClick: clear, children: icons.clear })}
           {sidebar
             ? button({ action: 'collapse', label: labels.collapse, title: withShortcut(labels.collapse, shortcuts.toggleCollapse), onClick: () => ui.setCollapsed(true), children: icons.collapse })
-            : floating && button({ action: 'dock', label: labels.dock, title: withShortcut(labels.dock, shortcuts.toggleLayout), onClick: () => ui.setMode('sidebar'), children: icons.dock })}
+            : switchesDock && floating && button({ action: 'dock', label: labels.dock, title: withShortcut(labels.dock, shortcuts.toggleLayout), onClick: () => ui.setMode('sidebar'), children: icons.dock })}
           {button({ action: 'close', label: labels.close, title: withShortcut(labels.close, shortcuts.toggle), onClick: ui.closeChat, children: icons.close })}
         </header>
         <div data-element="body" className={classNames.body} style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0 }}>
