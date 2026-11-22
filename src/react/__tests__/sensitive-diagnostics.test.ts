@@ -21,7 +21,7 @@ function productionSources(directory: string): string[] {
  * the browser's error for loading it. A failed worklet must name both, or
  * voice input fails without a hint.
  */
-const DEVELOPER_CONFIG_IDENTIFIERS = new Set(['workletUrl', 'workletLoadFailure']);
+const DEVELOPER_CONFIG_IDENTIFIERS = new Set(['workletPath', 'workletLoadFailure']);
 
 function isBoundedDiagnosticExpression(expression: ts.Expression): boolean {
   if (ts.isIdentifier(expression) && DEVELOPER_CONFIG_IDENTIFIERS.has(expression.text)) {

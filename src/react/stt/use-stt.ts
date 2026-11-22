@@ -38,8 +38,9 @@ let warnedIgnoredWorkletUrl = false;
 function warnIgnoredWorkletUrl(adapter: SttProviderAdapter, workletUrl: string | undefined): void {
   if (warnedIgnoredWorkletUrl || !workletUrl || adapter.acceptsWorkletUrl === true) return;
   warnedIgnoredWorkletUrl = true;
+  const workletPath = workletUrl.split(/[?#]/)[0];
   console.warn(
-    `[glirastes] voice.workletUrl ("${workletUrl}") is ignored: the speech adapter passed as voice.adapter does not declare acceptsWorkletUrl. Pass the URL to the adapter's constructor instead, e.g. new RecordedSttAdapter({ workletUrl }) or new DeepgramSttAdapter({ workletUrl }).`,
+    `[glirastes] voice.workletUrl ("${workletPath}") is ignored: the speech adapter passed as voice.adapter does not declare acceptsWorkletUrl. Pass the URL to the adapter's constructor instead, e.g. new RecordedSttAdapter({ workletUrl }) or new DeepgramSttAdapter({ workletUrl }).`,
   );
 }
 

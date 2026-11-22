@@ -94,20 +94,40 @@ export async function createPcmPipeline(
 
   const context = new AudioContextCtor({ sampleRate: 16_000 });
   const workletUrl = options.workletUrl ?? DEFAULT_AUDIO_WORKLET_URL;
+  const closeQuietly = () => {
+    void Promise.resolve().then(() => context.close()).catch(() => {});
+  };
+  const workletFailed = (workletLoadFailure: unknown): never => {
+    // Never silent: the developer sees the URL and the fix in the console,
+    // the user sees the chat's localized error text. Query and hash may
+    // carry tokens, so only the path is logged.
+    const workletPath = workletUrl.split(/[?#]/)[0];
+    console.error(
+      `[glirastes] Voice input: the audio worklet could not be loaded from ${workletPath}. Serve glirastes/react/audio-worklet-processor.js at that URL (\`glirastes stt worklet\` copies it into public/) or set workletUrl to where it is served.`,
+      workletLoadFailure,
+    );
+    closeQuietly();
+    throw new AudioWorkletLoadError(workletUrl, { cause: workletLoadFailure });
+  };
   try {
     await context.audioWorklet.addModule(workletUrl);
   } catch (workletLoadFailure) {
-    // Never silent: the developer sees the URL and the fix in the console,
-    // the user sees the chat's localized error text.
-    console.error(
-      `[glirastes] Voice input: the audio worklet could not be loaded from ${workletUrl}. Serve glirastes/react/audio-worklet-processor.js at that URL (\`glirastes stt worklet\` copies it into public/) or set workletUrl to where it is served.`,
-      workletLoadFailure,
-    );
-    void Promise.resolve().then(() => context.close()).catch(() => {});
-    throw new AudioWorkletLoadError(workletUrl, { cause: workletLoadFailure });
+    workletFailed(workletLoadFailure);
   }
-  const source = context.createMediaStreamSource(stream);
-  const processor = new AudioWorkletNode(context, 'audio-processor');
+  let source: MediaStreamAudioSourceNode;
+  try {
+    source = context.createMediaStreamSource(stream);
+  } catch (error) {
+    closeQuietly();
+    throw error;
+  }
+  let processor: AudioWorkletNode;
+  try {
+    // Throws when the loaded file does not register 'audio-processor'.
+    processor = new AudioWorkletNode(context, 'audio-processor');
+  } catch (workletLoadFailure) {
+    return workletFailed(workletLoadFailure);
+  }
   processor.port.onmessage = (event: MessageEvent<Int16Array>) => {
     onAudio(event.data.buffer as ArrayBuffer);
   };

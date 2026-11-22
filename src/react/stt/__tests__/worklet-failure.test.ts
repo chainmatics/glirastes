@@ -13,11 +13,17 @@ afterEach(() => {
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: originalAudioWorkletNode });
 });
 
-function stubAudio(addModule: (url: string) => Promise<void>) {
+function stubAudio(
+  addModule: (url: string) => Promise<void>,
+  options: { node?: () => void; source?: () => void } = {},
+) {
   const close = vi.fn(async () => {});
   const context = {
     audioWorklet: { addModule: vi.fn(addModule) },
-    createMediaStreamSource: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() })),
+    createMediaStreamSource: vi.fn(() => {
+      options.source?.();
+      return { connect: vi.fn(), disconnect: vi.fn() };
+    }),
     destination: {},
     close,
   };
@@ -30,7 +36,9 @@ function stubAudio(addModule: (url: string) => Promise<void>) {
     readonly port = { onmessage: null };
     readonly connect = vi.fn();
     readonly disconnect = vi.fn();
-    constructor(_context: AudioContext, _name: string) {}
+    constructor(_context: AudioContext, _name: string) {
+      options.node?.();
+    }
   }
   Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: TestAudioContext });
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: TestAudioWorkletNode });
@@ -54,6 +62,38 @@ describe('a worklet that does not load', () => {
     expect(String(error.mock.calls[0]![0])).toContain('/missing/pcm.js');
     expect(String(error.mock.calls[0]![0])).toContain('glirastes stt worklet');
     expect(error.mock.calls[0]![1]).toBe(cause);
+    expect(context.close).toHaveBeenCalled();
+  });
+
+  it('logs the URL without query or hash', async () => {
+    stubAudio(async () => { throw new Error('404'); });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await createPcmPipeline({} as MediaStream, vi.fn(), { workletUrl: '/pcm.js?token=abc#frag' })
+      .catch(() => {});
+    expect(String(error.mock.calls[0]![0])).toContain('/pcm.js.');
+    expect(String(error.mock.calls[0]![0])).not.toContain('token');
+    expect(String(error.mock.calls[0]![0])).not.toContain('frag');
+  });
+
+  it('treats a file without the audio-processor registration as a worklet failure', async () => {
+    const cause = new DOMException("Failed to construct 'AudioWorkletNode'", 'InvalidStateError');
+    const context = stubAudio(async () => {}, { node: () => { throw cause; } });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const failure = await createPcmPipeline({} as MediaStream, vi.fn(), { workletUrl: '/wrong.js' })
+      .catch((caught: unknown) => caught);
+
+    expect(failure).toBeInstanceOf(AudioWorkletLoadError);
+    expect((failure as AudioWorkletLoadError).cause).toBe(cause);
+    expect(String(error.mock.calls[0]![0])).toContain('/wrong.js');
+    expect(context.close).toHaveBeenCalled();
+  });
+
+  it('closes the context when the microphone source cannot be created', async () => {
+    const cause = new Error('no source');
+    const context = stubAudio(async () => {}, { source: () => { throw cause; } });
+    const failure = await createPcmPipeline({} as MediaStream, vi.fn()).catch((caught: unknown) => caught);
+    expect(failure).toBe(cause);
     expect(context.close).toHaveBeenCalled();
   });
 
