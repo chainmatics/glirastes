@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import { useChatContext } from '../provider/chat-context.js';
+import { useComposerContext } from '../provider/composer-context.js';
 import { sourceSearchOf } from '../completions/completion-search.js';
 import type {
   ChatComposerInputControls,
@@ -43,6 +43,7 @@ interface MenuRow {
   key: string;
   label: string;
   icon?: ReactNode;
+  description?: string;
   focus: FocusTarget;
   run: () => void;
 }
@@ -61,7 +62,8 @@ export interface ComposerPlusMenuProps {
 
 /** The `plus` toolbar item: a "+" button with a menu of composer actions. */
 export function ComposerPlusMenu({ config, items, controls, triggers, pickCompletion, attachInput }: ComposerPlusMenuProps) {
-  const { locale, completionSearch } = useChatContext();
+  const { locale, completionSearch, composer } = useComposerContext();
+  const renderIcon = composer?.renderIcon;
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [sourceItems, setSourceItems] = useState<ReadonlyArray<MentionResult>>([]);
@@ -94,7 +96,14 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
       }
       const hidden = typeof item.hidden === 'function' ? item.hidden(controls) : item.hidden;
       if (hidden) continue;
-      rows.push({ key: `item:${id}`, label: item.label, icon: item.icon, focus: 'button', run: () => item.onSelect?.(controls) });
+      rows.push({
+        key: `item:${id}`,
+        label: item.label,
+        icon: item.icon,
+        ...(item.description ? { description: item.description } : {}),
+        focus: 'button',
+        run: () => item.onSelect?.(controls),
+      });
     } else if (id === 'attach') {
       if (controls.attachmentsEnabled) {
         rows.push({ key: 'attach', label: locale.plusMenuAttachLabel ?? 'Attach file', focus: 'button', run: controls.openFilePicker });
@@ -111,6 +120,8 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
       rows.push({
         key: id,
         label: trigger.label ?? trigger.char,
+        icon: trigger.icon,
+        ...(trigger.description ? { description: trigger.description } : {}),
         focus: 'editor',
         run: () => controls.openCompletion({ trigger: trigger.char }),
       });
@@ -121,9 +132,12 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
   const staticCount = rows.length;
   if (sourceTrigger) {
     for (const result of sourceItems) {
+      const icon = result.icon && renderIcon ? renderIcon(result.icon, { type: result.type, trigger: sourceTrigger }) : undefined;
       rows.push({
         key: `source:${result.key ?? `${result.type}:${result.id}`}`,
         label: result.label,
+        ...(icon !== undefined && icon !== null ? { icon } : {}),
+        ...(result.description ? { description: result.description } : {}),
         focus: 'editor',
         run: () => pickCompletion!(result, { trigger: sourceTrigger }),
       });
@@ -231,21 +245,28 @@ export function ComposerPlusMenu({ config, items, controls, triggers, pickComple
   };
 
   const label = locale.plusMenuButtonLabel ?? 'More actions';
-  const renderRow = (row: MenuRow, position: number) => (
-    <button
-      key={row.key}
-      ref={(element) => { rowRefs.current[position] = element; }}
-      type="button"
-      role="menuitem"
-      tabIndex={-1}
-      data-element="plus-menu-item"
-      onClick={() => choose(row)}
-      onMouseMove={() => { if (position !== index) setActive(position); }}
-    >
-      {row.icon !== undefined && <span data-element="plus-menu-icon" aria-hidden="true">{row.icon}</span>}
-      <span data-element="plus-menu-label">{row.label}</span>
-    </button>
-  );
+  const renderRow = (row: MenuRow, position: number) => {
+    // With a description the name is the label alone; the description describes the row.
+    const labelId = row.description ? `${menuId}-label-${position}` : undefined;
+    const descriptionId = row.description ? `${menuId}-description-${position}` : undefined;
+    return (
+      <button
+        key={row.key}
+        ref={(element) => { rowRefs.current[position] = element; }}
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        data-element="plus-menu-item"
+        {...(labelId ? { 'aria-labelledby': labelId, 'aria-describedby': descriptionId } : {})}
+        onClick={() => choose(row)}
+        onMouseMove={() => { if (position !== index) setActive(position); }}
+      >
+        {row.icon !== undefined && row.icon !== null && <span data-element="plus-menu-icon" aria-hidden="true">{row.icon}</span>}
+        <span data-element="plus-menu-label" {...(labelId ? { id: labelId } : {})}>{row.label}</span>
+        {row.description && <span data-element="plus-menu-description" id={descriptionId}>{row.description}</span>}
+      </button>
+    );
+  };
   rowRefs.current.length = rowCount;
 
   return (

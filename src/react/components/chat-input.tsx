@@ -13,7 +13,12 @@ import { VoiceInputAddon } from './voice-input-addon.js';
 import { MentionInput } from './mention-input.js';
 import { ComposerToolbarLayout } from './composer-toolbar.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
-import type { ChatAttachment, ChatComposerInputControls, ChatInputProps } from '../types.js';
+import { createTextareaComposerHandle } from './textarea-composer-handle.js';
+import { ComposerHint } from './composer-hint.js';
+import { composerContextOf } from '../provider/composer-context.js';
+import { useChatComposerTarget } from '../composer/chat-composer.js';
+import { useComposerDraft } from '../composer/use-composer-draft.js';
+import type { ChatAttachment, ChatComposerInputControls, ChatInputProps, RichMentionInputHandle } from '../types.js';
 
 const NO_ATTACHMENTS: ReadonlyArray<ChatAttachment> = [];
 
@@ -30,12 +35,19 @@ export function ChatInput(props: ChatInputProps) {
 
 function PlainChatInput({ className, onSubmit }: ChatInputProps) {
   const visible = useContext(ChatWindowVisibilityContext);
-  const { send, stop, isLoading, canCompose: composable, queue, classNames, locale, components, voice } = useChatContext();
+  const context = useChatContext();
+  const { send, stop, isLoading, canCompose: composable, queue, classNames, locale, components, voice } = context;
+  const hint = composerContextOf(context).composer?.hint === true;
   // A hand-built context without `canCompose` locks while loading, as before.
   const canCompose = composable ?? !isLoading;
   const [value, setValue] = useState('');
   const InputExtra = components.InputExtra;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // `useChatComposer` operations (insertText, setDraft, chatAbout, ...) reach the textarea through this handle.
+  const handleRef = useRef<RichMentionInputHandle | null>(null);
+  if (!handleRef.current) handleRef.current = createTextareaComposerHandle(textareaRef, setValue);
+  useComposerDraft(handleRef, value, setValue);
+  useChatComposerTarget(handleRef, { onChange: setValue });
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -164,6 +176,7 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
           />
         )}
       />
+      {hint && <ComposerHint />}
     </form>
   );
 }

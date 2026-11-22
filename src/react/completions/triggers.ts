@@ -8,6 +8,8 @@ import { inferMentionPrefix } from '../utils/mention-markup.js';
 /** A trigger with its defaults applied (`resolveChatTriggers`). */
 export type ResolvedChatTrigger = Required<Pick<ChatTriggerDefinition, 'char' | 'prefix' | 'select'>> & {
   label?: string;
+  icon?: ChatTriggerDefinition['icon'];
+  description?: string;
   types?: ReadonlyArray<string>;
 };
 
@@ -30,7 +32,7 @@ function assertChar(char: unknown): asserts char is string {
  */
 export function normalizeTrigger(trigger: string | ChatTriggerDefinition): ResolvedChatTrigger {
   const definition = typeof trigger === 'string' ? { char: trigger } : trigger;
-  const { char, label, prefix = char, select = 'chip', types } = definition;
+  const { char, label, icon, description, prefix = char, select = 'chip', types } = definition;
   assertChar(char);
   const invalid = (rule: string) => new Error(`Invalid chat trigger ${JSON.stringify(char)}: ${rule}`);
   // The prefix is the pill's token in the text (`prefix + slug`); it must survive a send.
@@ -51,6 +53,8 @@ export function normalizeTrigger(trigger: string | ChatTriggerDefinition): Resol
     prefix,
     select,
     ...(label !== undefined ? { label } : {}),
+    ...(icon !== undefined && icon !== null ? { icon } : {}),
+    ...(description ? { description } : {}),
     ...(types !== undefined ? { types: [...types] } : {}),
   };
 }

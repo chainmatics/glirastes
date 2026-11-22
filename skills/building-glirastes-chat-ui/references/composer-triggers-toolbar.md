@@ -11,6 +11,7 @@ All names below come from `glirastes/react` unless noted.
 - Opening a list from a button
 - Toolbar
 - Plus menu
+  - Row descriptions and icons
 - End-to-end example
 
 ## Triggers
@@ -254,6 +255,40 @@ const composer = useMemo<ComposerConfig>(() => ({
   outside closes. ArrowDown/ArrowUp on the button open on the first/last row.
 - Texts: `locale.plusMenuButtonLabel` (`More actions`, de `Mehr Aktionen`)
   and `locale.plusMenuAttachLabel` (`Attach file`, de `Datei anhängen`).
+
+### Row descriptions and icons
+
+A row is `[icon][label][description]`. The description sits under the label
+in muted text and is linked with `aria-describedby`; the row's name stays the
+label. Rows take them from:
+
+- `composer.items` rows: `icon` (an element) and `description`.
+- `trigger:<char>` rows: the trigger's `icon` and `description`
+  (`ChatTriggerDefinition`); a `trigger:<char>` toolbar button shows the
+  `icon` instead of the char and keeps the label as its accessible name.
+- `source` rows: the entry's `description` (shown whenever the entry has
+  one) and its string `icon` through `composer.renderIcon`.
+
+String icon names (`CompletionItem.icon`, `ChatCommandDefinition.icon`,
+`ChatEntityDefinition.icon`, starter icons) render only through
+`composer.renderIcon(name, { type, trigger })`; the SDK ships no icon set.
+The same resolver puts an icon before the label in the default list item.
+
+```tsx
+import { FileText, LifeBuoy, User } from 'lucide-react';
+
+const ICONS: Record<string, ComponentType<{ size?: number }>> = { 'file-text': FileText, 'life-buoy': LifeBuoy, user: User };
+
+const composer = useMemo<ComposerConfig>(() => ({
+  toolbar: { start: ['plus'], end: ['send'] },
+  items: { help: { label: 'Hilfe', description: 'Kurze Anleitung', icon: <LifeBuoy size={16} />, onSelect: openHelp } },
+  plusMenu: { items: ['help', 'trigger:@'], source: { trigger: '/', label: 'Vorlagen' } },
+  renderIcon: (name) => {
+    const Icon = ICONS[name];
+    return Icon ? <Icon size={16} /> : null;
+  },
+}), [openHelp]);
+```
 
 ## End-to-end example
 

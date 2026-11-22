@@ -308,6 +308,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     language,
     turnOutcomes,
     mentionPrefix,
+    composer,
   } = useComposerContext();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
@@ -543,6 +544,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
           toolCallId={clarification.toolCallId}
           request={clarification.request}
           interactive={clarification.ready && isLatestMessage && !isLoading}
+          {...(composer?.clarificationChips ? { showOptions: false } : {})}
           onAnswer={(answer) => send(clarificationAnswerMessage({
             toolCallId: clarification.toolCallId,
             answer: answer.text,

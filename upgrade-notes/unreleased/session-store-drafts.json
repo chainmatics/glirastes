@@ -1,0 +1,19 @@
+{
+  "id": "session-store-drafts",
+  "kind": "recommended",
+  "summary": "createLocalSessionStore now keeps each chat's unsent composer text in the same browser storage and key prefix as the chat, so it survives a reload; drafts: false turns it off. Own SessionConfig stores can add draft.",
+  "howTo": "Nothing to do with createLocalSessionStore: drafts are stored as `${storageKey}:draft:<chatId>` and removed when sent, when the chat is removed, cleared or evicted, and by clearLocalSessionStore on sign-out (stores created before it write no drafts any more, so create a new store for the next sign-in). Pass drafts: false to keep them in memory only. An own SessionConfig can add draft: { load(id), save(id, draft | null) } (ComposerDraftStorage); writes are debounced 300 ms and flushed on chat switch and pagehide, drafts over 20,000 characters are not written, errors are ignored. See references/composer-starters-drafts.md#drafts-across-reloads.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "imports": ["glirastes/react"],
+    "symbols": ["createLocalSessionStore", "SessionConfig"]
+  },
+  "adoptedWhen": {
+    "patterns": ["drafts:\\s*false", "draft:\\s*\\{"]
+  },
+  "surface": [
+    "glirastes/react#ComposerDraftStorage.*",
+    "glirastes/react#SessionConfig.draft",
+    "glirastes/react#LocalSessionStoreOptions.drafts"
+  ]
+}

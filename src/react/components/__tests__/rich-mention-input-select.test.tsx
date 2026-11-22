@@ -280,6 +280,68 @@ describe('completion pick behavior (select)', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
+  it('onCompletionSelect that puts text before the trigger and returns true still loses it', async () => {
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((_item, { controls }) => {
+      controls.setText(`Vorab ${controls.value}`);
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Siehe #bu');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(editor.textContent).toBe('Vorab Siehe ');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('a handled pick leaves the text alone when the trigger text occurs twice after a rebuild', async () => {
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((_item, { controls }) => {
+      controls.setText(`#bu ${controls.value}`);
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, 'Siehe #bu');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(editor.textContent).toBe('#bu Siehe #bu');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('a handler that prepends the picked token keeps it whole and loses only the typed trigger', async () => {
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((_item, { controls }) => {
+      controls.setText(`#bug-7 ${controls.value}`);
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, '#bu');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(editor.textContent).toBe('#bug-7 ');
+  });
+
+  it('the old place of the trigger does not decide when the text occurs twice', async () => {
+    const onCompletionSelect = vi.fn<NonNullable<AiChatProviderConfig['onCompletionSelect']>>((_item, { controls }) => {
+      controls.setText(`${controls.value} #bu`);
+      return true;
+    });
+    render(<Composer chat={transport()} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox', { name: 'Type a message...' });
+
+    typeInto(editor, '#bu');
+    await waitFor(() => expect(option('Bug sieben')).toBeTruthy());
+    fireEvent.click(option('Bug sieben'));
+
+    expect(editor.textContent).toBe('#bu #bu');
+  });
+
   it('a handled pick in the middle of the text leaves one space', async () => {
     render(<Composer chat={transport()} onCompletionSelect={() => true} />);
     const editor = screen.getByRole('textbox', { name: 'Type a message...' });
@@ -416,6 +478,30 @@ describe('standalone RichMentionInput pick behavior', () => {
 
     expect(chip(editor, '9')).not.toBeNull();
     expect(editor.textContent).not.toContain('#bu');
+  });
+
+  it('a handler that inserts a pill before the text loses the typed trigger, the pill stays', async () => {
+    const ref = React.createRef<RichMentionInputHandle>();
+    const onCompletionSelect = vi.fn((item: { id: string; type: string; label: string }) => {
+      const editor = screen.getByRole('textbox');
+      const start = document.createRange();
+      start.setStart(editor.firstChild!, 0);
+      start.collapse(true);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(start);
+      ref.current!.insertMention({ id: item.id, type: item.type, label: item.label, displayName: item.label, prefix: '#', slug: 'bug-neun' });
+      return true;
+    });
+    render(<RichMentionInput ref={ref} onSearch={() => results} triggers={['#']} onCompletionSelect={onCompletionSelect} />);
+    const editor = screen.getByRole('textbox');
+
+    typeInto(editor, 'Siehe #bu');
+    await waitFor(() => expect(option('Bug neun')).toBeTruthy());
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(chip(editor, '9')).not.toBeNull();
+    expect(editor.textContent).not.toContain('#bu');
+    expect(editor.textContent!.indexOf('Bug neun')).toBeLessThan(editor.textContent!.indexOf('Siehe'));
   });
 
   it('takes onCompletionSelect with trigger and query', async () => {

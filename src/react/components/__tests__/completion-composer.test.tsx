@@ -386,3 +386,47 @@ describe('composer with completion providers', () => {
     expect(onCompletionProviderError).toHaveBeenCalledWith('broken', expect.any(Error));
   });
 });
+
+describe('default list item icons', () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+  afterEach(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    cleanup();
+  });
+
+  const iconic: ChatCompletionProvider = {
+    id: 'iconic',
+    trigger: '@',
+    search: () => [{ id: '1', type: 'user', label: 'Alice Doe', icon: 'user' }],
+  };
+
+  function Iconic({ renderIcon }: { renderIcon?: (name: string, context: { type: string; trigger?: string }) => React.ReactNode }) {
+    const providers = useMemo(() => [iconic], []);
+    const composer = useMemo(() => (renderIcon ? { renderIcon } : undefined), [renderIcon]);
+    return (
+      <AiChatProvider transport={transport()} completionProviders={providers} composer={composer}>
+        <MentionInput />
+      </AiChatProvider>
+    );
+  }
+
+  it('the default list item renders a string icon through renderIcon', async () => {
+    const renderIcon = vi.fn((name: string) => <i data-icon={name} />);
+    render(<Iconic renderIcon={renderIcon} />);
+    typeInto(screen.getByRole('textbox'), '@al');
+    const option = await screen.findByRole('option', { name: /Alice Doe/ });
+    const icon = option.querySelector('[data-element="icon"]')!;
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+    expect(icon.querySelector('i[data-icon="user"]')).not.toBeNull();
+    expect(renderIcon).toHaveBeenCalledWith('user', expect.objectContaining({ type: 'user' }));
+  });
+
+  it('without renderIcon the default list item has no icon element', async () => {
+    render(<Iconic />);
+    typeInto(screen.getByRole('textbox'), '@al');
+    const option = await screen.findByRole('option', { name: /Alice Doe/ });
+    expect(option.querySelector('[data-element="icon"]')).toBeNull();
+  });
+});

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Chat composer: `composer.clarificationChips` shows the options of an open clarification as chips above the composer (same answer message as the card; hidden while loading, once answered and without options; disabled while locked); the card then keeps question and free text only (`ClarificationCardProps.showOptions`). `ClarificationChips` for own panels; locale key `clarificationChipsLabel`. Default off.
+- Chat composer: `composer.starters` (`ChatStarter`: `label`, `prompt`, `description`, `icon`, `send`) shows starter chips above the composer on an empty chat; a click fills the composer and focuses it, `send: true` sends. Disabled while the composer is locked; `suggestions.staticChips` are hidden while starters show. `ChatStarters` for own panels; locale key `startersLabel`. Default off.
+- Chat composer: `composer.hint` shows a keyboard hint line under the composer ("↵ Send · ⇧ ↵ New line", the list keys while a completion list is open; `aria-hidden`, hidden on touch devices). `ComposerHint` for own composers with `ChatComposerInput.completionOpen`; `RichMentionInputProps.onListOpenChange`; locale keys `composerHintSend`, `composerHintNewline`, `composerHintNavigate`, `composerHintPick`, `composerHintClose`. Default off.
+- Chat composer: "+" menu rows show an icon and a description (`ComposerToolbarItem.description`, `ChatTriggerDefinition.icon`/`description`; a `trigger:<char>` button shows the trigger's icon). `composer.renderIcon(name, { type, trigger })` renders string icon names of completion entries (new `CompletionItem.icon`; the existing `ChatCommandDefinition.icon` and `ChatEntityDefinition.icon` now reach it) in the default list item and in `plusMenu.source` rows; `plusMenu.source` rows now show the entry's `description`.
+
+### Changed
+
+- `createLocalSessionStore` keeps each chat's unsent composer text in the browser storage (`${storageKey}:draft:<id>`), so it survives a reload; removed when sent, when the chat is removed, cleared or evicted, and by `clearLocalSessionStore`. `drafts: false` turns it off. Own stores can add `SessionConfig.draft` (`ComposerDraftStorage`); writes are debounced (300 ms) and flushed on switch, `pagehide` and unmount; drafts over 20,000 characters are not written.
+- Chat composer: the unsent text belongs to its chat (`ComposerDraft`). Switching chats shows that chat's draft instead of carrying the text over; the draft survives a remount of the input inside the same provider and is cleared by sending. Pills keep their ids; attachments are not part of a draft. Drafts live as long as the `AiChatProvider` instance.
+
+### Fixed
+
+- Chat composer: `useChatComposer()` (`insertText`, `setDraft`, `chatAbout`, `clear`, `focus`) also fills the plain chat input (no completion, no attachments); mentions arrive there as their text.
+- Chat composer: `onCompletionSelect` returning `true` also removes the typed trigger and query when the handler put text or a pill before them (`setText`, `insertMention` at the start); after a rebuild only a single whole-word occurrence is removed (inserted text such as `#bug-7` is never cut), several remove nothing.
+
 ## [0.22.0] - 2026-11-21
 
 ### Added

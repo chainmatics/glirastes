@@ -57,6 +57,7 @@ import {
 } from '../interactions/registry.js';
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
+import { createComposerDraftController, type ComposerDraftController } from '../composer/composer-drafts.js';
 import { ChatMarkdownOptionsContext, NO_MARKDOWN_OPTIONS } from '../markdown-options.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
 import {
@@ -195,6 +196,13 @@ export const DEFAULT_LOCALE: ChatLocale = {
   attachButtonLabel: 'Attach files',
   plusMenuButtonLabel: 'More actions',
   plusMenuAttachLabel: 'Attach file',
+  composerHintSend: 'Send',
+  composerHintNewline: 'New line',
+  composerHintNavigate: 'Navigate',
+  composerHintPick: 'Pick suggestion',
+  composerHintClose: 'Close',
+  startersLabel: 'Suggestions',
+  clarificationChipsLabel: 'Answer options',
   attachmentsLabel: 'Attachments',
   removeAttachmentLabel: 'Remove {name}',
   openAttachmentLabel: 'Open {name}',
@@ -1012,6 +1020,19 @@ export function AiChatProvider({
   );
   const entityPrefix = triggers.find((trigger) => trigger.char === '@')?.prefix ?? '@';
   const mentionPrefix = useMemo(() => createMentionPrefixLookup(triggers), [triggers]);
+  // Drafts live as long as this provider: an identity change remounts it and starts empty.
+  const draftsRef = useRef<ComposerDraftController | null>(null);
+  if (!draftsRef.current) draftsRef.current = createComposerDraftController(() => sessionRef.current?.draft);
+  const drafts = draftsRef.current;
+  // Pending draft writes reach the storage before the page goes away or the provider unmounts.
+  useEffect(() => {
+    const flush = () => drafts.flush();
+    if (typeof window !== 'undefined') window.addEventListener('pagehide', flush);
+    return () => {
+      if (typeof window !== 'undefined') window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [drafts]);
   // What `session.save` gets as its third argument: only when a trigger claims `types`, so saves stay as before otherwise.
   const saveOptionsRef = useRef<{ mentionPrefix: (type: string) => string } | undefined>(undefined);
   saveOptionsRef.current = mentionPrefix === inferMentionPrefix ? undefined : { mentionPrefix };
@@ -2241,6 +2262,8 @@ export function AiChatProvider({
     if (streamActiveRef.current) requestTurnRef.current = { sessionId: null, userMessageId: null };
     setLastRejection(null);
     setMessages([]);
+    // A pending draft write must not bring the cleared chat's draft back.
+    drafts.forget(activeSessionId);
     void Promise.resolve(sessionRef.current?.clear?.(activeSessionId));
     processedToolCallsRef.current.clear();
     handledApprovalIdsRef.current.clear();
@@ -2374,6 +2397,8 @@ export function AiChatProvider({
       if (!cfg?.remove) return;
       sessionMutationRef.current = true;
       setIsSessionMutating(true);
+      // Before the store call: a pending draft write must not land after the delete.
+      drafts.forget(id, { gone: true });
       try {
         await cfg.remove(id);
         // Re-fetch first so the fallback target reflects reality
@@ -2905,6 +2930,7 @@ export function AiChatProvider({
       composer: composerConfig,
       onCompletionSelect,
       mentionPrefix,
+      drafts,
       interactions: interactionRegistry,
       pendingCommand,
       submitPendingCommand,
@@ -3004,6 +3030,7 @@ export function AiChatProvider({
       composerConfig,
       onCompletionSelect,
       mentionPrefix,
+      drafts,
       interactionRegistry,
       pendingCommand,
       submitPendingCommand,

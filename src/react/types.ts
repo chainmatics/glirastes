@@ -386,6 +386,8 @@ export interface CompletionItem {
   type: string;
   label: string;
   description?: string;
+  /** An icon name; rendered through `composer.renderIcon` (nothing without it). */
+  icon?: string;
   slug?: string;
   /**
    * Tool-backed commands: the catalog definition to run. Set it when `id` is
@@ -453,6 +455,14 @@ export interface ChatTriggerDefinition {
   char: string;
   /** Name of the trigger in composer menus. */
   label?: string;
+  /**
+   * Shown before the label in the "+" menu and instead of the char on a
+   * `trigger:<char>` button. An element: a string shows as text (it does not
+   * go through `composer.renderIcon`).
+   */
+  icon?: ReactNode;
+  /** Short text under the label in the "+" menu. */
+  description?: string;
   /** Visible prefix of a picked pill; defaults to `char`. Commands keep `/`. */
   prefix?: string;
   /** Default pick behavior of the trigger's entries; default `chip`. */
@@ -587,6 +597,13 @@ export interface SessionConfig {
 
   /** Attachment files kept next to the chats, so the provider can reuse them. */
   attachments?: AttachmentBlobStore;
+
+  /**
+   * Where each chat's unsent composer text is kept, so it survives a reload.
+   * `createLocalSessionStore` supplies one; without it drafts live in memory
+   * as long as the provider.
+   */
+  draft?: ComposerDraftStorage;
 }
 
 // ============================================================================
@@ -1016,11 +1033,47 @@ export type ComposerToolbarBuiltin = 'attach' | 'mic' | 'actions' | 'extra' | 's
 export interface ComposerToolbarItem {
   /** Accessible name of the button; its text when there is no `icon`. */
   label: string;
+  /** An element; a string shows as text (it does not go through `composer.renderIcon`). */
   icon?: ReactNode;
+  /** Short text under the label when the item is a row of the "+" menu. */
+  description?: string;
   onSelect?: (controls: ChatComposerInputControls) => void;
   /** Renders the item yourself; wins over `icon` and `onSelect`. */
   render?: (controls: ChatComposerInputControls) => ReactNode;
   hidden?: boolean | ((controls: ChatComposerInputControls) => boolean);
+}
+
+/**
+ * The unsent text of one chat's composer, with the pills in it. Attachments
+ * are never part of a draft.
+ */
+export interface ComposerDraft {
+  text: string;
+  mentions?: ReadonlyArray<MentionData>;
+}
+
+/**
+ * Keeps unsent composer drafts per chat (`SessionConfig.draft`). The provider
+ * writes at most every 300 ms and on `pagehide`; a draft over 20,000
+ * characters is not written (`save(id, null)` instead). Errors are ignored.
+ */
+export interface ComposerDraftStorage {
+  load(conversationId: string): ComposerDraft | null | Promise<ComposerDraft | null>;
+  /** `null` removes the draft (sent or emptied). */
+  save(conversationId: string, draft: ComposerDraft | null): void | Promise<void>;
+}
+
+/** A starter chip on an empty chat (`composer.starters`). */
+export interface ChatStarter {
+  label: string;
+  /** Text for the composer (or the message with `send`); default `label`. */
+  prompt?: string;
+  /** Shown as the chip's tooltip (`title`). */
+  description?: string;
+  /** An element, or an icon name for `composer.renderIcon` (context type `starter`). */
+  icon?: ReactNode;
+  /** Send at once instead of filling the composer. Default false. */
+  send?: boolean;
 }
 
 /** Layout and app items of the composer (`AiChatProvider` `composer`). */
@@ -1036,6 +1089,34 @@ export interface ComposerConfig {
   items?: Readonly<Record<string, ComposerToolbarItem>>;
   /** Rows of the `plus` toolbar item; without it the default rows. */
   plusMenu?: ComposerPlusMenuConfig;
+  /**
+   * A keyboard hint line under the composer ("↵ Send · ⇧ ↵ New line", the
+   * list keys while a completion list is open); hidden on touch devices.
+   * Default `false`.
+   */
+  hint?: boolean;
+  /**
+   * Starter chips above the composer while the chat has no messages; a
+   * string is `{ label }`. A click puts the prompt into the composer (appends
+   * to text already there) and focuses it; `send: true` sends it instead.
+   * While they show, `suggestions.staticChips` are hidden. For page-aware
+   * starters build the list with `useMemo` from app state.
+   */
+  starters?: ReadonlyArray<string | ChatStarter>;
+  /**
+   * The options of an open clarification (`ask_clarification`) as chips
+   * above the composer; the card in the message then keeps the question and
+   * the free-text answer without its option buttons. Default `false`.
+   */
+  clarificationChips?: boolean;
+  /**
+   * Turns an icon name into an element: the string `icon` of completion
+   * entries (`MentionResult.icon`, `ChatCommandDefinition.icon`,
+   * `ChatEntityDefinition.icon`) and of starters. `context.type` is the
+   * entry's mention type (`starter` for starters), `context.trigger` the
+   * list's trigger char when known. Without it string icons render nothing.
+   */
+  renderIcon?: (name: string, context: { type: string; trigger?: string }) => ReactNode;
 }
 
 /**
@@ -1333,6 +1414,20 @@ export interface ChatLocale {
   plusMenuButtonLabel?: string;
   /** The `attach` row of the "+" menu; default `Attach file`. */
   plusMenuAttachLabel?: string;
+  /** Hint line (`composer.hint`): what Enter does; default `Send`. */
+  composerHintSend?: string;
+  /** Hint line: what Shift+Enter does; default `New line`. */
+  composerHintNewline?: string;
+  /** Hint line while a list is open: the arrow keys; default `Navigate`. */
+  composerHintNavigate?: string;
+  /** Hint line while a list is open: Enter; default `Pick suggestion`. */
+  composerHintPick?: string;
+  /** Hint line while a list is open: Escape; default `Close`. */
+  composerHintClose?: string;
+  /** Accessible name of the starter chips group; default `Suggestions`. */
+  startersLabel?: string;
+  /** Accessible name of the clarification chips group; default `Answer options`. */
+  clarificationChipsLabel?: string;
   attachmentsLabel: string;
   removeAttachmentLabel: string;      // supports `{name}`
   openAttachmentLabel: string;        // supports `{name}`
@@ -2200,9 +2295,11 @@ export interface ChatComposerInput extends ChatComposerInputControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers' | 'onListOpenChange'>;
   /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
   readonly attachmentInputProps: ChatAttachmentInputProps;
+  /** A completion list of the editor is open (e.g. for `ComposerHint`). */
+  readonly completionOpen: boolean;
   readonly pendingCommand: PendingChatCommand | null;
   submitPendingCommand(values: Readonly<Record<string, string>>, valueLabels?: Readonly<Record<string, string>>): boolean;
   cancelPendingCommand(): void;
@@ -2304,6 +2401,8 @@ export interface RichMentionInputProps {
   onBackspaceEmpty?: () => void;
   /** Enter submits an empty editor, e.g. while attachments wait. */
   allowEmptySubmit?: boolean;
+  /** The completion list opened (`true`) or closed (`false`); not called on mount. */
+  onListOpenChange?: (open: boolean) => void;
 }
 
 export interface ChatWindowHeaderRenderProps {
@@ -2424,6 +2523,8 @@ export interface ClarificationCardProps {
   /** False once answered or when a newer message exists. */
   interactive: boolean;
   onAnswer: (answer: { text: string; optionId?: string }) => void;
+  /** Renders the option buttons; default true. False with `composer.clarificationChips` (the options are chips above the composer). */
+  showOptions?: boolean;
   className?: string;
 }
 

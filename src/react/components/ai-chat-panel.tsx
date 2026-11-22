@@ -5,6 +5,9 @@ import { MessageList } from './message-list.js';
 import { ChatInput } from './chat-input.js';
 import { MentionInput } from './mention-input.js';
 import { SuggestionBar } from './suggestion-bar.js';
+import { ChatStarters } from './chat-starters.js';
+import { ClarificationChips } from './clarification-chips.js';
+import { composerContextOf } from '../provider/composer-context.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { BulkApprovalCard as DefaultBulkApprovalCard } from './bulk-approval-card.js';
 import { ChatQueue as DefaultChatQueue } from './chat-queue.js';
@@ -35,6 +38,7 @@ function approvalIdsOf(messages: ReadonlyArray<ChatMessage>): Set<string> {
  * Uses configuration from the parent `<AiChatProvider>`.
  */
 export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
+  const context = useChatContext();
   const {
     classNames,
     hasMentions,
@@ -61,7 +65,9 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     attachments,
     approvalDisplay,
     queue,
-  } = useChatContext();
+  } = context;
+  // Starters replace the static suggestion chips on an empty chat.
+  const startersShown = messages.length === 0 && (composerContextOf(context).composer?.starters?.length ?? 0) > 0;
 
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const BulkApprovalCardComponent = components.BulkApprovalCard ?? DefaultBulkApprovalCard;
@@ -212,7 +218,9 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
         </div>
       )}
 
-      {!isLoading && !showTypingIndicator && <SuggestionBar />}
+      {startersShown && <ChatStarters />}
+      {composerContextOf(context).composer?.clarificationChips && <ClarificationChips />}
+      {!isLoading && !showTypingIndicator && !startersShown && <SuggestionBar />}
       {queue?.enabled && ChatQueueComponent && <ChatQueueComponent />}
       <InputComponent />
     </div>

@@ -77,7 +77,7 @@ function renderTrigger(id: string, triggers: ReadonlyArray<ResolvedChatTrigger> 
       onMouseDown={keepFocus}
       onClick={() => controls.openCompletion({ trigger: trigger.char })}
     >
-      {trigger.char}
+      {trigger.icon ?? trigger.char}
     </button>
   );
 }

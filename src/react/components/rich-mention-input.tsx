@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useImperativeHandle,
@@ -21,6 +22,8 @@ import type {
   RichMentionInputProps,
 } from '../types.js';
 import { normalizeTrigger } from '../completions/triggers.js';
+import { ChatContext } from '../provider/chat-context.js';
+import { composerContextOf } from '../provider/composer-context.js';
 import { sourceSearchOf } from '../completions/completion-search.js';
 import {
   inferMentionPrefix,
@@ -106,13 +109,14 @@ export function pickCompletionOf(handle: RichMentionInputHandle | null | undefin
 }
 
 /**
- * Text the editor holds at a position counted over all its text nodes, so it
- * can be found again after an app handler rebuilt the nodes (`setText`,
- * `appendText`) or split them (`insertMention`).
+ * The typed trigger and query, so they can be found again after an app
+ * handler rebuilt the nodes (`setText`, `appendText`) or split them
+ * (`insertMention`).
  */
 interface TextSnapshot {
-  start: number;
   text: string;
+  /** A live range over the text: it follows text a handler inserts before it. */
+  range?: Range;
 }
 
 function textNodesOf(editor: HTMLElement): Text[] {
@@ -122,33 +126,56 @@ function textNodesOf(editor: HTMLElement): Text[] {
   return nodes;
 }
 
-function textOffsetOf(editor: HTMLElement, node: Text, offset: number): number {
-  let total = 0;
-  for (const current of textNodesOf(editor)) {
-    if (current === node) return total + offset;
-    total += current.length;
-  }
-  return -1;
+function inChip(node: Node): boolean {
+  return !!node.parentElement?.closest('[data-component="mention-chip"]');
+}
+
+/** Deletes `length` characters at `local` and one of two spaces that then meet. */
+function deleteTextAt(node: Text, local: number, length: number): { node: Text; offset: number } {
+  node.deleteData(local, length);
+  if (local > 0 && isSpace(node.data[local - 1]) && isSpace(node.data[local])) node.deleteData(local, 1);
+  return { node, offset: local };
 }
 
 /**
- * Deletes the snapshot's text when it is still at its place (outside a pill)
- * and, when spaces then meet on both sides, one of them. Returns the text
- * node and offset where it was, or null when the text is gone.
+ * Removes the typed trigger and query after a handled pick, wherever the
+ * app's handler moved them: (1) the live range when it still spans exactly
+ * the text (handlers that insert before it), else (2) the text when it occurs
+ * exactly once outside pills as a whole word (a space, the start or the end
+ * of a text node on both sides). Zero or several matches delete nothing, so
+ * text the handler put in (`#bug-7` for `#bu`) is never cut.
  */
-function deleteSnapshot(editor: HTMLElement, snapshot: TextSnapshot): { node: Text; offset: number } | null {
-  let total = 0;
-  for (const node of textNodesOf(editor)) {
-    const local = snapshot.start - total;
-    total += node.length;
-    if (local < 0 || local > node.length) continue;
-    if (node.data.slice(local, local + snapshot.text.length) !== snapshot.text) continue;
-    if (node.parentElement?.closest('[data-component="mention-chip"]')) return null;
-    node.deleteData(local, snapshot.text.length);
-    if (local > 0 && isSpace(node.data[local - 1]) && isSpace(node.data[local])) node.deleteData(local, 1);
-    return { node, offset: local };
+function removeTypedTrigger(editor: HTMLElement, snapshot: TextSnapshot): { node: Text; offset: number } | null {
+  const { range } = snapshot;
+  if (
+    range && !range.collapsed
+    && range.startContainer === range.endContainer
+    && range.startContainer.nodeType === Node.TEXT_NODE
+    && editor.contains(range.startContainer)
+    && range.toString() === snapshot.text
+    && !inChip(range.startContainer)
+  ) {
+    return deleteTextAt(range.startContainer as Text, range.startOffset, snapshot.text.length);
   }
-  return null;
+  let found: { node: Text; local: number } | null = null;
+  for (const node of textNodesOf(editor)) {
+    if (inChip(node)) continue;
+    for (let local = node.data.indexOf(snapshot.text); local >= 0; local = node.data.indexOf(snapshot.text, local + 1)) {
+      const end = local + snapshot.text.length;
+      if (local > 0 && !isSpace(node.data[local - 1])) continue;
+      if (end < node.length && !isSpace(node.data[end])) continue;
+      if (found) return null;
+      found = { node, local };
+    }
+  }
+  return found ? deleteTextAt(found.node, found.local, snapshot.text.length) : null;
+}
+
+function liveRange(node: Text, start: number, end: number): Range {
+  const range = node.ownerDocument.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, end);
+  return range;
 }
 
 function isChip(node: Node | null | undefined): node is HTMLElement {
@@ -208,6 +235,9 @@ function charAfter(range: Range, editor: HTMLElement): string {
 
 function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: MentionDropdownItemProps) {
   const itemRef = useRef<HTMLButtonElement>(null);
+  // Standalone (outside a provider) there is no `composer.renderIcon`: no icon, as before.
+  const renderIcon = composerContextOf(useContext(ChatContext)).composer?.renderIcon;
+  const icon = result.icon && renderIcon ? renderIcon(result.icon, { type: result.type }) : null;
 
   useEffect(() => {
     if (isSelected && itemRef.current) {
@@ -225,6 +255,7 @@ function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: Menti
       data-mention-type={result.type}
       data-selected={isSelected ? 'true' : 'false'}
     >
+      {icon !== null && icon !== undefined && <span data-element="icon" aria-hidden="true">{icon}</span>}
       <span data-element="label">{result.label}</span>
       {result.description && (
         <span data-element="description">{result.description}</span>
@@ -262,6 +293,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onFiles,
       onBackspaceEmpty,
       allowEmptySubmit = false,
+      onListOpenChange,
     },
     ref,
   ) {
@@ -290,6 +322,17 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // -1: the result itself; 0..n: one of its entity actions.
     const [selectedAction, setSelectedAction] = useState(-1);
     const [isSearching, setIsSearching] = useState(false);
+
+    // `onListOpenChange` on every change of the shown list, not on mount (closed).
+    const listShown = hasMentionSupport && dropdownOpen && searchResults.length > 0;
+    const listShownRef = useRef(false);
+    const onListOpenChangeRef = useRef(onListOpenChange);
+    onListOpenChangeRef.current = onListOpenChange;
+    useEffect(() => {
+      if (listShownRef.current === listShown) return;
+      listShownRef.current = listShown;
+      onListOpenChangeRef.current?.(listShown);
+    }, [listShown]);
     const listboxId = useId();
     const [isFocused, setIsFocused] = useState(false);
 
@@ -860,8 +903,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       const editor = editableRef.current;
       if (!editor) return null;
       if (armed && editor.contains(armed.node) && armed.node.data.slice(armed.start, armed.start + armed.text.length) === armed.text) {
-        const start = textOffsetOf(editor, armed.node, armed.start);
-        return start < 0 ? null : { start, text: armed.text };
+        return { text: armed.text, range: liveRange(armed.node, armed.start, armed.start + armed.text.length) };
       }
       const selection = editorSelection(editor);
       if (!selection || selection.rangeCount === 0) return null;
@@ -873,8 +915,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         const char = text[i]!;
         if (isSpace(char)) break;
         if (triggers.has(char) && (i === 0 || isSpace(text[i - 1]))) {
-          const start = textOffsetOf(editor, node, i);
-          return start < 0 ? null : { start, text: text.slice(i, range.startOffset) };
+          return { text: text.slice(i, range.startOffset), range: liveRange(node, i, range.startOffset) };
         }
       }
       return null;
@@ -914,7 +955,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         // The app handled it: trigger and query (or the untouched `openCompletion` text) leave the
         // editor, found by the snapshot from before the handler (it may have rebuilt the text).
         const editor = editableRef.current;
-        const removed = editor && typed ? deleteSnapshot(editor, typed) : null;
+        const removed = editor && typed ? removeTypedTrigger(editor, typed) : null;
         if (removed) {
           const selection = editorSelection(editor);
           const caret = document.createRange();

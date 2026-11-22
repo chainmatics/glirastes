@@ -268,8 +268,8 @@ those capabilities.
 `mentions` supplies the sources; `MentionInput` and `RichMentionInput` render
 them, `MentionChip` and `MentionChipList` show them. Assert that structured
 mention ids survive submission: a mention degraded to plain text looks right
-and no longer resolves. `suggestions` drives `SuggestionBar` and
-`SuggestionChip`; a failing source may not take the composer down.
+and no longer resolves. `suggestions` drives `SuggestionBar` and `SuggestionChip`; a failing source may not take the composer down.
+Opt-in `composer.starters`, `composer.hint`, `composer.clarificationChips`; per-chat drafts are on by default: [references/composer-starters-drafts.md](references/composer-starters-drafts.md).
 
 ## Attachments
 
@@ -298,8 +298,8 @@ For several chats per user without a backend, pass
 (from `glirastes/react`; memoize by that complete identity key): the chats
 stay in the browser's `localStorage`, are named after their first question,
 and the assistant header lists them in place of its title, with new, rename
-and delete. Include app, environment, business tenant and verified user in
-`storageKey`; remount the React chat with that key when identity changes. This keeps chat
+and delete; it also keeps each chat's unsent draft (`drafts: false` turns it off). Include app, environment, business tenant and verified user in
+`storageKey`; remount `AiChatProvider` with that key when identity changes (drafts live in it). This keeps chat
 content on the device, so decide it with the developer; an app that needs
 chats on every device supplies `list`, `create`, `remove`, `rename`, `save`
 and `load` from its own server instead.

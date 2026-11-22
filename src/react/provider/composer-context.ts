@@ -1,5 +1,6 @@
 import type { CompletionItem, CompletionSelectContext, ComposerConfig } from '../types.js';
 import type { ResolvedChatTrigger } from '../completions/triggers.js';
+import type { ComposerDraftController } from '../composer/composer-drafts.js';
 import { useChatContext, type ChatContextValue } from './chat-context.js';
 
 /**
@@ -17,6 +18,8 @@ export interface ComposerContextValue {
   onCompletionSelect?: (item: CompletionItem, context: CompletionSelectContext) => boolean | void;
   /** Visible prefix of a sent mention by type: a trigger's `types`, else `inferMentionPrefix`. */
   mentionPrefix?: (type: string) => string;
+  /** The unsent composer text per chat, owned by this provider instance. */
+  drafts?: ComposerDraftController;
 }
 
 /** The internal composer fields of a chat context value (absent outside the provider). */

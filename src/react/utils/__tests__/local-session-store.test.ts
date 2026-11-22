@@ -442,3 +442,88 @@ describe('maxMessagesPerSession', () => {
     expect(put.mock.calls.map((call) => call[1])).toEqual(['att_nnnnnnnnnnnnnnnnnnnnnnnn']);
   });
 });
+
+describe('composer drafts kept next to the chats', () => {
+  it('draft.save and draft.load round-trip under the storageKey', async () => {
+    const { data, storage } = memory();
+    const sessions = store(storage);
+    const mention = { id: '7', type: 'person', label: 'Bug sieben' };
+    await sessions.draft!.save('default', { text: 'halb fertig', mentions: [mention] });
+    expect(JSON.parse(data.get('app:u1:draft:default')!)).toEqual({ text: 'halb fertig', mentions: [mention] });
+    expect(await store(storage).draft!.load('default')).toEqual({ text: 'halb fertig', mentions: [mention] });
+    expect(await store(storage).draft!.load('other')).toBeNull();
+  });
+
+  it('save(null) removes the key', async () => {
+    const { data, storage } = memory();
+    const sessions = store(storage);
+    await sessions.draft!.save('default', { text: 'weg damit' });
+    await sessions.draft!.save('default', null);
+    expect(data.has('app:u1:draft:default')).toBe(false);
+  });
+
+  it('remove and clear drop the draft', async () => {
+    const { data, storage } = memory();
+    const sessions = createLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null, createId: () => 'x' });
+    const created = await sessions.create!();
+    await sessions.draft!.save(created.id, { text: 'in x' });
+    await sessions.draft!.save('default', { text: 'in default' });
+    await sessions.remove!(created.id);
+    expect(data.has('app:u1:draft:x')).toBe(false);
+    await sessions.clear!();
+    expect(data.has('app:u1:draft:default')).toBe(false);
+  });
+
+  it('an evicted chat (maxSessions) loses its draft', async () => {
+    const { data, storage } = memory();
+    const clock = { now: 1_000 };
+    let next = 0;
+    const sessions = createLocalSessionStore({
+      storageKey: 'app:u1', storage, attachmentStore: null, maxSessions: 1, now: () => clock.now, createId: () => `s${++next}`,
+    });
+    await sessions.save!('default', [user('Erste Frage')]);
+    await sessions.draft!.save('default', { text: 'alt' });
+    clock.now = 2_000;
+    await sessions.create!();
+    expect(data.has('app:u1:draft:default')).toBe(false);
+  });
+
+  it('clearLocalSessionStore removes drafts', async () => {
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+      removeItem: (key: string) => { data.delete(key); },
+      get length() { return data.size; },
+      key: (index: number) => [...data.keys()][index] ?? null,
+    };
+    const sessions = createLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    await sessions.draft!.save('default', { text: 'abmelden' });
+    await clearLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    expect(data.has('app:u1:draft:default')).toBe(false);
+  });
+
+  it('drafts: false offers no draft adapter', () => {
+    expect(createLocalSessionStore({ storageKey: 'app:u1', storage: memory().storage, attachmentStore: null, drafts: false }).draft).toBeUndefined();
+  });
+
+  it('drafts are namespaced by storageKey', async () => {
+    const { data, storage } = memory();
+    const first = createLocalSessionStore({ storageKey: 'app:u1', storage, attachmentStore: null });
+    const second = createLocalSessionStore({ storageKey: 'app:u2', storage, attachmentStore: null });
+    await first.draft!.save('default', { text: 'von u1' });
+    expect(await second.draft!.load('default')).toBeNull();
+    expect(data.has('app:u1:draft:default')).toBe(true);
+  });
+
+  it('blocked storage', async () => {
+    const blocked = {
+      getItem: () => { throw new Error('blocked'); },
+      setItem: () => { throw new Error('blocked'); },
+      removeItem: () => { throw new Error('blocked'); },
+    };
+    const sessions = createLocalSessionStore({ storageKey: 'app:u1', storage: blocked, attachmentStore: null });
+    await expect(Promise.resolve(sessions.draft!.save('default', { text: 'x' }))).resolves.toBeUndefined();
+    expect(await sessions.draft!.load('default')).toBeNull();
+  });
+});

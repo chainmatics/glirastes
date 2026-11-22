@@ -1,4 +1,4 @@
-import type { ChatMessage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
+import type { ChatMessage, ComposerDraft, ComposerDraftStorage, SessionConfig, SessionSummary, WireChatMessage } from '../types.js';
 import { attachmentIdOf } from '../../contracts/attachments.js';
 import { fileToDataUrl, omitAttachmentData } from './attachments.js';
 import { createIndexedDbAttachmentStore, dataUrlToBlob, type AttachmentBlobStore } from './attachment-blob-store.js';
@@ -31,11 +31,25 @@ export interface LocalSessionStoreOptions {
    * is set; `null` keeps no files.
    */
   attachmentStore?: AttachmentBlobStore | null;
+  /**
+   * Keep each chat's unsent composer text (`${storageKey}:draft:<id>`), so it
+   * survives a reload; gone once sent or when the chat is removed, cleared or
+   * evicted. Attachments are never kept. Default: true.
+   */
+  drafts?: boolean;
   now?: () => number;
   createId?: () => string;
 }
 
 const DEFAULT_ID = 'default';
+
+/**
+ * Bumped by `clearLocalSessionStore` per `storageKey`: a store created before
+ * the clear writes no drafts any more, so a pending write of the signed-out
+ * user cannot bring a draft back.
+ */
+const generations = new Map<string, number>();
+const generationOf = (storageKey: string) => generations.get(storageKey) ?? 0;
 const TITLE_LENGTH = 40;
 
 function browserStorage(): KeyValueStorage | null {
@@ -108,12 +122,16 @@ function isSummary(value: unknown): value is SessionSummary & { createdAt: numbe
     && typeof entry.createdAt === 'number' && typeof entry.updatedAt === 'number';
 }
 
-/** Forgets every chat of this `storageKey` (every key starting with `${storageKey}:`), files included, e.g. on sign-out. */
+/**
+ * Forgets every chat of this `storageKey` (every key starting with `${storageKey}:`), files included, e.g. on sign-out.
+ * Stores created before the call write no drafts any more; create a new one for the next sign-in.
+ */
 export async function clearLocalSessionStore(options: {
   storageKey: string;
   storage?: KeyValueStorage | null;
   attachmentStore?: AttachmentBlobStore | null;
 }): Promise<void> {
+  generations.set(options.storageKey, generationOf(options.storageKey) + 1);
   const storage = options.storage === undefined ? browserStorage() : options.storage;
   const prefix = `${options.storageKey}:`;
   try {
@@ -179,6 +197,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
   const activeKey = `${options.storageKey}:active`;
   const indexKey = `${options.storageKey}:sessions`;
   const messagesKey = (id: string) => `${options.storageKey}:messages:${id}`;
+  const draftKey = (id: string) => `${options.storageKey}:draft:${id}`;
   type Entry = SessionSummary & { createdAt: number; updatedAt: number; named?: boolean; trimmed?: boolean };
 
   const read = (key: string): unknown => {
@@ -221,6 +240,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     const ordered = sorted(list);
     for (const removed of ordered.slice(maxSessions)) {
       drop(messagesKey(removed.id));
+      drop(draftKey(removed.id));
       void deleteFiles(removed.id);
     }
     const kept = ordered.slice(0, maxSessions);
@@ -251,8 +271,23 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     }));
   };
 
+  const generation = generationOf(options.storageKey);
+  const draft: ComposerDraftStorage = {
+    load(conversationId) {
+      const stored = read(draftKey(conversationId)) as Partial<ComposerDraft> | null;
+      if (typeof stored !== 'object' || stored === null || typeof stored.text !== 'string') return null;
+      return { text: stored.text, ...(Array.isArray(stored.mentions) ? { mentions: stored.mentions } : {}) };
+    },
+    save(conversationId, value) {
+      if (generationOf(options.storageKey) !== generation) return;
+      if (value) write(draftKey(conversationId), { text: value.text, mentions: value.mentions ?? [] });
+      else drop(draftKey(conversationId));
+    },
+  };
+
   return {
     ...(files ? { attachments: files } : {}),
+    ...(options.drafts === false ? {} : { draft }),
     get defaultActiveId() {
       const active = read(activeKey);
       const list = entries();
@@ -270,6 +305,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     },
     async remove(conversationId) {
       drop(messagesKey(conversationId));
+      drop(draftKey(conversationId));
       const remaining = entries().filter((entry) => entry.id !== conversationId);
       if (remaining.length === 0) drop(indexKey);
       else persist(remaining);
@@ -346,6 +382,7 @@ export function createLocalSessionStore(options: LocalSessionStoreOptions): Sess
     async clear(conversationId) {
       const id = conversationId ?? DEFAULT_ID;
       drop(messagesKey(id));
+      drop(draftKey(id));
       persist(entries().map((entry) => (entry.id === id ? { ...entry, messageCount: 0 } : entry)));
       await deleteFiles(id);
     },

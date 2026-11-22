@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandArgumentsForm as DefaultCommandArgumentsForm } from '../components/command-arguments-form.js';
 import { useChatComposerTarget } from '../composer/chat-composer.js';
+import { useComposerDraft } from '../composer/use-composer-draft.js';
 import { useComposerContext } from '../provider/composer-context.js';
 import type {
   ChatAttachment,
@@ -66,6 +67,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   const canCompose = composable ?? !isLoading;
   const { onSubmit, initialValue } = options;
   const [value, setValue] = useState('');
+  const [completionOpen, setCompletionOpen] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentProblem, setAttachmentProblem] = useState<AttachmentProblem | null>(null);
   const attachmentsRef = useRef(attachments);
@@ -74,6 +76,9 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   const inputRef = useRef<RichMentionInputHandle | null>(null);
   const initialApplied = useRef(false);
   const ArgumentsForm = components.CommandArgumentsForm ?? DefaultCommandArgumentsForm;
+
+  // The open chat's unsent text: restored before queued composer operations run.
+  const draft = useComposerDraft(inputRef, value, setValue);
 
   // Pills and drafts from `useChatComposer` (e.g. a "Chat about this" menu entry).
   useChatComposerTarget(inputRef, { onChange: setValue });
@@ -94,7 +99,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     const handle = inputRef.current;
     if (initialApplied.current || !handle) return;
     initialApplied.current = true;
-    if (!initialValue) return;
+    if (!initialValue || draft.restored()) return;
     const prefix = handle.getValue();
     handle.setValue(prefix ? `${prefix} ${initialValue}` : initialValue, handle.getMentions());
     setValue(handle.getValue());
@@ -188,6 +193,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
 
   const inputProps = useMemo<ChatComposerInput['inputProps']>(() => ({
     onChange: setValue,
+    onListOpenChange: setCompletionOpen,
     onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
     // Only a non-default list: a `triggers` prop the app sets on the input must not be overridden by the default.
@@ -262,6 +268,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     removeAttachment,
     openFilePicker,
     attachmentInputProps,
+    completionOpen,
     submit,
     stop,
     setText,
