@@ -152,10 +152,10 @@ export const RuntimeConfigSchema = z
       .default({ enabled: false }),
     limits: z
       .object({
-        maxModelSteps: z.number().int().min(1).max(50).default(6),
+        maxModelSteps: z.number().int().min(1).max(50).default(10),
         maxToolCalls: z.number().int().min(1).max(100).default(8),
         totalTimeoutMs: z.number().int().min(1000).max(300_000).default(60_000),
-        maxInputTokens: z.number().int().min(1).max(200_000).default(40_000),
+        maxInputTokens: z.number().int().min(1).max(200_000).default(60_000),
         maxOutputTokens: z.number().int().min(1).max(32_000).default(4000),
         maxEstimatedCostUsd: z.number().positive().max(100).default(0.5),
         /**
@@ -179,10 +179,10 @@ export const RuntimeConfigSchema = z
           .optional(),
       })
       .default({
-        maxModelSteps: 6,
+        maxModelSteps: 10,
         maxToolCalls: 8,
         totalTimeoutMs: 60_000,
-        maxInputTokens: 40_000,
+        maxInputTokens: 60_000,
         maxOutputTokens: 4000,
         maxEstimatedCostUsd: 0.5,
       }),
