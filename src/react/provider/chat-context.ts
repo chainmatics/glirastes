@@ -141,8 +141,9 @@ export interface ChatContextValue {
   pauseQueue: () => void;
   stop: () => void;
   /**
-   * Empties the open chat (and its queue). A running request is stopped; nothing of it is shown, stored or
-   * recorded, and the chat stays busy until the transport reports its end.
+   * Empties the open chat (and its queue). A running request is stopped (best effort); until the transport
+   * reports its end the chat stays busy and empty, nothing of it is shown, stored or recorded, and a message
+   * sent meanwhile goes out into the emptied chat afterwards (see `docs/concepts.md`, Turn outcomes).
    */
   clear: () => void;
   loadMore: () => void;

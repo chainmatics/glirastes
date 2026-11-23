@@ -1162,15 +1162,23 @@ export function AiChatProvider({
   const languageRef = useRef(language);
   languageRef.current = language;
 
-  // A request running when clear() was called, until it ended: everything the transport holds or sends
-  // meanwhile is that request's, so it is neither shown nor stored, and the transport's history is emptied
-  // once it ended. Only the end of the request is waited for; no message is told apart by its id.
-  const [discardingRun, setDiscardingRun] = useState(false);
+  // The window of a request running when clear() was called, until the transport reports its end: the chat
+  // that was cleared (`sessionId`). While it is that chat that is open, what the transport holds is the
+  // cleared request's, so it is neither shown nor stored; the request's data parts are dropped whichever chat
+  // is open; the transport's history is emptied once the request ended. Only the end of the request is
+  // waited for; no message is told apart by its id.
+  const [discarding, setDiscarding] = useState<{ sessionId: string } | null>(null);
   const discardingRunRef = useRef(false);
-  // The chat that was cleared: only its history is emptied at the end (a chat opened meanwhile loaded its own).
-  const discardedSessionRef = useRef<string | null>(null);
-  // The failure the cleared request ended with: not shown in the emptied chat.
+  const discardingRun = discarding !== null;
+  // The failure the cleared request ended with: not shown in the emptied chat (until the next request starts).
   const [discardedError, setDiscardedError] = useState<Error | null>(null);
+  // A message sent during the window without the queue: sent into the emptied chat once the window closed.
+  const [heldSend, setHeldSend] = useState<{
+    message: string;
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] };
+  } | null>(null);
+  const heldSendRef = useRef(heldSend);
+  heldSendRef.current = heldSend;
 
   // Data part handler — processes pipeline and truncation events from any transport
   const handleDataPart = useCallback((dataPart: { type: string; data: unknown }) => {
@@ -1239,7 +1247,10 @@ export function AiChatProvider({
     setMessages,
     addToolApprovalResponse,
   } = resolvedTransport;
-  const rawMessages = discardingRun ? (NO_MESSAGES as unknown as typeof transportMessages) : transportMessages;
+  // A chat opened during the window shows what it loaded (the cleared request may still write into it: the
+  // shared-transport case of docs/plans/2026-11-23-design-left-chat.md).
+  const hidesTransport = discarding !== null && discarding.sessionId === activeSessionId;
+  const rawMessages = hidesTransport ? (NO_MESSAGES as unknown as typeof transportMessages) : transportMessages;
   const clearedRunFailure = discardingRun || (rawTransportError != null && rawTransportError === discardedError);
   const transportError = clearedRunFailure ? null : rawTransportError;
   const status = clearedRunFailure && transportStatus === 'error' ? 'ready' : transportStatus;
@@ -1513,6 +1524,9 @@ export function AiChatProvider({
     // Held messages and a refused message belong to the chat that was left.
     setHeldMessages([]);
     setLastRejection(null);
+    // So does a message waiting for the end of a cleared request.
+    heldSendRef.current = null;
+    setHeldSend(null);
   }, [activeSessionId, resetUiActions]);
 
   // Load messages from session whenever the active session changes.
@@ -2136,6 +2150,20 @@ export function AiChatProvider({
     message: string,
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
   ): ChatSubmitOutcome => {
+    if (!queueEnabled && discardingRunRef.current) {
+      // The chat is being cleared: one message waits for the emptied chat, nothing reaches the transport now.
+      if (sessionNotReady || sessionMutationRef.current || heldSendRef.current) return { status: 'rejected', reason: 'session' };
+      if (sendOptions?.files?.length && !attachmentOptions) return { status: 'rejected', reason: 'attachments-off' };
+      const held = { message, sendOptions: { mentions: [...(sendOptions?.mentions ?? activeMentions)], ...(sendOptions?.files ? { files: sendOptions.files } : {}) } };
+      heldSendRef.current = held;
+      setHeldSend(held);
+      setActiveMentions([]);
+      setMentionQuery('');
+      setMentionTrigger(null);
+      setMentionResults([]);
+      setIsMentionSearching(false);
+      return { status: 'queued' };
+    }
     if (!queueEnabled) {
       const refused = sendDirect(message, sendOptions);
       return refused ? { status: 'rejected', reason: refused } : { status: 'sent' };
@@ -2268,7 +2296,25 @@ export function AiChatProvider({
 
   const consumeComposerMentions = useCallback(() => setComposerMentions([]), []);
 
+  const stopTransport = useCallback(() => {
+    // Best effort: a stop that throws, rejects or is missing never keeps the chat from being cleared.
+    try {
+      const stopped: unknown = (transportStop as (() => unknown) | undefined)?.();
+      if ((typeof stopped === 'object' || typeof stopped === 'function') && stopped !== null
+        && typeof (stopped as { then?: unknown }).then === 'function') {
+        (stopped as PromiseLike<unknown>).then(undefined, () => { console.warn('[glirastes] The transport could not stop the request'); });
+      }
+    } catch {
+      console.warn('[glirastes] The transport could not stop the request');
+    }
+  }, [transportStop]);
+
   const stop = useCallback(() => {
+    // The cleared request is being stopped already: ask again, record and pause nothing.
+    if (discardingRunRef.current) {
+      stopTransport();
+      return;
+    }
     // The running turn keeps that it was stopped, also when nothing of its answer arrived yet.
     if (streamActiveRef.current) recordTurnOutcome('aborted', selfAbortRef.current ? 'send-now' : 'stopped');
     // The user stopped the run: what is queued waits (unless `sendNow` stopped it to go next).
@@ -2288,19 +2334,21 @@ export function AiChatProvider({
       message: 'Stopped by user.',
     }));
     transportStop();
-  }, [transportStop, pipelineSteps.length, queueConfig.pauseOn, queueStore, recordTurnOutcome]);
+  }, [transportStop, stopTransport, pipelineSteps.length, queueConfig.pauseOn, queueStore, recordTurnOutcome]);
 
   const clear = useCallback(() => {
     resetUiActions();
-    // A request still running belonged to the cleared history: it is stopped, its outcome is recorded nowhere,
-    // and nothing of it is shown or stored until it ended (see `discardingRun`).
-    if (streamActiveRef.current) {
+    // A request still running belonged to the cleared history: its outcome is recorded nowhere and nothing of
+    // it is shown or stored until it ended (see `discarding`); it is stopped once the chat is cleared.
+    const running = streamActiveRef.current;
+    if (running) {
       requestTurnRef.current = { sessionId: null, userMessageId: null };
       discardingRunRef.current = true;
-      discardedSessionRef.current = activeSessionId;
-      setDiscardingRun(true);
-      transportStop();
+      setDiscarding({ sessionId: activeSessionId });
     }
+    // A message held for the emptied chat belonged to it too.
+    heldSendRef.current = null;
+    setHeldSend(null);
     setLastRejection(null);
     setMessages([]);
     // A pending draft write must not bring the cleared chat's draft back.
@@ -2325,16 +2373,34 @@ export function AiChatProvider({
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
     // The queue belonged to the cleared conversation.
     queueStore.clearAll();
-  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions, queueStore, transportStop]);
+    if (running) stopTransport();
+  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions, queueStore, stopTransport]);
 
-  // The cleared request ended: empty what it left in the transport, then the chat is idle again.
+  // The cleared request ended: empty what it left in the transport (only the cleared chat's: a chat opened
+  // meanwhile loaded its own) and what the run showed; then the chat is idle again.
   useEffect(() => {
-    if (!discardingRun || transportLoading) return;
-    if (discardedSessionRef.current === activeSessionIdRef.current) setMessages([] as unknown as typeof transportMessages);
+    if (!discarding || transportLoading) return;
+    if (discarding.sessionId === activeSessionIdRef.current) setMessages([] as unknown as typeof transportMessages);
     setDiscardedError(rawTransportError ?? null);
+    setPipelineSteps([]);
+    setPipelineState(null);
+    setTruncation(null);
     discardingRunRef.current = false;
-    setDiscardingRun(false);
-  }, [discardingRun, transportLoading, rawTransportError, setMessages]);
+    setDiscarding(null);
+  }, [discarding, transportLoading, rawTransportError, setMessages]);
+
+  // The next request starts: a failure from then on is shown, also the same error object again.
+  useEffect(() => {
+    if (transportLoading && !discarding) setDiscardedError(null);
+  }, [transportLoading, discarding]);
+
+  // A message held during the window goes out once the window closed and the chat is empty.
+  useEffect(() => {
+    if (discarding || !heldSend) return;
+    heldSendRef.current = null;
+    setHeldSend(null);
+    void dispatchSend(heldSend.message, heldSend.sendOptions);
+  }, [discarding, heldSend, dispatchSend]);
 
   // ---------------------------------------------------------------------------
   // Multi-session actions

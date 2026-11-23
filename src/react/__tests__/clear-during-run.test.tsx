@@ -3,13 +3,16 @@
 // parts of it still arrive afterwards. Nothing of it is recorded (no outcome, no onTurnEnd).
 // docs/plans/2026-11-23-design-left-chat.md ("clear() im Lauf").
 
-import React, { StrictMode } from 'react';
+import React, { StrictMode, useMemo } from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Chat, useChat } from '@ai-sdk/react';
+import { DefaultChatTransport, type UIMessage } from 'ai';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import { MessageList } from '../components/message-list.js';
 import { useVercelAiChatTransport } from '../transports/vercel.js';
-import type { AiChatProviderConfig, ChatMessage, SessionConfig, TurnEndInfo, TurnOutcome } from '../types.js';
+import { useLangGraphChatTransport } from '../transports/langgraph.js';
+import type { AiChatProviderConfig, ChatMessage, ChatTransport, SessionConfig, TurnEndInfo, TurnOutcome } from '../types.js';
 import { ctx, Host, Probe, StreamingChat } from './streaming-chat.js';
 import { carried, stubControlledFetch, textChunks, type ControlledRequest } from './controlled-fetch.js';
 
@@ -17,7 +20,12 @@ let requests: ControlledRequest[];
 beforeEach(() => {
   ({ requests } = stubControlledFetch());
 });
-afterEach(cleanup);
+afterEach(() => {
+  for (const request of requests) request.close();
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 
@@ -281,5 +289,339 @@ describe('clear() while a request of a custom transport runs', () => {
     await act(async () => { ctx.clear(); });
     expect(chat.stop).not.toHaveBeenCalled();
     expect(ctx.messages).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// A message sent while the cleared request is still ending (the window).
+// ---------------------------------------------------------------------------------------------------------------
+
+/** A Vercel chat with a store and onTurnEnd whose first request streams the start of its answer. */
+async function vercelRunning(config: Partial<AiChatProviderConfig> = {}) {
+  const store = sessionStore();
+  const turnEnds = recorder();
+  render(<VercelHost session={store.session} onTurnEnd={turnEnds.onTurnEnd} {...config} />);
+  await waitFor(() => expect(ctx.canCompose).toBe(true));
+  await act(async () => { ctx.send('a question'); });
+  await waitFor(() => expect(requests).toHaveLength(1));
+  for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+  await waitFor(() => expect(seen()).toContain('ANSWER'));
+  return { store, turnEnds };
+}
+
+/** The fresh message reached the transport alone, its answer is shown and stored, and its turn reports. */
+async function freshTurnGoesOn(store: ReturnType<typeof sessionStore>, turnEnds: ReturnType<typeof recorder>, index = 1) {
+  await waitFor(() => expect(requests).toHaveLength(index + 1));
+  expect(requests[0]!.aborted).toBe(true);
+  expect(carried(requests[index]!)).toEqual(['user:fresh']);
+  await act(async () => { requests[index]!.answer('FRESH ANSWER'); });
+  await waitFor(() => expect(ctx.isLoading).toBe(false));
+  await settle();
+  expect(ctx.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+  expect(seen()).toContain('fresh');
+  expect(seen()).toContain('FRESH ANSWER');
+  expect(seen()).not.toContain('ANSWER OF');
+  expect(JSON.stringify(store.histories.A)).toContain('FRESH ANSWER');
+  expect(JSON.stringify(store.histories.A)).not.toContain('a question');
+  expect(ctx.turnOutcomes.get(ctx.messages[0]!.id)?.status).toBe('completed');
+  expect(turnEnds.calls.map((call) => call.outcome.status)).toEqual(['completed']);
+}
+
+describe('a message sent while the cleared request is still ending', () => {
+  it('without the queue, in the same tick as clear(): it is held, reported as queued, and sent into the emptied chat', async () => {
+    const { store, turnEnds } = await vercelRunning();
+    let result: unknown;
+    await act(async () => {
+      ctx.clear();
+      result = ctx.submitWithResult('fresh');
+    });
+    expect(result).toEqual({ status: 'queued' });
+    await freshTurnGoesOn(store, turnEnds);
+  });
+
+  it('without the queue, in the next tick while the old stream still delivers chunks: held, then sent alone', async () => {
+    ({ requests } = stubControlledFetch({ deliverInFlightAfterAbort: true }));
+    const { store, turnEnds } = await vercelRunning();
+    act(() => { ctx.clear(); });
+    let result: unknown;
+    act(() => {
+      requests[0]!.push({ type: 'text-delta', id: 't', delta: 'OF THE CLEARED CHAT' });
+      result = ctx.submitWithResult('fresh');
+    });
+    expect(result).toEqual({ status: 'queued' });
+    expect(ctx.messages).toEqual([]);
+    expect(requests).toHaveLength(1);
+    await freshTurnGoesOn(store, turnEnds);
+  });
+
+  it('without the queue, two sends: the first is held, the second is refused (session) and never sent', async () => {
+    const { store, turnEnds } = await vercelRunning();
+    const results: unknown[] = [];
+    await act(async () => {
+      ctx.clear();
+      results.push(ctx.submitWithResult('fresh'));
+      results.push(ctx.submitWithResult('second'));
+    });
+    expect(results).toEqual([{ status: 'queued' }, { status: 'rejected', reason: 'session' }]);
+    expect(ctx.lastRejection?.reason).toBe('session');
+    await freshTurnGoesOn(store, turnEnds);
+    expect(requests).toHaveLength(2);
+  });
+
+  it('without the queue, a send and then clear() again: the held message is dropped, nothing is sent', async () => {
+    const { store } = await vercelRunning();
+    await act(async () => {
+      ctx.clear();
+      ctx.submitWithResult('fresh');
+      ctx.clear();
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(requests).toHaveLength(1);
+    expect(ctx.messages).toEqual([]);
+    expect(store.histories.A).toEqual([]);
+  });
+
+  it('with the queue, in the same tick: queued, then sent into the emptied chat', async () => {
+    const { store, turnEnds } = await vercelRunning({ queue: { enabled: true } });
+    let result: unknown;
+    await act(async () => {
+      ctx.clear();
+      result = ctx.submitWithResult('fresh');
+    });
+    expect(result).toEqual({ status: 'queued' });
+    await freshTurnGoesOn(store, turnEnds);
+  });
+
+  it('a host switch during the window drops a held message', async () => {
+    const histories: Record<string, ChatMessage[]> = { A: [], B: [] };
+    const session = (activeId: string): SessionConfig => ({
+      activeId, load: async (id: string) => histories[id] ?? [], save: (id, messages) => { histories[id] = messages; },
+    });
+    const chat = new UnstoppableChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); ctx.submitWithResult('fresh'); });
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ctx.activeSessionId).toBe('B'));
+    await act(async () => { chat.fail(); });
+    await settle();
+    expect(chat.sent).toEqual(['a question']);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Stop during the window, a host switch during it, a stop that fails, the auto-continuation, LangGraph.
+// ---------------------------------------------------------------------------------------------------------------
+
+describe('during the window', () => {
+  it('Stop asks the transport again but records and pauses nothing; a message queued after the clear is sent into the emptied chat', async () => {
+    const chat = new UnstoppableChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true } }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); });
+    await act(async () => { expect(ctx.submitWithResult('fresh')).toEqual({ status: 'queued' }); });
+    // A new chat or another one cannot be opened from the provider during the window, as during any run.
+    let created: unknown = 'unset';
+    await act(async () => { created = await ctx.createSession(); });
+    expect(created).toBeNull();
+    await act(async () => { ctx.stop(); });
+    expect(chat.stop).toHaveBeenCalledTimes(2);
+    expect(ctx.pipelineState).toBeNull();
+    expect(ctx.queue.paused).toBe(false);
+    await act(async () => { chat.finish([{ type: 'text', text: 'OLD' }]); });
+    await waitFor(() => expect(chat.sent).toEqual(['a question', 'fresh']));
+    expect(chat.requests.at(-1)!.map((message) => (message.parts[0] as { text: string }).text)).toEqual(['fresh']);
+    expect(ctx.pipelineState).toBeNull();
+    expect(JSON.stringify(ctx.messages)).not.toContain('OLD');
+  });
+
+  it('a host switch to B: B shows what it loaded during the window, the run\'s data parts are dropped, B is not emptied at the end', async () => {
+    const B = [
+      { id: 'b-u1', role: 'user', parts: [{ type: 'text', text: 'b question' }] },
+      { id: 'b-a1', role: 'assistant', parts: [{ type: 'text', text: 'b answer' }] },
+    ] as ChatMessage[];
+    const histories: Record<string, ChatMessage[]> = { A: [], B };
+    const session = (activeId: string): SessionConfig => ({
+      activeId, load: async (id: string) => histories[id] ?? [], save: (id, messages) => { histories[id] = messages; },
+    });
+    const chat = new UnstoppableChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); });
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ctx.messages.map((message) => message.id)).toEqual(['b-u1', 'b-a1']));
+    expect(ctx.isLoading).toBe(true);
+    act(() => { chat.emit({ type: 'data-step-report', data: { stepNumber: 0, toolCalls: [], finishReason: 'tool-calls' } }); });
+    expect(ctx.pipelineSteps).toEqual([]);
+    await act(async () => { chat.fail(); });
+    await settle();
+    expect(ctx.isLoading).toBe(false);
+    expect(ctx.error).toBeNull();
+    expect(ctx.messages.map((message) => message.id)).toEqual(['b-u1', 'b-a1']);
+    expect(histories.B).toEqual(B);
+  });
+
+  it.each([
+    ['throws', () => { throw new Error('stop failed'); }],
+    ['rejects', () => Promise.reject(new Error('stop failed'))],
+  ])('a stop() that %s: clear() still empties the chat, its store and its queue', async (_name, failingStop) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = sessionStore();
+    const chat = new StreamingChat();
+    chat.stop.mockImplementation(failingStop as () => void);
+    render(<Host chat={chat} config={{ session: store.session, queue: { enabled: true } }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.send('queued'); });
+    await act(async () => { ctx.clear(); });
+    await settle();
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    expect(ctx.messages).toEqual([]);
+    expect(ctx.queue.items).toHaveLength(0);
+    expect(store.cleared).toEqual(['A']);
+    expect(warn).toHaveBeenCalledWith('[glirastes] The transport could not stop the request');
+  });
+
+  it('a transport without stop(): clear() still empties the chat', async () => {
+    const chat = new StreamingChat();
+    function NoStopHost() {
+      const [, force] = React.useReducer((count: number) => count + 1, 0);
+      React.useEffect(() => chat.subscribe(force), []);
+      const { stop: _stop, ...rest } = chat.transport;
+      return <AiChatProvider transport={rest as ChatTransport}><Probe /><MessageList /></AiChatProvider>;
+    }
+    render(<NoStopHost />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); });
+    expect(ctx.messages).toEqual([]);
+    await act(async () => { chat.finish([{ type: 'text', text: 'OLD' }]); });
+    await settle();
+    expect(ctx.isLoading).toBe(false);
+    expect(ctx.messages).toEqual([]);
+  });
+
+  it('a later failure with the same error object as the cleared run\'s is shown', async () => {
+    const failure = new Error('network');
+    const chat = new UnstoppableChat();
+    render(<Host chat={chat} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); });
+    await act(async () => { chat.fail(failure); });
+    await settle();
+    expect(ctx.error).toBeNull();
+    await act(async () => { ctx.send('again'); });
+    await act(async () => { chat.fail(failure); });
+    await settle();
+    expect(ctx.error).toBe(failure);
+  });
+});
+
+describe('the AI SDK continuation of a cleared turn', () => {
+  it('clear() during the request that continues after an approval: aborted, no further request, also when chunks arrive after the abort', async () => {
+    ({ requests } = stubControlledFetch({ deliverInFlightAfterAbort: true }));
+    render(<VercelHost />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('delete t1'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => {
+      requests[0]!.push({ type: 'start' });
+      requests[0]!.push({ type: 'start-step' });
+      requests[0]!.push({ type: 'tool-input-available', toolCallId: 'c1', toolName: 'tasks_delete', input: { id: 't1' } });
+      requests[0]!.push({ type: 'tool-approval-request', approvalId: 'ap-1', toolCallId: 'c1' });
+      requests[0]!.push({ type: 'finish-step' });
+      requests[0]!.push({ type: 'finish' });
+      requests[0]!.end();
+    });
+    await waitFor(() => expect(ctx.pendingApprovals).toHaveLength(1));
+    await act(async () => { await ctx.approve('ap-1'); });
+    // The AI SDK sends the history with the approval answer by itself.
+    await waitFor(() => expect(requests).toHaveLength(2));
+    act(() => { ctx.clear(); });
+    // What the continuation had in flight: the end of the approved step, with no new step after it.
+    act(() => {
+      requests[1]!.push({ type: 'start' });
+      requests[1]!.push({ type: 'finish-step' });
+      requests[1]!.push({ type: 'finish' });
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(requests[1]!.aborted).toBe(true);
+    expect(requests).toHaveLength(2);
+    expect(ctx.messages).toEqual([]);
+  });
+});
+
+function LangGraphHost() {
+  const transport = useLangGraphChatTransport({ endpoint: '/api/graph' });
+  return <AiChatProvider transport={transport}><Probe /><MessageList /></AiChatProvider>;
+}
+const langGraphMessage = (content: string) => `event: message\ndata: ${JSON.stringify({ content })}\n\n`;
+
+describe('clear() while a request of the LangGraph transport runs', () => {
+  it('aborts it; the chat is idle and empty at once; what still arrives is not shown', async () => {
+    ({ requests } = stubControlledFetch({ deliverInFlightAfterAbort: true }));
+    render(<LangGraphHost />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => { requests[0]!.pushRaw(langGraphMessage('ANSWER ')); });
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    act(() => { ctx.clear(); });
+    expect(requests[0]!.aborted).toBe(true);
+    expect(ctx.isLoading).toBe(false);
+    expect(ctx.messages).toEqual([]);
+    act(() => { requests[0]!.pushRaw(langGraphMessage('LATE')); });
+    await settle();
+    expect(ctx.messages).toEqual([]);
+    await act(async () => { ctx.send('fresh'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect((requests[1]!.body.messages as Array<{ content: string }>).map((message) => message.content)).toEqual(['fresh']);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// An app-owned AI SDK Chat outlives the provider that cleared it.
+// ---------------------------------------------------------------------------------------------------------------
+
+function useAppChatTransport(chat: Chat<UIMessage>): ChatTransport {
+  const { messages, status, error, sendMessage, stop, setMessages, addToolApprovalResponse } = useChat({ chat });
+  return useMemo<ChatTransport>(() => ({
+    messages: messages as unknown as ChatMessage[], status, error: error ?? null,
+    sendMessage: ({ text }) => sendMessage({ text }), stop,
+    setMessages: setMessages as unknown as ChatTransport['setMessages'], addToolApprovalResponse,
+  }), [messages, status, error, sendMessage, stop, setMessages, addToolApprovalResponse]);
+}
+function AppChatHost({ chat }: { chat: Chat<UIMessage> }) {
+  const transport = useAppChatTransport(chat);
+  return <AiChatProvider transport={transport}><Probe /><MessageList /></AiChatProvider>;
+}
+
+describe('an app-owned AI SDK Chat that outlives the provider', () => {
+  it('unmounted during the window: what the cleared request wrote after the clear stays in the app\'s Chat and shows on remount (as of this change)', async () => {
+    ({ requests } = stubControlledFetch({ deliverInFlightAfterAbort: true }));
+    const chat = new Chat<UIMessage>({ id: 'app', transport: new DefaultChatTransport({ api: '/api/chat' }) });
+    const view = render(<AppChatHost chat={chat} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    act(() => {
+      ctx.clear();
+      requests[0]!.push({ type: 'text-delta', id: 't', delta: 'LATE' });
+    });
+    view.unmount();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(chat.status).toBe('ready');
+    render(<AppChatHost chat={chat} />);
+    await settle();
+    // Without a store nothing empties the app's Chat once the provider is gone.
+    expect(seen()).toContain('ANSWER LATE');
   });
 });
