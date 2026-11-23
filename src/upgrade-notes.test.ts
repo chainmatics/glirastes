@@ -319,4 +319,18 @@ describe('shipped note detection', () => {
       'public/audio-worklet-processor.js': "class AudioProcessor {}\nregisterProcessor('audio-processor', AudioProcessor);\n",
     })).status).toBe('adopted');
   });
+
+  it('markdown-loading-placeholder flags every app that renders the React chat or the embed', async () => {
+    const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === 'markdown-loading-placeholder')!;
+    for (const [file, source] of [
+      ['app/chat.tsx', "import { VercelAiChat } from 'glirastes/react/vercel';\nexport const c = <VercelAiChat endpoint=\"/api/chat\" />;\n"],
+      ['app/chat.tsx', "import { FloatingChatUI } from 'glirastes/react';\nexport const c = <FloatingChatUI />;\n"],
+      ['src/chat.ts', "import { defineGlirastesChatElement } from 'glirastes/embed';\ndefineGlirastesChatElement();\n"],
+    ] as const) {
+      expect(evaluateNote(note, scanOf({ [file]: source })).status, source).toBe('affected');
+    }
+    expect(evaluateNote(note, scanOf({
+      'server/handler.ts': "import { createAiChatHandler } from 'glirastes/server/nextjs';\nexport const h = createAiChatHandler({});\n",
+    })).status).toBe('not-affected');
+  });
 });

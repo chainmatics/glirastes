@@ -172,25 +172,13 @@
   border: 1px solid var(--cm-border);
   text-align: left;
 }
-/* While the Markdown renderer loads: skeleton lines, one text line high each,
-   about as wide as the source's longest line (set inline as
-   --cm-markdown-placeholder-chars). Color: --cm-markdown-placeholder. */
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"][data-state="loading"] {
-  display: flex;
-  flex-direction: column;
-  width: calc(var(--cm-markdown-placeholder-chars, 40) * 1ch);
-  max-width: 100%;
-}
+/* While the Markdown renderer loads: skeleton lines. Their size is inline (so
+   they take space without this stylesheet too): --cm-markdown-placeholder
+   (color), --cm-markdown-placeholder-line-height, --cm-markdown-placeholder-line-gap;
+   --cm-markdown-placeholder-chars is set per block from its source. This only
+   adds the pulse. */
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] [data-element="markdown-placeholder-line"] {
-  display: block;
-  height: 0.75em;
-  margin: 0.375em 0;
-  border-radius: var(--cm-radius-sm);
-  background: var(--cm-markdown-placeholder, var(--cm-border));
   animation: cm-markdown-placeholder 1.6s ease-in-out infinite;
-}
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] [data-element="markdown-placeholder-line"]:last-child:not(:first-child) {
-  width: 60%;
 }
 @keyframes cm-markdown-placeholder {
   0%, 100% { opacity: 1; }

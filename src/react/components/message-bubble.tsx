@@ -1,8 +1,14 @@
-import { Fragment, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, memo, useMemo, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
-import { useMarkdownRenderer } from '../markdown-loader.js';
-import { markdownPlaceholderShape, markdownToPlainText } from '../utils/markdown-plain-text.js';
+import {
+  markdownLoaderGeneration,
+  markdownRenderer,
+  markdownStatus,
+  useMarkdownStatus,
+  waitForMarkdown,
+} from '../markdown-loader.js';
+import { markdownPlaceholderShape, markdownToPlainBlocks } from '../utils/markdown-plain-text.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { useComposerContext } from '../provider/composer-context.js';
@@ -805,55 +811,153 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   );
 }
 
-function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
+type MarkdownBlockProps = { content: string; className?: string };
+
+/**
+ * The default Markdown block. Server and client render through one Suspense
+ * boundary around a lazy block, as before: streaming server rendering waits
+ * for react-markdown and sends the rendered Markdown. Once loaded, the lazy
+ * block resolves at once (a synchronous thenable), so nothing suspends.
+ */
+const DefaultMarkdown = memo(function DefaultMarkdown({ content, className }: MarkdownBlockProps) {
+  const snapshot = useMarkdownStatus();
+  const current = snapshot === 'hydrating' ? markdownStatus() : snapshot;
+  // Hydrated from server HTML before the renderer is there: keep that HTML until the renderer
+  // loads (or fails). Suspending here instead would lose it to the next update of the chat.
+  const [fromServer] = useState(() => snapshot === 'hydrating' && current !== 'loaded' && current !== 'failed');
+  const LazyMarkdown = currentLazyMarkdown();
+  // The server's fallback (renderToString before the renderer loaded) is readable text; the client's a skeleton.
+  const fallback = typeof window === 'undefined'
+    ? <PlainMarkdown content={content} className={className} />
+    : <MarkdownPlaceholder content={content} className={className} />;
+  return (
+    <Suspense fallback={fallback}>
+      {fromServer && current !== 'loaded' && current !== 'failed'
+        ? <div className={className} data-component="markdown" suppressHydrationWarning dangerouslySetInnerHTML={KEEP_SERVER_HTML} />
+        : <LazyMarkdown content={content} className={className} />}
+    </Suspense>
+  );
+});
+
+/** React leaves the server's children of an element with `dangerouslySetInnerHTML` alone while hydrating. */
+const KEEP_SERVER_HTML = { __html: '' };
+
+let lazyMarkdown: { generation: number; component: ComponentType<MarkdownBlockProps> } | null = null;
+
+function currentLazyMarkdown(): ComponentType<MarkdownBlockProps> {
+  const generation = markdownLoaderGeneration();
+  if (!lazyMarkdown || lazyMarkdown.generation !== generation) {
+    const resolved = { default: ResolvedMarkdown };
+    lazyMarkdown = {
+      generation,
+      component: lazy(() => {
+        const settled = markdownStatus();
+        const ready = settled === 'loaded' || settled === 'failed' ? null : waitForMarkdown();
+        // A thenable React subscribes to directly: synchronous once settled (nothing suspends), else in
+        // the same tick as the load, so code that awaited `preloadMarkdown()` finds the block resolved.
+        return {
+          then: (resolve: (value: typeof resolved) => void) => {
+            if (ready) void ready.then(() => resolve(resolved));
+            else resolve(resolved);
+          },
+        } as unknown as Promise<typeof resolved>;
+      }),
+    };
+  }
+  return lazyMarkdown.component;
+}
+
+/** After the wait: the rendered Markdown once the renderer is there, else the plain text. */
+function ResolvedMarkdown({ content, className }: MarkdownBlockProps) {
   const links = useChatEntityLinks();
   const { remarkPlugins } = useChatMarkdownOptions();
-  const { status, Renderer } = useMarkdownRenderer();
-  if (Renderer) {
-    return (
-      <div className={className} data-component="markdown">
-        <Renderer
-          components={links.enabled ? links.markdownComponents : undefined}
-          remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
-        >{content}</Renderer>
-      </div>
-    );
-  }
-  if (status === 'failed') return <PlainMarkdown content={content} className={className} />;
-  return <MarkdownPlaceholder content={content} className={className} />;
+  const snapshot = useMarkdownStatus();
+  const current = snapshot === 'hydrating' ? markdownStatus() : snapshot;
+  const Renderer = current === 'loaded' ? markdownRenderer() : null;
+  if (!Renderer) return <PlainMarkdown content={content} className={className} />;
+  return (
+    <div className={className} data-component="markdown">
+      <Renderer
+        components={links.enabled ? links.markdownComponents : undefined}
+        remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
+      >{content}</Renderer>
+    </div>
+  );
 }
+
+const VISUALLY_HIDDEN: CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0,0,0,0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+};
+
+// Inline, so the placeholder takes space without the SDK stylesheet (unstyled, own layouts);
+// apps size and color it through the CSS variables. The stylesheet adds the pulse.
+const PLACEHOLDER_LINE: CSSProperties = {
+  display: 'block',
+  height: 'var(--cm-markdown-placeholder-line-height, 0.75em)',
+  margin: 'var(--cm-markdown-placeholder-line-gap, 0.375em) 0',
+  borderRadius: 'var(--cm-radius-sm, 0.25rem)',
+  backgroundColor: 'var(--cm-markdown-placeholder, color-mix(in srgb, currentColor 14%, transparent))',
+};
+const PLACEHOLDER_LAST_LINE: CSSProperties = { ...PLACEHOLDER_LINE, width: '60%' };
 
 /**
  * While the renderer loads: skeleton lines sized from the source, never the
  * source itself (it would show list markers, emphasis and escapes, then jump).
+ * Screen readers read a hidden "Loading message…" where they are; nothing is announced.
  */
-function MarkdownPlaceholder({ content, className }: { content: string; className?: string }) {
-  const { lines, chars } = markdownPlaceholderShape(content);
-  const style = { '--cm-markdown-placeholder-chars': chars } as CSSProperties;
+function MarkdownPlaceholder({ content, className }: MarkdownBlockProps) {
+  const { locale } = useChatContext();
+  const { lines, chars } = useMemo(() => markdownPlaceholderShape(content), [content]);
+  const style = {
+    '--cm-markdown-placeholder-chars': chars,
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    width: 'calc(var(--cm-markdown-placeholder-chars) * 1ch)',
+    maxWidth: '100%',
+  } as CSSProperties;
   return (
     <div className={className} data-component="markdown" data-state="loading" aria-busy="true" style={style}>
+      <span data-element="markdown-loading-text" style={VISUALLY_HIDDEN}>
+        {locale.markdownLoadingLabel ?? 'Loading message…'}
+      </span>
       {Array.from({ length: lines }, (_, index) => (
-        <span key={index} data-element="markdown-placeholder-line" aria-hidden="true" />
+        <span
+          key={index}
+          data-element="markdown-placeholder-line"
+          aria-hidden="true"
+          style={index > 0 && index === lines - 1 ? PLACEHOLDER_LAST_LINE : PLACEHOLDER_LINE}
+        />
       ))}
     </div>
   );
 }
 
-/** When the renderer cannot be loaded: the text without Markdown syntax, paragraphs and lines kept. */
-function PlainMarkdown({ content, className }: { content: string; className?: string }) {
-  const paragraphs = markdownToPlainText(content).split(/\n{2,}/).filter((paragraph) => paragraph.trim());
+/** Without the renderer (failed, or not there in time): the text without Markdown syntax; code keeps its whitespace. */
+function PlainMarkdown({ content, className }: MarkdownBlockProps) {
+  const blocks = useMemo(() => markdownToPlainBlocks(content), [content]);
   return (
     <div className={className} data-component="markdown" data-state="plain">
-      {paragraphs.map((paragraph, index) => (
-        <p key={index}>
-          {paragraph.split('\n').map((line, at) => (
-            <Fragment key={at}>
-              {at > 0 ? <br /> : null}
-              {line}
-            </Fragment>
-          ))}
-        </p>
-      ))}
+      {blocks.map((block, index) => (block.kind === 'code'
+        ? <pre key={index}><code>{block.text}</code></pre>
+        : (
+          <p key={index}>
+            {block.text.split('\n').map((line, at) => (
+              <Fragment key={at}>
+                {at > 0 ? <br /> : null}
+                {line}
+              </Fragment>
+            ))}
+          </p>
+        )))}
     </div>
   );
 }

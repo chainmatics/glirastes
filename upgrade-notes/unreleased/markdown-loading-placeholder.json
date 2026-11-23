@@ -1,14 +1,13 @@
 {
   "id": "markdown-loading-placeholder",
   "kind": "recommended",
-  "summary": "Visible change: until react-markdown has loaded, a message shows skeleton lines instead of its raw Markdown source; without react-markdown, plain text without Markdown syntax. The provider preloads it on mount; new preloadMarkdown() in glirastes/react.",
-  "howTo": "Nothing to do. The placeholder is div[data-component=\"markdown\"][data-state=\"loading\"][aria-busy=\"true\"] with span[data-element=\"markdown-placeholder-line\"] per estimated line; color --cm-markdown-placeholder (default --cm-border), it pulses unless prefers-reduced-motion. When react-markdown cannot be loaded the text renders in div[data-component=\"markdown\"][data-state=\"plain\"]. Call preloadMarkdown() earlier (for example when the chat button renders) to load it before the provider mounts; it never rejects and does nothing on the server. Server-rendered chats render the placeholder and hydrate to Markdown. Tests that read the raw text of [data-component=\"markdown\"] right after render, before the renderer loaded, wait for it (await preloadMarkdown() or waitFor). Apps with components.Markdown are unaffected and do not load react-markdown. To show mention chips in a chat restored with session.load or createLocalSessionStore before its next turn, set entityDeclarations; streamed declarations are not stored.",
+  "summary": "Visible change: until react-markdown has loaded, a message shows skeleton lines instead of its raw Markdown source; without it (failed, or not there within 3 s) plain text without Markdown syntax. The provider loads it on mount; new preloadMarkdown() in glirastes/react.",
+  "howTo": "Nothing to do. The placeholder is div[data-component=\"markdown\"][data-state=\"loading\"][aria-busy=\"true\"] with a visually hidden span[data-element=\"markdown-loading-text\"] (locale key markdownLoadingLabel, German ships) and one span[data-element=\"markdown-placeholder-line\"] per estimated line. Its size is inline, so it also takes space with unstyled or in an own layout outside the panel; adjust it with --cm-markdown-placeholder (color), --cm-markdown-placeholder-line-height and --cm-markdown-placeholder-line-gap, or hide it with your own CSS on markdown-placeholder-line. The plain-text fallback is div[data-component=\"markdown\"][data-state=\"plain\"] (code in pre). react-markdown is now downloaded when AiChatProvider mounts, also for a closed floating chat, unless components.Markdown or components.MessageBubble is set; call preloadMarkdown() to start earlier, or await it on the server before renderToString. Streaming server rendering still sends rendered Markdown and hydration keeps it. Tests that read [data-component=\"markdown\"] right after render wait for the renderer (await preloadMarkdown() or waitFor). For mention chips in a chat restored with session.load or createLocalSessionStore before its next turn, set entityDeclarations.",
   "skill": "building-glirastes-chat-ui#sessions",
   "affectedWhen": {
-    "symbols": [
-      "AiChatProvider",
-      "MessageBubble",
-      "createLocalSessionStore"
+    "imports": [
+      "glirastes/react",
+      "glirastes/embed"
     ]
   },
   "adoptedWhen": {
@@ -18,6 +17,8 @@
     ]
   },
   "surface": [
-    "glirastes/react#preloadMarkdown"
+    "glirastes/react#preloadMarkdown",
+    "glirastes/react#ChatLocale.markdownLoadingLabel",
+    "locale#markdownLoadingLabel"
   ]
 }

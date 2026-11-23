@@ -81,7 +81,7 @@ import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
 import { STEP_FAILURE_TEXTS_EN } from '../utils/step-failure.js';
 import { VOICE_TEXTS_EN } from '../components/voice-ui.js';
-import { preloadMarkdown } from '../markdown-loader.js';
+import { loadMarkdown } from '../markdown-loader.js';
 import { latestUserMessageId, readStoredTurnOutcomes, withStoredTurnOutcomes } from '../utils/turn-outcomes.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
@@ -184,6 +184,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   newChatLabel: 'New chat',
   noSessionsLabel: 'No conversations yet',
   sessionsLoadingLabel: 'Loading…',
+  markdownLoadingLabel: 'Loading message…',
   untitledSessionLabel: 'Untitled',
   deleteSessionAriaLabel: 'Delete conversation',
   confirmDeleteSessionPrompt: 'Delete this conversation?',
@@ -784,10 +785,11 @@ export function AiChatProvider({
   const classNames = useMemo(() => userClassNames ?? {}, [userClassNames]);
   const components = useMemo(() => userComponents ?? {}, [userComponents]);
   // Load the default Markdown renderer now, not when the first message renders:
-  // a stored history would otherwise wait for it. An own renderer needs none.
-  const ownMarkdown = Boolean(components.Markdown);
+  // a stored history would otherwise wait for it. An own renderer or bubble
+  // needs none here (a default Markdown block still loads it when it renders).
+  const ownMarkdown = Boolean(components.Markdown || components.MessageBubble);
   useEffect(() => {
-    if (!ownMarkdown) void preloadMarkdown();
+    if (!ownMarkdown) void loadMarkdown();
   }, [ownMarkdown]);
   const suggestionsConfig = useMemo(
     () => ({ enabled: true, count: 3, autoSuggest: true, ...userSuggestions }),

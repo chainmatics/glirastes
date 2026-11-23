@@ -1462,6 +1462,8 @@ export interface ChatLocale {
   newChatLabel: string;              // "+ New chat" row + default new session title
   noSessionsLabel: string;           // empty state
   sessionsLoadingLabel: string;      // loading state
+  /** Read by screen readers inside a message whose Markdown renderer is still loading (not announced). */
+  markdownLoadingLabel?: string;
   untitledSessionLabel: string;
   deleteSessionAriaLabel: string;
   confirmDeleteSessionPrompt: string;
