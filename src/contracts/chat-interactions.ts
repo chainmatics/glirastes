@@ -83,10 +83,21 @@ export interface ChatEntityActionData {
   readonly destructive?: boolean;
 }
 
+/**
+ * Further names of an entity type for the `@<type>:` filter: one list for
+ * every language, or one list per BCP-47 language tag. A name has no
+ * whitespace and no colon.
+ */
+export type ChatEntityAliases =
+  | ReadonlyArray<string>
+  | { readonly [language: string]: ReadonlyArray<string> | undefined };
+
 export interface ChatEntityData {
   /** Mention type, e.g. `task`. */
   readonly type: string;
   readonly label: ChatText;
+  /** Names besides the label that select this type in `@<type>:<text>`. */
+  readonly aliases?: ChatEntityAliases;
   readonly icon?: string;
   readonly search?: ChatEntitySearchData;
   readonly actions?: ReadonlyArray<ChatEntityActionData>;
@@ -128,9 +139,13 @@ export const CHAT_INTERACTION_LIMITS = Object.freeze({
   labelLength: 200,
   descriptionLength: 500,
   promptLength: 2_000,
+  aliasesPerLanguage: 10,
+  aliasLength: 60,
 });
 
 export const CHAT_ENTITY_TYPE_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/;
+/** A name of an entity type in the `@<type>:` filter: no whitespace, no colon, no control character. */
+export const CHAT_ENTITY_ALIAS_PATTERN = /^[^\s:\u0000-\u001F\u007F]{1,60}$/u;
 const FIELD = /^[A-Za-z_][\w-]{0,63}$/;
 const ARG_SEGMENT = /^[A-Za-z_$][\w$-]{0,63}$/;
 const ICON = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -203,6 +218,33 @@ function text(value: unknown, max: number, path: string, issues: Issues): ChatTe
   }
   if (Object.keys(result).length === 0) return fail(issues, path, 'needs at least one language');
   return result;
+}
+
+function aliasList(value: unknown, path: string, issues: Issues): string[] | undefined {
+  const parsed = list(value, CHAT_INTERACTION_LIMITS.aliasesPerLanguage, path, issues, (entry, entryPath) => (
+    typeof entry === 'string' && CHAT_ENTITY_ALIAS_PATTERN.test(entry)
+      ? entry
+      : fail(issues, entryPath, `a name of at most ${CHAT_INTERACTION_LIMITS.aliasLength} characters without whitespace or colon`)
+  ));
+  return parsed && parsed.length > 0 ? parsed : undefined;
+}
+
+function aliases(value: unknown, path: string, issues: Issues): ChatEntityAliases | undefined {
+  if (Array.isArray(value)) return aliasList(value, path, issues);
+  if (!isRecord(value)) return fail(issues, path, 'a list of names or one list per language ({ de: […], pl: […] })');
+  const languages = Object.keys(value);
+  if (languages.length > MAX_TEXT_LANGUAGES) return fail(issues, path, `at most ${MAX_TEXT_LANGUAGES} languages`);
+  const result: Record<string, string[]> = {};
+  for (const language of languages) {
+    if (!isLanguageTag(language)) {
+      issues.push(`${path}.${language.length <= 35 && /^[\w-]+$/.test(language) ? language : '<key>'}: not a BCP-47 language tag`);
+      continue;
+    }
+    if (value[language] === undefined) continue;
+    const entry = aliasList(value[language], `${path}.${language}`, issues);
+    if (entry) result[language] = entry;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function pattern(value: unknown, regex: RegExp, path: string, issues: Issues): string | undefined {
@@ -375,9 +417,10 @@ function uniqueBy<T>(entries: ReadonlyArray<T>, key: (entry: T) => string, path:
 
 function entity(value: unknown, path: string, issues: Issues): ChatEntityData | undefined {
   if (!isRecord(value)) return fail(issues, path, 'an object');
-  checkKeys(value, ['type', 'label', 'icon', 'search', 'actions'], path, issues);
+  checkKeys(value, ['type', 'label', 'aliases', 'icon', 'search', 'actions'], path, issues);
   const type = pattern(value.type, CHAT_ENTITY_TYPE_PATTERN, `${path}.type`, issues);
   const label = text(value.label, CHAT_INTERACTION_LIMITS.labelLength, `${path}.label`, issues);
+  const names = value.aliases === undefined ? undefined : aliases(value.aliases, `${path}.aliases`, issues);
   const icon = value.icon === undefined ? undefined : pattern(value.icon, ICON, `${path}.icon`, issues);
   const parsedSearch = value.search === undefined ? undefined : search(value.search, `${path}.search`, issues);
   const actions = value.actions === undefined
@@ -388,6 +431,7 @@ function entity(value: unknown, path: string, issues: Issues): ChatEntityData | 
   if (!type || label === undefined) return undefined;
   return {
     type, label,
+    ...(names ? { aliases: names } : {}),
     ...(icon ? { icon } : {}),
     ...(parsedSearch ? { search: parsedSearch } : {}),
     ...(actions ? { actions } : {}),
@@ -446,9 +490,13 @@ export function parseChatInteractionOverrides(value: unknown): ChatInteractionOv
     return { ...(patch.hidden === true ? { hidden: true } : {}), ...commandFields(patch, path, issues) };
   });
   const entities = overrideMap(value.entities, '$.entities', CHAT_ENTITY_TYPE_PATTERN, issues, (patch, path) => {
-    checkKeys(patch, ['hidden', 'label', 'icon', 'search', 'actions'], path, issues);
+    checkKeys(patch, ['hidden', 'label', 'aliases', 'icon', 'search', 'actions'], path, issues);
     const result: Record<string, unknown> = patch.hidden === true ? { hidden: true } : {};
     if (patch.label !== undefined) result.label = text(patch.label, CHAT_INTERACTION_LIMITS.labelLength, `${path}.label`, issues);
+    if (patch.aliases !== undefined) {
+      const names = aliases(patch.aliases, `${path}.aliases`, issues);
+      if (names) result.aliases = names;
+    }
     if (patch.icon !== undefined) result.icon = pattern(patch.icon, ICON, `${path}.icon`, issues);
     if (patch.search !== undefined) result.search = search(patch.search, `${path}.search`, issues);
     const actions = overrideMap(patch.actions, `${path}.actions`, CHAT_COMMAND_ID_PATTERN, issues, (actionPatch, actionPath) => {
