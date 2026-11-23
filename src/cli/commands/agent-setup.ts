@@ -135,6 +135,7 @@ export async function runAgentSetup(options: {
   const base = { schemaVersion: 1, agent, instructions, inspection };
   const scaffoldText = (scaffold: InitScaffold, verb: string) => [
     scaffold.written.length > 0 ? `${verb}: ${scaffold.written.join(', ')}` : 'No Glirastes input files were missing.',
+    ...scaffold.changes.map((change) => `  ${change}`),
     ...scaffold.notes,
   ].join('\n');
   if (options.dryRun) {
