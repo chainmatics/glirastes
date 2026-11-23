@@ -67,3 +67,15 @@ describe('shipped styles for chat interactions', () => {
     expect(CHAT_STYLES).toContain('[data-component="command-arguments"]');
   });
 });
+
+describe('history drawer backdrop color', () => {
+  const selector = '[data-component="assistant-shell"] [data-element="history-backdrop"]';
+
+  it('reads --cm-history-backdrop and falls back to the previous color', () => {
+    expect(rule(selector)).toContain('background: var(--cm-history-backdrop, rgba(17, 24, 39, 0.3))');
+  });
+
+  it('ships the same rule in the embed styles', () => {
+    expect(CHAT_STYLES).toContain('background: var(--cm-history-backdrop, rgba(17, 24, 39, 0.3))');
+  });
+});
