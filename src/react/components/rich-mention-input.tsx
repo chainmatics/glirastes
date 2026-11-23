@@ -894,7 +894,15 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
       // Mention mode: what the user types keeps `openCompletion` text and a preset.
       armedRef.current = null;
-      presetRef.current = null;
+      // The input event that ends an IME composition follows `compositionend`, which may have set
+      // the preset: it stays untouched while its text and the caret behind it are unchanged.
+      const kept = presetRef.current;
+      const keptRange = kept ? editorSelection(editableRef.current) : null;
+      const caret = keptRange && keptRange.rangeCount > 0 ? keptRange.getRangeAt(0) : null;
+      const untouched = kept !== null && caret !== null && caret.collapsed && caret.startContainer === kept.node
+        && caret.startOffset === kept.start + kept.text.length
+        && kept.node.data.slice(kept.start, kept.start + kept.text.length) === kept.text;
+      presetRef.current = untouched ? kept : null;
       const triggerState = detectTrigger();
       if (triggerState) {
         // Not under `openCompletion({ source })`: the preset searches the registry's types, not that source.

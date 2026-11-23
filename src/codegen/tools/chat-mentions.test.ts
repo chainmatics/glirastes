@@ -236,6 +236,16 @@ describe('declared mention sources', () => {
 });
 
 describe('declared sources from config text', () => {
+  it('ignores a source whose optional fields are null instead of failing the refresh', () => {
+    for (const field of ['label', 'aliases', 'idField', 'labelField', 'itemsPath', 'descriptionField', 'limitParam']) {
+      const { data, findings } = analyze([FILES], {
+        policy: 'declared', sources: { 'media-file': { tool: 'files.list', queryParam: 'q', [field]: null } },
+      });
+      expect(data.entities, field).toEqual([]);
+      expect(codes(findings), field).toContain('mention-source-invalid');
+    }
+  });
+
   it('never carries control characters or line breaks of tools.json keys and tool names into a finding', () => {
     const { findings } = analyze([PEOPLE], {
       sources: {
@@ -418,6 +428,41 @@ describe('derived type follows the declared identity', () => {
     expect(attach.args).toEqual([{ name: 'fileId', label: 'File id', required: true, entity: 'file' }]);
     // Byte-stable whatever the tool order.
     expect(JSON.stringify(analyze([media, FILES]))).toBe(JSON.stringify(analyze([FILES, media])));
+  });
+
+  it('never maps a word that is one entity\'s type and another one\'s route name to the wrong entity', () => {
+    // /api/files declares `document`, /api/documents declares `archive`: both types are unique and adopted.
+    const filesAsDocument: Spec = { ...FILES, outputEntities: [{ type: 'document', id: 'id', name: 'displayName', path: 'items[]' }] };
+    const documentsAsArchive: Spec = {
+      ...FILES, name: 'documents.list', path: '/api/documents',
+      outputEntities: [{ type: 'archive', id: 'id', name: 'displayName', path: 'items[]' }],
+    };
+    const attach: Spec = {
+      name: 'tags.attach', method: 'POST', path: '/api/tags/:id/attach',
+      input: object({ id: STRING, documentId: STRING, fileId: STRING }, ['id', 'documentId', 'fileId']),
+      params: { path: ['id'], query: [], body: ['documentId', 'fileId'] },
+    };
+    const navigate: Spec = {
+      name: 'ui.navigate',
+      input: object({
+        destination: { type: 'string', enum: ['/documents/:documentId', '/files/:fileId', '/documents/:id'] },
+        params: object({ documentId: STRING, fileId: STRING, id: STRING }),
+      }, ['destination']),
+      uiAction: { kind: 'navigate' },
+    };
+    const { data } = analyze([filesAsDocument, documentsAsArchive, attach, TAGS, navigate]);
+    const entity = (type: string) => data.entities.find((entry) => entry.type === type)!;
+    expect(data.entities.map((entry) => `${entry.type}:${entry.search!.tool}`).sort())
+      .toEqual(['archive:documents.list', 'document:files.list', 'tag:tags.list']);
+    // `documentId` could mean the type `document` (files) or the route /documents (archive): no entity picker.
+    // `fileId` only names the route /files, whose entity is `document`.
+    expect(entity('tag').actions!.find((action) => action.id === 'tag.tags.attach')!.args).toEqual([
+      { name: 'documentId', label: 'Document id', required: true },
+      { name: 'fileId', label: 'File id', required: true, entity: 'document' },
+    ]);
+    // A page is resolved by its collection segment: /documents/… opens the entity searched at /api/documents.
+    expect(entity('archive').actions!.find((action) => action.id === 'archive.open')!.run.args).toEqual({ destination: '/documents/:documentId' });
+    expect(entity('document').actions!.find((action) => action.id === 'document.open')!.run.args).toEqual({ destination: '/files/:fileId' });
   });
 
   it('keeps the route type of a derived candidate whose identity type another tool declares in mentions.sources', () => {

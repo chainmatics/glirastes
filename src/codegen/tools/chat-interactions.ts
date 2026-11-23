@@ -566,14 +566,27 @@ export function analyzeChatInteractions(input: DeriveChatInteractionsInput): {
   for (const candidate of [...declared, ...(mentions.policy === 'declared' ? [] : derivedByType)]) {
     if (!searches.has(candidate.type)) searches.set(candidate.type, candidate);
   }
-  // An argument or page parameter names an entity by its type, or by the type its route names (`fileId` → `media-file`).
-  const typeFor = new Map<string, string>([...searches.keys()].map((type) => [type, type] as const));
+  // A word names an entity by its type, or by the type its route names (`fileId` → `media-file`).
+  // A word that is one entity's type and another one's route name (`/api/files` declares
+  // `document`, `/api/documents` declares `archive`) names neither as an argument.
+  const byType = new Map<string, string>([...searches.keys()].map((type) => [type, type] as const));
+  const byRoute = new Map<string, string>();
   for (const candidate of searches.values()) {
-    if (candidate.routeType && !typeFor.has(candidate.routeType)) typeFor.set(candidate.routeType, candidate.type);
+    if (candidate.routeType && !byRoute.has(candidate.routeType)) byRoute.set(candidate.routeType, candidate.type);
   }
+  const isAmbiguousWord = (word: string | undefined): boolean => {
+    const type = word ? entityType(word) : undefined;
+    return type !== undefined && byType.has(type) && byRoute.has(type) && byType.get(type) !== byRoute.get(type);
+  };
   const typeOf = (word: string | undefined): string | undefined => {
     const type = word ? entityType(word) : undefined;
-    return type ? typeFor.get(type) : undefined;
+    if (!type || isAmbiguousWord(word)) return undefined;
+    return byType.get(type) ?? byRoute.get(type);
+  };
+  /** A path segment is a route name first: `/documents/:id` is the entity searched at `/api/documents`. */
+  const typeOfSegment = (segment: string | undefined): string | undefined => {
+    const type = segment ? entityType(segment) : undefined;
+    return type ? byRoute.get(type) ?? byType.get(type) : undefined;
   };
   const entityOf = (name: string): string | undefined => typeOf(idParameterStem(name));
 
@@ -641,7 +654,9 @@ export function analyzeChatInteractions(input: DeriveChatInteractionsInput): {
         if (params.length !== 1) continue;
         const segments = path.split('/');
         const index = segments.indexOf(`:${params[0]}`);
-        const type = entityOf(params[0]!) ?? (isBareIdParameter(params[0]!) && index > 0 ? typeOf(segments[index - 1]!) : undefined);
+        const stem = idParameterStem(params[0]!);
+        const type = entityOf(params[0]!)
+          ?? ((isBareIdParameter(params[0]!) || isAmbiguousWord(stem ?? undefined)) && index > 0 ? typeOfSegment(segments[index - 1]!) : undefined);
         if (!type || !searches.has(type)) continue;
         addAction(type, {
           id: `${type}.open`,

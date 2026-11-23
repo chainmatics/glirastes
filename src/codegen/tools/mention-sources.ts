@@ -334,7 +334,7 @@ export function resolveMentionSources(
     };
     const carried = carriedIssues({
       type,
-      label: raw.label ?? type,
+      label: raw.label !== undefined ? raw.label : type,
       ...(raw.aliases !== undefined ? { aliases: raw.aliases } : {}),
       search,
     });

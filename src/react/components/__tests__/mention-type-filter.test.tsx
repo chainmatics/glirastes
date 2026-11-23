@@ -174,6 +174,20 @@ describe('mentionContext preset', () => {
     expect(editor.textContent).toBe('@');
   });
 
+  it('keeps the preset untouched over the input event that ends the composition, so Backspace removes all of it', async () => {
+    render(<Chat chat={transport()} mentionContext={{ presetType: 'task' }} />);
+    const editor = screen.getByRole('textbox');
+    fireEvent.compositionStart(editor);
+    edit(editor, '@');
+    fireEvent.compositionEnd(editor);
+    expect(editor.textContent).toBe('@Aufgabe:');
+    // Browsers send the composition's final input after compositionend; text and caret are unchanged.
+    fireEvent.input(editor);
+    expect(editor.textContent).toBe('@Aufgabe:');
+    expect(fireEvent.keyDown(editor, { key: 'Backspace' })).toBe(false);
+    expect(editor.textContent).toBe('@');
+  });
+
   it('puts no preset into an open IME composition and applies it on compositionend if the trigger is still bare', async () => {
     render(<Chat chat={transport()} mentionContext={{ presetType: 'task' }} />);
     const editor = screen.getByRole('textbox');
