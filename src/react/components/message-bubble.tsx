@@ -2,7 +2,7 @@ import { Fragment, Suspense, lazy, useCallback, useContext, useState, useSyncExt
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
 import { ChatContext, useChatContext } from '../provider/chat-context.js';
-import { markdownModuleForLazy, markdownOverdue, markdownTimedOut, subscribeMarkdownTimeout } from '../markdown-module.js';
+import { markdownLoadingLimit, markdownModuleForLazy, markdownOverdue, markdownTimedOut, subscribeMarkdownTimeout } from '../markdown-module.js';
 import { loadingMarkdownSources } from '../utils/copy-message.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { useComposerContext } from '../provider/composer-context.js';
@@ -811,7 +811,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   const links = useChatEntityLinks();
   const { remarkPlugins, loadingTimeoutMs } = useChatMarkdownOptions();
-  const limit = loadingTimeoutMs ?? DEFAULT_LOADING_TIMEOUT_MS;
+  const limit = markdownLoadingLimit(loadingTimeoutMs);
   // Optional: rendered outside the provider (print, renderToStaticMarkup) it behaves as before.
   const chat = useContext(ChatContext);
   // Outside a provider both snapshots are `false`: no re-render after hydration, as before.
@@ -854,9 +854,6 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
 }
 
 interface FallbackChoice { content: string; skeleton: boolean }
-
-/** Default `markdown.loadingTimeoutMs`. */
-const DEFAULT_LOADING_TIMEOUT_MS = 4_000;
 
 const subscribeNothing = () => () => {};
 const onClient = () => true;

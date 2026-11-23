@@ -112,6 +112,35 @@ describe('react-markdown that does not arrive in time', () => {
     expect(vi.getTimerCount()).toBe(0);
   }, GRAPH_TIMEOUT);
 
+  // Edge values: a finite number >= 0 counts; Infinity and more than 2^31 - 1 ms mean no limit;
+  // anything else (negative, NaN, a string, null) means the default 4000.
+  for (const [label, value, expected] of [
+    ['negative', -1, 'default'],
+    ['NaN', Number.NaN, 'default'],
+    ['a string', '5000', 'default'],
+    ['null', null, 'default'],
+    ['Infinity', Number.POSITIVE_INFINITY, 'none'],
+    ['more than 2^31 - 1', 2 ** 31, 'none'],
+    ['2^31 - 1', 2 ** 31 - 1, 'long'],
+  ] as const) {
+    it(`loadingTimeoutMs ${label}: ${expected === 'default' ? 'the default 4000' : expected === 'none' ? 'no limit' : 'that limit'}`, async () => {
+      const graph = await freshGraph();
+      vi.useFakeTimers();
+      const view = mount(graph.chat({ markdown: { loadingTimeoutMs: value as unknown as number } }));
+      await advance(1);
+      expect(stateOf(view.container)).toBe('skeleton');
+      expect(vi.getTimerCount()).toBe(expected === 'none' ? 0 : 1);
+      await advance(3_998);
+      expect(stateOf(view.container)).toBe('skeleton');
+      await advance(1);
+      expect(stateOf(view.container)).toBe(expected === 'default' ? 'raw' : 'skeleton');
+      await advance(60_000);
+      expect(stateOf(view.container)).toBe(expected === 'default' ? 'raw' : 'skeleton');
+      view.seen.stop();
+      expect(view.seen.states).toEqual(expected === 'default' ? ['skeleton', 'raw'] : ['skeleton']);
+    }, GRAPH_TIMEOUT);
+  }
+
   it('a bubble mounting after the limit has passed shows the raw text directly', async () => {
     const graph = await freshGraph();
     vi.useFakeTimers();

@@ -51,6 +51,24 @@ function stopTimer(waiter: Waiter): void {
   waiter.timer = undefined;
 }
 
+/** Default `markdown.loadingTimeoutMs`. */
+const DEFAULT_LOADING_TIMEOUT_MS = 4_000;
+/** The longest delay `setTimeout` takes (2^31 - 1 ms); longer means no limit. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * `markdown.loadingTimeoutMs` as used: a finite number >= 0 as given (`0`: no
+ * skeleton); `false`, `Infinity` or more than 2^31 - 1 ms: no limit; anything
+ * else (`undefined`, `null`, a negative number, `NaN`, a string): the default
+ * 4000. A negative value is no valid duration, so it gets the default rather
+ * than `0`, which would silently turn the skeleton off.
+ */
+export function markdownLoadingLimit(value: unknown): number | false {
+  if (value === false) return false;
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) return DEFAULT_LOADING_TIMEOUT_MS;
+  return value > MAX_TIMER_MS ? false : value;
+}
+
 /** Whether the import is still pending `ms` after it started (decided when a bubble first renders). */
 export function markdownOverdue(ms: number): boolean {
   return !loaded && startedAt !== undefined && Date.now() - startedAt >= ms;
