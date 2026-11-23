@@ -1,0 +1,21 @@
+{
+  "id": "assistant-history-backdrop-class",
+  "kind": "optional",
+  "summary": "classNames.historyBackdrop sets a class on the backdrop of the full-screen chat drawer; the drawer states (data-drawer=\"true\", hidden, role=\"dialog\") are documented as stable.",
+  "howTo": "Optional: classNames={{ historyBackdrop: 'my-backdrop' }}. The shipped backdrop color comes from a (0,2,0) rule, so a single class does not override it: use .my-backdrop.my-backdrop or [data-element=\"history-backdrop\"].my-backdrop after styles.css, or unstyled; existing CSS on [data-element=\"history-backdrop\"] keeps working. Select the drawer with [data-element=\"history\"][data-drawer], the open one with :not([hidden]); aria-expanded on [data-action=\"history\"] holds for the built-in toggle (a renderButton sets its own). A renderButton that opens a tooltip on focus shows it when focus returns to the chats toggle after the drawer closes; open it on :focus-visible or hover only. See placing-the-assistant.md, Replacing shell parts.",
+  "skill": "building-glirastes-chat-ui#replacing-shell-parts",
+  "affectedWhen": {
+    "symbols": [
+      "AssistantShell",
+      "AssistantWorkspace"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "historyBackdrop"
+    ]
+  },
+  "surface": [
+    "glirastes/react#AssistantShellClassNames.historyBackdrop"
+  ]
+}
