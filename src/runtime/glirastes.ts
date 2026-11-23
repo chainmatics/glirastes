@@ -519,8 +519,29 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 // Next.js bundles instrumentation and each route separately, so the one
 // instance per app and process lives on globalThis, keyed by the app id.
 const INSTANCES = Symbol.for('glirastes.runtime.instances');
-const STOPPING_INSTANCE = Symbol.for('glirastes.runtime.stopping');
+const STOPPING_INSTANCES = Symbol.for('glirastes.runtime.stopping-instances');
+const ACCEPTED_STORES = Symbol.for('glirastes.runtime.accepted-stores.v1');
 type InstanceHolder = { [INSTANCES]?: Map<string, Glirastes> };
+type PrivateRuntimeHolder = {
+  [STOPPING_INSTANCES]?: WeakSet<Glirastes>;
+  [ACCEPTED_STORES]?: Map<string, AcceptedStateStore>;
+};
+function stoppingInstances(): WeakSet<Glirastes> {
+  const holder = globalThis as PrivateRuntimeHolder;
+  return holder[STOPPING_INSTANCES] ??= new WeakSet();
+}
+function acceptedStoreFor(appId: string, environmentId?: string): AcceptedStateStore {
+  if (!environmentId) return new AcceptedStateStore();
+  const holder = globalThis as PrivateRuntimeHolder;
+  const stores = holder[ACCEPTED_STORES] ??= new Map();
+  const key = `${appId}:${environmentId}`;
+  const store = stores.get(key) ?? new AcceptedStateStore();
+  // Orderly replacement is not disk loss: retain verified restrictions that
+  // failed to persist. A new instance still needs fresh authenticated bootstrap.
+  store.clear();
+  stores.set(key, store);
+  return store;
+}
 
 function instances(): Map<string, Glirastes> {
   const holder = globalThis as InstanceHolder;
@@ -546,7 +567,7 @@ export function createGlirastes(options: CreateGlirastesOptions): Glirastes {
   const appId = AppSetupArtifactSchema.parse(options.generated.setupArtifact).appId;
   const existing = instances().get(appId);
   if (existing) {
-    if ((existing as Glirastes & {[STOPPING_INSTANCE]?: boolean})[STOPPING_INSTANCE]) throw new Error('runtime_stopping');
+    if (stoppingInstances().has(existing)) throw new Error('runtime_stopping');
     return existing;
   }
   const instance = createInstance(options, appId);
@@ -595,10 +616,10 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   });
 
   const base = localSource();
-  const store = new AcceptedStateStore();
   const configuredStateEnvironmentId = options.stateEnvironmentId ?? env.GLIRASTES_STATE_ENVIRONMENT_ID?.trim();
   const stateEnvironmentId = configuredStateEnvironmentId;
   const validStateBinding = z.uuid().safeParse(stateEnvironmentId).success;
+  const store = acceptedStoreFor(appId, validStateBinding ? stateEnvironmentId : undefined);
   let stateBindingLoaded = !stateEnvironmentId;
   let stateBindingMismatch = Boolean(stateEnvironmentId && !validStateBinding);
   const loadBoundState = async () => {
@@ -889,6 +910,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     onError(new Error('[glirastes] Managed privacy requires durable bound state (accepted_state_missing).'));
   }
   const privacyGate = (pinned: PinnedPrivacyPolicy | undefined) => {
+    if (abort.signal.aborted && managedPrivacy()) throw new PrivacyError('privacy_policy_unavailable');
     if (stateBindingMismatch || (options.stateStore && !validStateBinding)) throw new PrivacyError('privacy_state_binding_mismatch');
     if (stateEnvironmentId && !stateBindingLoaded) throw new PrivacyError('privacy_policy_unavailable');
     // Lost, unreadable or unsaved state: no verified, durable decision yet.
@@ -993,7 +1015,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     },
     async stop() {
       if (stopping) return stopping;
-      Object.defineProperty(instance, STOPPING_INSTANCE, {value: true});
+      stoppingInstances().add(instance);
       // Keep ownership while writes drain. A replacement cannot attach to the
       // same backend until the old writer has finished, even during stop().
       stopping = Promise.resolve().then(async () => {

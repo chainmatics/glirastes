@@ -387,6 +387,12 @@ export const POST = createAiChatHandler({
   never refuses or raises anything. The floor is a high-water mark of the
   accepted revision number: a rollback, a replayed older `off`, a rejected
   revision, a dropped connection or a failed save never lowers it.
+  Orderly stop/recreation in the same process retains verified restrictions
+  for the same app/environment even when their last write failed; replacement
+  still requires fresh authenticated bootstrap. Await `stop()` before creating
+  its replacement. Turns from a stopped managed runtime remain blocked.
+  Process loss together with failed persistence remains the documented recovery
+  boundary: current Platform authority must restore the requirement.
 - Once a protected block was accepted or refused, a later revision without
   one is refused (`privacy_policy_downgrade`); only a newer, explicitly
   signed `off` lowers the floor. The gate runs again before every model

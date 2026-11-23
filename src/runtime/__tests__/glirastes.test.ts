@@ -240,6 +240,10 @@ function track(instance: Glirastes): Glirastes {
 
 afterEach(async () => {
   await Promise.all(instances.splice(0).map((instance) => instance.stop()));
+  // Each test creates a different synthetic Platform/backend with the same
+  // fixture IDs. Replacement within one test must retain its restrictions.
+  const retained = (globalThis as Record<symbol, unknown>)[Symbol.for('glirastes.runtime.accepted-stores.v1')];
+  (retained as Map<string, unknown> | undefined)?.clear();
 });
 
 // The turn helper spreads straight into the chat handler config.
@@ -1051,6 +1055,74 @@ describe('createGlirastes with a privacy policy', () => {
     const second = track(createGlirastes({...options, fetchImpl: platform({deployments: [next], publicKey}).fetchImpl, pollIntervalMs: 60000}));
     await second.ready(); await second.stop();
     expect((await durable.load())?.stable?.deploymentId).toBe(next.deploymentId);
+  });
+
+  it('carries a failed protected floor through graceful replacement and only newer signed off clears it', async () => {
+    const {privateKey, publicKey} = generateKeyPairSync('ed25519');
+    const ordinary = activeDeployment(privateKey);
+    const protectedDeployment = activeDeployment(privateKey, [], block);
+    const {signature: _signature, contentHash: _hash, ...fields} = protectedDeployment.policyRevision;
+    protectedDeployment.policyRevision = revision(privateKey, {...fields, revision: 2, revisionId: id('3967')});
+    protectedDeployment.deploymentId = id('3966');
+    const deployments = [ordinary]; const durable = new SharedDurableTestStore();
+    const save = durable.saveAtomic.bind(durable); let fail = true, refusedSave = false;
+    durable.saveAtomic = async state => {if (fail && state.privacyFloor?.profile === 'protected-text/v1') {refusedSave = true; throw new Error('fixture unavailable');} await save(state);};
+    const options = {generated: generated(), env, stateStore: () => durable, fetchImpl: platform({deployments, publicKey}).fetchImpl, push: false as const, pollIntervalMs: 10, onError: vi.fn()};
+    const first = track(createGlirastes(options)); await first.ready();
+    deployments.splice(0, 1, protectedDeployment); await vi.waitFor(() => expect(refusedSave).toBe(true));
+    await first.stop(); fail = false; deployments.splice(0, 1, ordinary);
+    const second = track(createGlirastes(options)); await second.ready();
+    await vi.waitFor(async () => expect((await durable.load())?.privacyFloor).toMatchObject({profile: 'protected-text/v1', policyRevision: 2}));
+    const turn = await second.chatTurn(principal); const adapter = providerAdapters().openrouter;
+    const handler = createAiChatHandler({tools: {}, model: adapter.model, systemPrompt: 'Assistant', managedRuntime: turn.managedRuntime, onError: () => {}});
+    const response = await handler(new Request('https://app.example/chat', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({messages: [{id: 'u1', role: 'user', parts: [{type: 'text', text: 'handoff.canary@example.invalid'}]}]})}));
+    await response.text(); expect(response.status).toBe(503); expect(adapter.requests).toHaveLength(0);
+    const off = activeDeployment(privateKey, [], {schemaVersion: 1, profile: 'off'});
+    const {signature: _offSignature, contentHash: _offHash, ...offFields} = off.policyRevision;
+    off.policyRevision = revision(privateKey, {...offFields, revision: 3, revisionId: id('3969')}); off.deploymentId = id('3968');
+    deployments.splice(0, 1, off);
+    await vi.waitFor(() => expect(second.accepted()?.policyRevision.revision).toBe(3));
+    expect(second.privacyPolicy()).toBeNull();
+  });
+
+  it('retains an unpersisted verified revocation through a graceful handoff', async () => {
+    const {privateKey, publicKey} = generateKeyPairSync('ed25519');
+    const revocations: SecurityRevocation[] = [];
+    const durable = new SharedDurableTestStore();
+    const options = {generated: generated(), env, stateStore: () => durable,
+      fetchImpl: platform({deployments: [activeDeployment(privateKey, [], {schemaVersion: 1, profile: 'off'})], publicKey, revocations}).fetchImpl,
+      push: false as const, pollIntervalMs: 10, onError: vi.fn()};
+    const first = track(createGlirastes(options)); await first.ready(); durable.failSave = true;
+    const unsigned = {revocationId: id('3975'), environmentId: ENVIRONMENT_ID, effectiveAt: '2026-07-29T00:02:00.000Z', reasonCode: 'privacy-off-revoked', toolIds: [], agentRevisionIds: [], policyRevisionIds: [first.accepted()!.policyRevision.revisionId]};
+    revocations.push({...unsigned, signature: {algorithm: 'Ed25519', keyId: 'runtime-key', value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url')}});
+    await vi.waitFor(() => expect(first.revocations()).toHaveLength(1)); await first.stop();
+    durable.failSave = false; revocations.splice(0);
+    const second = track(createGlirastes(options)); await second.ready();
+    expect(second.revocations()).toHaveLength(1);
+    expect((await durable.load())?.revocations).toHaveLength(1);
+    // The replacement cannot finish fresh bootstrap from a revoked snapshot.
+    expect(codeOf(() => second.privacyPolicy())).toBe('privacy_policy_unavailable');
+  });
+
+  it('does not reopen a stopped managed turn when its replacement reconciles', async () => {
+    const {privateKey, publicKey} = generateKeyPairSync('ed25519');
+    const durable = new SharedDurableTestStore();
+    const options = {generated: generated(), env, stateStore: () => durable,
+      fetchImpl: platform({deployments: [activeDeployment(privateKey, [], {schemaVersion: 1, profile: 'off'})], publicKey}).fetchImpl,
+      push: false as const, pollIntervalMs: 60000, onError: vi.fn()};
+    const first = track(createGlirastes(options)); await first.ready(); const oldTurn = await first.chatTurn(principal); await first.stop();
+    const second = track(createGlirastes(options)); await second.ready(); expect(second.privacyPolicy()).toBeNull();
+    const adapter = providerAdapters().openrouter;
+    const handler = createAiChatHandler({tools: {}, model: adapter.model, systemPrompt: 'Assistant', managedRuntime: oldTurn.managedRuntime, onError: () => {}});
+    const response = await handler(new Request('https://app.example/chat', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({messages: [{id: 'u1', role: 'user', parts: [{type: 'text', text: 'stopped.canary@example.invalid'}]}]})}));
+    await response.text(); expect(response.status).toBe(503); expect(adapter.requests).toHaveLength(0);
+  });
+
+  it.each([Object.seal, Object.freeze])('stops an immutable public runtime handle without mutation', async immutable => {
+    const first = track(createGlirastes({generated: generated(), env: {}}));
+    immutable(first); await first.stop();
+    const second = track(createGlirastes({generated: generated(), env: {}}));
+    expect(second).not.toBe(first); await second.stop();
   });
 
   it('temporal review: bound-only off cannot report applied from volatile state',async()=>{
