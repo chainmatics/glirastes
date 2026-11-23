@@ -223,6 +223,22 @@ describe('render function slots are components', () => {
     expect(screen.getByRole('button', { name: /^Layout: / }).getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('switching between panes with hooks inside one stable function keeps their state apart', async () => {
+    function PaneA() { const [n, set] = useState(0); return <button type="button" onClick={() => set(n + 1)}>A {n}</button>; }
+    function PaneB() { const [n] = useState(100); useEffect(() => {}, []); return <span>B {n}</span>; }
+    let route: 'a' | 'b' = 'a';
+    const historyPane = () => route === 'a' ? <PaneA /> : <PaneB />;
+    const view = await mount({ historyPane });
+    await go('fullscreen');
+    fireEvent.click(screen.getByRole('button', { name: 'A 0' }));
+    route = 'b';
+    await view.rerender({ historyPane });
+    expect(screen.getByText('B 100')).toBeTruthy();
+    route = 'a';
+    await view.rerender({ historyPane });
+    expect(screen.getByRole('button', { name: 'A 0' })).toBeTruthy();
+  });
+
   it('close, modes and entries keep their identity between renders', async () => {
     const closes = new Set<unknown>();
     const modeLists = new Set<unknown>();
@@ -243,7 +259,7 @@ describe('render function slots are components', () => {
 describe('focus after close()', () => {
   const composers: Array<[string, ReactNode, string]> = [
     ['textarea', <textarea key="c" aria-label="Draft" />, 'Draft'],
-    ['input', <input key="c" aria-label="Draft" />, 'Draft'],
+    ['marked input', <input key="c" aria-label="Draft" data-glirastes-composer />, 'Draft'],
     ['own composer', <><input aria-label="Search filter" /><div key="c" role="textbox" tabIndex={0} aria-label="Draft" data-glirastes-composer /></>, 'Draft'],
   ];
   for (const narrowView of [true, false]) {
@@ -274,9 +290,9 @@ describe('focus after close()', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: narrowView ? 'Show chats' : 'Hide chats' }));
   });
 
-  it('a pick in the built-in list with an input composer focuses it', async () => {
+  it('a pick in the built-in list with a marked input composer focuses it', async () => {
     narrow = true;
-    await mount({}, chat(), <input aria-label="Draft" />);
+    await mount({}, chat(), <input aria-label="Draft" data-glirastes-composer />);
     await go('fullscreen');
     fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
     await frame();

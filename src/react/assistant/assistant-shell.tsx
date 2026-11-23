@@ -44,7 +44,7 @@ export interface AssistantShellIcons {
   history?: ReactNode;
   /** The "+" of new chat in the shell's own session switchers (header and chat column). `false` drops it. */
   newChat?: ReactNode;
-  /** Rename and delete in the shell's own session switchers; `false` or `null` keep the default icon. */
+  /** Rename and delete in the shell's own session switchers; empty values (`false`, `null`, `''`) keep the default icon. */
   rename?: ReactNode;
   delete?: ReactNode;
 }
@@ -340,26 +340,26 @@ function edgeStyle(edge: FloatingResizeEdge): CSSProperties {
 /**
  * Renders an app's render-function slot as a component of its own, so hooks
  * inside it belong to the slot, not to the shell, and it runs only where the
- * slot is shown. Its state lives as long as that part stays rendered.
+ * slot is shown. Not keyed by the function: a new function each render keeps
+ * the state, and swapping in a different function with other hooks is not
+ * supported (switch inside one function or render components from it).
  */
 function RenderSlot<P>({ render, props }: { render: (props: P) => ReactNode; props: P }) {
   return <>{render(props)}</>;
 }
 
-/** Marks an app's own composer input so the shell focuses it, e.g. after `close()` of the chat column. */
-const ASSISTANT_COMPOSER_ATTRIBUTE = 'data-glirastes-composer';
-const ENABLED = ':not(:disabled):not([aria-disabled="true"])';
-/** In order: the app's marked composer, the SDK composers (editor, textarea), any text input. */
-const COMPOSER_SELECTORS = [
-  `[${ASSISTANT_COMPOSER_ATTRIBUTE}]`,
-  `:is([contenteditable="true"], [contenteditable=""], textarea)${ENABLED}`,
-  `input${ENABLED}:not([type="hidden"], [type="file"], [type="checkbox"], [type="radio"], [type="button"], [type="submit"], [type="reset"], [type="range"], [type="color"])`,
-];
-/** Focuses the element and tells whether it took focus (hidden, inert or disabled ones do not). */
+/** The editor or textarea the shell has always looked for; disabled ones included, as before. */
+const BASE_COMPOSER = '[contenteditable="true"],[contenteditable=""],textarea';
+/** Marks an app's own composer (or the wrapper around its input) for focus after the chat column closes. */
+const COMPOSER_MARK = '[data-glirastes-composer]';
+/** Enabled, editable text inputs; buttons, checkboxes, files, images and the like are not a composer. */
+const TEXT_INPUT = 'input:not(:disabled):not([readonly]):not([aria-disabled="true"])'
+  + ':is(:not([type]), [type=""], [type="text"], [type="search"], [type="email"], [type="url"], [type="tel"], [type="number"], [type="password"])';
+/** Focuses the element and tells whether it took focus, also inside a shadow root. */
 function focusIfPossible(element: HTMLElement | null | undefined): boolean {
   if (!element) return false;
   element.focus();
-  return element.ownerDocument.activeElement === element;
+  return (element.getRootNode() as Document | ShadowRoot).activeElement === element;
 }
 
 const withShortcut = (label: string, combo: string | false) => combo ? `${label} (${formatShortcut(combo)})` : label;
@@ -594,16 +594,17 @@ export function AssistantShell({
   }, []);
   const pickedFromHistory = useCallback(() => closeDrawer('composer'), [closeDrawer]);
   const closeHistory = useCallback((focus: 'composer' | 'toggle' = 'composer') => closeDrawer(focus), [closeDrawer]);
-  // After the chat column closes: the composer in the conversation, never anything in the column,
-  // else the chats toggle, else focus stays where it is.
+  // After the chat column closes. Where the shell always found an editor or textarea in the
+  // conversation, it focuses that exactly as before (no check, also when disabled). Only where it
+  // used to fall back to the first button of the shell (which sat in the column): an element marked
+  // `data-glirastes-composer` or a text input inside it, else the chats toggle, else focus stays.
   const focusComposerAfterHistory = useCallback(() => {
     const body = frameRef.current?.querySelector<HTMLElement>('[data-element="body"]');
-    for (const selector of COMPOSER_SELECTORS) {
-      const found = body?.querySelector<HTMLElement>(selector);
-      if (!found) continue;
-      if (focusIfPossible(found)) return;
-      // A marked wrapper that does not take focus itself: its editor or input.
-      if (selector === COMPOSER_SELECTORS[0] && focusIfPossible(found.querySelector<HTMLElement>(COMPOSER_SELECTORS.slice(1).join(', ')))) return;
+    const composer = body?.querySelector<HTMLElement>(BASE_COMPOSER);
+    if (composer) { composer.focus(); return; }
+    for (const marked of Array.from(body?.querySelectorAll<HTMLElement>(COMPOSER_MARK) ?? [])) {
+      if (marked.matches(TEXT_INPUT) || marked.tabIndex >= 0) { if (focusIfPossible(marked)) return; }
+      if (focusIfPossible(marked.querySelector<HTMLElement>(TEXT_INPUT))) return;
     }
     focusHistoryToggle();
   }, [focusHistoryToggle]);

@@ -108,7 +108,8 @@ runs after a pick or a new chat. Texts come from the chat locale:
 ## Replacing shell parts
 
 Every part below is opt-in; an app that sets none of them gets the same DOM,
-behaviour and styles as before.
+behaviour and styles as before, apart from the focus fix after the column
+closes when the conversation has no editor or `textarea` (below).
 
 - Layout menu (only with `'fullscreen'` among several `modes`):
   `showModeMenu={false}` drops the menu and its key handling (Enter, Space,
@@ -118,37 +119,55 @@ behaviour and styles as before.
   built-in key handling. It gets `{ modes, current, setMode, label, title,
   entries }` (`AssistantModeMenuRenderProps`; `entries[mode]` is an
   `AssistantModeMenuEntry` with `label` and `icon`, `title` carries the
-  layout shortcut). `modes`, `entries` and `setMode` keep their identity
-  between renders, so they can sit in effect dependencies. The app's control
-  owns its keyboard and a11y (e.g. `aria-haspopup`). Its Escape handler calls
-  `event.preventDefault()` and `event.stopPropagation()`, or the full-screen
-  modal sees the same Escape and leaves full screen. A menu it portals out of
-  the shell needs `data-cm-keep-interactive` to stay usable in full screen.
+  layout shortcut). `modes` and `setMode` keep their identity between renders;
+  `entries` does as long as the `labels` strings and the `icons` elements the
+  app passes do (inline JSX icons are new elements every render). The app's
+  control owns its keyboard and a11y (e.g. `aria-haspopup`). Its Escape
+  handler calls `event.preventDefault()` and `event.stopPropagation()`, or the
+  full-screen modal sees the same Escape and leaves full screen. A menu it
+  portals out of the shell needs `data-cm-keep-interactive` to stay usable in
+  full screen.
 - Own chat column that closes the drawer: pass `historyPane` as a function.
   It gets `{ open, drawer, close }` (`AssistantHistoryPaneProps`): `open` is
   whether the column is shown, `drawer` whether it is the drawer below 900 px,
-  `close()` closes the drawer like a pick in the built-in list and focuses the
-  composer, `close('toggle')` gives focus back to the chats toggle (as Escape
-  does). In the wide column `close()` only moves focus. `close` keeps its
-  identity between renders. A function always gives a column, also when the
-  chat keeps only one conversation.
-- Composer focus after `close()` or a pick: the first enabled element in the
-  conversation, never in the column: an element marked
-  `data-glirastes-composer` (an app's own composer; on a wrapper, its editor
-  or input inside), else the SDK editor or a `textarea`, else a text `input`.
-  Without one focus goes to the chats toggle; when that cannot take it, focus
-  stays where it is.
-- Render functions (`historyPane`, `historyTitle`, `renderModeMenu`) are
-  rendered as components: hooks inside them are safe, and they run only while
-  their part is shown. Their state lives while the part stays rendered: the
-  column keeps it when its toggle hides it, and starts fresh after leaving
-  full screen; the layout menu starts fresh when `showModeMenu` or `modes`
-  take it away and give it back.
+  `close()` closes the drawer like a pick in the built-in list and moves focus
+  to the composer (below), `close('toggle')` gives focus back to the chats
+  toggle (as Escape does). In the wide column `close()` only moves focus.
+  `close` keeps its identity between renders. A function always gives a
+  column, also when the chat keeps only one conversation.
 
   ```tsx
   <AssistantWorkspace chat={<AiChatPanel />} modes={['sidebar', 'floating', 'fullscreen']}
     historyPane={({ close }) => <MyProjectsPane onPick={close} />}>
   ```
+- The drawer's dialog name and the toggle's names stay `labels.history`,
+  `labels.showHistory` and `labels.hideHistory` ("Chats", "Show chats", "Hide
+  chats"); an app whose column shows something else (projects, folders) sets
+  those labels too.
+- Focus after the column closes (a pick in the built-in list, `close()`): the
+  first editor (`contenteditable`) or `textarea` in the conversation gets
+  `focus()` as it always did, also a disabled one (then focus stays where it
+  was). Only when there is none: an element in the conversation marked
+  `data-glirastes-composer` (when it is a text input or focusable itself), else
+  the first enabled, editable text input inside it, else the chats toggle;
+  when nothing takes focus it stays where it is. Other inputs in the
+  conversation (a clarification answer, a command form, a queued message) are
+  never taken for the composer. The shell does not look into a shadow root of
+  its own inside the marked element: mark the focusable host (`tabIndex`,
+  `delegatesFocus`). Opening the assistant and the focus-input shortcut
+  (alt+shift+I) still look only for an editor or a `textarea` and otherwise
+  focus the first button; the mark does not change them.
+- Render functions (`historyPane`, `historyTitle`, `renderModeMenu`) are
+  rendered as components of their own, so hooks inside them belong to that
+  part, and they run only while their part is shown. Pass a stable function
+  (or the same one every render); it is not remounted when its identity
+  changes, so switching between different functions that use hooks reuses or
+  breaks their state. To switch between panes, switch inside one function and
+  render components from it:
+  `historyPane={() => route === 'projects' ? <ProjectsPane /> : <FoldersPane />}`.
+  State lives while the part stays rendered: the column keeps it when its
+  toggle hides it and starts fresh after leaving full screen; the layout menu
+  starts fresh when `showModeMenu` or `modes` take it away and give it back.
 - Heading of the column: `historyTitle` replaces
   `[data-element="history-title"]` with a node, or a function with the same
   argument (e.g. a close button in the drawer); `false` drops it, `null` keeps
@@ -156,12 +175,13 @@ behaviour and styles as before.
 - Session icons: `icons.newChat`, `icons.rename` and `icons.delete` replace
   the "+" of new chat and the rename and delete icons in the shell's own
   session switchers (header and chat column). The default "+" stays the text
-  character. Outside the shell pass `icons` (`SessionSwitcherIcons`) to `SessionSwitcher` directly;
-  `DEFAULT_SESSION_SWITCHER_ICONS` has the shipped ones. The icons are
-  decorative: the buttons keep their names from the chat locale
-  (`newChatLabel`, `renameSessionAriaLabel`, `deleteSessionAriaLabel`).
-  `newChat: false` drops the "+" element; `rename` and `delete` set to `false`
-  or `null` keep the default icon, so an action button is never empty.
+  character. Outside the shell pass `icons` (`SessionSwitcherIcons`) to
+  `SessionSwitcher` directly; `DEFAULT_SESSION_SWITCHER_ICONS` has the shipped
+  ones. The icons are decorative: the buttons keep their names from the chat
+  locale (`newChatLabel`, `renameSessionAriaLabel`, `deleteSessionAriaLabel`).
+  `newChat: false` drops the "+" element; empty `rename` and `delete` values
+  (`false`, `null`, `''`, `true`, `[]`) keep the default icon, so an action
+  button is never empty.
 - Own session controls: `useSessionLock()` gives `{ visible, sessionChangeBlocked,
   locked }` (`SessionLockState`), the rule the built-in `SessionSwitcher`
   follows. `sessionChangeBlocked` is true while a reply streams, a UI action

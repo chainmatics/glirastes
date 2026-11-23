@@ -51,7 +51,7 @@ describe('SessionSwitcher icons', () => {
     expect(document.querySelector('[data-element="row-delete"] polyline')).not.toBeNull();
   });
 
-  it.each([false, null] as const)('rename and delete %s keep the default icons, never an empty button', value => {
+  it.each([[false], [null], [''], [true], [[]]] as const)('rename and delete %j keep the default icons, never an empty button', value => {
     mount({ variant: 'list', icons: { rename: value, delete: value } });
     expect(document.querySelector('[data-element="row-edit"] svg')).not.toBeNull();
     expect(document.querySelector('[data-element="row-delete"] svg')).not.toBeNull();
