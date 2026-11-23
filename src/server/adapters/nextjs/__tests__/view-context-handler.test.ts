@@ -6,7 +6,8 @@ import { UI_ACTION_HANDOFF_MESSAGE } from '../../../../browser/ui-action-handoff
 import { createJsonSchemaLike } from '../../../../runtime/json-schema.js';
 import { uiActionToolToTool } from '../../../core/index.js';
 import { defineTool, type PiiDetector, type PipelineResult, type ToolRegistry } from '../../../../types.js';
-import { createPiiShield } from '../../../pii-shield/index.js';
+import { createPiiShield, createRegexPiiDetector } from '../../../pii-shield/index.js';
+import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
 import { createAiChatHandler, type AiChatHandlerFullConfig } from '../create-ai-chat-handler.js';
 import { VIEW_CONTEXT_HEADER } from '../view-context-block.js';
 import type { RuntimeMetricEvent } from '../../../../contracts/index.js';
@@ -219,13 +220,77 @@ describe.each<Mode>(['legacy', 'pipeline'])('view context in the chat handler (%
     const handler = createAiChatHandler({
       tools: registry, systemPrompt: 'Assistant', model: textModel(),
       ...(mode === 'pipeline' ? { pipeline: { process: async () => pipelineResult } } : {}),
-      streamHandler: async (context) => { seen.push(context.messages); return new Response('ok'); },
+      streamHandler: async (context) => {
+        seen.push({ keys: Object.keys(context), messages: context.messages, systemPrompt: context.systemPrompt, earlier: context.earlierMessages });
+        return new Response('ok');
+      },
     } as AiChatHandlerFullConfig);
-    await handler(new Request('https://app.example/api/chat', {
+    const response = await handler(new Request('https://app.example/api/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [userMessage], ...field(orderView) }),
     }));
-    expect(JSON.stringify(seen)).not.toContain('view-context');
+    expect(response.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(JSON.stringify(seen)).not.toMatch(/view-context|viewContext|Order 1/);
+  });
+
+  it('gives a pseudonym in the block the same as in the user message, which the shield restores', async () => {
+    const shield = createPiiShield({ locale: 'en', detector: createRegexPiiDetector({ categories: ['email'] }) });
+    const messages = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Write to max@firma.de about this.' }] }];
+    const view = [{ entity: { type: 'order', id: 'ord-1' }, label: 'Max <max@firma.de>' }];
+    const { prompt } = await promptOf({ piiShield: shield }, field(view), { mode, messages });
+    const userText = JSON.stringify(prompt!.at(-2));
+    const lines = ((prompt!.at(-1)!.content as Array<{ text: string }>)[0]!.text).split('\n');
+    expect(lines).toHaveLength(4);
+    const entry = JSON.parse(lines[2]!) as { label: string };
+    expect(entry.label).not.toContain('max@firma.de');
+    const pseudonym = entry.label.replace(/^Max </, '').replace(/>$/, '');
+    expect(entry.label).toBe(`Max <${pseudonym}>`);
+    expect(userText).toContain(pseudonym);
+    expect(userText).not.toContain('max@firma.de');
+    expect(shield.inbound(`Sent to ${entry.label}.`, 'ai-u1')).toBe('Sent to Max <max@firma.de>.');
+  });
+
+  it('runs the request without a block when the PII shield fails on it', async () => {
+    const shield = createPiiShield({ locale: 'en', detector: { detect: () => [] } });
+    shield.anonymizeResult = async () => { throw new Error('detector down'); };
+    const without = await promptOf({ piiShield: shield }, {}, { mode });
+    const { status, prompt } = await promptOf({ piiShield: shield }, field(orderView), { mode });
+    expect(status).toBe(200);
+    expect(JSON.stringify(prompt)).toBe(JSON.stringify(without.prompt));
+  });
+
+  it('sends no block with a direct command (no model input carries it)', async () => {
+    const command = formatChatCommandMessage({ commandId: 'orders.get', tool: 'orders.get', args: { orderId: 'ord-1' }, label: '/Open order' });
+    const model = textModel();
+    const handler = createAiChatHandler({
+      tools: registry, systemPrompt: 'Assistant', model,
+      ...(mode === 'pipeline' ? { pipeline: { process: async () => pipelineResult } } : {}),
+    } as AiChatHandlerFullConfig);
+    const response = await handler(new Request('https://app.example/api/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: command }] }], ...field(orderView) }),
+    }));
+    const wire = await response.text();
+    expect(response.status).toBe(200);
+    expect(wire).not.toContain('view-context');
+    for (const call of model.doStreamCalls) expect(JSON.stringify(call.prompt)).not.toContain('view-context');
+  });
+});
+
+describe('requests that do not reach the model normally', () => {
+  it('sends no block when the pipeline guardrails block the request', async () => {
+    const blocked = { ...pipelineResult, blocked: true };
+    const without = await promptOf({ pipeline: { process: async () => blocked } }, {}, { mode: 'pipeline' });
+    const { status, prompt } = await promptOf({ pipeline: { process: async () => blocked } }, field(orderView), { mode: 'pipeline' });
+    expect(status).toBe(200);
+    expect(prompt).toBeDefined();
+    expect(JSON.stringify(prompt)).toBe(JSON.stringify(without.prompt));
+  });
+
+  it('names types of every offered tool, also when the intent router scopes them away (legacy)', async () => {
+    const { prompt } = await promptOf({ intentRouter: async () => ({ toolNames: ['ui_navigate'] }) }, field(orderView));
+    expect(blockOf(prompt)).toBe(true);
   });
 });
 
@@ -263,6 +328,23 @@ describe('viewContext option of createAiChatHandler', () => {
     ['a facts schema without safeParse', { facts: { order: {} } }],
     ['a string', 'on'],
   ])('throws at creation for %s', (_name, viewContext) => {
+    expect(() => createAiChatHandler({ tools: registry, model: textModel(), viewContext } as never)).toThrow(/viewContext/);
+  });
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+  ])('treats viewContext: %s as not set (on, defaults)', async (_name, viewContext) => {
+    const model = textModel();
+    const handler = createAiChatHandler({ tools: registry, systemPrompt: 'Assistant', model, viewContext } as never);
+    await (await handler(new Request('https://app.example/api/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [userMessage], ...field(orderView) }),
+    }))).text();
+    expect(JSON.stringify(model.doStreamCalls[0]!.prompt)).toContain('<view-context>');
+  });
+
+  it.each([['0', 0], ['an empty string', ''], ['a number', 3], ['NaN', Number.NaN]])('still throws at creation for %s', (_name, viewContext) => {
     expect(() => createAiChatHandler({ tools: registry, model: textModel(), viewContext } as never)).toThrow(/viewContext/);
   });
 

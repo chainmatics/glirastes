@@ -508,7 +508,7 @@ export interface AiChatHandlerConfig {
    * browser in the request body (`glirastesViewContext`) and given to the
    * model as data, never as an instruction, in its own user message right
    * after the newest user message (never in the system prompt). On by
-   * default; `false` turns it off. Without the field, the model input is
+   * default; `false` turns it off (`null` counts as not set). Without the field, the model input is
    * exactly as without this option. The browser side (a registry and a
    * hook) follows in a later release; until then nothing sends the field.
    *
@@ -518,8 +518,10 @@ export interface AiChatHandlerConfig {
    * (Zod or any `safeParse`). Invalid input is dropped, never answered with
    * 400. It grants no permission: every tool call is authorized as before.
    * Only the built-in stream handler adds the block; a continuation (an
-   * approval, a UI outcome, a budget stop) and the answer to a
-   * clarification get none. `history` must be `'none'` for now (the newest
+   * approval, a UI outcome, a budget stop), a request the pipeline
+   * guardrails blocked and the answer to a clarification get none. With
+   * `piiShield` the values are shielded like tool results; a failing
+   * shield sends no block. `history` must be `'none'` for now (the newest
    * message only). An invalid option throws here. See `ViewContextPolicy`
    * (`glirastes/contracts`).
    */

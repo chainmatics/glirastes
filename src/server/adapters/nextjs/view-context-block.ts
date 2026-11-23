@@ -12,13 +12,19 @@
  * is ignored. `byMessage` (entries by user message id) is reserved for a
  * later server that binds entries to stored messages; this one ignores it.
  *
- * Safety of the block rests on JSON: every entry is one line of
- * `JSON.stringify`, so no value can start a line; `<`, U+2028 and U+2029
- * become JSON escapes (`escapeJsonForBlock`), so no value can open or close a
- * tag; bidi controls become JSON escapes too. Ids, facts and routes keep
- * `-->`, `}}` or `{{mention:` as data inside their JSON strings. The block
- * has no nonce: nothing in it depends on a secret, so guessing one gains
- * nothing, and it stays byte-identical for the same entries.
+ * Safety of the block rests on JSON, on its own (it does not rely on the
+ * sanitizer): every entry is one line of `JSON.stringify`, so no value can
+ * start a line; `<`, U+2028 and U+2029 become JSON escapes
+ * (`escapeJsonForBlock`), so no value can open or close a tag; NEL, the
+ * other C1 controls, bidi controls, zero-width, invisible-format and tag
+ * characters become JSON escapes too. All of them occur only inside JSON
+ * strings, so each line stays valid JSON with the same value. Ids, facts and
+ * routes keep `-->`, `}}` or `{{mention:` as data inside their JSON
+ * strings. The PII shield replaces values before serializing, never in the
+ * serialized line. The block has no nonce: nothing in it depends on a
+ * secret, so guessing one gains nothing, and it stays byte-identical for the
+ * same entries; a user can type a look-alike block in their own message,
+ * which grants nothing either.
  *
  * @module
  */
@@ -57,35 +63,51 @@ export const VIEW_CONTEXT_HEADER = [
 const OPEN = '<view-context>';
 const CLOSE = '</view-context>';
 
-const unicodeEscape = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
-// Bidi controls: they only occur inside JSON strings, so their escapes keep the JSON valid.
-const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+/** JSON escapes of every UTF-16 unit of `char` (a tag character is two). */
+const unicodeEscape = (char: string) =>
+  Array.from({ length: char.length }, (_, index) => `\\u${char.charCodeAt(index).toString(16).padStart(4, '0')}`).join('');
 
 /**
- * One line of the block: `escapeJsonForBlock` plus JSON escapes for bidi
- * controls and for CR, LF and NEL (`JSON.stringify` leaves NEL raw; a raw
- * CR or LF only a PII shield could have put there).
+ * Characters `JSON.stringify` leaves raw that could hide, reorder or break
+ * a line: C1 controls (NEL included), soft hyphen, Arabic letter mark,
+ * Mongolian vowel separator, zero-width and joiner characters, bidi controls,
+ * invisible operators, BOM, interlinear annotation and tag characters.
+ */
+const INVISIBLE = /[\u0080-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
+
+/**
+ * One line of the block: `escapeJsonForBlock` (`<`, U+2028, U+2029) plus
+ * JSON escapes for {@link INVISIBLE} and for a raw CR or LF (a line built by
+ * `viewContextLines` has none; `renderViewContextBlock` takes any line).
  */
 function blockLine(line: string): string {
-  return escapeJsonForBlock(line).replace(BIDI, unicodeEscape).replace(/[\r\n\u0085]/g, unicodeEscape);
+  return escapeJsonForBlock(line).replace(INVISIBLE, unicodeEscape).replace(/[\r\n]/g, unicodeEscape);
 }
 
-/** The entries as JSON lines, keys in SDK order (`facts` last, its keys as the schema returned them). */
-export function viewContextLines(entries: ReadonlyArray<ViewContextEntry>): string[] {
-  return entries.map((entry) => blockLine(JSON.stringify({
+/** The object one entry is written as: keys in SDK order (`facts` last, its keys as the schema returned them). */
+function lineObject(entry: ViewContextEntry): Record<string, unknown> {
+  return {
     ...(entry.entity !== undefined ? { entity: { type: entry.entity.type, id: entry.entity.id } } : {}),
     ...(entry.selection !== undefined ? { selection: { type: entry.selection.type, ids: entry.selection.ids } } : {}),
     ...(entry.label !== undefined ? { label: entry.label } : {}),
     ...(entry.unsaved !== undefined ? { unsaved: entry.unsaved } : {}),
     ...(entry.route !== undefined ? { route: entry.route } : {}),
     ...(entry.facts !== undefined ? { facts: entry.facts } : {}),
-  })));
+  };
+}
+
+/** The entries as JSON lines (see {@link lineObject} and {@link blockLine}). */
+export function viewContextLines(entries: ReadonlyArray<ViewContextEntry>): string[] {
+  return entries.map((entry) => blockLine(JSON.stringify(lineObject(entry))));
 }
 
 /**
  * The block of `lines`: the first lines (each made block-safe again) that
- * fit {@link VIEW_CONTEXT_BLOCK_MAX_CHARS}, the rest omitted; undefined when
- * none fits.
+ * fit {@link VIEW_CONTEXT_BLOCK_MAX_CHARS}, measured after shielding and
+ * escaping. From the first line that does not fit on, whole entries are left
+ * out (`omitted`), deterministically, never a part of a line; undefined
+ * when none fits. Only escape-heavy or shield-lengthened entries can be left
+ * out: sanitized entries fit as written.
  */
 export function renderViewContextBlock(
   lines: ReadonlyArray<string>,
@@ -143,33 +165,61 @@ export interface PreparedViewContext {
 }
 
 /**
+ * `entries` with their string values through the PII shield, the way tool
+ * results go (`anonymizeResult`, one call, same session as the user's
+ * messages, so a value gets the pseudonym it has there): ids, selection ids,
+ * labels, routes and fact values. Ids are shielded like the ids of tool
+ * results: a pseudonym in a tool argument is restored to the original id
+ * (`rehydrateArgs`), so tool calls still name the right record. Entity
+ * types (declared names, no user data) and keys stay as they are, as in
+ * tool results. Throws when the shield fails or returns another shape.
+ */
+async function shieldEntries(
+  entries: ReadonlyArray<ViewContextEntry>,
+  shield: { shield: Pick<PiiShield, 'anonymizeResult'>; sessionId: string },
+): Promise<ViewContextEntry[]> {
+  const values = entries.map((entry) => ({
+    id: entry.entity?.id, ids: entry.selection?.ids, label: entry.label, route: entry.route, facts: entry.facts,
+  }));
+  const shielded = await shield.shield.anonymizeResult(values, shield.sessionId);
+  if (!Array.isArray(shielded) || shielded.length !== entries.length) throw new Error('unexpected shield result');
+  return entries.map((entry, index) => {
+    const value = shielded[index] as Partial<Record<'id' | 'ids' | 'label' | 'route' | 'facts', unknown>>;
+    if (!isRecord(value)) throw new Error('unexpected shield result');
+    return {
+      ...(entry.entity ? { entity: { type: entry.entity.type, id: value.id } } : {}),
+      ...(entry.selection ? { selection: { type: entry.selection.type, ids: value.ids } } : {}),
+      ...(entry.label !== undefined ? { label: value.label } : {}),
+      ...(entry.unsaved !== undefined ? { unsaved: entry.unsaved } : {}),
+      ...(entry.route !== undefined ? { route: value.route } : {}),
+      ...(entry.facts !== undefined ? { facts: value.facts } : {}),
+    } as ViewContextEntry;
+  });
+}
+
+/**
  * The block for the `current` entries of a request: sanitized against the
  * types `tools` declare (the request's tools, so a type only a tool this
  * user cannot use declares is dropped) and the facts schemas of the policy,
- * rendered, each line through the PII shield. Undefined for a disabled
- * policy. Never throws: anything unexpected, a failing shield included,
- * gives no block (never an unshielded one).
+ * the values through the PII shield (only when an entry is left), then
+ * serialized and escaped. Undefined for a disabled policy. Never throws:
+ * anything unexpected, a failing shield included, gives no block (never an
+ * unshielded one).
  */
 export async function prepareViewContext(
   field: { current: unknown },
   options: {
     policy: ResolvedViewContextPolicy;
     tools: Readonly<Record<string, unknown>>;
-    shield?: { shield: Pick<PiiShield, 'outbound'>; sessionId: string };
+    shield?: { shield: Pick<PiiShield, 'anonymizeResult'>; sessionId: string };
   },
 ): Promise<PreparedViewContext | undefined> {
   if (!options.policy.enabled) return undefined;
   try {
     const result = sanitizeViewContext(field.current, { declaredTypes: declaredEntityTypes(options.tools), policy: options.policy });
-    let lines = viewContextLines(result.entries);
-    const shield = options.shield;
-    if (shield) {
-      const shielded: string[] = [];
-      // One after another: pseudonyms are assigned in the order of the entries.
-      for (const line of lines) shielded.push(await shield.shield.outbound(line, shield.sessionId));
-      lines = shielded;
-    }
-    const block = renderViewContextBlock(lines);
+    if (result.entries.length === 0) return { dropped: result.dropped };
+    const entries = options.shield ? await shieldEntries(result.entries, options.shield) : result.entries;
+    const block = renderViewContextBlock(viewContextLines(entries));
     return { ...(block ? { text: block.text } : {}), dropped: result.dropped };
   } catch {
     return { dropped: {} };

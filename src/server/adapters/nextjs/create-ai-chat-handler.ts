@@ -1349,7 +1349,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   if (uiToolResultShape !== 'auto' && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
     throw new Error("createAiChatHandler: uiToolResultShape must be 'auto', 'handoff' or 'legacy'");
   }
-  const viewContextPolicy = resolveViewContextPolicy(viewContextOption);
+  // `null` counts as not set (config spreads); other wrong values throw.
+  const viewContextPolicy = resolveViewContextPolicy(viewContextOption ?? undefined);
   if (viewContextPolicy.history !== 'none') {
     throw new Error("viewContext: history must be 'none' for now; 'changes' and 'all' need view contexts bound to messages (a later release).");
   }
@@ -2424,7 +2425,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           sessionId,
           requestStart,
           modelId: resolvedModelId,
-        } : undefined, await withViewContext(requestState, unscopedAiTools, sessionId));
+        // A request the guardrails blocked gets no view context (fail closed).
+        } : undefined, pipelineResult.blocked ? requestState : await withViewContext(requestState, unscopedAiTools, sessionId));
 
         return clearWhenDone(await pipelineStreamHandler({
           tools: discoveryController
