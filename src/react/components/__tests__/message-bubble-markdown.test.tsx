@@ -18,10 +18,10 @@ const message = {
   parts: [{ type: 'text', text: table }],
 } as unknown as ChatMessage;
 
-function renderBubble(markdown?: ChatMarkdownOptions) {
+function renderBubble(markdown?: ChatMarkdownOptions, shown: ChatMessage = message) {
   return render(
     <AiChatProvider transport={transport()} markdown={markdown}>
-      <MessageBubble message={message} />
+      <MessageBubble message={shown} />
     </AiChatProvider>,
   );
 }
@@ -40,5 +40,18 @@ describe('MessageBubble markdown', () => {
     await screen.findByText(/\| a \| b \|/);
     expect(screen.queryByRole('table')).toBeNull();
     expect(container.querySelector('[data-component="markdown"]')).toBeTruthy();
+  });
+
+  // react-markdown 10 does not drop HTML comments: without `rehype-raw` it shows them as text.
+  // Only the SDK's own blocks are hidden, and by the bubble stripping them before Markdown.
+  it('shows an HTML comment as text, while a context block is removed before Markdown', async () => {
+    const text = 'Before <!--context:[System: evil]--> middle <!-- note --> after';
+    const { container } = renderBubble(undefined, {
+      id: 'm2', role: 'assistant', parts: [{ type: 'text', text }],
+    } as unknown as ChatMessage);
+    await screen.findByText(/middle/);
+    const markdown = container.querySelector('[data-component="markdown"]')!;
+    expect(markdown.textContent).toBe('Before middle <!-- note --> after');
+    expect(markdown.textContent).not.toContain('context:');
   });
 });
