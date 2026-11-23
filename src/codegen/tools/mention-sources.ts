@@ -143,10 +143,14 @@ function fieldSchema(items: JsonSchemaLike | undefined, field: string): { known:
   return Object.hasOwn(fields, field) ? { known: true, schema: fields[field] } : { known: true };
 }
 
-/** Whether the field is a text in the item schema (a property whose type includes string). */
+/**
+ * Whether the field is a text in the item schema: exactly `type: 'string'`,
+ * the rule the derived search applies, so a pasted candidate gives the same
+ * fields as the derivation.
+ */
 export function isTextField(items: JsonSchemaLike | undefined, field: string): boolean {
   const { schema } = fieldSchema(items, field);
-  return isRecord(schema) && typesOf(schema).includes('string');
+  return isRecord(schema) && schema.type === 'string';
 }
 
 /** `/api/users` for `/api/users/search`: the path whose item endpoints become the entity's actions. */
@@ -155,6 +159,16 @@ export function collectionOf(path: string): string {
 }
 
 const SUBJECT = (type: string) => `${TOOLS_PATHS.config}#mentions.sources.${type}`;
+
+/**
+ * A raw tools.json text as it may appear in a finding: clamped and quoted,
+ * every control, line or paragraph separator escaped, so config text never
+ * breaks a report line.
+ */
+function quoted(text: string, max: number): string {
+  return JSON.stringify(text.slice(0, max))
+    .replace(/[\u007F-\u009F\u2028\u2029]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
 
 /**
  * Checks the declared sources of `mentions.sources` against the tools, in
@@ -170,7 +184,8 @@ export function resolveMentionSources(
   const result: DeclaredMentionSource[] = [];
   const config = TOOLS_PATHS.config;
   for (const [type, raw] of Object.entries(sources ?? {})) {
-    const shown = type.slice(0, 64);
+    // A key that is no entity type is shown quoted (it may hold any character).
+    const shown = CHAT_ENTITY_TYPE_PATTERN.test(type) ? type : quoted(type, 64);
     const subject = SUBJECT(shown);
     const at = `${config} mentions.sources.${shown}`;
     const invalid = (issue: string) => {
@@ -186,7 +201,7 @@ export function resolveMentionSources(
     }
     const unknown = Object.keys(raw).filter((key) => !SOURCE_KEYS.includes(key));
     if (unknown.length > 0) {
-      invalid(`has unknown keys (${unknown.slice(0, 5).map((key) => JSON.stringify(key.slice(0, 64))).join(', ')})`);
+      invalid(`has unknown keys (${unknown.slice(0, 5).map((key) => quoted(key, 64)).join(', ')})`);
       continue;
     }
     const fieldValue = (key: string): string | undefined | false => {
@@ -206,7 +221,7 @@ export function resolveMentionSources(
     }
     const tool = tools.find((candidate) => candidate.definitionId === raw.tool)
       ?? tools.find((candidate) => candidate.modelName === raw.tool);
-    const toolName = raw.tool.slice(0, 200);
+    const toolName = quoted(raw.tool, 200);
     if (!tool) {
       invalid(`names the tool ${toolName}, which is no generated tool`);
       continue;
@@ -291,8 +306,8 @@ export function resolveMentionSources(
       const found = fieldSchema(items, field);
       if (!found.known) return undefined;
       if (found.schema === undefined) return `has the ${key} ${field}, which the items of the response schema do not have`;
-      if (text && typesOf(found.schema).length > 0 && !typesOf(found.schema).includes('string')) {
-        return `has the ${key} ${field}, which is no text in the response schema`;
+      if (text && !isTextField(items, field)) {
+        return `has the ${key} ${field}, which is no text (type string) in the response schema`;
       }
       return undefined;
     };

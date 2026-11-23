@@ -211,7 +211,9 @@ describe('declared mention sources', () => {
     let result: ReturnType<typeof analyze> | undefined;
     expect(() => { result = analyze([composite, withPathParam, write, disabled, PEOPLE], { sources }); }).not.toThrow();
     const invalid = result!.findings.filter((finding) => finding.code === 'mention-source-invalid');
-    expect(invalid.map((finding) => finding.subjectRef.replace(`${CONFIG}#mentions.sources.`, ''))).toEqual(Object.keys(sources));
+    // A key that is no entity type is shown quoted.
+    expect(invalid.map((finding) => finding.subjectRef.replace(`${CONFIG}#mentions.sources.`, '')))
+      .toEqual(Object.keys(sources).map((key) => (key === 'Bad Type' ? '"Bad Type"' : key)));
     expect(invalid.every((finding) => finding.severity === 'warning' && finding.nextAction === nextActionFor('mention-source-invalid'))).toBe(true);
     const message = (type: string) => invalid.find((finding) => finding.subjectRef.endsWith(`.${type}`))!.message;
     expect(message('unknown')).toContain('no generated tool');
@@ -221,7 +223,7 @@ describe('declared mention sources', () => {
     expect(message('media-file')).toContain('composite id');
     expect(message('no-query')).toContain('no queryParam');
     expect(message('wrong-query')).toContain('no query parameter');
-    expect(message('Bad Type')).toContain('no entity type');
+    expect(message('"Bad Type"')).toContain('no entity type');
     expect(message('no-label-field')).toContain('do not have');
     expect(message('number-label')).toContain('no text');
     expect(message('bad-label')).toContain('label');
@@ -230,6 +232,41 @@ describe('declared mention sources', () => {
     expect(message('extra')).toContain('unknown keys');
     // Nothing declared survives; the derived candidates stay as without the block.
     expect(result!.data).toEqual(deriveChatInteractions(catalog([composite, withPathParam, write, disabled, PEOPLE])));
+  });
+});
+
+describe('declared sources from config text', () => {
+  it('never carries control characters or line breaks of tools.json keys and tool names into a finding', () => {
+    const { findings } = analyze([PEOPLE], {
+      sources: {
+        'bad\ntype\u0000\u2028': { tool: 'people.list', queryParam: 'q', idField: 'id', labelField: 'name' },
+        tagged: { tool: 'nope\r\nINJECTED\u0085', queryParam: 'q' },
+        keyed: { tool: 'people.list', queryParam: 'q', ['x\ny']: 1 },
+      },
+    });
+    expect(codes(findings)).toEqual(['mention-source-invalid', 'mention-source-invalid', 'mention-source-invalid']);
+    for (const finding of findings) {
+      expect(`${finding.subjectRef} ${finding.message}`).not.toMatch(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/);
+    }
+    expect(findings[0]!.subjectRef).toBe(`${CONFIG}#mentions.sources."bad\\ntype\\u0000\\u2028"`);
+    expect(findings[1]!.message).toContain('names the tool "nope\\r\\nINJECTED\\u0085", which is no generated tool');
+    expect(findings[2]!.message).toContain('"x\\ny"');
+  });
+
+  it('takes label and description fields only of exactly type string, as the derivation does', () => {
+    const nullable = { type: ['string', 'null'] };
+    const people: Spec = {
+      ...PEOPLE,
+      output: { type: 'array', items: object({ id: STRING, name: STRING, email: nullable, status: STRING, nick: nullable }) },
+    };
+    const derived = deriveChatInteractions(catalog([people]));
+    const { findings } = analyze([people], { policy: 'declared' });
+    const pasted = analyze([people], { policy: 'declared', sources: findings[0]!.expected as Record<string, unknown> });
+    expect(pasted.data.entities).toEqual(derived.entities);
+    expect(pasted.data.entities[0]!.search!.descriptionField).toBe('status');
+    const nick = analyze([people], { sources: { member: { tool: 'people.list', queryParam: 'q', idField: 'id', labelField: 'nick' } } });
+    expect(nick.findings.map((finding) => [finding.code, finding.message.includes('no text (type string)')]))
+      .toEqual([['mention-source-invalid', true]]);
   });
 });
 
@@ -349,6 +386,54 @@ describe('derived type follows the declared identity', () => {
     const elsewhere = analyze([{ ...FILES, outputEntities: [{ type: 'media-file', id: 'id', path: 'total' }] }]);
     expect(elsewhere.data.entities.map((entity) => entity.type)).toEqual(['file']);
     expect([...two.findings, ...composite.findings, ...elsewhere.findings]).toEqual([]);
+  });
+
+  it('keeps every derived entity when an identity type is not unique, with one ambiguity warning per type', () => {
+    const media: Spec = { ...FILES, name: 'media.list', path: '/api/media' };
+    const documents: Spec = { ...undeclared(FILES), name: 'documents.list', path: '/api/documents' };
+    const filesAsDocument: Spec = { ...FILES, outputEntities: [{ type: 'document', id: 'id', name: 'displayName', path: 'items[]' }] };
+    const pairs = (data: { entities: ReadonlyArray<{ type: string; search?: { tool: string } }> }) =>
+      data.entities.map((entity) => `${entity.type}:${entity.search!.tool}`).sort();
+    for (const shape of [[FILES, media], [documents, filesAsDocument]]) {
+      const before = deriveChatInteractions(catalog(shape.map(undeclared)));
+      const { data, findings } = analyze(shape);
+      // The same search tools under the same route types as without identity declarations.
+      expect(pairs(data)).toEqual(pairs(before));
+      expect(JSON.stringify(data)).toBe(JSON.stringify(before));
+      expect(codes(findings)).toEqual(['mention-type-ambiguous']);
+      expect(findings[0]!.nextAction).toBe(nextActionFor('mention-type-ambiguous'));
+    }
+    expect(pairs(analyze([FILES, media]).data)).toEqual(['file:files.list', 'media:media.list']);
+    const ambiguous = analyze([FILES, media]).findings[0]!;
+    expect(ambiguous.subjectRef).toBe(`${CONFIG}#mentions.sources.media-file`);
+    expect(ambiguous.message).toContain('files.list (/api/files, kept as file)');
+    expect(ambiguous.message).toContain('media.list (/api/media, kept as media)');
+    expect(ambiguous.message).toContain('declare it under mentions.sources.media-file');
+    const shadowing = analyze([documents, filesAsDocument]);
+    expect(pairs(shadowing.data)).toEqual(['document:documents.list', 'file:files.list']);
+    expect(shadowing.findings[0]!.message).toContain('documents.list (/api/documents)');
+    // fileId arguments keep their entity.
+    const attach = analyze([documents, filesAsDocument, FILE_TAG, TAGS]).data.entities
+      .find((entry) => entry.type === 'tag')!.actions!.find((action) => action.id === 'tag.tags.attach')!;
+    expect(attach.args).toEqual([{ name: 'fileId', label: 'File id', required: true, entity: 'file' }]);
+    // Byte-stable whatever the tool order.
+    expect(JSON.stringify(analyze([media, FILES]))).toBe(JSON.stringify(analyze([FILES, media])));
+  });
+
+  it('keeps the route type of a derived candidate whose identity type another tool declares in mentions.sources', () => {
+    const media: Spec = { ...undeclared(FILES), name: 'media.list', path: '/api/media' };
+    const { data, findings } = analyze([FILES, media], {
+      sources: { 'media-file': { tool: 'media.list', queryParam: 'q', idField: 'id', labelField: 'displayName', itemsPath: ['items'] } },
+    });
+    expect(data.entities.map((entity) => `${entity.type}:${entity.search!.tool}`)).toEqual(['media-file:media.list', 'file:files.list']);
+    expect(codes(findings)).toEqual(['mention-source-undeclared-type', 'mention-type-ambiguous']);
+    expect(findings[1]!.message).toContain('mentions.sources.media-file already names media.list');
+  });
+
+  it('names the changed action ids and the lapsed hidden patches in the type-change warning', () => {
+    const { findings } = analyze(specs);
+    expect(findings[0]!.message).toContain('action ids change too (file.… → media-file.…)');
+    expect(findings[0]!.message).toContain('hidden: true patches included, no longer apply');
   });
 
   it('follows a declaration at data[] of a bare list answer and keeps the derived label field when the declared name is no text', () => {

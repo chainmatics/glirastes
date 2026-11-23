@@ -1061,15 +1061,20 @@ export function AiChatProvider({
 
   const onCompletionProviderErrorRef = useRef(onCompletionProviderError);
   onCompletionProviderErrorRef.current = onCompletionProviderError;
-  // The `@` context of the page: the latest mounted `useMentionContext` with a value, else the prop,
-  // else `chatInteractions.mentionContext`. Read at search time, so a change rebuilds nothing.
+  // The `@` context of the page: the `useMentionContext` with a value rendered last (highest render
+  // order, independent of effect order), else the prop, else `chatInteractions.mentionContext`.
+  // Read at search time, so a change rebuilds nothing.
   const mentionContextPropRef = useRef(mentionContextProp);
   mentionContextPropRef.current = mentionContextProp;
-  const mentionContextStackRef = useRef<Array<() => ChatMentionContext | null | undefined>>([]);
-  const registerMentionContext = useCallback((read: () => ChatMentionContext | null | undefined) => {
-    mentionContextStackRef.current = [...mentionContextStackRef.current, read];
+  type MentionContextEntry = { read: () => ChatMentionContext | null | undefined; order: number };
+  const mentionContextStackRef = useRef<MentionContextEntry[]>([]);
+  const registerMentionContext = useCallback((read: () => ChatMentionContext | null | undefined, order: number) => {
+    const entry: MentionContextEntry = { read, order };
+    // Kept sorted by render order, so the last entry with a value wins.
+    mentionContextStackRef.current = [...mentionContextStackRef.current, entry]
+      .sort((left, right) => left.order - right.order);
     return () => {
-      mentionContextStackRef.current = mentionContextStackRef.current.filter((entry) => entry !== read);
+      mentionContextStackRef.current = mentionContextStackRef.current.filter((candidate) => candidate !== entry);
     };
   }, []);
   const chatInteractionsRef = useRef(chatInteractions);
@@ -1077,7 +1082,7 @@ export function AiChatProvider({
   const resolveMentionContext = useCallback((): ChatMentionContext | undefined => {
     const stack = mentionContextStackRef.current;
     for (let index = stack.length - 1; index >= 0; index -= 1) {
-      const value = stack[index]!();
+      const value = stack[index]!.read();
       if (value) return value;
     }
     if (mentionContextPropRef.current) return mentionContextPropRef.current;

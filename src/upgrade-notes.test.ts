@@ -320,6 +320,22 @@ describe('shipped note detection', () => {
     })).status).toBe('adopted');
   });
 
+  it('the @ type change is a must for apps with identity declarations; the type filter note reaches every chat-interactions app', async () => {
+    const notes = await loadUpgradeNotes(notesDir, SDK_VERSION);
+    const typeChange = notes.find((n) => n.id === 'mention-type-follows-identity')!;
+    expect(typeChange.kind).toBe('breaking');
+    expect(typeChange.howTo).toContain('hidden: true patch under the old type or action id no longer applies');
+    expect(evaluateNote(typeChange, scanOf({
+      'app/api/files/contract.ts': "export const contract = { outputEntities: [{ type: 'media-file', id: 'id' }] };\n",
+    })).status).toBe('affected');
+    const filter = notes.find((n) => n.id === 'mention-sources-and-type-filter')!;
+    expect(filter.kind).toBe('recommended');
+    expect(filter.summary).toContain('also without configuration');
+    expect(evaluateNote(filter, scanOf({
+      'app/chat.tsx': "import { VercelAiChat } from 'glirastes/react/vercel';\nexport const c = <VercelAiChat chatInteractions={x} />;\n",
+    })).status).toBe('affected');
+  });
+
   it('markdown-loading-skeleton flags every app that renders the React chat or the embed', async () => {
     const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === 'markdown-loading-skeleton')!;
     for (const [file, source] of [

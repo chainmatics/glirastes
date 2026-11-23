@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createRef, useMemo, useState, type ReactNode } from 'react';
+import { createRef, StrictMode, useMemo, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineChatCommand, defineChatEntity } from '../../interactions/definitions.js';
 import type { ChatInteractionsConfig, ChatMentionContext } from '../../interactions/registry.js';
@@ -174,6 +174,36 @@ describe('mentionContext preset', () => {
     expect(editor.textContent).toBe('@');
   });
 
+  it('puts no preset into an open IME composition and applies it on compositionend if the trigger is still bare', async () => {
+    render(<Chat chat={transport()} mentionContext={{ presetType: 'task' }} />);
+    const editor = screen.getByRole('textbox');
+    fireEvent.compositionStart(editor);
+    edit(editor, '@');
+    expect(editor.textContent).toBe('@');
+    fireEvent.compositionEnd(editor);
+    expect(editor.textContent).toBe('@Aufgabe:');
+    expect(window.getSelection()!.getRangeAt(0).startOffset).toBe('@Aufgabe:'.length);
+
+    // A composition that ends with text behind the trigger gets no preset.
+    edit(editor, '');
+    fireEvent.compositionStart(editor);
+    edit(editor, '@');
+    edit(editor, '@た');
+    fireEvent.compositionEnd(editor);
+    expect(editor.textContent).toBe('@た');
+
+    // An input event that reports isComposing gets none either.
+    edit(editor, '');
+    editor.textContent = '@';
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, 1);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.input(editor, { isComposing: true });
+    expect(editor.textContent).toBe('@');
+  });
+
   it('lets Backspace work per character once the user typed after the preset', async () => {
     render(<Chat chat={transport()} mentionContext={{ presetType: 'task' }} />);
     const editor = screen.getByRole('textbox');
@@ -235,6 +265,44 @@ describe('mentionContext preset', () => {
     fireEvent.click(screen.getByText('pop'));
     fireEvent.click(screen.getByText('pop'));
     expect(presetOf()).toBe('@Aufgabe:');
+  });
+
+  it('the call rendered last wins: nested over its page, a later sibling, a later mount (StrictMode too)', async () => {
+    function Context({ type, children }: { type: string; children?: ReactNode }) {
+      useMentionContext({ presetType: type });
+      return <>{children}</>;
+    }
+    function App({ panel, strict }: { panel: 'nested' | 'sibling' | 'late'; strict?: boolean }) {
+      const [late, setLate] = useState(false);
+      const tree = (
+        <Chat chat={transport()} mentionContext={{ presetType: 'nope' }}>
+          {panel === 'nested' && <Context type="task"><Context type="person" /></Context>}
+          {panel === 'sibling' && <><Context type="task" /><Context type="person" /></>}
+          {panel === 'late' && <Context type="person">{late && <Context type="task" />}</Context>}
+          <button type="button" onClick={() => setLate(true)}>late</button>
+        </Chat>
+      );
+      return strict ? <StrictMode>{tree}</StrictMode> : tree;
+    }
+    const presetOf = () => {
+      const editor = screen.getByRole('textbox');
+      edit(editor, '');
+      edit(editor, '@');
+      return editor.textContent;
+    };
+    for (const strict of [false, true]) {
+      render(<App panel="nested" strict={strict} />);
+      expect(presetOf()).toBe('@Person:');
+      cleanup();
+      render(<App panel="sibling" strict={strict} />);
+      expect(presetOf()).toBe('@Person:');
+      cleanup();
+      render(<App panel="late" strict={strict} />);
+      expect(presetOf()).toBe('@Person:');
+      fireEvent.click(screen.getByText('late'));
+      expect(presetOf()).toBe('@Aufgabe:');
+      cleanup();
+    }
   });
 
   it('presets openCompletion({ trigger: "@" }) without a query; Backspace leaves an armed bare @', async () => {

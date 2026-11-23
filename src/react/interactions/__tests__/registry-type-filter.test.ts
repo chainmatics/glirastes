@@ -109,6 +109,52 @@ describe('@<type>:<text> filter', () => {
     expect(registry.entityFilterConflicts).toEqual([['product', 'ticket']]);
   });
 
+  it('logs a conflict set once per page, also when the registry is created again', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const entities = () => [entity('invoice', 'Bill').definition, entity('receipt', 'Bill').definition];
+    setup({ entities: entities() });
+    setup({ entities: entities() });
+    expect(warn).toHaveBeenCalledTimes(1);
+    // Another set of conflicting types is logged once as well.
+    setup({ entities: [...entities(), entity('voucher', 'Coupon').definition, entity('coupon', 'Coupon').definition] });
+    setup({ entities: [...entities(), entity('voucher', 'Coupon').definition, entity('coupon', 'Coupon').definition] });
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('folds letters without a decomposition (Polish ł, Nordic ø æ, đ, ı) in filter names, upper-case too', () => {
+    const owner = entity('owner', { pl: 'Właściciel', en: 'Owner' }, { aliases: { pl: ['Łódź'] } });
+    const place = entity('place', { pl: 'Miejsce', en: 'Place' }, { aliases: ['Ærø', 'Đakovo', 'Kırşehir'] });
+    const { registry } = setup({ entities: [owner.definition, place.definition], locale: 'pl' });
+    expect(registry.entityFilter('wlasciciel:x')).toEqual({ type: 'owner', text: 'x' });
+    expect(registry.entityFilter('WŁAŚCICIEL:x')).toEqual({ type: 'owner', text: 'x' });
+    expect(registry.entityFilter('lodz:x')).toEqual({ type: 'owner', text: 'x' });
+    expect(registry.entityFilter('aero:x')).toEqual({ type: 'place', text: 'x' });
+    expect(registry.entityFilter('dakovo:x')).toEqual({ type: 'place', text: 'x' });
+    expect(registry.entityFilter('kirsehir:x')).toEqual({ type: 'place', text: 'x' });
+  });
+
+  it('ranks / commands with the same folding (Polish without diacritics finds the command)', async () => {
+    const registry = createChatInteractionRegistry({
+      locale: 'pl',
+      commands: [defineChatCommand({ id: 'owner.remove', label: { pl: 'Usuń właściciela', en: 'Remove owner' }, run: { kind: 'prompt', prompt: 'x' } })],
+    });
+    const search = createCompletionSearch(registry.providers);
+    expect((await search('wlasc', '/')).map((hit) => hit.id)).toEqual(['owner.remove']);
+    expect((await search('usun', '/')).map((hit) => hit.id)).toEqual(['owner.remove']);
+  });
+
+  it('never makes a label or alias of only combining marks a filter name or the preset', () => {
+    const marks = '\u0301\u0308';
+    const task = entity('task', marks, { aliases: [marks] });
+    const { registry } = setup({
+      entities: [task.definition, entity('person', 'Person').definition],
+      mentionContext: { presetType: 'task' },
+    });
+    expect(registry.entityFilterNames('task')).toEqual(['task']);
+    expect(registry.completionPreset('@')).toBe('task:');
+    expect(registry.entityFilter(`${marks}:x`)).toBeUndefined();
+  });
+
   it('keeps the canonical type with its own type when another type uses it as a label', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const user = entity('user', 'Person');

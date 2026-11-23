@@ -531,7 +531,11 @@ function hasFields(patch: object, required: ReadonlyArray<string>): boolean {
  * patch under an id or type that is not derived and is no complete entry is
  * a stale patch, typically for a tool a refresh no longer derives: it is
  * ignored, with one console warning naming it, so the chat route still loads
- * and the entry keeps nothing. The result is validated again.
+ * and the entry keeps nothing. A `hidden: true` patch under an id or type
+ * that is not derived hides nothing and is named in a second warning: a
+ * renamed entry (an entity type that follows its declared identity renames
+ * its action ids too) would otherwise show again unnoticed. The result is
+ * validated again.
  */
 export function mergeChatInteractions(
   base: ChatInteractionsData,
@@ -539,14 +543,16 @@ export function mergeChatInteractions(
 ): ChatInteractionsData {
   if (!overrides) return parseChatInteractions(base);
   const ignored: string[] = [];
+  const hiddenNothing: string[] = [];
   const commandPatches = overrides.commands ?? {};
   const commands: unknown[] = base.commands
     .filter((entry) => commandPatches[entry.id]?.hidden !== true)
     .map((entry) => ({ ...entry, ...withoutHidden(commandPatches[entry.id] ?? {}) }));
   const known = new Set(base.commands.map((entry) => entry.id));
   for (const [id, patch] of Object.entries(commandPatches)) {
-    if (known.has(id) || patch.hidden === true) continue;
-    if (hasFields(patch, ['label', 'run'])) commands.push({ id, ...withoutHidden(patch) });
+    if (known.has(id)) continue;
+    if (patch.hidden === true) hiddenNothing.push(`commands.${id}`);
+    else if (hasFields(patch, ['label', 'run'])) commands.push({ id, ...withoutHidden(patch) });
     else ignored.push(`commands.${id}`);
   }
   const entityPatches = overrides.entities ?? {};
@@ -555,14 +561,16 @@ export function mergeChatInteractions(
     patches: Readonly<Record<string, ChatEntityActionOverride>>,
     path: string,
     stale: string[],
+    unmatched: string[],
   ) => {
     const merged: unknown[] = actions
       .filter((entry) => patches[entry.id]?.hidden !== true)
       .map((entry) => ({ ...entry, ...withoutHidden(patches[entry.id] ?? {}) }));
     const ids = new Set(actions.map((entry) => entry.id));
     for (const [id, patch] of Object.entries(patches)) {
-      if (ids.has(id) || patch.hidden === true) continue;
-      if (hasFields(patch, ['label', 'entityArg', 'run'])) merged.push({ id, ...withoutHidden(patch) });
+      if (ids.has(id)) continue;
+      if (patch.hidden === true) unmatched.push(`${path}.actions.${id}`);
+      else if (hasFields(patch, ['label', 'entityArg', 'run'])) merged.push({ id, ...withoutHidden(patch) });
       else stale.push(`${path}.actions.${id}`);
     }
     return (merged as ChatEntityActionData[])
@@ -578,15 +586,19 @@ export function mergeChatInteractions(
       if (!patch) return entry;
       const { actions: actionPatches, ...fields } = withoutHidden(patch);
       const { actions: current, ...rest } = entry;
-      const actions = mergeActions(current ?? [], actionPatches ?? {}, `entities.${entry.type}`, ignored);
+      const actions = mergeActions(current ?? [], actionPatches ?? {}, `entities.${entry.type}`, ignored, hiddenNothing);
       return { ...rest, ...fields, ...(actions.length > 0 ? { actions } : {}) };
     });
   const types = new Set(base.entities.map((entry) => entry.type));
   for (const [type, patch] of Object.entries(entityPatches)) {
-    if (types.has(type) || patch.hidden === true) continue;
+    if (types.has(type)) continue;
+    if (patch.hidden === true) {
+      hiddenNothing.push(`entities.${type}`);
+      continue;
+    }
     const { actions: actionPatches, ...fields } = withoutHidden(patch);
     const stale: string[] = [];
-    const actions = mergeActions([], actionPatches ?? {}, `entities.${type}`, stale);
+    const actions = mergeActions([], actionPatches ?? {}, `entities.${type}`, stale, hiddenNothing);
     if (hasFields(fields, ['label']) && (fields.search !== undefined || actions.length > 0)) {
       entities.push({ type, ...fields, ...(actions.length > 0 ? { actions } : {}) });
       ignored.push(...stale);
@@ -598,6 +610,13 @@ export function mergeChatInteractions(
     console.warn(
       '[glirastes] .glirastes/chat-interactions.json: ignored patches for ids that are not derived '
       + `(any more) and are no complete entries: ${ignored.join(', ')}. Remove them.`,
+    );
+  }
+  if (hiddenNothing.length > 0) {
+    console.warn(
+      '[glirastes] .glirastes/chat-interactions.json: hidden patches for ids or types that are not derived '
+      + `(any more) hide nothing: ${hiddenNothing.join(', ')}. If the entry was renamed (an entity type that now follows `
+      + 'its declared identity also renames its action ids), it is shown again: move the patch to the new name, or remove it.',
     );
   }
   return parseChatInteractions({ schemaVersion: 1, entities, commands });

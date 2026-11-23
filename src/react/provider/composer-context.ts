@@ -34,8 +34,11 @@ export interface ComposerContextValue {
   isTurnRunning?: boolean;
   /** The resolved `messageFooter` (every part a boolean), null when it is off. */
   messageFooter?: Required<MessageFooterConfig> | null;
-  /** `useMentionContext`: adds a reader of a page's `@` context; the returned function removes it. */
-  registerMentionContext?: (read: () => ChatMentionContext | null | undefined) => () => void;
+  /**
+   * `useMentionContext`: adds a reader of a page's `@` context with its render
+   * order (the highest with a value wins); the returned function removes it.
+   */
+  registerMentionContext?: (read: () => ChatMentionContext | null | undefined, order: number) => () => void;
   /** The `@<type>:` preset of a bare `@` (`RichMentionInput`'s `completionPreset`); only with `chatInteractions`. */
   completionPreset?: (trigger: string) => string | undefined;
 }

@@ -3,6 +3,7 @@ import type {
   CompletionItem,
   UiToolCommandSource,
 } from '../types.js';
+import { foldText } from '../utils/fold-text.js';
 import { describeToolReference } from '../utils/mention-markup.js';
 
 interface UiToolCommand {
@@ -14,9 +15,7 @@ interface UiToolCommand {
   readonly carriesTool: boolean;
 }
 
-function fold(value: string): string {
-  return value.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().trim();
-}
+const fold = foldText;
 
 function rank(command: UiToolCommand, needle: string): number | undefined {
   if (!needle) return 0;

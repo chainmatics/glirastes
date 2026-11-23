@@ -882,7 +882,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       return text;
     }, [presetFor]);
 
-    const handleInput = useCallback(() => {
+    // An IME composition is open (compositionstart … compositionend): no preset is put into it.
+    const composingRef = useRef(false);
+
+    const handleInput = useCallback((event?: { nativeEvent?: Event }) => {
       if (!hasMentionSupport) {
         const nextValue = normalizeInputValue(editableRef.current?.innerText ?? '');
         setValue(nextValue);
@@ -895,7 +898,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       const triggerState = detectTrigger();
       if (triggerState) {
         // Not under `openCompletion({ source })`: the preset searches the registry's types, not that source.
-        const query = triggerState.query === '' && sourceRef.current === undefined
+        // While an IME composes, the preset waits for compositionend.
+        const composing = composingRef.current || (event?.nativeEvent as { isComposing?: boolean } | undefined)?.isComposing === true;
+        const query = triggerState.query === '' && sourceRef.current === undefined && !composing
           ? applyPreset(triggerState) ?? ''
           : triggerState.query;
         clearTimeout(searchTimeoutRef.current);
@@ -910,6 +915,25 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
       onChange?.(getFullValue());
     }, [hasMentionSupport, setValue, detectTrigger, applyPreset, performSearch, closeDropdown, onChange, getFullValue]);
+
+    const handleCompositionStart = useCallback(() => {
+      composingRef.current = true;
+    }, []);
+
+    /** The composition is committed: a trigger it left bare gets its preset now. */
+    const handleCompositionEnd = useCallback(() => {
+      composingRef.current = false;
+      if (!hasMentionSupport || sourceRef.current !== undefined) return;
+      const triggerState = detectTrigger();
+      if (!triggerState || triggerState.query !== '') return;
+      const query = applyPreset(triggerState);
+      if (query === null) return;
+      clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = setTimeout(() => {
+        void performSearch(query, triggerState.trigger, sourceRef.current);
+      }, SEARCH_DEBOUNCE_MS);
+      onChange?.(getFullValue());
+    }, [hasMentionSupport, detectTrigger, applyPreset, performSearch, onChange, getFullValue]);
 
     /** Backspace right behind an untouched preset: removes all of it, the bare trigger searches again. */
     const removePreset = useCallback((): boolean => {
@@ -1694,6 +1718,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           aria-controls={listOpen ? listboxId : undefined}
           aria-activedescendant={listOpen ? optionId(selectedIndex, selectedAction) : undefined}
           onInput={handleInput}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onFocus={() => setIsFocused(true)}

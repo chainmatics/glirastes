@@ -292,12 +292,21 @@ function declaredAtList(
   return { type: declaration.type, id: ids[0]!, ...(declaration.name ? { name: declaration.name } : {}) };
 }
 
+/** A derived search entity; `fallback` is the route-typed entity (as before identity) when the declared type differs from the route's. */
+interface DerivedCandidate {
+  primary: SearchCandidate;
+  fallback?: SearchCandidate;
+  /** The declared identity type differs from the route type, so the candidate adopts a new type. */
+  adopts: boolean;
+}
+
 /**
  * A read endpoint with a search parameter whose output is a list of objects
  * with an id and a label. Its type is the one the tool's identity declares
- * at that list, else the singular of the route.
+ * at that list, else the singular of the route; for a declared type other
+ * than the route's, the route-typed entity is kept as the fallback.
  */
-function searchEntity(tool: BoundTool): SearchCandidate | undefined {
+function searchEntity(tool: BoundTool): DerivedCandidate | undefined {
   if ((tool.method !== 'GET' && tool.method !== 'HEAD') || !tool.path || tool.path.includes(':')) return undefined;
   const query = new Set(tool.contract.params.query);
   const route = listNameOf(tool.path);
@@ -326,34 +335,40 @@ function searchEntity(tool: BoundTool): SearchCandidate | undefined {
   const fields = properties(items);
   const isText = (name: string) => isRecord(fields[name]) && (fields[name] as Record<string, unknown>).type === 'string';
   const declared = declaredAtList(tool, itemsPath);
-  const type = declared?.type ?? routeType;
   // Which lists become an entity is decided as before, by the field-name guess: a declaration
   // names the type and the fields of such a list, it never adds one (that is `mentions.sources`).
   const guessedId = searchIdFieldCandidates(routeType).find((name) => isRecord(fields[name]));
   const guessedLabel = LABEL_FIELDS.find((name) => name !== guessedId && isText(name));
   if (!guessedId || !guessedLabel) return undefined;
-  const idField = declared?.id ?? guessedId;
-  const labelField = (declared?.name !== undefined && isText(declared.name) ? declared.name : undefined)
-    ?? LABEL_FIELDS.find((name) => name !== idField && isText(name));
-  if (!labelField) return undefined;
-  const descriptionField = SEARCH_DESCRIPTION_FIELDS.find((name) => name !== labelField && isText(name));
   const limitParam = SEARCH_LIMIT_PARAMS.find((name) => query.has(name));
-  const entity: ChatEntityData = {
-    type,
-    label: entityLabel(tool, type),
-    search: {
-      tool: tool.definitionId,
-      path: tool.path,
-      queryParam,
-      itemsPath,
-      idField,
-      labelField,
-      ...(descriptionField ? { descriptionField } : {}),
-      ...(limitParam ? { limitParam } : {}),
-    },
-  };
   const collection = isSearchPath ? collectionOf(tool.path) : tool.path;
-  return carries([entity], []) ? { type, routeType, entity, collection } : undefined;
+  const build = (type: string, idField: string, labelField: string): SearchCandidate | undefined => {
+    const descriptionField = SEARCH_DESCRIPTION_FIELDS.find((name) => name !== labelField && isText(name));
+    const entity: ChatEntityData = {
+      type,
+      label: entityLabel(tool, type),
+      search: {
+        tool: tool.definitionId,
+        path: tool.path!,
+        queryParam,
+        itemsPath: itemsPath!,
+        idField,
+        labelField,
+        ...(descriptionField ? { descriptionField } : {}),
+        ...(limitParam ? { limitParam } : {}),
+      },
+    };
+    return carries([entity], []) ? { type, routeType, entity, collection } : undefined;
+  };
+  const byRoute = build(routeType, guessedId, guessedLabel);
+  if (!declared) return byRoute ? { primary: byRoute, adopts: false } : undefined;
+  const idField = declared.id;
+  const labelField = (declared.name !== undefined && isText(declared.name) ? declared.name : undefined)
+    ?? LABEL_FIELDS.find((name) => name !== idField && isText(name));
+  const byDeclaration = labelField ? build(declared.type, idField, labelField) : undefined;
+  if (!byDeclaration) return undefined;
+  if (declared.type === routeType) return { primary: byDeclaration, adopts: false };
+  return { primary: byDeclaration, ...(byRoute ? { fallback: byRoute } : {}), adopts: true };
 }
 
 /** A ready-to-paste `mentions.sources` entry for a derived candidate. */
@@ -468,19 +483,62 @@ export function analyzeChatInteractions(input: DeriveChatInteractionsInput): {
     }];
   });
 
-  // Derived candidates: one per type (the first by path), none of a declared type or tool, none ignored.
+  // Derived candidates: a declared identity type is adopted only when it is unique among the
+  // final types of all derived candidates and no other tool's declared source; otherwise every
+  // candidate involved keeps its route type, as before identity. Then one per type (the first by path).
   const declaredTypes = new Set(declared.map((candidate) => candidate.type));
   const declaredTools = new Set(declared.map((candidate) => candidate.entity.search!.tool));
   const ignored = new Set(mentions.ignore ?? []);
-  const derived = new Map<string, SearchCandidate>();
-  for (const candidate of tools
+  const candidates = tools
     .map(searchEntity)
-    .filter((entry): entry is SearchCandidate => entry !== undefined)
-    .sort((left, right) => compareCodeUnits(left.entity.search!.path, right.entity.search!.path))) {
-    if (declaredTypes.has(candidate.type) || declaredTools.has(candidate.entity.search!.tool) || ignored.has(candidate.type)) continue;
-    if (!derived.has(candidate.type)) derived.set(candidate.type, candidate);
+    .filter((entry): entry is DerivedCandidate => entry !== undefined)
+    .filter((entry) => !declaredTools.has(entry.primary.entity.search!.tool))
+    .sort((left, right) => compareCodeUnits(left.primary.entity.search!.path, right.primary.entity.search!.path));
+  const fallen = new Set<DerivedCandidate>();
+  const current = (candidate: DerivedCandidate): SearchCandidate | undefined =>
+    fallen.has(candidate) ? candidate.fallback : candidate.primary;
+  for (let changed = true; changed;) {
+    changed = false;
+    const counts = new Map<string, number>();
+    for (const candidate of candidates) {
+      const type = current(candidate)?.type;
+      if (type) counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+    for (const candidate of candidates) {
+      if (!candidate.adopts || fallen.has(candidate)) continue;
+      const type = candidate.primary.type;
+      if ((counts.get(type) ?? 0) > 1 || declaredTypes.has(type)) {
+        fallen.add(candidate);
+        changed = true;
+      }
+    }
+  }
+  const derived = new Map<string, SearchCandidate>();
+  for (const candidate of candidates) {
+    const chosen = current(candidate);
+    if (!chosen || declaredTypes.has(chosen.type) || ignored.has(chosen.type)) continue;
+    if (!derived.has(chosen.type)) derived.set(chosen.type, chosen);
   }
   const derivedByType = [...derived.values()].sort((left, right) => compareCodeUnits(left.type, right.type));
+  if (mentions.policy !== 'declared') {
+    const ambiguous = [...new Set([...fallen].map((candidate) => candidate.primary.type))].sort(compareCodeUnits);
+    for (const type of ambiguous) {
+      const involved = candidates.filter((candidate) => (fallen.has(candidate) && candidate.primary.type === type)
+        || current(candidate)?.type === type);
+      const named = involved.map((candidate) => {
+        const kept = current(candidate);
+        const search = candidate.primary.entity.search!;
+        return `${search.tool} (${search.path}${fallen.has(candidate) ? `, kept as ${kept ? kept.type : 'no entity'}` : ''})`;
+      });
+      const source = declared.find((candidate) => candidate.type === type);
+      findings.push(toolFinding('mention-type-ambiguous', 'warning', `${config}#mentions.sources.${type}`,
+        `The identity type ${type} is not unique among the @ entities: ${named.join(', ')}`
+        + `${source ? `; mentions.sources.${type} already names ${source.entity.search!.tool}` : ''}`
+        + (source
+          ? `. So the others keep their route types as before; to leave one of them out of the @ menu, add its route type to mentions.ignore.`
+          : `. So none of them adopts ${type} and each keeps its route type as before; to offer the wanted one as ${type}, declare it under mentions.sources.${type}.`)));
+    }
+  }
   if (mentions.policy === 'declared') {
     for (const candidate of derivedByType) {
       const entry = sourceEntryOf(candidate);
@@ -498,7 +556,9 @@ export function analyzeChatInteractions(input: DeriveChatInteractionsInput): {
       if (Object.hasOwn(mentions.sources ?? {}, candidate.type)) continue;
       findings.push(toolFinding('mention-type-follows-identity', 'warning', `${config}#mentions.acknowledgedTypes.${candidate.type}`,
         `The @ entity of ${candidate.entity.search!.tool} is now of the declared identity type ${candidate.type} instead of ${candidate.routeType}: `
-        + `overrides under entities.${candidate.routeType} in .glirastes/chat-interactions.json and stored {{mention:${candidate.routeType}:…}} markers refer to the old name.`));
+        + `its action ids change too (${candidate.routeType}.… → ${candidate.type}.…), so overrides under entities.${candidate.routeType} `
+        + `and under the old action ids in .glirastes/chat-interactions.json, hidden: true patches included, no longer apply, `
+        + `and stored {{mention:${candidate.routeType}:…}} markers refer to the old name.`));
     }
   }
 

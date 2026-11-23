@@ -15,7 +15,7 @@ the Glirastes Platform.
 | A page without parameters (`ui.navigate`) | `/` command `open.<path>`, the path segments joined by dots (`/overview` is `open.overview`, `/settings/profile` is `open.settings.profile`, `/` is `open.home`; "Open Overview") |
 | A URL filter (`ui.filter.<view>`) | `/` command `filter.<view>`; its string keys are arguments, enums become choices |
 | A client action (`ui.<actionId>`) | `/` command `<actionId>`; its string payload fields are arguments |
-| A read endpoint with `search`, `q`, `query` or `term` whose output lists objects with `id` and `title`/`name`/`displayName`/`label`/`subject`/`email` (`GET /api/tasks?search=`) | `@` entity `task`, searched with the user's session |
+| A read endpoint with `search`, `q`, `query` or `term` whose output lists objects with `id` and `title`/`name`/`displayName`/`label`/`subject`/`email` (`GET /api/tasks?search=`) | `@` entity `task` (the type its [identity](entity-identity.md) declares at that list when no other derived search ends up with it, else the singular of the route), searched with the user's session. [Declare the sources](#which-entities-appear-in-) to decide this yourself |
 | A search endpoint below `/search` with a `name` parameter (`GET /api/users/search?name=`) | `@` entity `user` |
 | An endpoint with one path parameter below that collection (`PATCH /api/tasks/:id`, `POST /api/tasks/:id/complete`) | Context action of the entity ("Edit", "Complete") |
 | A page with one parameter of that entity (`/tasks/:taskId`) | Context action "Open" |
@@ -31,11 +31,14 @@ and destructive actions (marked `destructive: true`) come last in an entity's
 menu, also after actions the overrides add.
 
 Labels come from each tool's reviewed `title` in
-`.glirastes/tool-semantics.json`, entity labels from its presentation noun
-(inside an entity's menu a leading noun is dropped: "Endgültig löschen"
-instead of "Aufgabe endgültig löschen"). Without them the label is verb plus
-object built from identifiers, in English and German ("Open task create
-dialog", "Task create dialog öffnen"). Synonyms, icons and what a title cannot
+`.glirastes/tool-semantics.json`, entity labels from the reviewed singular of
+its search tool, in every language of `languages` in `.glirastes/tools.json`
+(`pl`, `pt-BR`, … like the tool labels; inside an entity's menu a leading noun
+is dropped in each language: "Endgültig löschen" instead of "Aufgabe endgültig
+löschen"). Without them the label is verb plus object built from identifiers,
+in English and German ("Open task create dialog", "Task create dialog
+öffnen"); every other language needs a reviewed text or an override, the same
+rule as for commands. Synonyms, icons and what a title cannot
 say come from `.glirastes/chat-interactions.json` (written by people, the
 `describing-glirastes-tools` or `curating-glirastes-chat-interactions` skill,
 never by the generator). The titles reach the derivation through
@@ -62,11 +65,93 @@ action `label`, `entityArg` and `run`, an entity `label` and a `search` or an
 action). A patch under an id or type that is not derived and is no complete
 entry is stale, typically after a refresh stopped deriving a tool: it is
 ignored and the handler logs one console warning naming it, so the route still
-loads. Remove stale patches, and load the chat route after every refresh. An
+loads. A `hidden: true` patch under a command id, entity type or action id that
+is not derived hides nothing; the handler names it in a second warning, since a
+renamed entry (see the [migration](#migration-the-type-follows-the-declared-identity))
+shows again. Both warnings come once, when the handler is created. Remove stale
+patches, and load the chat route after every refresh. An
 invalid file (unknown field, wrong type) throws when the handler is created,
 like an invalid tool policy. `hidden` only shapes the lists; it is no
 permission. What a user may run is decided by the tool policy and the app's
 endpoints, for direct commands exactly as for the model.
+
+## Which entities appear in `@`
+
+By default every read endpoint that looks like a search becomes an `@` entity
+(`policy: "derived"`). `mentions` in `.glirastes/tools.json` lets the app
+decide:
+
+```json
+"mentions": {
+  "policy": "declared",
+  "sources": {
+    "project": { "tool": "projects.list", "queryParam": "q" },
+    "media-file": {
+      "tool": "files.list", "queryParam": "search",
+      "idField": "id", "labelField": "displayName", "itemsPath": ["items"],
+      "descriptionField": "status", "limitParam": "limit",
+      "label": { "de": "Datei", "en": "File", "pl": "Plik" },
+      "aliases": { "de": ["datei"], "pl": ["plik"] }
+    }
+  },
+  "ignore": ["tag"],
+  "acknowledgedTypes": []
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `policy` | `derived` (default): declared sources plus every derived one. `declared`: only `sources` |
+| `sources.<type>` | The key is the entity type, the one the tool's identity declares (`outputEntities`, `x-glirastes-entity`, `identity` in tools.json) |
+| `tool` | Definition id or model name of an enabled read endpoint (GET/HEAD) without path parameters |
+| `queryParam` | The query parameter that takes the typed text |
+| `idField`, `labelField`, `itemsPath` | Default from the tool's identity declaration of that type (`id`, `name`, `path`); given values win. Without a declaration `idField` and `labelField` are required, and `itemsPath` unless the answer has one list. A composite id cannot be mentioned |
+| `descriptionField`, `limitParam` | Optional; default as for a derived entity (`description`/`email`/`status`/…, `limit`/`pageSize`) |
+| `label`, `aliases` | Optional texts per language; `aliases` are further names for the [type filter](#type-filter) |
+| `ignore` | Derived types that are neither offered nor reported |
+| `acknowledgedTypes` | Silences `mention-type-follows-identity` for these types |
+
+A declared source replaces a derived entity of the same type or the same
+tool. The groups of the `@` list follow the order of `sources`; derived ones
+come after them, by type. Context actions ("Edit", "Open") are derived for a
+declared entity as for a derived one. The file is local and never sent to the
+Platform; `hidden` and the overrides in `.glirastes/chat-interactions.json`
+still apply on top.
+
+`glirastes tools refresh` and `tools check` report (all warnings, never a failed refresh):
+
+| Code | When | Effect |
+| --- | --- | --- |
+| `mention-source-candidate` | `policy: "declared"` and a derivable search is neither declared nor ignored | Not offered; `expected` holds the entry to paste into `sources` |
+| `mention-source-invalid` | Unknown or disabled tool, a write tool, a path parameter, a missing `queryParam`, a composite id, a field that is not in the schema, an invalid type, label or alias | The entry is ignored |
+| `mention-source-undeclared-type` | The tool's identity does not declare the type of the key | Used with the given fields; declare the identity so markers, approval subjects and entity links agree on the type |
+| `mention-type-follows-identity` | `policy: "derived"` and a derived entity now has its declared type instead of the route's (`file` → `media-file`) | Nothing else; see the migration note below |
+| `mention-type-ambiguous` | `policy: "derived"` and a declared identity type is not unique: two derived searches declare it, another one's route type is that name (`/api/documents` beside `/api/files` declaring `document`), or `sources` already has the key | Each search involved keeps its route type, as before; declare the wanted one under `sources` |
+
+To move to declared sources: set `"policy": "declared"`, run `glirastes tools
+check`, paste the candidates you want into `sources`, list the others under
+`ignore`. Pasting all of them gives the same list as before. A pasted source
+whose tool declares no identity of that type adds a
+`mention-source-undeclared-type` warning until the identity is declared.
+
+### Migration: the type follows the declared identity
+
+Before, the type of a derived entity was always the singular of the route
+(`/api/files` → `file`), also when the tool declared another type for the
+same records (`media-file`). It now is the declared type, with the declared
+id and name field, whenever exactly one declaration with a single id sits at
+the searched list and no other derived search ends up with that type (else
+`mention-type-ambiguous`, and every search involved keeps its route type).
+Only apps with such a declaration are affected; which endpoints become
+entities is unchanged, and no entity of before disappears. The action ids
+start with the type, so they change too: `file.files.delete` becomes
+`media-file.files.delete`, `file.open` becomes `media-file.open`. After
+upgrading:
+
+1. Run `glirastes tools refresh`; `mention-type-follows-identity` names each changed type.
+2. Rename keys under `entities` and action ids under `actions` in `.glirastes/chat-interactions.json` from `<old>` and `<old>.…` to `<new>` and `<new>.…`. A `hidden: true` patch under the old type or action id no longer applies, so a hidden action (also a destructive one) shows again until it is moved; the handler names such patches in a console warning, stale patches with other fields in another. Rename `entity: '<old>'` in own commands, `defineChatEntity`, `chatAbout`, `mentionEntity` and `entityLinks` code as well.
+3. Messages stored before keep `{{mention:<old>:…}}`; they stay readable, their chips open only if the app still handles the old type in `entityLinks.open`.
+4. Add the type to `mentions.acknowledgedTypes` (or declare it under `sources`) to end the finding.
 
 ## Serving them
 
@@ -124,6 +209,92 @@ offers the generated UI tools as `/` commands; drop an earlier
 `createUiToolCommandProvider` from `completionProviders`, or the `/` list can
 show a command twice (results are only merged when type and id match), and
 the entry of the older provider still goes through the model.
+
+## Order by context
+
+The host says which entity types belong to what the user looks at; the `@`
+list shows those groups first, the others follow in their declared order:
+
+```tsx
+import { useMentionContext } from 'glirastes/react';
+
+function ProjectPage() {
+  useMentionContext({ preferredTypes: ['project', 'task'], presetType: 'project' });
+  …
+}
+```
+
+`useMentionContext(value | null)` works in any component below the provider.
+Of the mounted calls with a value, the one rendered last wins: a nested
+component over its ancestors, a later sibling over an earlier one, a
+component mounted later over those mounted before, independent of the order
+React runs their effects in. Unmounting restores the one before. `mentionContext` on `AiChatProvider` / `VercelAiChat` (and the
+property `mentionContext` of `<glirastes-chat>`) is the fallback for apps
+that keep this state themselves. Types the chat does not know are ignored;
+without any of them the order is the declared one. The value is read when a
+search runs and never sent anywhere.
+
+This is the one host indication for `@`. The planned view context
+(`ViewContextEntry`, `useViewContext`) will feed it from the entity and
+selection types of the registered view, and an explicit `useMentionContext`
+keeps winning; there will be no second channel.
+
+## Type filter
+
+`@<type>:<text>` searches one entity type: `@project:apollo`, German
+`@Projekt:apollo`. This needs no configuration: whenever the text before the
+first colon is a name of a type, only that type is searched for the rest
+(before, `@task:123` searched every type for `task:123`). The names of a type,
+compared without case and diacritics (`ue` also finds `ü`, `l` finds `ł`, `o`
+finds `ø`):
+
+- its label in the chat's language (`chatInteractions.locale`), when it has no whitespace and no colon and is not only combining marks,
+- its `aliases` for that language (`pl-PL` finds `pl`) or a language-free list, under the same rule,
+- always the canonical type (`media-file`).
+
+The marker a pick writes always carries the canonical type, whatever name was
+typed. A label of several words ("Media file") needs an alias to be typed as
+a filter. A name two types share in one language selects neither (alias and
+canonical type still do); the console warns with the count once per page for
+each set of conflicting types (also when the provider builds the registry
+again), and `registry.entityFilterConflicts` (`useChatContext().interactions`)
+lists them.
+
+| Typed | Result |
+| --- | --- |
+| `@pro` | Types whose name starts with `pro` first ("Filter by type", at most 3, e.g. `Projekt:`), then the hits of all types. An entity called "Projektplan" stays findable |
+| pick `Projekt:` (Enter, Tab, click) | The text becomes `@Projekt:`, no pill; the list stays open and shows that type |
+| `@Projekt:` | That type, without search text |
+| `@Projekt:12:30` | The first colon ends the filter: `project` searched for `12:30` |
+| `@12:30`, `@foo:bar` | No type of that name: all types searched for the whole text |
+
+With `presetType` a bare `@` (typed, or `openCompletion({ trigger: '@' })`
+without a query) becomes `@Projekt:`. Backspace right behind the untouched
+preset removes it at once and leaves `@`, which searches all types and is not
+preset again; after typing, Backspace deletes characters as usual. While an
+input method (IME) composes, nothing is preset; when the composition ends with
+the `@` still bare, the preset follows. `/` and own triggers are never preset.
+
+Type suggestions need at least two searchable types. Own
+`completionProviders` on `@` receive the typed text unchanged (`project:apo`)
+and keep their hits: the filter narrows only the entities of
+`chatInteractions`. An own `onCompletionSelect` sees the suggestions as items
+of type `mention-filter` with `select: 'query'` and should leave them alone
+(return nothing). `select: 'query'` is also open to own providers: the pick
+replaces the typed query with `insertText` and searches again. The legacy
+`mentions` composer (no `chatInteractions`, no `completionProviders`) has no
+type filter.
+
+Texts: the headings and the hint are the optional locale keys
+`completionCommandsGroupLabel` ("Commands"), `completionEntityTypesGroupLabel`
+("Filter by type") and `completionEntityTypeFilterLabel` ("Search only this
+type", `{type}` is the name); English and German ship, any other language
+comes from the app's `locale` / `locales`. Type names are the entity labels
+and aliases, per language:
+
+```json
+"entities": { "project": { "label": { "de": "Projekt", "en": "Project", "pl": "Projekt" }, "aliases": { "en": ["proj"], "pl": ["proj"] } } }
+```
 
 ## Pills in the composer
 
@@ -239,7 +410,8 @@ An app that replaces the input (`components.ChatInput`) first tries the SDK
 chat), `renderActions` and `renderSubmit` (both get the composer controls),
 `inputClassName` and `editorClassName`. A layout those props cannot express
 builds the input on `useChatComposerInput`, which keeps the suggestion search,
-direct commands, the argument form, entity actions and `mentionEntity`:
+direct commands, the argument form, entity actions, `mentionEntity`, the
+type filter and its preset (`inputProps.completionPreset`):
 
 ```tsx
 import { RichMentionInput, useChatComposerInput } from 'glirastes/react';
@@ -327,6 +499,10 @@ then goes to the model.
 - Backspace behind a pill and Delete before it remove the whole pill; each
   pill's remove control is named by `locale.removeMentionLabel`.
 - A chip in an answer is a button named by `locale.openEntityLabel`.
+- A type suggestion is an `option` like a hit, named "<name>: <hint>"
+  (`Projekt: Nur diesen Typ durchsuchen`); Enter or Tab sets the filter and
+  the live region announces the new count. Backspace behind a preset filter
+  removes it in one step.
 - A list that mixes commands and entity types shows a heading per group; a
   search without hits shows the optional locale text `completionEmptyLabel`, which
   Escape clears.

@@ -68,6 +68,27 @@ identifiers ("Open task create dialog", German "Task create dialog öffnen").
      approval card: check `requiresApproval` in `glirastes tools status` and
      run `glirastes tools policy confirm <tool>` where it is off. Hide
      irreversible ones the chat should not offer at all.
+   - *Which entities appear in `@`.* The app decides, not the derivation:
+     `mentions` in `.glirastes/tools.json` with `policy: "declared"` and one
+     entry per entity under `sources` (`{ tool, queryParam }`; the key is the
+     type the tool's identity declares, which also gives id, name and list
+     path). `glirastes tools check` then reports every other derivable
+     search as `mention-source-candidate` with the entry to paste; list what
+     should stay out under `ignore`. The order of `sources` is the order of
+     the groups in `@`. `mention-type-follows-identity` means a derived type
+     now is the declared one (`media-file`, before `file`): rename the
+     override keys and the action ids under them (`file.files.delete` →
+     `media-file.files.delete`; a `hidden: true` patch under the old name
+     hides nothing any more) and own `entity:` references, then add the type
+     to `mentions.acknowledgedTypes`. `mention-type-ambiguous` means two
+     searches end up with one declared type: both keep their route types
+     until the wanted one is declared under `sources`.
+   - *Languages.* Give every entity `label` and its `aliases` in each
+     language of the app (`{ "de": …, "en": …, "pl": … }`): the label (when
+     one word) and the aliases are the names of the type filter
+     `@<type>:<text>` (`ChatEntityAliases`: one list, or one per language).
+     A label of several words needs an alias. Two types must not share a
+     name in one language.
 3. **Override.** Texts, `hidden`, `keywords` and `icon` go into
    `.glirastes/chat-interactions.json`. A command the derivation leaves out
    comes back as a complete entry with `label` and `run`:
@@ -116,6 +137,14 @@ identifiers ("Open task create dialog", German "Task create dialog öffnen").
    the POST refuses. In React load the list with
    `useChatInteractionsData('/api/chat')` and pass a memoized
    `chatInteractions={{ data, entities, commands, locale }}` to the chat.
+   A page that shows one kind of thing calls
+   `useMentionContext({ preferredTypes: ['project'], presetType: 'project' })`
+   (`ChatMentionContext`) so its types lead the `@` list and the filter is
+   preset; an app that keeps this state itself passes `mentionContext` to
+   the chat. A registry built by hand takes its headings as `texts`
+   (`ChatInteractionTexts`); inside the provider they are the locale keys
+   `completionCommandsGroupLabel`, `completionEntityTypesGroupLabel` and
+   `completionEntityTypeFilterLabel`.
 5. **Custom composer.** When the app replaces the input
    (`components.ChatInput`), first try the SDK `MentionInput` with its props:
    `initialMentions`, `initialValue`, `components={{ DropdownItem }}`,

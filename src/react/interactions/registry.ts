@@ -20,6 +20,7 @@ import type {
   MentionData,
 } from '../types.js';
 import { fillTemplate } from '../utils/fill-template.js';
+import { foldText } from '../utils/fold-text.js';
 import { normalizeMentionSlug } from '../utils/mention-markup.js';
 import {
   entitiesFromData,
@@ -145,7 +146,7 @@ export interface ChatInteractionRegistry {
   /**
    * Groups of entity types (sorted) that share a label or alias in the
    * registry's language: that name selects none of them. Logged as a count
-   * when the registry is created.
+   * when a registry with this set of conflicts is first created on the page.
    */
   readonly entityFilterConflicts: ReadonlyArray<ReadonlyArray<string>>;
   /**
@@ -169,9 +170,7 @@ export interface ChatInteractionRegistry {
   ): ChatSendPlan;
 }
 
-function fold(value: string): string {
-  return value.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().trim();
-}
+const fold = foldText;
 
 /** German spelling without umlauts: `Übersicht` → `uebersicht`, `Schließen` → `schliessen`. */
 function transliterate(value: string): string {
@@ -185,10 +184,16 @@ function nameKeys(value: string): string[] {
   return [...keys];
 }
 
-/** A label or alias usable as a filter name: no whitespace, no colon, no control character. */
+/**
+ * A label or alias usable as a filter name: no whitespace, no colon, no
+ * control character, and something left once folded (not only combining marks).
+ */
 function isFilterName(value: unknown): value is string {
-  return typeof value === 'string' && CHAT_ENTITY_ALIAS_PATTERN.test(value);
+  return typeof value === 'string' && CHAT_ENTITY_ALIAS_PATTERN.test(value) && fold(value) !== '';
 }
+
+/** Conflict sets already logged on this page: a rebuilt registry (new `completionContext`) logs a set once. */
+const loggedFilterConflicts = new Set<string>();
 
 /** The aliases of `locale`: a plain list serves every language, a per-language list falls back like `chatText`. */
 function aliasesFor(aliases: ChatEntityAliases | undefined, locale: string): ReadonlyArray<unknown> {
@@ -312,7 +317,9 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     for (const key of keys) if (!filterLookup.has(key)) filterLookup.set(key, candidate.type);
   }
   const entityFilterConflicts = [...shared].map((group) => group.split('/'));
-  if (entityFilterConflicts.length > 0) {
+  const conflictKey = JSON.stringify([...shared].sort());
+  if (entityFilterConflicts.length > 0 && !loggedFilterConflicts.has(conflictKey)) {
+    if (loggedFilterConflicts.size < 100) loggedFilterConflicts.add(conflictKey);
     // Static text and a count only (no app data in logs); `entityFilterConflicts` names the types.
     console.warn(`[glirastes] chatInteractions: ${entityFilterConflicts.length} group(s) of entity types share a label or alias in this language; it selects none of them in @<name>: (their other aliases and the type itself still do). See registry.entityFilterConflicts.`);
   }

@@ -1,0 +1,14 @@
+{
+  "id": "mention-type-follows-identity",
+  "kind": "breaking",
+  "summary": "A derived @ entity now has the type its search tool declares by identity instead of the route's singular (media-file, not file), and its action ids follow (file.files.delete → media-file.files.delete): hidden: true patches under the old names stop applying.",
+  "howTo": "Run glirastes tools refresh and commit the result. For each mention-type-follows-identity finding rename, in .glirastes/chat-interactions.json, the key under entities from <old> to <new> and every action id under actions from <old>.… to <new>.… (e.g. file.files.delete → media-file.files.delete, file.open → media-file.open): a hidden: true patch under the old type or action id no longer applies, so a hidden action, also a destructive one, shows again until it is renamed; the chat-interactions handler names such patches in a console warning. Rename the old type in own code too (entity: of command arguments, defineChatEntity, chatAbout, mentionEntity, entityLinks), then add the type to mentions.acknowledgedTypes in .glirastes/tools.json. Stored messages keep {{mention:<old type>:…}} markers. A declared type that is not unique among the derived searches is not adopted (mention-type-ambiguous; the route types stay). Apps without an identity declaration on their search tools are not affected. See docs/chat-interactions.md, Migration.",
+  "skill": "curating-glirastes-chat-interactions",
+  "affectedWhen": {
+    "patterns": [
+      "\\boutputEntities\\s*:",
+      "x-glirastes-entit",
+      "\"identity\"\\s*:\\s*\\{"
+    ]
+  }
+}

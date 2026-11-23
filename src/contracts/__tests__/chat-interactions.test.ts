@@ -245,14 +245,28 @@ describe('override patches for ids that are no longer derived', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('does not warn for a hidden entry that is not derived (it is already out of the list)', () => {
+  it('names hidden patches for command ids, entity types and action ids that are not derived in a second warning', () => {
     const warn = warned();
     const merged = mergeChatInteractions(data, parseChatInteractionOverrides({
       schemaVersion: 1,
-      commands: { 'gone.command': { hidden: true } },
-      entities: { gone: { hidden: true } },
+      commands: { 'gone.command': { hidden: true }, orphan: { keywords: ['x'] } },
+      entities: {
+        gone: { hidden: true },
+        task: { actions: { 'file.files.delete': { hidden: true }, 'task.tasks.complete': { hidden: true } } },
+      },
     }));
-    expect(merged).toEqual(parseChatInteractions(data));
-    expect(warn).not.toHaveBeenCalled();
+    // The hidden patches change nothing else; the derived action that is named is hidden.
+    expect(merged.commands).toEqual(data.commands);
+    expect(merged.entities[0]!.actions!.map((entry) => entry.id)).toEqual(['task.tasks.assign']);
+    expect(warn).toHaveBeenCalledTimes(2);
+    // The existing warning keeps its text and its ids.
+    expect(String(warn.mock.calls[0]![0])).toBe('[glirastes] .glirastes/chat-interactions.json: ignored patches for ids that are not derived '
+      + '(any more) and are no complete entries: commands.orphan. Remove them.');
+    const hidden = String(warn.mock.calls[1]![0]);
+    for (const id of ['commands.gone.command', 'entities.gone', 'entities.task.actions.file.files.delete']) {
+      expect(hidden).toContain(id);
+    }
+    expect(hidden).not.toContain('task.tasks.complete');
+    expect(hidden).toContain('hide nothing');
   });
 });
