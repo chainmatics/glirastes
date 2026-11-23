@@ -25,7 +25,7 @@ export interface SessionSwitcherProps {
  * `deleteSessionAriaLabel`).
  */
 export interface SessionSwitcherIcons {
-  /** Inside `[data-element="plus"]` of the new-chat button; `false` drops that element. Default: the text `+`. */
+  /** Inside `[data-element="plus"]` of the new-chat button; `false` drops that element, other empty values (`null`, `''`, `true`, `[]`) keep the default text `+`. */
   newChat: ReactNode;
   /** Empty values (`false`, `null`, `''`, `true`, `[]`) keep the default: an action button always shows an icon. */
   rename: ReactNode;
@@ -108,7 +108,8 @@ export function SessionSwitcher({
     locale,
   } = useChatContext();
   const blocked = useSessionLock().locked || disabled;
-  const newChatIcon = icons?.newChat ?? DEFAULT_SESSION_SWITCHER_ICONS.newChat;
+  const newChatIcon = icons?.newChat === false ? false
+    : isEmptyNode(icons?.newChat) ? DEFAULT_SESSION_SWITCHER_ICONS.newChat : icons!.newChat;
   const renameIcon = isEmptyNode(icons?.rename) ? DEFAULT_SESSION_SWITCHER_ICONS.rename : icons!.rename;
   const deleteIcon = isEmptyNode(icons?.delete) ? DEFAULT_SESSION_SWITCHER_ICONS.delete : icons!.delete;
   const plus = newChatIcon === false ? null : <span data-element="plus" aria-hidden="true">{newChatIcon}</span>;

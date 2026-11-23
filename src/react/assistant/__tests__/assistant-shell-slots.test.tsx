@@ -343,6 +343,27 @@ describe('history pane as a render function', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Show chats' }));
   });
 
+  it('a stale close() after leaving full screen does nothing', async () => {
+    let stale: AssistantHistoryPaneProps['close'] | undefined;
+    render(<input aria-label="Page field" />);
+    await mount({ historyPane: ({ close }) => { stale = close; return <p>pane</p>; } });
+    await go('fullscreen');
+    expect(stale).toBeDefined();
+    await go('sidebar');
+    // Let the shell's own focus on the layout change settle first.
+    await frame();
+    await frame();
+    const field = screen.getByRole('textbox', { name: 'Page field' });
+    field.focus();
+    act(() => { stale!(); });
+    await frame();
+    await frame();
+    expect(document.activeElement).toBe(field);
+    act(() => { stale!('toggle'); });
+    await frame();
+    expect(document.activeElement).toBe(field);
+  });
+
   it('close() in the wide column keeps the column and focuses the composer, like a pick', async () => {
     await mount({ historyPane: ({ close }) => <button type="button" onClick={() => close()}>Pick project</button> });
     await go('fullscreen');

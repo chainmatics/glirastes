@@ -18,8 +18,8 @@
       "historyTitle",
       "useSessionLock",
       "historyPane\\s*=\\s*\\{\\s*(\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>",
-      "icons\\s*=\\s*\\{\\{[^}]*\\b(newChat|rename|delete)\\s*:",
-      "data-glirastes-composer"
+      "data-glirastes-composer",
+      "\\bicons\\s*=\\s*\\{[\\s\\S]{0,400}?\\b(newChat|rename|delete)\\s*:"
     ]
   },
   "surface": [

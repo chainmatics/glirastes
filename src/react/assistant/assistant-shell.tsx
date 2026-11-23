@@ -339,8 +339,10 @@ function edgeStyle(edge: FloatingResizeEdge): CSSProperties {
 }
 /**
  * Renders an app's render-function slot as a component of its own, so hooks
- * inside it belong to the slot, not to the shell, and it runs only where the
- * slot is shown. Not keyed by the function: a new function each render keeps
+ * inside it belong to the slot, not to the shell. It runs while its part is
+ * rendered (the column: whenever the shell is in full screen, also hidden or
+ * as a closed drawer; the menu: while the layout menu is shown). Not keyed
+ * by the function: a new function each render keeps
  * the state, and swapping in a different function with other hooks is not
  * supported (switch inside one function or render components from it).
  */
@@ -593,7 +595,10 @@ export function AssistantShell({
     setFocusRequest(n => n + 1);
   }, []);
   const pickedFromHistory = useCallback(() => closeDrawer('composer'), [closeDrawer]);
-  const closeHistory = useCallback((focus: 'composer' | 'toggle' = 'composer') => closeDrawer(focus), [closeDrawer]);
+  // A stale `close()` (the column is gone, e.g. full screen was left) does nothing.
+  const closeHistory = useCallback((focus: 'composer' | 'toggle' = 'composer') => {
+    if (historyRef.current?.isConnected) closeDrawer(focus);
+  }, [closeDrawer]);
   // After the chat column closes. Where the shell always found an editor or textarea outside the
   // column, it focuses that exactly as before (no check, also when disabled). Only where it
   // used to fall back to the first button of the shell (which sat in the column): an element marked

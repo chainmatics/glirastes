@@ -57,6 +57,11 @@ describe('SessionSwitcher icons', () => {
     expect(document.querySelector('[data-element="row-delete"] svg')).not.toBeNull();
   });
 
+  it.each([[null], [''], [true], [[]]] as const)('newChat %j keeps the default plus', value => {
+    mount({ variant: 'list', icons: { newChat: value } });
+    expect(document.querySelector('[data-element="plus"]')!.textContent).toBe('+');
+  });
+
   it('newChat={false} drops the plus, the button keeps its name', () => {
     mount({ variant: 'list', icons: { newChat: false } });
     expect(document.querySelector('[data-element="plus"]')).toBeNull();

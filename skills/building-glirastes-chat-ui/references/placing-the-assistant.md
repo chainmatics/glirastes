@@ -113,8 +113,9 @@ closes when the shell has no editor or `textarea` outside the column (below).
 
 - Layout menu (only with `'fullscreen'` among several `modes`):
   `showModeMenu={false}` drops the menu and its key handling (Enter, Space,
-  arrow keys on `[data-element="mode-picker"]`); full screen stays a layout
-  (`setMode`, alt+shift+D, Escape), detach/dock do not come back.
+  arrow keys on `[data-element="mode-picker"]`); full screen stays a layout:
+  the app enters it with `setMode('fullscreen')`, alt+shift+D, Escape and
+  `restoreMode()` leave it; detach/dock do not come back.
   `renderModeMenu` draws the app's own control in its place, also without the
   built-in key handling. It gets `{ modes, current, setMode, label, title,
   entries }` (`AssistantModeMenuRenderProps`; `entries[mode]` is an
@@ -133,8 +134,9 @@ closes when the shell has no editor or `textarea` outside the column (below).
   `close()` closes the drawer like a pick in the built-in list and moves focus
   to the composer (below), `close('toggle')` gives focus back to the chats
   toggle (as Escape does). In the wide column `close()` only moves focus.
-  `close` keeps its identity between renders. A function always gives a
-  column, also when the chat keeps only one conversation.
+  `close` keeps its identity between renders; called after the column is gone
+  (full screen was left) it does nothing. A function always gives a column,
+  also when the chat keeps only one conversation.
 
   ```tsx
   <AssistantWorkspace chat={<AiChatPanel />} modes={['sidebar', 'floating', 'fullscreen']}
@@ -151,16 +153,21 @@ closes when the shell has no editor or `textarea` outside the column (below).
   none: an element in the conversation marked
   `data-glirastes-composer` (when it is a text input or focusable itself), else
   the first enabled, editable text input inside it, else the chats toggle;
-  when nothing takes focus it stays where it is. Other inputs in the
-  conversation (a clarification answer, a command form, a queued message) are
-  never taken for the composer. The shell does not look into a shadow root of
+  when nothing takes focus it stays where it is. That input fallback never
+  takes other inputs of the conversation (a clarification answer, a command
+  form); the kept first step still focuses the first editor or `textarea` in
+  DOM order, which can be a queued message's edit field above the composer.
+  The shell does not look into a shadow root of
   its own inside the marked element: mark the focusable host (`tabIndex`,
   `delegatesFocus`). Opening the assistant and the focus-input shortcut
   (alt+shift+I) still look only for an editor or a `textarea` and otherwise
   focus the first button; the mark does not change them.
 - Render functions (`historyPane`, `historyTitle`, `renderModeMenu`) are
   rendered as components of their own, so hooks inside them belong to that
-  part, and they run only while their part is shown. Pass a stable function
+  part, and they run while their part is rendered: the column functions
+  whenever the shell is in full screen, also while the column is hidden or the
+  drawer closed (`open: false`); `renderModeMenu` while the layout menu is
+  shown. Pass a stable function
   (or the same one every render); it is not remounted when its identity
   changes, so switching between different functions that use hooks reuses or
   breaks their state. To switch between panes, switch inside one function and
@@ -180,7 +187,8 @@ closes when the shell has no editor or `textarea` outside the column (below).
   `SessionSwitcher` directly; `DEFAULT_SESSION_SWITCHER_ICONS` has the shipped
   ones. The icons are decorative: the buttons keep their names from the chat
   locale (`newChatLabel`, `renameSessionAriaLabel`, `deleteSessionAriaLabel`).
-  `newChat: false` drops the "+" element; empty `rename` and `delete` values
+  `newChat: false` drops the "+" element, other empty `newChat` values
+  (`null`, `''`, `true`, `[]`) keep the "+"; empty `rename` and `delete` values
   (`false`, `null`, `''`, `true`, `[]`) keep the default icon, so an action
   button is never empty.
 - Own session controls: `useSessionLock()` gives `{ visible, sessionChangeBlocked,
