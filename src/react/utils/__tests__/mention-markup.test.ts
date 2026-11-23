@@ -496,6 +496,48 @@ describe('serializeMentionsForSend is linear', () => {
     expect(parseMentionMarkers(sent)).toHaveLength(10_000);
   });
 
+  // The token search counts its work too: no native search for the token runs outside the
+  // counter (spied), so the counted steps are all the search does, independent of machine speed.
+  function tokenSearchWork(text: string, mention: MentionData, token: string): { steps: number; uncountedSearches: number } {
+    const methods = ['indexOf', 'lastIndexOf', 'includes', 'startsWith', 'endsWith'] as const;
+    let uncountedSearches = 0;
+    const spies = methods.map((method) => {
+      const original = String.prototype[method] as (this: string, ...args: unknown[]) => unknown;
+      return vi.spyOn(String.prototype, method).mockImplementation(function (this: string, ...args: unknown[]) {
+        if (args[0] === token) uncountedSearches += 1;
+        return original.apply(this, args);
+      } as never);
+    });
+    try {
+      serializeMentionsForSend(text, [mention]);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+    return { steps: serializeWork.steps, uncountedSearches };
+  }
+
+  it('a periodic token in a text without whitespace (case 1)', () => {
+    const run = (n: number) => tokenSearchWork('a'.repeat(n), { id: '1', type: 'user', label: 'A', prefix: 'a', slug: 'a'.repeat(n / 10 - 1) }, 'a'.repeat(n / 10));
+    const small = run(50_000);
+    const large = run(100_000);
+    expect(small.uncountedSearches).toBe(0);
+    expect(large.uncountedSearches).toBe(0);
+    expect(large.steps).toBeLessThanOrEqual(2 * small.steps + 64);
+    expect(large.steps).toBeLessThanOrEqual(4 * 100_000);
+  });
+
+  it('many near misses of a long token (case 2, the default slug path)', () => {
+    const word = `@${'a'.repeat(3_999)}b `;
+    // No slug: the token comes from the label ('@' and 4000 a), every word misses it at its last character.
+    const run = (length: number) => tokenSearchWork(word.repeat(Math.ceil(length / word.length)), { id: '1', type: 'user', label: 'a'.repeat(4_000), prefix: '@' }, `@${'a'.repeat(4_000)}`);
+    const small = run(200_000);
+    const large = run(400_000);
+    expect(small.uncountedSearches).toBe(0);
+    expect(large.uncountedSearches).toBe(0);
+    expect(large.steps).toBeLessThanOrEqual(2 * small.steps + 64);
+    expect(large.steps).toBeLessThanOrEqual(4 * 400_000);
+  });
+
   it('many context blocks to strip count too', () => {
     const absent: MentionData = { id: '1', type: 'user', label: 'Z', slug: 'zz', prefix: '@' };
     const small = work('<!--context:[x]--> a '.repeat(10_000), [absent]);
