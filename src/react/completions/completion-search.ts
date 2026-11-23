@@ -80,7 +80,18 @@ function pickFields(item: CompletionItem): Pick<MentionResult, 'select' | 'inser
   };
 }
 
-const SELECT_KINDS = new Set<string>(['chip', 'text', 'run']);
+const SELECT_KINDS = new Set<string>(['chip', 'text', 'run', 'query']);
+
+/**
+ * `select: 'query'` entries (e.g. `@<type>:` suggestions) refine the search
+ * instead of being hits: they come first, at most this many per provider, and
+ * neither the per-provider nor the overall cap nor the hits' dedupe drops them.
+ */
+const MAX_REFINEMENTS_PER_PROVIDER = 3;
+
+function isRefinement(item: unknown): boolean {
+  return typeof item === 'object' && item !== null && (item as { select?: unknown }).select === 'query';
+}
 
 function groupOf(value: unknown): { group?: string } {
   if (typeof value !== 'string') return {};
@@ -149,14 +160,48 @@ export function createCompletionSearch(
           const items = await withTimeout(Promise.resolve(provider.search({
             query, trigger, signal: controller.signal, context, limit,
           })), timeoutMs);
-          return { provider, items: Array.isArray(items) ? items.slice(0, limit) : [] };
+          const list: ReadonlyArray<unknown> = Array.isArray(items) ? items : [];
+          return {
+            provider,
+            refinements: list.filter(isRefinement).slice(0, MAX_REFINEMENTS_PER_PROVIDER),
+            items: list.filter((item) => !isRefinement(item)).slice(0, limit),
+          };
         } catch (error) {
           if (!controller.signal.aborted) options.onProviderError?.(provider.id, error);
-          return { provider, items: [] };
+          return { provider, refinements: [] as unknown[], items: [] as unknown[] };
         }
       }));
     if (controller.signal.aborted) return [];
     if (current === controller) current = null;
+
+    const toResult = (provider: ChatCompletionProvider, item: CompletionItem): MentionResult => ({
+      id: item.id,
+      key: `${provider.id}:${item.type}:${item.id}`,
+      type: item.type,
+      label: item.label.trim(),
+      ...(item.description ? { description: item.description } : {}),
+      ...(typeof item.icon === 'string' && item.icon ? { icon: item.icon } : {}),
+      ...(item.slug ? { slug: item.slug } : {}),
+      ...(item.definitionId ? { definitionId: item.definitionId } : {}),
+      ...(item.args ? { args: item.args } : {}),
+      ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
+      ...groupOf(item.group),
+      ...pickFields(item),
+    });
+
+    // Refinements first, outside the caps; the same one from two providers shows once.
+    const refined = new Set<string>();
+    const refinements: MentionResult[] = [];
+    for (const { provider, refinements: items } of settled) {
+      for (const item of items) {
+        if (!isItem(item)) continue;
+        const result = toResult(provider, item);
+        const identity = `${result.type}:${result.insertText ?? result.label}`;
+        if (refined.has(identity)) continue;
+        refined.add(identity);
+        refinements.push(result);
+      }
+    }
 
     const seen = new Set<string>();
     const results: MentionResult[] = [];
@@ -166,24 +211,11 @@ export function createCompletionSearch(
         const identity = `${item.type}:${item.id}`;
         if (seen.has(identity)) continue;
         seen.add(identity);
-        results.push({
-          id: item.id,
-          key: `${provider.id}:${item.type}:${item.id}`,
-          type: item.type,
-          label: item.label.trim(),
-          ...(item.description ? { description: item.description } : {}),
-          ...(typeof item.icon === 'string' && item.icon ? { icon: item.icon } : {}),
-          ...(item.slug ? { slug: item.slug } : {}),
-          ...(item.definitionId ? { definitionId: item.definitionId } : {}),
-          ...(item.args ? { args: item.args } : {}),
-          ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
-          ...groupOf(item.group),
-          ...pickFields(item),
-        });
+        results.push(toResult(provider, item));
         if (results.length >= maxResults) break collect;
       }
     }
-    return grouped(results);
+    return grouped([...refinements, ...results]);
   };
   const search: CompletionSearch = (query, trigger) => searchSources(query, trigger, undefined);
   return Object.assign(search, { [SOURCE_SEARCH]: searchSources });

@@ -3,19 +3,23 @@ import {
   serializeChatCommandArgs,
 } from '../../contracts/chat-command.js';
 import {
+  CHAT_ENTITY_ALIAS_PATTERN,
   chatText,
   isChatArgumentPath,
+  type ChatEntityAliases,
   type ChatEntitySearchData,
   type ChatInteractionArg,
   type ChatInteractionsData,
   type ChatLocaleCode,
 } from '../../contracts/chat-interactions.js';
+import { pickLanguage } from '../../contracts/localized-text.js';
 import type {
   ChatCompletionProvider,
   CompletionItem,
   CompletionPermissionContext,
   MentionData,
 } from '../types.js';
+import { fillTemplate } from '../utils/fill-template.js';
 import { normalizeMentionSlug } from '../utils/mention-markup.js';
 import {
   entitiesFromData,
@@ -25,6 +29,50 @@ import {
   type ChatEntityItem,
   type DerivedEntityOptions,
 } from './definitions.js';
+
+/**
+ * What the page the user is on says about `@` references. Set by the host
+ * (`mentionContext` on the provider, `useMentionContext` in a page); a later
+ * view context feeds the same value. Unknown or unsearchable types are ignored.
+ */
+export interface ChatMentionContext {
+  /** Entity types whose `@` hits come first, in this order; the other types follow in their declared order. */
+  readonly preferredTypes?: ReadonlyArray<string>;
+  /** Typing a bare `@` starts as `@<name>:`, searching only this type (Backspace right behind it removes it). */
+  readonly presetType?: string;
+}
+
+/**
+ * Texts of the `@`/`/` lists. Each falls back to the built-in text of the
+ * registry's `locale` (English, German for `de`). The provider passes the
+ * app's own `ChatLocale` texts here.
+ */
+export interface ChatInteractionTexts {
+  /** Heading of the `/` commands. Built in: `Commands`, German `Befehle`. */
+  readonly commandsGroup?: string;
+  /** Heading of the `@<type>:` suggestions. Built in: `Filter by type`, German `Nach Typ filtern`. */
+  readonly entityTypesGroup?: string;
+  /** Description of one `@<type>:` suggestion; `{type}` is the type's label. Built in: `Search only this type`. */
+  readonly entityTypeFilter?: string;
+}
+
+const BUILT_IN_TEXTS: Readonly<Record<'en' | 'de', Required<ChatInteractionTexts>>> = {
+  en: { commandsGroup: 'Commands', entityTypesGroup: 'Filter by type', entityTypeFilter: 'Search only this type' },
+  de: { commandsGroup: 'Befehle', entityTypesGroup: 'Nach Typ filtern', entityTypeFilter: 'Nur diesen Typ durchsuchen' },
+};
+
+/** Every built-in text of the chat interactions, per key (to tell an app's own text from a default). */
+export const BUILT_IN_CHAT_INTERACTION_TEXTS: Readonly<Record<keyof ChatInteractionTexts, ReadonlySet<string>>> = {
+  commandsGroup: new Set(Object.values(BUILT_IN_TEXTS).map((texts) => texts.commandsGroup)),
+  entityTypesGroup: new Set(Object.values(BUILT_IN_TEXTS).map((texts) => texts.entityTypesGroup)),
+  entityTypeFilter: new Set(Object.values(BUILT_IN_TEXTS).map((texts) => texts.entityTypeFilter)),
+};
+
+/** Item `type` of an `@<type>:` suggestion: never a mention, its pick (`select: 'query'`) only rewrites the query. */
+export const ENTITY_TYPE_FILTER_ITEM_TYPE = 'mention-filter';
+
+/** At most this many `@<type>:` suggestions above the hits. */
+const MAX_TYPE_SUGGESTIONS = 3;
 
 export interface ChatInteractionsConfig extends DerivedEntityOptions {
   /** Derived interactions: `useChatInteractionsData(endpoint)` or the generated module's `chatInteractions`. */
@@ -37,6 +85,14 @@ export interface ChatInteractionsConfig extends DerivedEntityOptions {
   readonly locale?: ChatLocaleCode;
   /** Passed to entity searches; set by the provider from `completionContext`. */
   readonly context?: CompletionPermissionContext;
+  /**
+   * Order and preset of the `@` list. A function is read at every search, so
+   * a changing context needs no new registry. The provider sets it from its
+   * `mentionContext` prop and `useMentionContext`.
+   */
+  readonly mentionContext?: ChatMentionContext | (() => ChatMentionContext | null | undefined);
+  /** List headings and descriptions; built-in texts of `locale` otherwise. */
+  readonly texts?: ChatInteractionTexts;
 }
 
 /** A command or entity action that still needs arguments from the user. */
@@ -66,7 +122,7 @@ export type ChatSendPlan =
 
 export interface ChatInteractionRegistry {
   readonly locale: ChatLocaleCode;
-  /** `/` commands and `@` entities for `createCompletionSearch`. */
+  /** `/` commands, `@<type>:` suggestions and `@` entities for `createCompletionSearch`. */
   readonly providers: ReadonlyArray<ChatCompletionProvider>;
   command(id: string): ChatCommandDefinition | undefined;
   entity(type: string): ChatEntityDefinition | undefined;
@@ -74,6 +130,30 @@ export interface ChatInteractionRegistry {
   readonly entitySearches: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }>;
   /** Searches one entity type, e.g. for an argument field; failures yield no hits. */
   searchEntity(type: string, query: string, signal: AbortSignal): Promise<ChatEntityItem[]>;
+  /**
+   * The `@<name>:<text>` filter of a query typed after `@`: the entity type
+   * and the text searched in it; undefined when the text before the first
+   * colon is no filter name (then the whole query searches every type).
+   */
+  entityFilter(query: string): { readonly type: string; readonly text: string } | undefined;
+  /**
+   * The names that select an entity type in `@<name>:` for the registry's
+   * language, the primary (shown) one first; empty for an unknown or
+   * unsearchable type.
+   */
+  entityFilterNames(type: string): ReadonlyArray<string>;
+  /**
+   * Groups of entity types (sorted) that share a label or alias in the
+   * registry's language: that name selects none of them. Logged as a count
+   * when the registry is created.
+   */
+  readonly entityFilterConflicts: ReadonlyArray<ReadonlyArray<string>>;
+  /**
+   * The query a bare `trigger` starts with (`RichMentionInput`'s
+   * `completionPreset`): `<name>:` for `@` while the mention context names a
+   * `presetType`; undefined otherwise.
+   */
+  completionPreset(trigger: string): string | undefined;
   /**
    * How to send a composed message: `undefined` for a normal model message
    * (no command, several commands, or a command mixed with free text).
@@ -96,6 +176,27 @@ function fold(value: string): string {
 /** German spelling without umlauts: `Übersicht` → `uebersicht`, `Schließen` → `schliessen`. */
 function transliterate(value: string): string {
   return fold(value.toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss'));
+}
+
+/** The forms a filter name is compared in: folded, and with the German transliteration. */
+function nameKeys(value: string): string[] {
+  const keys = new Set([fold(value), transliterate(value)]);
+  keys.delete('');
+  return [...keys];
+}
+
+/** A label or alias usable as a filter name: no whitespace, no colon, no control character. */
+function isFilterName(value: unknown): value is string {
+  return typeof value === 'string' && CHAT_ENTITY_ALIAS_PATTERN.test(value);
+}
+
+/** The aliases of `locale`: a plain list serves every language, a per-language list falls back like `chatText`. */
+function aliasesFor(aliases: ChatEntityAliases | undefined, locale: string): ReadonlyArray<unknown> {
+  if (!aliases || typeof aliases !== 'object') return [];
+  if (Array.isArray(aliases)) return aliases as ReadonlyArray<unknown>;
+  const perLanguage = aliases as Readonly<Record<string, unknown>>;
+  const language = pickLanguage(Object.keys(perLanguage).filter((key) => Array.isArray(perLanguage[key])), locale);
+  return language === undefined ? [] : perLanguage[language] as ReadonlyArray<unknown>;
 }
 
 function rankWith(normalize: (value: string) => string, label: string, command: ChatCommandDefinition, needle: string): number | undefined {
@@ -163,11 +264,94 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
   for (const command of config.data?.commands ?? []) commands.set(command.id, command);
   for (const command of config.commands ?? []) commands.set(command.id, command);
 
+  const builtInTexts = BUILT_IN_TEXTS[/^de(?:-|$)/i.test(locale) ? 'de' : 'en'];
+  const text = (key: keyof ChatInteractionTexts): string => {
+    const own = config.texts?.[key];
+    return typeof own === 'string' && own.trim() ? own : builtInTexts[key];
+  };
+
+  // Types the `@` filter can select: app entities, and derived ones with a search.
+  const searchable = new Set<string>();
+  for (const entity of config.data?.entities ?? []) if (entity.search) searchable.add(entity.type);
+  for (const entity of config.entities ?? []) searchable.add(entity.type);
+  const searchableTypes = [...entities.keys()].filter((type) => searchable.has(type));
+
+  // Filter names per type (label, aliases, canonical type). A label or alias another type also
+  // claims selects neither; the canonical type always selects its own type.
+  const candidates: Array<{ type: string; name: string; canonical: boolean }> = [];
+  for (const type of searchableTypes) {
+    const entity = entities.get(type)!;
+    const label = chatText(entity.label, locale);
+    if (isFilterName(label)) candidates.push({ type, name: label, canonical: false });
+    for (const alias of aliasesFor(entity.aliases, locale)) {
+      if (isFilterName(alias)) candidates.push({ type, name: alias, canonical: false });
+    }
+    candidates.push({ type, name: type, canonical: true });
+  }
+  const owners = new Map<string, Set<string>>();
+  for (const candidate of candidates) {
+    for (const key of nameKeys(candidate.name)) {
+      const set = owners.get(key) ?? new Set<string>();
+      set.add(candidate.type);
+      owners.set(key, set);
+    }
+  }
+  const filterNames = new Map<string, string[]>();
+  const filterLookup = new Map<string, string>();
+  const shared = new Set<string>();
+  for (const candidate of candidates) {
+    const keys = nameKeys(candidate.name);
+    const others = new Set(keys.flatMap((key) => [...owners.get(key)!].filter((type) => type !== candidate.type)));
+    if (others.size > 0 && !candidate.canonical) {
+      shared.add([candidate.type, ...others].sort().join('/'));
+      continue;
+    }
+    const list = filterNames.get(candidate.type) ?? [];
+    if (!list.some((name) => fold(name) === fold(candidate.name))) list.push(candidate.name);
+    filterNames.set(candidate.type, list);
+    for (const key of keys) if (!filterLookup.has(key)) filterLookup.set(key, candidate.type);
+  }
+  const entityFilterConflicts = [...shared].map((group) => group.split('/'));
+  if (entityFilterConflicts.length > 0) {
+    // Static text and a count only (no app data in logs); `entityFilterConflicts` names the types.
+    console.warn(`[glirastes] chatInteractions: ${entityFilterConflicts.length} group(s) of entity types share a label or alias in this language; it selects none of them in @<name>: (their other aliases and the type itself still do). See registry.entityFilterConflicts.`);
+  }
+
+  const readMentionContext = (): ChatMentionContext | undefined => {
+    const source = config.mentionContext;
+    try {
+      const value = typeof source === 'function' ? source() : source;
+      return value && typeof value === 'object' ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  /** Entity types in list order: the context's preferred types first, then the declared order. */
+  const orderedTypes = (): string[] => {
+    const all = [...entities.keys()];
+    const preferred = readMentionContext()?.preferredTypes;
+    if (!Array.isArray(preferred) || preferred.length === 0) return all;
+    const first = [...new Set((preferred as ReadonlyArray<unknown>).filter(
+      (type): type is string => typeof type === 'string' && entities.has(type),
+    ))];
+    return [...first, ...all.filter((type) => !first.includes(type))];
+  };
+  const entityFilter = (query: string): { type: string; text: string } | undefined => {
+    if (typeof query !== 'string') return undefined;
+    const colon = query.indexOf(':');
+    if (colon <= 0) return undefined;
+    for (const key of nameKeys(query.slice(0, colon))) {
+      const type = filterLookup.get(key);
+      if (type) return { type, text: query.slice(colon + 1) };
+    }
+    return undefined;
+  };
+
   const commandProvider: ChatCompletionProvider = {
     id: 'chat-commands',
     trigger: '/',
     search({ query, limit }) {
-      const group = /^de(?:-|$)/i.test(locale) ? 'Befehle' : 'Commands';
+      const group = text('commandsGroup');
       return [...commands.values()]
         .map((command) => {
           const label = chatText(command.label, locale);
@@ -193,12 +377,47 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     },
   };
 
+  // `@ta` also offers `Task:`, which narrows the list to that type (above the hits, which still search every type).
+  const entityTypeProvider: ChatCompletionProvider = {
+    id: 'chat-entity-types',
+    trigger: '@',
+    search({ query }) {
+      if (searchableTypes.length < 2 || typeof query !== 'string' || query.includes(':')) return [];
+      const folded = fold(query);
+      const transliterated = transliterate(query);
+      if (!folded) return [];
+      return orderedTypes()
+        .filter((type) => (filterNames.get(type) ?? []).some((name) => (
+          fold(name).startsWith(folded) || transliterate(name).startsWith(transliterated)
+        )))
+        .slice(0, MAX_TYPE_SUGGESTIONS)
+        .map((type): CompletionItem => {
+          const entity = entities.get(type)!;
+          const name = `${filterNames.get(type)![0]!}:`;
+          return {
+            id: type,
+            type: ENTITY_TYPE_FILTER_ITEM_TYPE,
+            label: name,
+            description: fillTemplate(text('entityTypeFilter'), { type: chatText(entity.label, locale) }),
+            ...(entity.icon ? { icon: entity.icon } : {}),
+            group: text('entityTypesGroup'),
+            select: 'query',
+            insertText: name,
+          };
+        });
+    },
+  };
+
   const entityProvider: ChatCompletionProvider = {
     id: 'chat-entities',
     trigger: '@',
     async search({ query, signal, limit, context }) {
-      const settled = await Promise.allSettled([...entities.values()].map(async (entity) => {
-        const items = await entity.search(query, { signal, limit, locale, context });
+      // `@task:rel` searches only `task` for `rel`; any other query searches every type.
+      const filter = entityFilter(query);
+      const types = filter ? [filter.type] : orderedTypes();
+      const searched = filter ? filter.text : query;
+      const settled = await Promise.allSettled(types.map((type) => entities.get(type)!).map(async (entity) => {
+        const items = await entity.search(searched, { signal, limit, locale, context });
         return (Array.isArray(items) ? items : []).slice(0, limit).map((item): CompletionItem => {
           const card = entity.card?.(item);
           const description = card?.subtitle ?? item.description;
@@ -274,13 +493,22 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
 
   return {
     locale,
-    providers: [commandProvider, entityProvider],
+    providers: [commandProvider, entityTypeProvider, entityProvider],
     entitySearches: (config.data?.entities ?? []).flatMap((entity) => (
       entity.search ? [{ type: entity.type, search: entity.search }] : []
     )),
     command: (id) => commands.get(id),
     entity: (type) => entities.get(type),
     completeCommand: complete,
+    entityFilter,
+    entityFilterNames: (type) => [...(filterNames.get(type) ?? [])],
+    entityFilterConflicts,
+    completionPreset(trigger) {
+      if (trigger !== '@') return undefined;
+      const type = readMentionContext()?.presetType;
+      const name = typeof type === 'string' ? filterNames.get(type)?.[0] : undefined;
+      return name ? `${name}:` : undefined;
+    },
 
     async searchEntity(type, query, signal) {
       const entity = entities.get(type);

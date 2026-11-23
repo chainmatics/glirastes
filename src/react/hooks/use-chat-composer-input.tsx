@@ -62,6 +62,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     cancelPendingCommand,
     attachments: attachmentOptions,
     interactions,
+    completionPreset,
   } = useComposerContext();
   // A hand-built context without `canCompose` locks while loading, as before.
   const canCompose = composable ?? !isLoading;
@@ -215,6 +216,8 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     resultsLabel: locale.completionResultsLabel,
     emptyLabel: locale.completionEmptyLabel,
     removeMentionLabel: locale.removeMentionLabel,
+    // A bare `@` starts as `@<type>:` while the page's `mentionContext` names a `presetType`.
+    ...(completionPreset ? { completionPreset } : {}),
     ...(attachmentOptions
       ? {
           onFiles: (files: File[]) => { void addFiles(files); },
@@ -222,7 +225,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
           allowEmptySubmit: attachments.length > 0,
         }
       : {}),
-  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
+  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length, completionPreset]);
 
   const attachmentInputProps = useMemo<ChatComposerInput['attachmentInputProps']>(() => ({
     ref: fileInputRef,

@@ -123,6 +123,24 @@ describe('<glirastes-chat> chat interactions', () => {
     expect(await element.mentionEntity('task', 'missing')).toBe(false);
   });
 
+  it('takes the page `@` context as the mentionContext property: preset and order', async () => {
+    const person = defineChatEntity({ type: 'person', label: 'Person', search: () => [{ id: 'a', label: 'Alice' }] });
+    const { element, editor } = await mount((node) => {
+      node.defineEntity(task);
+      node.defineEntity(person);
+    });
+    await act(async () => { element.mentionContext = { presetType: 'person', preferredTypes: ['person'] }; });
+    expect(element.mentionContext).toEqual({ presetType: 'person', preferredTypes: ['person'] });
+    typeInto(editor(), '@');
+    expect(editor().textContent).toBe('@Person:');
+    await waitFor(() => expect(element.shadowRoot!.querySelector('[role="option"]')?.textContent).toBe('Alice'));
+    await act(async () => { element.mentionContext = null; });
+    typeInto(editor(), '@');
+    expect(editor().textContent).toBe('@');
+    await waitFor(() => expect([...element.shadowRoot!.querySelectorAll('[role="option"] [data-element="label"]')].map((node) => node.textContent))
+      .toEqual(['Release prüfen', 'Alice']));
+  });
+
   it('refuses invalid definitions and reports interactions it cannot load', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     const { element, errors } = await mount((node) => {

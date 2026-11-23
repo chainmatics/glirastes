@@ -92,6 +92,13 @@ interface ArmedCompletion {
   created: boolean;
 }
 
+/** Text `completionPreset` put behind a trigger, untouched since: Backspace right behind it removes all of it. */
+interface PresetText {
+  node: Text;
+  start: number;
+  text: string;
+}
+
 /**
  * Internal: the handle `RichMentionInput` really has. `pickCompletion` applies
  * an entry as if it was picked from the `trigger` list at the caret
@@ -253,6 +260,7 @@ function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: Menti
       onClick={onClick}
       data-component="mention-dropdown-item"
       data-mention-type={result.type}
+      data-mention-select={result.select === 'query' ? 'query' : undefined}
       data-selected={isSelected ? 'true' : 'false'}
     >
       {icon !== null && icon !== undefined && <span data-element="icon" aria-hidden="true">{icon}</span>}
@@ -294,6 +302,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onBackspaceEmpty,
       allowEmptySubmit = false,
       onListOpenChange,
+      completionPreset,
     },
     ref,
   ) {
@@ -349,6 +358,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const openCompletionRef = useRef<((options: OpenCompletionOptions) => void) | null>(null);
     const warnedTriggersRef = useRef(new Set<string>());
     const isInitializedRef = useRef(false);
+    // `completionPreset`: read when a trigger is typed; the untouched preset text; the trigger occurrence
+    // already decided (preset or declined), so a trigger left bare by Backspace is not preset again.
+    const completionPresetRef = useRef(completionPreset);
+    completionPresetRef.current = completionPreset;
+    const presetRef = useRef<PresetText | null>(null);
+    const presetSeenRef = useRef<{ node: Text; pos: number } | null>(null);
 
     const DropdownItem = components?.DropdownItem ?? DefaultDropdownItem;
     const currentValue = isControlled ? value : internalValue;
@@ -603,6 +618,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       trigger: string;
       query: string;
       triggerPos: number;
+      node: Text;
     } | null => {
       const selection = editorSelection(editableRef.current);
       if (!selection || selection.rangeCount === 0) return null;
@@ -620,7 +636,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         if (isSpace(char)) break;
         if (triggers.has(char)) {
           if (i === 0 || isSpace(before[i - 1])) {
-            return { trigger: char, query: before.slice(i + 1), triggerPos: i };
+            return { trigger: char, query: before.slice(i + 1), triggerPos: i, node: textNode };
           }
         }
       }
@@ -832,6 +848,40 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // Event handlers
     // -----------------------------------------------------------------------
 
+    /** The text `completionPreset` gives a bare trigger: no whitespace, else nothing. */
+    const presetFor = useCallback((trigger: string): string | undefined => {
+      const preset = completionPresetRef.current;
+      if (typeof preset !== 'function') return undefined;
+      try {
+        const text = preset(trigger);
+        return typeof text === 'string' && text.length > 0 && !/\s/.test(text) ? text : undefined;
+      } catch {
+        return undefined;
+      }
+    }, []);
+
+    /**
+     * A trigger just typed bare: puts its preset behind it (caret at the end)
+     * and returns the query to search. Each trigger occurrence is preset once.
+     */
+    const applyPreset = useCallback((state: { trigger: string; triggerPos: number; node: Text }): string | null => {
+      const seen = presetSeenRef.current;
+      if (seen && seen.node === state.node && seen.pos === state.triggerPos) return null;
+      presetSeenRef.current = { node: state.node, pos: state.triggerPos };
+      const text = presetFor(state.trigger);
+      if (!text) return null;
+      const start = state.triggerPos + 1;
+      state.node.insertData(start, text);
+      const selection = editorSelection(editableRef.current);
+      const caret = document.createRange();
+      caret.setStart(state.node, start + text.length);
+      caret.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(caret);
+      presetRef.current = { node: state.node, start, text };
+      return text;
+    }, [presetFor]);
+
     const handleInput = useCallback(() => {
       if (!hasMentionSupport) {
         const nextValue = normalizeInputValue(editableRef.current?.innerText ?? '');
@@ -839,21 +889,58 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         return;
       }
 
-      // Mention mode: what the user types keeps `openCompletion` text.
+      // Mention mode: what the user types keeps `openCompletion` text and a preset.
       armedRef.current = null;
+      presetRef.current = null;
       const triggerState = detectTrigger();
       if (triggerState) {
+        // Not under `openCompletion({ source })`: the preset searches the registry's types, not that source.
+        const query = triggerState.query === '' && sourceRef.current === undefined
+          ? applyPreset(triggerState) ?? ''
+          : triggerState.query;
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = setTimeout(() => {
-          void performSearch(triggerState.query, triggerState.trigger, sourceRef.current);
+          void performSearch(query, triggerState.trigger, sourceRef.current);
         }, SEARCH_DEBOUNCE_MS);
       } else {
+        presetSeenRef.current = null;
         clearTimeout(searchTimeoutRef.current);
         closeDropdown();
       }
 
       onChange?.(getFullValue());
-    }, [hasMentionSupport, setValue, detectTrigger, performSearch, closeDropdown, onChange, getFullValue]);
+    }, [hasMentionSupport, setValue, detectTrigger, applyPreset, performSearch, closeDropdown, onChange, getFullValue]);
+
+    /** Backspace right behind an untouched preset: removes all of it, the bare trigger searches again. */
+    const removePreset = useCallback((): boolean => {
+      const preset = presetRef.current;
+      presetRef.current = null;
+      const editor = editableRef.current;
+      if (!preset || !editor || !editor.contains(preset.node)) return false;
+      const { node, start, text } = preset;
+      const selection = editorSelection(editor);
+      const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+      if (
+        !range || !range.collapsed || range.startContainer !== node || range.startOffset !== start + text.length
+        || node.data.slice(start, start + text.length) !== text || !triggers.has(node.data[start - 1] ?? '')
+      ) {
+        return false;
+      }
+      node.deleteData(start, text.length);
+      const armed = armedRef.current;
+      if (armed && armed.node === node && armed.start + armed.text.length === start + text.length && armed.text.endsWith(text)) {
+        armed.text = armed.text.slice(0, -text.length);
+      }
+      const caret = document.createRange();
+      caret.setStart(node, start);
+      caret.collapse(true);
+      selection!.removeAllRanges();
+      selection!.addRange(caret);
+      clearTimeout(searchTimeoutRef.current);
+      onChange?.(getFullValue());
+      void performSearch('', node.data[start - 1]!, sourceRef.current);
+      return true;
+    }, [triggers, onChange, getFullValue, performSearch]);
 
     /**
      * Chips in the DOM plus text-inserted commands whose token is still
@@ -971,7 +1058,20 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       }
       // Any other value (an own `onSearch` may return one) picks as `chip`.
       const kind = result.select ?? triggers.get(active.trigger)?.select ?? 'chip';
-      if (kind === 'text') {
+      if (kind === 'query') {
+        // A refinement (`@<type>:`): the new query behind the trigger, no space, and the list searches it.
+        const query = result.insertText ?? result.label;
+        const char = replaceQuery((trigger) => `${trigger}${query}`);
+        if (char === null) dropArmed();
+        else {
+          presetRef.current = null;
+          clearTimeout(searchTimeoutRef.current);
+          setSelectedIndex(0);
+          setSelectedAction(-1);
+          onChange?.(getFullValue());
+          void performSearch(query, char, sourceRef.current);
+        }
+      } else if (kind === 'text') {
         if (replaceQuery(() => result.insertText ?? result.label) === null) dropArmed();
         else {
           closeDropdown();
@@ -984,7 +1084,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         else if (kind === 'run') submit([inserted]);
       }
       openDeferred();
-    }, [detectTrigger, snapshotTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, insertMention, submit, removeArmed]);
+    }, [detectTrigger, snapshotTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, insertMention, submit, removeArmed, performSearch]);
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
@@ -1053,6 +1153,11 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           return;
         }
 
+        if (event.key === 'Backspace' && hasMentionSupport && presetRef.current && removePreset()) {
+          event.preventDefault();
+          return;
+        }
+
         if (event.key === 'Backspace' && onBackspaceEmpty) {
           const empty = hasMentionSupport
             ? getFullValue() === ''
@@ -1106,6 +1211,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         onChange,
         getFullValue,
         onBackspaceEmpty,
+        removePreset,
       ],
     );
 
@@ -1334,19 +1440,32 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         pickQueueRef.current.push(options);
         return;
       }
+      // A bare trigger without a narrowed source starts with its preset, as if typed.
+      const preset = !options?.query && options?.source === undefined && typeof options?.trigger === 'string'
+        && triggers.has(options.trigger) && hasMentionSupport && !disabled
+        ? presetFor(options.trigger)
+        : undefined;
+      const query = preset ?? options?.query ?? '';
       const trigger = armTrigger(
         options?.trigger,
-        options?.query ?? '',
+        query,
         'open',
       );
       if (trigger === null) return;
+      const armed = armedRef.current;
+      if (armed) {
+        // This trigger is decided: typing back to it bare later does not preset it (also not under a `source`).
+        const start = armed.start + armed.text.length - query.length;
+        presetSeenRef.current = { node: armed.node, pos: start - 1 };
+        if (preset) presetRef.current = { node: armed.node, start, text: preset };
+      }
       clearTimeout(searchTimeoutRef.current);
       sourceRef.current = options.source;
       setSelectedIndex(0);
       setSelectedAction(-1);
       onChange?.(getFullValue());
-      void performSearch(options.query ?? '', trigger, options.source);
-    }, [armTrigger, onChange, getFullValue, performSearch]);
+      void performSearch(query, trigger, options.source);
+    }, [armTrigger, onChange, getFullValue, performSearch, triggers, hasMentionSupport, disabled, presetFor]);
 
     openCompletionRef.current = openCompletion;
 
@@ -1499,12 +1618,18 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const listOpen = dropdownOpen && searchResults.length > 0;
     const showEmpty = !listOpen && noMatches && Boolean(emptyLabel);
     const showHeadings = new Set(searchResults.map((result) => result.group ?? '')).size > 1;
-    const optionProps = (index: number, action = -1): MentionDropdownOptionProps => ({
-      id: optionId(index, action),
-      role: 'option',
-      'aria-selected': index === selectedIndex && action === selectedAction,
-      tabIndex: -1,
-    });
+    const optionProps = (index: number, action = -1): MentionDropdownOptionProps => {
+      const result = searchResults[index];
+      // A refinement (`Task:`) is named with its description, so a screen reader hears that it filters.
+      const refinement = action < 0 && result?.select === 'query' && result.description;
+      return {
+        id: optionId(index, action),
+        role: 'option',
+        'aria-selected': index === selectedIndex && action === selectedAction,
+        tabIndex: -1,
+        ...(refinement ? { 'aria-label': `${result.label} ${result.description}` } : {}),
+      };
+    };
 
     const renderRow = (result: MentionResult, index: number, key: string) => {
       const item = (
