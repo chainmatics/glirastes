@@ -1021,7 +1021,10 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       stopping = Promise.resolve().then(async () => {
         await store.drain();
         try { await metrics?.close(); }
-        finally { if (instances().get(appId) === instance) instances().delete(appId); }
+        finally {
+          store.clear(); // Retain restrictions, release the backend and deployment graph.
+          if (instances().get(appId) === instance) instances().delete(appId);
+        }
       });
       abort.abort();
       stopSync?.();

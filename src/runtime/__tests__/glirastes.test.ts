@@ -1125,6 +1125,20 @@ describe('createGlirastes with a privacy policy', () => {
     expect(second).not.toBe(first); await second.stop();
   });
 
+  it('releases consumer backend and accepted deployment references on stop', async () => {
+    const {privateKey, publicKey} = generateKeyPairSync('ed25519');
+    const durable = new SharedDurableTestStore();
+    const runtime = track(createGlirastes({generated: generated(), env, stateStore: () => durable,
+      fetchImpl: platform({deployments: [activeDeployment(privateKey)], publicKey}).fetchImpl,
+      push: false, pollIntervalMs: 60000, onError: vi.fn()}));
+    await runtime.ready(); expect(runtime.accepted()).toBeDefined();
+    await runtime.stop(); expect(runtime.accepted()).toBeUndefined();
+    const retained = (globalThis as Record<symbol, unknown>)[Symbol.for('glirastes.runtime.accepted-stores.v1')] as Map<string, Record<string, unknown>>;
+    for (const store of retained.values()) {
+      expect(store.persistent).toBeUndefined(); expect(store.stable).toBeUndefined(); expect(store.state).toBeNull();
+    }
+  });
+
   it('temporal review: bound-only off cannot report applied from volatile state',async()=>{
     const {privateKey,publicKey}=generateKeyPairSync('ed25519');const http=platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey});
     const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>new MemoryRuntimeStateStore(),fetchImpl:http.fetchImpl,push:false,pollIntervalMs:60000,onError:vi.fn()}));
