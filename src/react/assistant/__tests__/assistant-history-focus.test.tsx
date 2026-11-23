@@ -91,69 +91,80 @@ function active(root: Document | ShadowRoot): string {
   return `${element.tagName.toLowerCase()}:${element.getAttribute('aria-label') ?? element.textContent}`;
 }
 
-describe('base behaviour after a pick, unchanged', () => {
+describe('a pick in the built-in list focuses exactly as on base', () => {
+  // Every expectation is a snapshot recorded on the base code (before the shell slots).
+  const scenarios: Array<[string, ReactNode, { shadow?: boolean; props?: Record<string, unknown> }?]> = [
+    ['textarea', <textarea aria-label="Draft" />],
+    ['textarea in a shadow root', <textarea aria-label="Draft" />, { shadow: true }],
+    ['disabled textarea', <textarea aria-label="Draft" disabled />],
+    ['disabled textarea under a clarification input', <><input aria-label="Clarification answer" /><textarea aria-label="Draft" disabled /></>],
+    ['editor in the header', <textarea aria-label="Draft" />, { props: { headerActions: <textarea aria-label="Header note" /> } }],
+    ['no composer', <p>No composer</p>],
+    ['input only', <input aria-label="Draft" />],
+    ['marked input', <input aria-label="Draft" data-glirastes-composer />],
+    ['marked input in a shadow root', <input aria-label="Draft" data-glirastes-composer />, { shadow: true }],
+    ['contenteditable="false" editor (a disabled RichMentionInput)', <div role="textbox" tabIndex={0} aria-label="Draft" contentEditable={false} />],
+    ['plaintext-only editor', <div role="textbox" tabIndex={0} aria-label="Draft" contentEditable="plaintext-only" suppressContentEditableWarning />],
+  ];
   for (const narrowView of [false, true]) {
-    const where = narrowView ? 'drawer' : 'wide column';
-    it(`textarea composer in a shadow root (${where})`, async () => {
-      narrow = narrowView;
-      const view = await mount(<textarea aria-label="Draft" />, { shadow: true });
-      await pick(view);
-      expect(active(view.root)).toBe('textarea:Draft');
-    });
-
-    it(`disabled textarea composer (${where})`, async () => {
-      narrow = narrowView;
-      const view = await mount(<textarea aria-label="Draft" disabled />);
-      await pick(view);
-      // Recorded on the base: focus() on the disabled textarea does nothing, focus stays on the picked row.
-      expect(active(view.root)).toMatchInlineSnapshot(`"button:Customers"`);
-    });
-
-    it(`disabled textarea composer under a clarification input (${where})`, async () => {
-      narrow = narrowView;
-      const view = await mount(<><input aria-label="Clarification answer" /><textarea aria-label="Draft" disabled /></>);
-      await pick(view);
-      expect(active(view.root)).toMatchInlineSnapshot(`"button:Customers"`);
-    });
+    for (const [kind, composer, options] of scenarios) {
+      it(`${kind} (${narrowView ? 'drawer' : 'wide column'})`, async () => {
+        narrow = narrowView;
+        const view = await mount(composer, options);
+        await pick(view);
+        expect(active(view.root)).toMatchSnapshot();
+      });
+    }
   }
 });
 
-describe('editor search over the whole shell, as on base', () => {
-  it.each([false, true])('an editor in the header is focused as on base (narrow %s)', async narrowView => {
+/** Mounts an own column whose "Pick project" button calls the new `close()`. */
+const closingPane = { historyPane: ({ close }: { close(): void }) => <div><textarea aria-label="Pane note" /><button type="button" onClick={() => close()}>Pick project</button></div> };
+async function closeFromPane(view: Awaited<ReturnType<typeof mount>>) {
+  if (narrow) fireEvent.click(view.scope.getByRole('button', { name: 'Show chats' }));
+  await frame();
+  const button = Array.from(view.container.querySelectorAll<HTMLElement>('[data-element="history"] button')).find(b => b.textContent === 'Pick project')!;
+  button.focus();
+  fireEvent.click(button);
+  await frame();
+  await frame();
+}
+
+describe("close() of a render-function pane: the new lookup", () => {
+  it.each([false, true])('the first editor or textarea outside the column, header included (narrow %s)', async narrowView => {
     narrow = narrowView;
-    const view = await mount(<textarea aria-label="Draft" />, { props: { headerActions: <textarea aria-label="Header note" /> } });
-    await pick(view);
-    // Recorded on the base: the first editor or textarea of the shell in DOM order.
-    expect(active(view.root)).toMatchInlineSnapshot(`"textarea:Header note"`);
+    const view = await mount(<textarea aria-label="Draft" />, { props: { ...closingPane, headerActions: <textarea aria-label="Header note" /> } });
+    await closeFromPane(view);
+    expect(active(view.root)).toBe('textarea:Header note');
   });
 
-  it.each([false, true])('an editor in the column is not focused after a pick (narrow %s)', async narrowView => {
+  it.each([false, true])('an editor in the column itself is skipped (narrow %s)', async narrowView => {
     narrow = narrowView;
-    const view = await mount(<textarea aria-label="Draft" />, {
-      props: { historyPane: ({ close }: { close(): void }) => <div><textarea aria-label="Pane note" /><button type="button" onClick={() => close()}>Pick project</button></div> },
-    });
-    if (narrowView) fireEvent.click(view.scope.getByRole('button', { name: 'Show chats' }));
-    await frame();
-    fireEvent.click(Array.from(view.container.querySelectorAll<HTMLElement>('[data-element="history"] button')).find(b => b.textContent === 'Pick project')!);
-    await frame();
-    await frame();
+    const view = await mount(<textarea aria-label="Draft" />, { props: closingPane });
+    await closeFromPane(view);
     expect(active(view.root)).toBe('textarea:Draft');
   });
-});
 
-describe('new: composers the base did not find', () => {
+  it.each([false, true])('a disabled textarea gets focus() as on base: focus stays (narrow %s)', async narrowView => {
+    narrow = narrowView;
+    const view = await mount(<><input aria-label="Clarification answer" /><textarea aria-label="Draft" disabled /></>, { props: closingPane });
+    await closeFromPane(view);
+    expect(active(view.root)).toBe('button:Pick project');
+  });
+
   const composers: Array<[string, ReactNode]> = [
     ['marked input', <input key="c" aria-label="Draft" data-glirastes-composer />],
     ['input in a marked wrapper', <div key="c" data-glirastes-composer><input type="checkbox" aria-label="Option" /><input aria-label="Draft" /></div>],
     ['marked focusable host', <div key="c" role="textbox" tabIndex={0} aria-label="Draft" data-glirastes-composer />],
   ];
+  const noEditorPane = { historyPane: ({ close }: { close(): void }) => <button type="button" onClick={() => close()}>Pick project</button> };
   for (const shadow of [false, true]) {
     for (const narrowView of [false, true]) {
       for (const [kind, composer] of composers) {
         it(`${kind}${shadow ? ' in a shadow root' : ''} (${narrowView ? 'drawer' : 'wide column'})`, async () => {
           narrow = narrowView;
-          const view = await mount(<><input aria-label="Clarification answer" />{composer}</>, { shadow });
-          await pick(view);
+          const view = await mount(<><input aria-label="Clarification answer" />{composer}</>, { shadow, props: noEditorPane });
+          await closeFromPane(view);
           expect(active(view.root)).toMatch(/:Draft$/);
         });
       }
@@ -162,8 +173,8 @@ describe('new: composers the base did not find', () => {
 
   it.each([false, true])('an unmarked input is not taken for the composer, focus goes to the toggle (narrow %s)', async narrowView => {
     narrow = narrowView;
-    const view = await mount(<input aria-label="Clarification answer" />);
-    await pick(view);
+    const view = await mount(<input aria-label="Clarification answer" />, { props: noEditorPane });
+    await closeFromPane(view);
     expect(active(view.root)).toBe(`button:${narrowView ? 'Show chats' : 'Hide chats'}`);
   });
 
@@ -171,20 +182,8 @@ describe('new: composers the base did not find', () => {
     const input = kind === 'readonly' ? <input aria-label="Skip" readOnly />
       : kind === 'disabled' ? <input aria-label="Skip" disabled />
       : <input aria-label="Skip" type={kind} />;
-    const view = await mount(<div data-glirastes-composer>{input}</div>);
-    await pick(view);
+    const view = await mount(<div data-glirastes-composer>{input}</div>, { props: noEditorPane });
+    await closeFromPane(view);
     expect(active(view.root)).toBe('button:Hide chats');
-  });
-
-  it('close() from an own pane follows the same order in a shadow root', async () => {
-    narrow = true;
-    const view = await mount(<input aria-label="Draft" data-glirastes-composer />, {
-      shadow: true,
-      props: { historyPane: ({ close }: { close(): void }) => <button type="button" onClick={() => close()}>Pick project</button> },
-    });
-    fireEvent.click(view.scope.getByRole('button', { name: 'Show chats' }));
-    await frame();
-    fireEvent.click(view.container.querySelector<HTMLElement>('[data-element="history"] button')!);
-    await waitFor(() => expect(active(view.root)).toBe('input:Draft'));
   });
 });

@@ -108,8 +108,7 @@ runs after a pick or a new chat. Texts come from the chat locale:
 ## Replacing shell parts
 
 Every part below is opt-in; an app that sets none of them gets the same DOM,
-behaviour and styles as before, apart from the focus fix after the column
-closes when the shell has no editor or `textarea` outside the column (below).
+behaviour and styles as before.
 
 - Layout menu (only with `'fullscreen'` among several `modes`):
   `showModeMenu={false}` drops the menu and its key handling (Enter, Space,
@@ -132,7 +131,7 @@ closes when the shell has no editor or `textarea` outside the column (below).
   It gets `{ open, drawer, close }` (`AssistantHistoryPaneProps`): `open` is
   whether the column is shown, `drawer` whether it is the drawer below 900 px,
   `close()` closes the drawer like a pick in the built-in list and moves focus
-  to the composer (below), `close('toggle')` gives focus back to the chats
+  to the composer (next point), `close('toggle')` gives focus back to the chats
   toggle (as Escape does). In the wide column `close()` only moves focus.
   `close` keeps its identity between renders; called after the column is gone
   (full screen was left) it does nothing. A function always gives a column,
@@ -146,11 +145,11 @@ closes when the shell has no editor or `textarea` outside the column (below).
   `labels.showHistory` and `labels.hideHistory` ("Chats", "Show chats", "Hide
   chats"); an app whose column shows something else (projects, folders) sets
   those labels too.
-- Focus after the column closes (a pick in the built-in list, `close()`): the
+- Focus after `close()` of a function `historyPane` / `historyTitle`: the
   first editor (`contenteditable`) or `textarea` of the shell in DOM order,
-  header included but never one in the column, gets `focus()` as it always
-  did, also a disabled one (then focus stays where it was). Only when there is
-  none: an element in the conversation marked
+  header included but never one in the column, gets `focus()`, also a disabled
+  one (then focus stays where it was). Only when there is none: an element in
+  the conversation marked
   `data-glirastes-composer` (when it is a text input or focusable itself), else
   the first enabled, editable text input inside it, else the chats toggle;
   when nothing takes focus it stays where it is. That input fallback never
@@ -159,9 +158,11 @@ closes when the shell has no editor or `textarea` outside the column (below).
   DOM order, which can be a queued message's edit field above the composer.
   The shell does not look into a shadow root of
   its own inside the marked element: mark the focusable host (`tabIndex`,
-  `delegatesFocus`). Opening the assistant and the focus-input shortcut
-  (alt+shift+I) still look only for an editor or a `textarea` and otherwise
-  focus the first button; the mark does not change them.
+  `delegatesFocus`). This lookup belongs to `close()` only: a pick in the
+  built-in chat list, opening the assistant and the focus-input shortcut
+  (alt+shift+I) look only for an editor or a `textarea` in the shell and
+  otherwise focus the first button of the shell; the mark does not change
+  them.
 - Render functions (`historyPane`, `historyTitle`, `renderModeMenu`) are
   rendered as components of their own, so hooks inside them belong to that
   part, and they run while their part is rendered: the column functions

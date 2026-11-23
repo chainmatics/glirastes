@@ -289,16 +289,6 @@ describe('focus after close()', () => {
     await frame();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: narrowView ? 'Show chats' : 'Hide chats' }));
   });
-
-  it('a pick in the built-in list with a marked input composer focuses it', async () => {
-    narrow = true;
-    await mount({}, chat(), <input aria-label="Draft" data-glirastes-composer />);
-    await go('fullscreen');
-    fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
-    await frame();
-    fireEvent.click(screen.getByRole('button', { name: 'Customers' }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Draft' })));
-  });
 });
 
 describe('history pane as a render function', () => {

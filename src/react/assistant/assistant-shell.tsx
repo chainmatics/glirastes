@@ -587,9 +587,10 @@ export function AssistantShell({
     shell.current?.querySelector<HTMLElement>(`[aria-controls="${historyId}"], [data-action="history"]`)?.focus();
   }, [shell, historyId]);
   // Focus moves once the drawer is closed and the conversation is no longer inert.
-  const focusAfterHistory = useRef<'toggle' | 'composer' | null>(null);
+  // `'pane-composer'`: `close()` of an app's render-function column, which uses its own lookup.
+  const focusAfterHistory = useRef<'toggle' | 'composer' | 'pane-composer' | null>(null);
   const [, setFocusRequest] = useState(0);
-  const closeDrawer = useCallback((refocus: 'toggle' | 'composer') => {
+  const closeDrawer = useCallback((refocus: 'toggle' | 'composer' | 'pane-composer') => {
     focusAfterHistory.current = refocus;
     setDrawerOpen(false);
     setFocusRequest(n => n + 1);
@@ -597,14 +598,13 @@ export function AssistantShell({
   const pickedFromHistory = useCallback(() => closeDrawer('composer'), [closeDrawer]);
   // A stale `close()` (the column is gone, e.g. full screen was left) does nothing.
   const closeHistory = useCallback((focus: 'composer' | 'toggle' = 'composer') => {
-    if (historyRef.current?.isConnected) closeDrawer(focus);
+    if (historyRef.current?.isConnected) closeDrawer(focus === 'toggle' ? 'toggle' : 'pane-composer');
   }, [closeDrawer]);
-  // After the chat column closes. Where the shell always found an editor or textarea outside the
-  // column, it focuses that exactly as before (no check, also when disabled). Only where it
-  // used to fall back to the first button of the shell (which sat in the column): an element marked
-  // `data-glirastes-composer` or a text input inside it, else the chats toggle, else focus stays.
+  // Only after `close()` of an app's render-function column; the built-in list keeps `focusComposer`.
+  // The first editor or textarea of the shell outside the column gets a plain `focus()` (also when
+  // disabled); without one: an element marked `data-glirastes-composer` or a text input inside it,
+  // else the chats toggle, else focus stays.
   const focusComposerAfterHistory = useCallback(() => {
-    // The whole shell in DOM order, as before, except the column that is being closed.
     const composer = Array.from(shell.current?.querySelectorAll<HTMLElement>(BASE_COMPOSER) ?? [])
       .find(element => !historyRef.current?.contains(element));
     if (composer) { composer.focus(); return; }
@@ -650,7 +650,8 @@ export function AssistantShell({
     if (!target || drawerOpen) return;
     focusAfterHistory.current = null;
     if (target === 'toggle') focusHistoryToggle();
-    else focusComposerAfterHistory();
+    else if (target === 'pane-composer') focusComposerAfterHistory();
+    else focusComposer();
   });
   const activeChatTitle = chat?.sessions?.find(session => session.id === chat.activeSessionId)?.title || chat?.locale?.newChatLabel || labels.title;
 
