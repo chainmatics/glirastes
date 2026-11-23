@@ -94,8 +94,8 @@ export interface ChatContextValue {
    */
   send: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => boolean;
   /**
-   * `send` that tells what happened: `'sent'`, `'queued'` (only with
-   * `queue.enabled`) or `'rejected'`. `send` returns true for the first two.
+   * `send` that tells what happened: `'sent'`, `'queued'` (with `queue.enabled`, and without it for a message
+   * held while a request cleared with `clear()` still ends) or `'rejected'`. `send` returns true for the first two.
    */
   submit: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => ChatSubmitResult;
   /**
@@ -140,6 +140,12 @@ export interface ChatContextValue {
   /** Holds the queue until `resumeQueue()`. */
   pauseQueue: () => void;
   stop: () => void;
+  /**
+   * Empties the open chat (and its queue). A request the provider has seen running is stopped (best effort);
+   * until the transport reports its end the chat stays busy and empty, nothing of it is shown, stored or
+   * recorded, and a message sent meanwhile goes out into the emptied chat afterwards (see `docs/concepts.md`,
+   * Turn outcomes).
+   */
   clear: () => void;
   loadMore: () => void;
   hasMore: boolean;

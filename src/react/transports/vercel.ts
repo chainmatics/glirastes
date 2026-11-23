@@ -136,6 +136,21 @@ export function useVercelAiChatTransport(
   const reportsUiOutcomes = () => uiActionOutcomesRef.current && reportingRef.current;
   const autoResumeRef = useRef(autoResumeOnApproval);
   autoResumeRef.current = autoResumeOnApproval;
+  // The running request was discarded by clear(): no request starts by itself at its end and none of its data
+  // parts is handed on. The mark ends here, without React: when the AI SDK asks at the end of that request
+  // whether to send again (once, only for a request that did not fail or abort), or when the next request starts.
+  const discardedRef = useRef(false);
+  const statusRef = useRef<ChatTransport['status']>('ready');
+  const discardActiveRun = useCallback(() => {
+    if (statusRef.current !== 'submitted' && statusRef.current !== 'streaming') return;
+    discardedRef.current = true;
+  }, []);
+  /** Asked by the AI SDK at the end of a request: a discarded request is answered no, once. */
+  const unlessDiscarded = (decide: () => boolean | PromiseLike<boolean>) => {
+    if (!discardedRef.current) return decide();
+    discardedRef.current = false;
+    return false;
+  };
 
   const headersRef = useRef(userHeaders);
   headersRef.current = userHeaders;
@@ -166,15 +181,19 @@ export function useVercelAiChatTransport(
         headers: () => chatRequestHeaders(headersRef.current, languageRef.current),
         body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current, reportsUiOutcomes()),
         // Same body as the default, with file data only in the latest user turns.
-        prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => ({
-          body: {
-            ...body,
-            id,
-            messages: limitRequestAttachments(messages as unknown as ChatMessage[]),
-            trigger,
-            messageId,
-          },
-        }),
+        prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => {
+          // A new request: a mark of the one before it ends here.
+          discardedRef.current = false;
+          return {
+            body: {
+              ...body,
+              id,
+              messages: limitRequestAttachments(messages as unknown as ChatMessage[]),
+              trigger,
+              messageId,
+            },
+          };
+        },
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- headersRef/bodyExtrasRef/languageRef are stable
     [endpoint],
@@ -193,13 +212,14 @@ export function useVercelAiChatTransport(
     transport,
     // With the outcome protocol: approvals answered and every UI outcome reported (see shouldContinueChat).
     sendAutomaticallyWhen: uiActionOutcomes
-      ? (options) => (reportsUiOutcomes()
+      ? (options) => unlessDiscarded(() => (reportsUiOutcomes()
         ? shouldContinueChat(options, { approvals: autoResumeRef.current })
-        : autoResumeRef.current && lastAssistantMessageIsCompleteWithApprovalResponses(options))
+        : autoResumeRef.current && lastAssistantMessageIsCompleteWithApprovalResponses(options)))
       : autoResumeOnApproval
-        ? lastAssistantMessageIsCompleteWithApprovalResponses
+        ? (options) => unlessDiscarded(() => lastAssistantMessageIsCompleteWithApprovalResponses(options))
         : undefined,
     onData: (dataPart) => {
+      if (discardedRef.current) return;
       const part = dataPart as { type: string; data: unknown };
       if (part.type === MEMORY_NOTES_PART && memoryRef.current) {
         const notes = (part.data as { user?: unknown } | null)?.user;
@@ -209,6 +229,7 @@ export function useVercelAiChatTransport(
       subscribersRef.current.forEach((fn) => fn(part));
     },
   });
+  statusRef.current = status;
 
   const send = useCallback(
     ({ text, files }: { text: string; files?: FilePart[] }) => {
@@ -245,10 +266,12 @@ export function useVercelAiChatTransport(
       addToolApprovalResponse,
       subscribeToData,
       setRequestLanguage,
+      discardActiveRun,
       continueAfterBudgetStop,
       ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
     [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
-      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
+      setRequestLanguage, discardActiveRun, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting,
+      continueAfterBudgetStop],
   );
 }

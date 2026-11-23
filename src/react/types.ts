@@ -109,6 +109,14 @@ export interface ChatTransport {
   /** Called by the provider: whether it reports outcomes through this transport. */
   setUiOutcomeReporting?(enabled: boolean): void;
   /**
+   * Called by the provider in `clear()`, before `stop()`, when it has seen a request running: that request is
+   * discarded. The transport starts no request by itself at its end (no continuation after approvals or UI
+   * outcomes) and hands none of its data parts on. One call, no counterpart: the mark ends inside the
+   * transport with that request (at its end, or when the next request starts). Idle, it does nothing; a
+   * second call for the same request changes nothing. The bundled Vercel transport implements it.
+   */
+  discardActiveRun?(): void;
+  /**
    * Called by the provider with the chat language to name in each request
    * (`Content-Language`), or null for none (`sendLanguage: false`, unknown).
    */
@@ -1701,7 +1709,8 @@ export type ChatSubmitResult = 'sent' | 'queued' | 'rejected';
 
 /**
  * Why a message was not taken. `session`: the conversation is not loaded or
- * is changing. `approval-open`: an approval waits (only without the queue;
+ * is changing (also: a message is already held while a cleared request ends,
+ * or a held message was dropped because another chat was opened). `approval-open`: an approval waits (only without the queue;
  * with it the message is queued). `attachments-off`: files while attachments
  * are off. `files-with-command`: files with a direct `/` command. `queue-full`:
  * the queue holds `maxSize` messages.

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // CHARACTERISATION (green on main): app patterns around a running request and a change of the open chat that
-// work today. The session pool planned in docs/plans/2026-11-23-design-left-chat.md must keep every one of them.
+// work today. The planned session pool (one AI SDK `Chat` per session in the transport) must keep every one of them.
 // The defect itself (one transport shared by every chat) is reproduced in left-chat-defect.repro.test.tsx.
 // Tests marked KNOWN DEFECT are `it.fails`: they assert the correct behaviour that main does not have yet.
 
@@ -163,8 +163,8 @@ describe('C1 an app-owned AI SDK Chat per conversation', () => {
 
   // KNOWN DEFECT (main): A's turn, which ends while A is open again, gets no outcome (no `completed`): returning
   // to a live A loses the turn binding.
-  // Not covered by the pool design: the app-owned adapter has no `sessions` capability, so no row of
-  // docs/plans/2026-11-23-design-left-chat.md applies and no planned PR flips this. A defect of the app-owned-Chat
+  // Not covered by the planned session pool: the app-owned adapter has no `sessions` capability, so the pool does
+  // not apply and no planned PR flips this. A defect of the app-owned-Chat
   // pattern on main, to be decided separately.
   it.fails('KNOWN DEFECT A to B to A while A streams: A\'s turn is recorded as completed when it ends in A', async () => {
     const chats = appChats();
@@ -229,8 +229,8 @@ describe('C1 an app-owned AI SDK Chat per conversation', () => {
 describe('C1 known defects of outcome attribution', () => {
   // KNOWN DEFECT (main): returning to a live A loses A's turn binding (as above), so a stop in A records nothing
   // on A's turn; whether B sent meanwhile does not matter (see the control below).
-  // Not covered by the pool design: the app-owned adapter has no `sessions` capability, so no row of
-  // docs/plans/2026-11-23-design-left-chat.md applies and no planned PR flips this. A defect of the app-owned-Chat
+  // Not covered by the planned session pool: the app-owned adapter has no `sessions` capability, so the pool does
+  // not apply and no planned PR flips this. A defect of the app-owned-Chat
   // pattern on main, to be decided separately.
   it.fails('KNOWN DEFECT back in A while A and B stream: stop() records the aborted outcome on A\'s turn', async () => {
     const chats = appChats();
@@ -247,8 +247,8 @@ describe('C1 known defects of outcome attribution', () => {
   });
 
   // Same defect without a request of B: A to B to A while A streams, stop in A.
-  // Not covered by the pool design: the app-owned adapter has no `sessions` capability, so no row of
-  // docs/plans/2026-11-23-design-left-chat.md applies and no planned PR flips this. A defect of the app-owned-Chat
+  // Not covered by the planned session pool: the app-owned adapter has no `sessions` capability, so the pool does
+  // not apply and no planned PR flips this. A defect of the app-owned-Chat
   // pattern on main, to be decided separately.
   it.fails('KNOWN DEFECT A to B to A while A streams (B never sends): stop() records the aborted outcome on A\'s turn', async () => {
     const chats = appChats();
@@ -308,8 +308,8 @@ describe('C1 with a session store (load/save) next to the app-owned Chats', () =
   // KNOWN DEFECT (main): A's answer completes in A's Chat while B is open, but is never saved under A (only the
   // open chat is saved). Opening A again loads the stored partial answer into A's Chat (`setMessages`), so the
   // completed answer is lost from the Chat and the store.
-  // Not covered by the pool design: the app-owned adapter has no `sessions` capability, so no row of
-  // docs/plans/2026-11-23-design-left-chat.md applies and no planned PR flips this. A defect of the app-owned-Chat
+  // Not covered by the planned session pool: the app-owned adapter has no `sessions` capability, so the pool does
+  // not apply and no planned PR flips this. A defect of the app-owned-Chat
   // pattern on main, to be decided separately.
   it.fails('KNOWN DEFECT A to B while A streams, A ends in the background, then A again: A shows and stores the whole answer', async () => {
     const chats = appChats();
@@ -333,8 +333,8 @@ describe('C1 with a session store (load/save) next to the app-owned Chats', () =
 // ---------------------------------------------------------------------------------------------------------------
 // C2: a draft id replaced by the real id while the first request runs (one built-in Vercel transport).
 // The "rename without a signal, with re-id'd messages" case (C2c) is expected to change with `renamedFrom`:
-// see the design's tables "Semantik ('background')" (rows "Entwurf->echt ...") and "Verhaltensaenderungen",
-// item 5, in docs/plans/2026-11-23-design-left-chat.md.
+// the planned rename signal `renamedFrom` moves a running draft to the real id without a load; without it, a
+// rename with re-id'd messages counts as a switch and the answer stays under the draft id.
 // ---------------------------------------------------------------------------------------------------------------
 
 function VercelHost({ session, config }: { session: SessionConfig; config?: Partial<AiChatProviderConfig> }) {
@@ -445,8 +445,7 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
 
   // KNOWN DEFECT (main): while the real id's history loads, the provider has emptied the transport and the next
   // chunk writes the answer into it, so the chat shows the answer without its question until the load ends.
-  // With the design's `renamedFrom` no load happens (row "Entwurf->echt mit renamedFrom" of
-  // docs/plans/2026-11-23-design-left-chat.md); without the signal no planned PR changes it.
+  // With the planned rename signal `renamedFrom` no load happens; without the signal no planned PR changes it.
   it.fails('KNOWN DEFECT C2b with a slow load: while it loads the chat never shows the answer without its question', async () => {
     const store = draftStore();
     let release!: () => void;
@@ -465,8 +464,8 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
   });
 
   // KNOWN DEFECT (main), same as below plus the race: the stored partial and the streamed answer both stay.
-  // It can only flip once `renamedFrom` exists: without the signal the design deliberately keeps the answer under
-  // the draft id (row "Entwurf->echt ohne Signal, Ids umbenannt" of docs/plans/2026-11-23-design-left-chat.md).
+  // It can only flip once the rename signal `renamedFrom` exists: without the signal the planned pool deliberately
+  // keeps the answer under the draft id when the messages come back with new ids.
   it.fails('KNOWN DEFECT C2c with a slow load and a chunk arriving while it loads: the next request carries one answer', async () => {
     const store = draftStore();
     let release!: () => void;
@@ -504,8 +503,8 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
 
   // KNOWN DEFECT (main): the loaded partial answer `srv-1` stays in the history as a message of its own next to
   // the streamed answer; the UI merges them into one bubble, but the store and the next request carry both.
-  // It can only flip once `renamedFrom` exists: without the signal the design deliberately keeps the answer under
-  // the draft id (row "Entwurf->echt ohne Signal, Ids umbenannt" of docs/plans/2026-11-23-design-left-chat.md).
+  // It can only flip once the rename signal `renamedFrom` exists: without the signal the planned pool deliberately
+  // keeps the answer under the draft id when the messages come back with new ids.
   it.fails('KNOWN DEFECT C2c: neither the stored history nor the next request carries the loaded partial answer next to the streamed one', async () => {
     const store = draftStore();
     const { load, loaded } = draftLoad(store, true);
@@ -618,11 +617,11 @@ describe('C3 a transport wrapper that is a new object on every render', () => {
 
 /**
  * The optional members of `ChatTransport` the provider may look for, also the planned `sessions` capability (and
- * `setAutomaticSendsPaused` of the clear() fix). Edit this list when `ChatTransport` grows.
+ * `discardActiveRun` of `clear()`). Edit this list when `ChatTransport` grows.
  */
 const KNOWN_OPTIONAL_MEMBERS = [
   'subscribeToData', 'addToolOutput', 'continueTurn', 'continueAfterBudgetStop', 'setUiOutcomeReporting',
-  'setRequestLanguage', 'setAutomaticSendsPaused', 'sessions',
+  'setRequestLanguage', 'discardActiveRun', 'sessions',
 ];
 
 /** What the provider does with the transport object it is given: property writes and reads of absent members. */
@@ -689,7 +688,7 @@ describe('C4 a custom transport without a session capability', () => {
     expect([...new Set(seen.absentReads)].filter((key) => !KNOWN_OPTIONAL_MEMBERS.includes(String(key)))).toEqual([]);
   });
 
-  // The shared transport (intended to stay for transports without `sessions`, per the design): B is busy with
+  // The shared transport (intended to stay for transports without `sessions` under the planned pool): B is busy with
   // A's request; stop() in B stops it (the only one running), records nothing on B's turn and the outcome joins
   // A's turn. B's pipeline state shows the stop (R4-like).
   it('stop() in B after a host switch while A runs (intended to stay without sessions): stops the one shared request, the aborted outcome joins A\'s turn', async () => {
