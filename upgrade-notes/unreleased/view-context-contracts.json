@@ -5,10 +5,13 @@
   "howTo": "Nothing to do. sanitizeViewContext(input, { declaredTypes, factsSchemas, policy }) keeps up to 8 entries (a record of a declared entity type, a list view selection, or both) and drops invalid entries or fields with content-free reason counts; facts are kept only against a schema with safeParse (Zod or the runtime's JSON schema validator). The chat handler option, the browser registry and the model block follow in later releases.",
   "skill": "integrating-glirastes-nextjs",
   "adoptedWhen": {
-    "patterns": ["\\bsanitizeViewContext\\b"]
+    "patterns": [
+      "\\bsanitizeViewContext\\b"
+    ]
   },
   "surface": [
     "glirastes/contracts#ResolvedViewContextPolicy.*",
+    "glirastes/contracts#VIEW_CONTEXT_CHARACTER_POLICY",
     "glirastes/contracts#VIEW_CONTEXT_DROP_REASONS",
     "glirastes/contracts#VIEW_CONTEXT_HISTORY_MODES",
     "glirastes/contracts#VIEW_CONTEXT_LIMITS",
