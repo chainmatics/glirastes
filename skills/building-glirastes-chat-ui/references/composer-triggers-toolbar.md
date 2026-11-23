@@ -84,14 +84,18 @@ base.save!(id, messages, options)`).
 ### Mention markers
 
 A sent mention carries its canonical label (`mentions.serialize.labels`,
-default `'canonical'`): ordinary labels are byte-identical; `{` `}` `<!`
-`-->` `--!>` become `｛` `｝` `‹!` `--›` `--!›`, control, format (zero-width,
-bidi, tag, also ZWJ/ZWNJ) and line-break characters go, whitespace runs
-become one space, NFC, at most `maxLabelLength` (1-120, default 120) code
-points (`…`). A type outside `[a-z][a-z0-9_.-]{0,63}` (the entity type pattern) or an id with `:` `{`
-`}` `<` `>`, whitespace, control or format characters gets no marker: the
-text is prefix and label. `labels: 'raw'` sends the old format. Reading is
-unchanged so far (stored text shows as before).
+default `'canonical'`): ordinary labels, also emoji, flags, Persian and
+Devanagari names, are byte-identical; `{` `}` `<!` `-->` `--!>` become `｛`
+`｝` `‹!` `--›` `--!›`; hidden characters go (bidi, zero-width, soft hyphen,
+variation selectors, tag runs, private use, Hangul fillers) except one ZWJ
+between emoji, one ZWJ/ZWNJ between letters, the England/Scotland/Wales
+flag tags and one VS15/VS16 after an emoji; whitespace runs become one
+space, NFC, at most `maxLabelLength` (1-120, default 120) code points (`…`,
+cut before a joined sequence). A type outside `[a-z][a-z0-9_.-]{0,63}` or an
+id with `:` `{` `}` `<` `>`, whitespace, control, format or invisible
+characters gets no marker: the text is prefix and label and the model loses
+the id. `labels: 'raw'` sends the old format. Reading is unchanged so far
+(stored text shows as before).
 
 From `glirastes/contracts`, for own parsers and server code:
 `canonicalMentionLabel(label, { id?, maxLength? })` (`CanonicalMentionLabelOptions`),

@@ -237,19 +237,33 @@ marker carries nothing the bubble hides from the user but the model reads:
 | --- | --- |
 | `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (a `}}` can no longer end the marker, a `<!--context:…-->` is visible text of the chip) |
 | control characters, line and paragraph separators, whitespace runs | one space; trimmed |
-| format characters (zero-width, bidi such as RLO, tag characters, soft hyphen) | removed; this also takes the ZWJ out of emoji sequences (a family emoji shows its people side by side) and the ZWNJ out of Persian words |
-| more than `maxLabelLength` code points (1-120, default 120) | the first 119 and `…`, never inside a surrogate pair |
+| format characters: bidi controls (RLO …), zero-width space, word joiner, BOM, soft hyphen (a typesetting hint, invisible unless a line breaks there) and all others | removed |
+| ZWJ / ZWNJ | kept once between two emoji (family and profession emoji, 🏳️‍🌈) or between two letters or marks (Persian and Arabic ZWNJ, Indic conjuncts); a run becomes one joiner; every other joiner is removed |
+| tag characters | only the tags of the 🏴 England, Scotland and Wales flags; any other tag run is removed (a 🏴 with other tags stays a bare 🏴) |
+| variation selectors | one VS15/VS16 right after an emoji-capable character (❤️, ☺︎, keycaps); all others removed, also the supplement U+E0100-E01EF |
+| U+034F, Hangul fillers (U+115F, U+1160, U+3164, U+FFA0), U+2800, private use (icon fonts), unassigned and noncharacters, lone surrogates | removed |
+| more than `maxLabelLength` code points (1-120, default 120) | at most the first 119 and `…`, cut before a joined emoji, flag, conjunct or combining sequence |
 | nothing visible left | the id |
 
-The text is NFC. Ordinary labels (`ACME <Süd> & Co. -> a/b`) are sent
-byte-identical; a single `<` or `>` stays. A mention whose type is not
-`[a-z][a-z0-9_.-]{0,63}` (the entity type pattern) or whose id has `:` `{` `}` `<` `>`, whitespace,
-control or format characters or more than 200 UTF-16 units gets no marker:
-the text is the prefix and the canonical label (`@Acme`), and the context
-block does not list it. `labels: 'raw'` sends the format of releases
-before. Queued messages and restored drafts keep the structured mention and
-are serialized the same way when they are sent. `glirastes/contracts`
-exports the grammar for own parsers and server code:
+The text is NFC. Ordinary labels (`ACME <Süd> & Co. -> a/b`, emoji, flags,
+Persian, Arabic and Devanagari names) are sent byte-identical; a single `<`
+or `>` stays.
+
+**An invalid type or id sends no marker.** A mention whose type is not
+`[a-z][a-z0-9_.-]{0,63}` (the entity type pattern; capitals or non-ASCII
+are invalid) or whose id has `:` `{` `}` `<` `>`, whitespace, control,
+format or any invisible character of the table, or more than 200 UTF-16
+units, is sent as the prefix and the canonical label (`@Acme`): the model
+loses the id, and the context block does not list it. An id is never
+cleaned. Completion items already require a valid type, so an invalid type
+comes only from the legacy `mentions` config (`search` / `resolve`
+results), `addActiveMention`, `RichMentionInput` `addMention` /
+`insertMention` / `setValue` with app-built mentions, or drafts and queued
+messages stored with such mentions; an invalid id can come from all of
+these and from completion items. `labels: 'raw'` sends the format of
+releases before. Queued messages and restored drafts keep the structured
+mention and are serialized the same way when they are sent.
+`glirastes/contracts` exports the grammar for own parsers and server code:
 `canonicalMentionLabel`, `parseMentionMarkers` (`type`, `id`, `label`,
 `canonical`, `span`; the same matches as the reader before, linear in the
 text), `serializeMentionMarker`, `isMentionMarkerType`, `isMentionMarkerId`.

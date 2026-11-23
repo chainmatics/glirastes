@@ -12,10 +12,32 @@
  * type   = [a-z][a-z0-9_.-]{0,63}   (ENTITY_TYPE_PATTERN: every declared
  *          entity type, chat entity types and `command`)
  * id     = 1-200 code points (and UTF-16 units), without ":" "{" "}" "<" ">",
- *          whitespace, Cc, Cf, lone surrogates
- * label  = 1-120 code points (NFC), without "{" "}" Cc Cf Zl Zp,
- *          without "<!" "-->" "--!>", no whitespace at the edges or twice
+ *          whitespace, Cc, Cf, lone surrogates or any invisible character
+ *          of the table below (an id is never cleaned: invalid, no marker)
+ * label  = 1-120 code points, the character policy below applied
  * ```
+ *
+ * Character policy of a label (`cleanDisplayText`, then the delimiters):
+ *
+ * | Characters | In a label |
+ * | --- | --- |
+ * | lone surrogates (Cs) | removed |
+ * | Cf: bidi controls, zero-width space, word joiner, BOM, soft hyphen, all others | removed |
+ * | ZWJ / ZWNJ run between two emoji (before: Extended_Pictographic, emoji modifier or VS16; after: Extended_Pictographic), run contains a ZWJ | one ZWJ |
+ * | ZWJ / ZWNJ run between two letters or marks (not variation selectors) | its first joiner |
+ * | any other ZWJ / ZWNJ (edges, next to a removed character, emoji and letter) | removed |
+ * | tag characters (U+E0000-E007F) | only the exact tags of 🏴 England, Scotland, Wales; all others removed, the 🏴 stays |
+ * | VS15 / VS16 right after a character with the Emoji property (❤️, keycaps) | one kept |
+ * | other variation selectors (U+FE00-FE0F, U+E0100-E01EF) | removed |
+ * | U+034F, Hangul fillers U+115F U+1160 U+3164 U+FFA0, U+2800 | removed |
+ * | private use (Co), unassigned and noncharacters (Cn) | removed |
+ * | Cc, Zl, Zp, whitespace runs | one space; trimmed |
+ * | (after the above) | NFC |
+ * | `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (single `<` `>` stay) |
+ * | nothing left | the canonical id |
+ * | over 120 (or `maxLength`) code points | cut to at most 119 and `…`, never inside a joined emoji, flag, conjunct or combining sequence |
+ *
+ * Unassigned (Cn) follows the Unicode version of the JavaScript engine.
  *
  * @module
  */
@@ -38,7 +60,31 @@ const READ_MAX_PART = 200;
 const READ_MAX_LABEL = 1_000;
 
 const LONE_SURROGATE = /\p{Cs}/gu;
-const FORMAT_CHARS = /\p{Cf}+/gu;
+/**
+ * Invisible code points that can carry a hidden payload besides Cc and Cf:
+ * variation selectors, the combining grapheme joiner, the Hangul fillers,
+ * the braille blank, private use and unassigned code points (noncharacters
+ * included).
+ */
+const INVISIBLE_CLASS = String.raw`\p{Co}\p{Cn}\u034F\u115F\u1160\u3164\uFFA0\u2800\uFE00-\uFE0F\u{E0100}-\u{E01EF}`;
+const HAS_HIDDEN_CHAR = new RegExp(`[\\p{Cf}${INVISIBLE_CLASS}]`, 'u');
+const HIDDEN_CHAR = new RegExp(`^[\\p{Cf}${INVISIBLE_CLASS}]$`, 'u');
+const EMOJI = /^\p{Emoji}$/u;
+const PICTOGRAPHIC = /^\p{Extended_Pictographic}$/u;
+const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u;
+const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
+const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u;
+/** Code points that belong to the one before them: a cut never falls in front of one. */
+const ATTACHED = /^[\p{M}\p{Emoji_Modifier}\u200C\u200D\u{E0020}-\u{E007F}]$/u;
+const ZWJ = '\u200D';
+const ZWNJ = '\u200C';
+const TEXT_PRESENTATION = '\uFE0E';
+const EMOJI_PRESENTATION = '\uFE0F';
+const BLACK_FLAG = '\u{1F3F4}';
+/** The tag sequences after 🏴 of the three RGI subdivision flags (England, Scotland, Wales). */
+const RGI_FLAG_TAGS = ['gbeng', 'gbsct', 'gbwls'].map((code) =>
+  `${Array.from(code, (char) => String.fromCodePoint(0xe0000 + char.charCodeAt(0))).join('')}\u{E007F}`);
+const RGI_FLAG_TAG_LENGTH = 6;
 const SPACE_RUNS = /[\p{Cc}\p{Zl}\p{Zp}\p{Zs}\p{White_Space}]+/gu;
 const DELIMITERS = /[{}]|<!|--!?>/g;
 const DELIMITER_REPLACEMENTS: Readonly<Record<string, string>> = {
@@ -48,7 +94,7 @@ const DELIMITER_REPLACEMENTS: Readonly<Record<string, string>> = {
   '-->': '--›',
   '--!>': '--!›',
 };
-const INVALID_ID_CHAR = /[:{}<>\s\p{Cc}\p{Cf}\p{Cs}]/u;
+const INVALID_ID_CHAR = new RegExp(`[:{}<>\\s\\p{Cc}\\p{Cf}\\p{Cs}${INVISIBLE_CLASS}]`, 'u');
 
 export interface CanonicalMentionLabelOptions {
   /** Used (canonical) when nothing visible is left of the label. */
@@ -62,26 +108,112 @@ function clampLabelLength(value: number | undefined): number {
   return Math.min(MENTION_MARKER_MAX_LABEL_LENGTH, Math.max(1, Math.floor(value)));
 }
 
-function visibleLabel(label: string): string {
-  return label
-    .replace(LONE_SURROGATE, '�')
-    // Format characters go first: removed later, they could leave two spaces
-    // next to each other, or a base and a combining mark that NFC composes.
-    .replace(FORMAT_CHARS, '')
-    .normalize('NFC')
-    .replace(SPACE_RUNS, ' ')
-    .replace(DELIMITERS, (found) => DELIMITER_REPLACEMENTS[found]!)
-    .trim();
+const survives = (cp: string | undefined): cp is string => cp !== undefined && !HIDDEN_CHAR.test(cp);
+const isEmojiBeforeJoiner = (cp: string) =>
+  PICTOGRAPHIC.test(cp) || EMOJI_MODIFIER.test(cp) || cp === EMOJI_PRESENTATION;
+const isEmojiAfterJoiner = (cp: string | undefined) => survives(cp) && PICTOGRAPHIC.test(cp);
+const isLetterLike = (cp: string | undefined) => survives(cp) && LETTER_OR_MARK.test(cp);
+
+/**
+ * Removes hidden characters (Cf and `INVISIBLE_CLASS`) except those ordinary
+ * names need. A neighbour counts only if it is kept itself, so a joiner or
+ * selector next to any removed character goes too. One pass, linear.
+ */
+function withoutHiddenChars(text: string): string {
+  if (!HAS_HIDDEN_CHAR.test(text)) return text;
+  const points = Array.from(text);
+  let out = '';
+  /** Index of the last code point written, to tell whether `points[i - 1]` was kept. */
+  let kept = -1;
+  const keep = (from: number, to: number) => {
+    for (let j = from; j < to; j += 1) out += points[j]!;
+    kept = to - 1;
+  };
+  for (let i = 0; i < points.length;) {
+    const cp = points[i]!;
+    const before = kept === i - 1 ? points[i - 1] : undefined;
+    if (cp === BLACK_FLAG) {
+      const tags = points.slice(i + 1, i + 1 + RGI_FLAG_TAG_LENGTH).join('');
+      const end = RGI_FLAG_TAGS.includes(tags) ? i + 1 + RGI_FLAG_TAG_LENGTH : i + 1;
+      keep(i, end);
+      i = end;
+      continue;
+    }
+    if (!HIDDEN_CHAR.test(cp)) {
+      keep(i, i + 1);
+      i += 1;
+      continue;
+    }
+    if (cp === ZWJ || cp === ZWNJ) {
+      let end = i;
+      let hasZwj = false;
+      while (end < points.length && (points[end] === ZWJ || points[end] === ZWNJ)) {
+        if (points[end] === ZWJ) hasZwj = true;
+        end += 1;
+      }
+      const after = points[end];
+      if (before !== undefined && hasZwj && isEmojiBeforeJoiner(before) && isEmojiAfterJoiner(after)) {
+        out += ZWJ;
+        kept = end - 1;
+      } else if (before !== undefined && LETTER_OR_MARK.test(before) && before !== EMOJI_PRESENTATION && before !== TEXT_PRESENTATION && isLetterLike(after)) {
+        out += cp;
+        kept = end - 1;
+      }
+      i = end;
+      continue;
+    }
+    // One text or emoji presentation selector right after a character that has both presentations.
+    if ((cp === EMOJI_PRESENTATION || cp === TEXT_PRESENTATION) && before !== undefined && EMOJI.test(before)) {
+      keep(i, i + 1);
+    }
+    i += 1;
+  }
+  return out;
+}
+
+/** Whether a cut in front of `points[k]` would split a sequence that belongs together. */
+function splitsSequence(points: string[], k: number): boolean {
+  if (ATTACHED.test(points[k]!)) return true;
+  if (points[k - 1] === ZWJ || points[k - 1] === ZWNJ) return true;
+  if (!REGIONAL_INDICATOR.test(points[k]!) || !REGIONAL_INDICATOR.test(points[k - 1]!)) return false;
+  // Regional indicators pair up from the start of their run: an odd run before k ends mid-flag.
+  let run = 0;
+  for (let j = k - 1; j >= 0 && REGIONAL_INDICATOR.test(points[j]!); j -= 1) run += 1;
+  return run % 2 === 1;
 }
 
 /**
- * The canonical form of a mention label: lone surrogates become U+FFFD;
- * format characters (Cf: zero-width, bidi, tag characters, soft hyphen) are
- * removed; NFC; runs of control, line/paragraph separator and whitespace
- * characters become one space; `{` `}` `<!` `-->` `--!>` become `｛` `｝`
- * `‹!` `--›` `--!›`; trimmed; empty becomes the canonical `id`; over
- * `maxLength` code points it is cut to `maxLength - 1` code points and `…`.
- * Single `<` and `>` stay. Idempotent, linear in the label's length.
+ * Display text cleaned of everything a reader does not see but a model
+ * reads (the character policy in the module doc, without the marker
+ * delimiters): lone surrogates and hidden characters removed except the
+ * joiners, presentation selectors and flag tags of ordinary names; NFC;
+ * runs of control, line/paragraph separator and whitespace characters one
+ * space; trimmed. Idempotent, linear. Not part of the public API; for
+ * contracts that put display text into model-facing blocks.
+ */
+export function cleanDisplayText(text: string): string {
+  // Hidden characters go before NFC: removed later, they could leave two
+  // spaces next to each other, or a base and a combining mark NFC composes.
+  // They are checked again after NFC, which can change a neighbour (`<` and
+  // U+0338 become `≮`, no longer a letter or mark).
+  const composed = withoutHiddenChars(text.replace(LONE_SURROGATE, '')).normalize('NFC');
+  return withoutHiddenChars(composed)
+    .normalize('NFC')
+    .replace(SPACE_RUNS, ' ')
+    .trim();
+}
+
+function visibleLabel(label: string): string {
+  return cleanDisplayText(label).replace(DELIMITERS, (found) => DELIMITER_REPLACEMENTS[found]!);
+}
+
+/**
+ * The canonical form of a mention label: `cleanDisplayText` (see the
+ * character policy in the module doc); `{` `}` `<!` `-->` `--!>` become `｛`
+ * `｝` `‹!` `--›` `--!›`; empty becomes the canonical `id`; over `maxLength`
+ * code points it is cut to at most `maxLength - 1` code points and `…`,
+ * before any joined sequence the cut would split. Single `<` and `>` stay.
+ * Idempotent, linear in the label's length.
  */
 export function canonicalMentionLabel(label: string, options?: CanonicalMentionLabelOptions): string {
   let visible = visibleLabel(typeof label === 'string' ? label : '');
@@ -91,7 +223,10 @@ export function canonicalMentionLabel(label: string, options?: CanonicalMentionL
   if (visible.length <= max) return visible;
   const points = Array.from(visible);
   if (points.length <= max) return visible;
-  return `${points.slice(0, max - 1).join('')}…`;
+  // Cut before a joined emoji, flag, conjunct or combining sequence, never inside it.
+  let keep = max - 1;
+  while (keep > 0 && splitsSequence(points, keep)) keep -= 1;
+  return `${points.slice(0, keep).join('')}…`;
 }
 
 /** Whether `type` is a marker type (`[a-z][a-z0-9_.-]{0,63}`, `ENTITY_TYPE_PATTERN`). */
