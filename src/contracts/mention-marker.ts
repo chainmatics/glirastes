@@ -114,6 +114,18 @@ const HAS_HIDDEN_CHAR = new RegExp(`[${HIDDEN_CLASS}]`, 'u');
 const HIDDEN_CHAR = new RegExp(`^[${HIDDEN_CLASS}]$`, 'u');
 /** Characters a type or id must not carry: they can hide text or end a marker or comment. */
 const HOSTILE = new RegExp(String.raw`[\p{Cc}\p{Zl}\p{Zp}\p{Cs}\p{Cn}}${HIDDEN_CLASS}]|\{\{|<!|--!?>`, 'u');
+const HIDDEN_OR_BREAK = new RegExp(String.raw`[\p{Cc}\p{Zl}\p{Zp}\p{Cs}\p{Cn}${HIDDEN_CLASS}]`, 'u');
+
+/**
+ * Whether `text` holds a character that can hide text or break a line:
+ * control, line/paragraph separator, lone surrogate, unassigned, and the
+ * hidden characters of `cleanDisplayText` (without its exceptions). For
+ * values that are never cleaned, such as ids: one of these makes them
+ * invalid. Not part of the public API.
+ */
+export function hasHiddenChar(text: string): boolean {
+  return HIDDEN_OR_BREAK.test(text);
+}
 /** The type part of the reader every SDK version used. */
 const READ_TYPE = /^[^:}]{1,200}$/;
 const EMOJI = /^\p{Emoji}$/u;

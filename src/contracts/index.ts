@@ -216,3 +216,31 @@ export type {
   ParsedMentionMarker,
   SerializeMentionMarkerOptions,
 } from './mention-marker.js';
+
+export {
+  isViewContextRoute,
+  resolveViewContextPolicy,
+  sanitizeViewContext,
+  VIEW_CONTEXT_DROP_REASONS,
+  VIEW_CONTEXT_HISTORY_MODES,
+  VIEW_CONTEXT_LIMITS,
+  ViewContextEntrySchema,
+  ViewContextSchema,
+} from './view-context.js';
+export type {
+  ResolvedViewContextPolicy,
+  ViewContextDropReason,
+  ViewContextEntity,
+  ViewContextEntityId,
+  ViewContextEntry,
+  ViewContextFactValue,
+  ViewContextFacts,
+  ViewContextFactsSchema,
+  ViewContextFactsSchemas,
+  ViewContextHistory,
+  ViewContextOption,
+  ViewContextPolicy,
+  ViewContextSanitizeOptions,
+  ViewContextSanitizeResult,
+  ViewContextSelection,
+} from './view-context.js';
