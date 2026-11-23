@@ -157,17 +157,28 @@ describe('detect', () => {
     ]);
   });
 
-  it('scans style sheets for patterns only, never as glirastes imports', async () => {
+  it('matches style sheets only for notes that opt in with files: [\'style\']', async () => {
     write('app/globals.css', "@import 'glirastes/react/styles.css';\n[data-component=\"voice-input-addon\"]::before { content: ''; }\n");
     write('app/theme.scss', '.x { color: red; }\n');
+    write('src/a.ts', "export const css = 'voice-input-addon\"]::before';\n");
+    write('storybook-static/x.css', '[data-component="voice-input-addon"]::before {}\n');
+    write('.docusaurus/x.css', '[data-component="voice-input-addon"]::before {}\n');
+    write('.cache/x.css', '[data-component="voice-input-addon"]::before {}\n');
     const scan = await scanApp(root);
     expect(scan.files.map((f) => [f.path, f.glirastesImports])).toEqual([
       ['app/globals.css', []],
       ['app/theme.scss', []],
+      ['src/a.ts', []],
     ]);
-    expect(evaluateNote(note({ affectedWhen: { patterns: ['voice-input-addon"\\]::before'] } }), scan))
+    const pattern = 'voice-input-addon"\\]::before';
+    // Without opt-in a note keeps its old meaning: code files only.
+    expect(evaluateNote(note({ affectedWhen: { patterns: [pattern] } }), scan))
+      .toEqual({ status: 'affected', evidence: [{ file: 'src/a.ts', line: 1 }] });
+    expect(evaluateNote(note({ affectedWhen: { patterns: [pattern], files: ['style'] } }), scan))
       .toEqual({ status: 'affected', evidence: [{ file: 'app/globals.css', line: 2 }] });
-    expect(evaluateNote(note({ affectedWhen: { imports: ['glirastes/react'], symbols: ['color'] } }), scan).status)
+    expect(evaluateNote(note({ affectedWhen: { patterns: [pattern], files: ['code', 'style'] } }), scan).evidence)
+      .toEqual([{ file: 'app/globals.css', line: 2 }, { file: 'src/a.ts', line: 1 }]);
+    expect(evaluateNote(note({ affectedWhen: { imports: ['glirastes/react'], symbols: ['color'], files: ['style'] } }), scan).status)
       .toBe('not-affected');
   });
 

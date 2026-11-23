@@ -40,6 +40,12 @@ const DetectSchema = z
     imports: z.array(z.string().min(1)).optional(),
     symbols: z.array(z.string().min(1)).optional(),
     patterns: z.array(patternSchema).optional(),
+    /**
+     * The files the lists match in: `code` (default; source, JSON and
+     * package.json) and/or `style` (.css, .scss, .sass, .less, patterns only:
+     * an `@import` of glirastes/react/styles.css is no code import).
+     */
+    files: z.array(z.enum(['code', 'style'])).min(1).optional(),
   })
   .strict()
   .refine(

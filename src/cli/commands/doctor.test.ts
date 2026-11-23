@@ -558,6 +558,27 @@ describe('createDoctorReport', () => {
       });
     });
 
+    it('only warns for a configured URL under a base path ending in the copied file (Next basePath, Vite base)', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir, "{ workletUrl: '/app/audio-worklet-processor.js' }");
+      await scripts(rootDir, { predev: 'glirastes stt worklet' });
+      expect(await voiceCheck(rootDir)).toEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'verify-audio-worklet-url',
+      });
+    });
+
+    it('ignores workletUrl literals in test files', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await mkdir(join(rootDir, 'src/__tests__'), { recursive: true });
+      for (const path of ['src/voice.test.ts', 'src/voice.spec.tsx', 'src/__tests__/voice.ts']) {
+        await writeFile(join(rootDir, path),
+          "import { RecordedSttAdapter } from 'glirastes/react';\nnew RecordedSttAdapter({ workletUrl: '/custom/worklet.js' });\n");
+      }
+      await scripts(rootDir, { predev: 'glirastes stt worklet' });
+      expect((await voiceCheck(rootDir))?.remediation).toBe('run-audio-worklet-copy');
+    });
+
     it('checks a configured worklet path, not the default file, and only warns about an absolute URL', async () => {
       const rootDir = await fixture();
       await useVoice(rootDir, "{ workletUrl: '/static/pcm.js?v=2' }");

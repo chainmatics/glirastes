@@ -475,6 +475,9 @@ existing app add it yourself, in front of the existing commands:
 - The copy is a build output: `glirastes init` and `glirastes stt worklet`
   add its path (`/public/audio-worklet-processor.js`, or the `--out` path) to an
   existing `.gitignore` once and never create one; `--no-gitignore` skips it.
+  A `!` negation of the path is left alone, CRLF line ends are kept, and a
+  path with `[`, `]`, `*`, `?` or `\` gets no entry. An unwritable
+  `.gitignore` is only a warning (`--json`: `"gitignore": "failed"`).
   `glirastes init --dry-run` lists each script it adds or changes and the
   `.gitignore` entry.
 
@@ -485,7 +488,10 @@ literal `workletUrl` points to a file no copy step creates (the copy writes
 `audio-worklet-processor.js` into `public/` or `--out`; e.g. `/custom/worklet.js`
 next to a plain `glirastes stt worklet`), naming both paths. It warns
 (`E-SETUP-108`) when the copy step that creates the configured file has not run
-yet, copies outside `public/`, or the URL is absolute.
+yet, copies outside `public/`, the URL ends in the copied path under a base
+path (`/app/audio-worklet-processor.js` with Next.js `basePath` or Vite `base`),
+or the URL is absolute. `workletUrl` literals in test files (`*.test.*`,
+`*.spec.*`, `__tests__/`) are not checked.
 
 The mic, stop and retry buttons draw their own icon (`svg[data-icon="mic" |
 "stop" | "busy" | "retry"]`) and carry a localized `aria-label`; style them via

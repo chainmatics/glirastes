@@ -98,6 +98,41 @@ describe('glirastes stt worklet', () => {
     expect(JSON.parse(outside.out[0]!)).toMatchObject({ gitignore: 'none' });
   });
 
+  it('treats a negated entry as the developer\'s decision and keeps CRLF line ends', async () => {
+    await writeFile(join(root, '.gitignore'), `public/*\r\n!/public/${AUDIO_WORKLET_FILE}\r\n`);
+    const negated = io();
+    expect(await runSttCommand(['worklet', '--root', root, '--json'], { workletSource: source, ...negated })).toBe(0);
+    expect(JSON.parse(negated.out[0]!)).toMatchObject({ gitignore: 'listed' });
+    expect(await readFile(join(root, '.gitignore'), 'utf8')).toBe(`public/*\r\n!/public/${AUDIO_WORKLET_FILE}\r\n`);
+
+    await writeFile(join(root, '.gitignore'), 'node_modules\r\n');
+    const crlf = io();
+    expect(await runSttCommand(['worklet', '--root', root, '--json'], { workletSource: source, ...crlf })).toBe(0);
+    expect(await readFile(join(root, '.gitignore'), 'utf8'))
+      .toBe(`node_modules\r\n\r\n# Copied by glirastes stt worklet\r\n/public/${AUDIO_WORKLET_FILE}\r\n`);
+  });
+
+  it('writes no entry for a path with gitignore pattern characters', async () => {
+    await writeFile(join(root, '.gitignore'), 'node_modules\n');
+    for (const out of ['web/[static]', 'web/a*b', 'web/trailing ']) {
+      const lines = io();
+      expect(await runSttCommand(['worklet', '--root', root, '--out', out, '--json'], { workletSource: source, ...lines })).toBe(0);
+      expect(JSON.parse(lines.out[0]!), out).toMatchObject({ gitignore: 'none' });
+    }
+    expect(await readFile(join(root, '.gitignore'), 'utf8')).toBe('node_modules\n');
+  });
+
+  it('copies anyway and only warns when the .gitignore cannot be read or written', async () => {
+    await mkdir(join(root, '.gitignore'));
+    const lines = io();
+    expect(await runSttCommand(['worklet', '--root', root], { workletSource: source, ...lines })).toBe(0);
+    expect(existsSync(join(root, 'public', AUDIO_WORKLET_FILE))).toBe(true);
+    expect(lines.err.join('\n')).toContain('.gitignore');
+    const json = io();
+    expect(await runSttCommand(['worklet', '--root', root, '--json'], { workletSource: source, ...json })).toBe(0);
+    expect(JSON.parse(json.out[0]!)).toMatchObject({ gitignore: 'failed' });
+  });
+
   it('is a declared subcommand', () => {
     expect(STT_SUBCOMMANDS.worklet).toEqual({ flags: ['--json', '--no-gitignore'], values: ['--out', '--root'] });
   });

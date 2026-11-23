@@ -24,6 +24,9 @@ export interface VoiceWorkletInspection {
   mismatch?: { workletUrls: string[]; copyTargets: string[] };
 }
 
+/** Test files configure worklet URLs for their fixtures, not for the app. */
+const TEST_FILE = /(?:^|\/)__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
 const ABSOLUTE_URL = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i;
 
 /** The package.json script values only; prose elsewhere in the manifest does not count. */
@@ -68,6 +71,7 @@ export async function inspectVoiceWorklet(
 
   const urls = new Set<string>();
   for (const file of glirastesFiles) {
+    if (TEST_FILE.test(file.path)) continue;
     for (const match of file.text.matchAll(WORKLET_URL_LITERAL)) urls.add(match[2]!);
   }
   const configured = [...urls];
@@ -107,7 +111,10 @@ export async function inspectVoiceWorklet(
   const missingUrls = targets.filter((url) => !servedAt(url));
   const fileOf = (url: string) => url.split(/[?#]/)[0]!;
   const fileName = (url: string) => fileOf(url).split('/').pop();
-  const mismatched = missingUrls.filter((url) => !createdUrls.has(fileOf(url))
+  // A URL ending in a created path may sit under a base path (Next.js
+  // basePath, Vite base) this offline check does not read.
+  const underBase = (url: string) => [...createdUrls].some((created) => fileOf(url).endsWith(created));
+  const mismatched = missingUrls.filter((url) => !underBase(url)
     && !unknown && !(elsewhere && fileName(url) === AUDIO_WORKLET_FILE));
   if (mismatched.length > 0) {
     return { voice, status: 'mismatch', mismatch: { workletUrls: mismatched, copyTargets: [...copyTargets] } };

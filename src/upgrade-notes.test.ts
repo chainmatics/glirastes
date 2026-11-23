@@ -320,15 +320,16 @@ describe('shipped note detection', () => {
     })).status).toBe('adopted');
   });
 
-  it('voice-button-own-icon flags CSS that replaced the voice button text with an own icon, not ordinary voice styles', async () => {
+  it('voice-button-own-icon flags style sheets that replaced the voice button text with an own icon, not ordinary voice styles', async () => {
     const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === 'voice-button-own-icon')!;
+    expect(note.affectedWhen?.files).toEqual(['style']);
     for (const [file, source] of [
       ['app/globals.css', '[data-component="voice-input-addon"]::before { content: url(/mic.svg); }\n'],
       ['app/globals.css', '[data-component=voice-input-addon][data-state="recording"]:after {\n  content: "";\n}\n'],
       ['app/globals.scss', '[data-component="voice-input-addon"] {\n  font-size: 0;\n  background: url(/mic.svg);\n}\n'],
       ['src/voice.css', '.glirastes-voice-input-button { color: transparent; }\n'],
-      ['src/retry.css', '[data-action="retry-recording"]::before { content: "↻"; }\n'],
-      ['app/chat.tsx', 'const css = `[data-component="voice-input-button"] { text-indent: -9999px; }`;\n'],
+      ['src/retry.less', '[data-action="retry-recording"]::before { content: "↻"; }\n'],
+      ['app/x.sass', '[data-component="voice-input-button"] { text-indent: -9999px; }\n'],
     ] as const) {
       expect(evaluateNote(note, scanOf({ [file]: source })).status, source).toBe('affected');
     }
@@ -337,11 +338,20 @@ describe('shipped note detection', () => {
       '[data-component="voice-input-addon"][data-state="recording"] svg { color: red; }\n',
       '[data-component="voice-input-addon-wrapper"]::before { content: ""; }\n',
       '.composer::before { content: ""; }\n[data-component="voice-input-addon"] { width: 2rem; }\n',
+      '[data-component="voice-input-addon"] { display: flex; justify-content: center; }\n',
+      '[data-component="voice-input-addon"] { display: grid; place-content: center; }\n',
+      '[data-component="voice-input-addon"] { background-color: transparent; border-color: transparent; }\n',
+      '[data-component="voice-input-addon"] { align-content: center; font-size: 0.875rem; }\n',
+      `[data-component="voice-input-addon"]${' '.repeat(20_000)}x`,
     ]) {
-      expect(evaluateNote(note, scanOf({ 'app/globals.css': source })).status, source).toBe('not-affected');
+      expect(evaluateNote(note, scanOf({ 'app/globals.css': source })).status, source.slice(0, 120)).toBe('not-affected');
     }
+    // The shipped stylesheet itself styles the button without hiding text.
+    const shipped = await readFile(join(repoRoot, 'src/react/styles.css'), 'utf8');
+    expect(evaluateNote(note, scanOf({ 'app/vendor/styles.css': shipped })).status).toBe('not-affected');
+    // Code files never match, even when a selector string precedes a content: key.
     expect(evaluateNote(note, scanOf({
-      'app/test.tsx': "import { screen } from '@testing-library/react';\nscreen.getByRole('button', { name: 'Start voice input' });\n",
+      'app/test.tsx': "const b = document.querySelector('[data-component=\"voice-input-addon\"]::before');\nconst x = { content: 'a' };\n",
     })).status).toBe('not-affected');
   });
 

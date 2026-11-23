@@ -4,7 +4,7 @@ import { isFoundationDiagnosticError } from '../../../diagnostics/index.js';
 import { resolveSttModelDir, STT_ATTRIBUTION_TEXT } from '../../../server/stt-local/models.js';
 import { parseToolArgs, ToolsUsageError, type ToolArgsSpec } from '../tools/args.js';
 import { pullSttModels, type SttPullDependencies } from './pull.js';
-import { provideAudioWorklet, withAudioWorkletGitignoreEntry } from './worklet.js';
+import { isLiteralGitignorePath, provideAudioWorklet, withAudioWorkletGitignoreEntry } from './worklet.js';
 
 export type { SttPullDependencies, SttPullResult } from './pull.js';
 export { pullSttModels } from './pull.js';
@@ -94,7 +94,7 @@ async function runWorklet(
       ...(source !== undefined ? { source } : {}),
     });
     const shown = relative(root, result.path).split(sep).join('/');
-    const gitignore = args.flags.has('--no-gitignore') ? 'skipped' : await ignoreCopy(root, shown);
+    const gitignore = args.flags.has('--no-gitignore') ? 'skipped' : await ignoreCopy(root, shown, error);
     if (json) log(JSON.stringify({ path: shown, status: result.status, gitignore }));
     else {
       log(`${result.status === 'written' ? 'Wrote' : 'Up to date:'} ${shown}`);
@@ -117,22 +117,34 @@ async function runWorklet(
 
 /**
  * Lists the copy in the root's existing .gitignore, as init does; never
- * creates one. `none`: no .gitignore, or the copy lies outside the root.
+ * creates one. `none`: no .gitignore, a copy outside the root, or a path
+ * gitignore would read as a pattern. Fails soft: the copy is done, so an
+ * unreadable or read-only .gitignore is a warning (`failed`), not an error.
  */
-async function ignoreCopy(root: string, shown: string): Promise<'added' | 'listed' | 'none'> {
-  if (shown.startsWith('../') || isAbsolute(shown)) return 'none';
+async function ignoreCopy(
+  root: string,
+  shown: string,
+  warn: (line: string) => void,
+): Promise<'added' | 'listed' | 'none' | 'failed'> {
+  if (shown.startsWith('../') || isAbsolute(shown) || !isLiteralGitignorePath(shown)) return 'none';
   const path = join(root, '.gitignore');
-  let current: string;
   try {
-    current = await readFile(path, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'none';
-    throw error;
+    let current: string;
+    try {
+      current = await readFile(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'none';
+      throw error;
+    }
+    const next = withAudioWorkletGitignoreEntry(current, shown);
+    if (next === undefined) return 'listed';
+    await writeFile(path, next);
+    return 'added';
+  } catch (caught) {
+    const code = (caught as NodeJS.ErrnoException).code;
+    warn(`Warning: could not add /${shown} to .gitignore${code ? ` (${code})` : ''}; add it yourself or pass --no-gitignore.`);
+    return 'failed';
   }
-  const next = withAudioWorkletGitignoreEntry(current, shown);
-  if (next === undefined) return 'listed';
-  await writeFile(path, next);
-  return 'added';
 }
 
 function onStopSignals(abort: () => void): () => void {

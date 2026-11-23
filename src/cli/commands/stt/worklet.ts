@@ -74,15 +74,25 @@ function escapeRegExp(text: string): string {
 }
 
 /**
+ * A path gitignore would read as a pattern, not literally: `[`, `]`, `*`,
+ * `?`, `\\` or whitespace at the end of a segment. No entry is written for it.
+ */
+export function isLiteralGitignorePath(relativePath: string): boolean {
+  return !/[[\]*?\\]/.test(relativePath) && !relativePath.split('/').some((segment) => /\s$/.test(segment));
+}
+
+/**
  * The .gitignore with the copied worklet listed, or `undefined` when it is
  * listed already (at its path, with or without leading slash, or by its bare
- * file name). The copy is a build output; init and `glirastes stt worklet`
- * add the same entry.
+ * file name; a `!` negation of it is the developer's decision and counts as
+ * listed). Line ends follow the file (CRLF stays CRLF). The copy is a build
+ * output; init and `glirastes stt worklet` add the same entry.
  */
 export function withAudioWorkletGitignoreEntry(gitignore: string, relativePath?: string): string | undefined {
   const entry = audioWorkletGitignoreEntry(relativePath);
-  const listed = new RegExp(`^(?:/?${escapeRegExp(entry.slice(1))}|/?${escapeRegExp(AUDIO_WORKLET_FILE)})\\s*$`, 'm');
+  const listed = new RegExp(`^!?(?:/?${escapeRegExp(entry.slice(1))}|/?${escapeRegExp(AUDIO_WORKLET_FILE)})[ \\t]*\\r?$`, 'm');
   if (listed.test(gitignore)) return undefined;
-  const separator = gitignore === '' ? '' : gitignore.endsWith('\n') ? '\n' : '\n\n';
-  return `${gitignore}${separator}# Copied by ${AUDIO_WORKLET_COMMAND}\n${entry}\n`;
+  const eol = gitignore.includes('\r\n') ? '\r\n' : '\n';
+  const separator = gitignore === '' ? '' : gitignore.endsWith('\n') ? eol : `${eol}${eol}`;
+  return `${gitignore}${separator}# Copied by ${AUDIO_WORKLET_COMMAND}${eol}${entry}${eol}`;
 }
