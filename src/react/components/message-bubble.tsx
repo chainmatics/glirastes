@@ -1,6 +1,8 @@
-import { Fragment, Suspense, lazy, type ReactNode } from 'react';
+import { Fragment, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
+import { useMarkdownRenderer } from '../markdown-loader.js';
+import { markdownPlaceholderShape, markdownToPlainText } from '../utils/markdown-plain-text.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { useComposerContext } from '../provider/composer-context.js';
@@ -49,28 +51,7 @@ import type {
 } from '../types.js';
 import { turnStartId } from '../utils/turn-outcomes.js';
 
-// Lazy-load react-markdown — keeps it out of the synchronous import graph so
-// server-only consumers don't pay for it, and gracefully degrades to raw text
-// when the optional peer dep isn't installed.
-type MarkdownModule = typeof import('react-markdown');
 type ReactMarkdownOptions = import('react-markdown').Options;
-
-const ReactMarkdown = lazy<MarkdownModule['default']>(async () => {
-  try {
-    const mod = await import('react-markdown');
-    return { default: mod.default };
-  } catch {
-    if (typeof console !== 'undefined') {
-      console.warn(
-        '[MessageBubble] react-markdown is not installed — falling back to plain text. Install it with: npm install react-markdown',
-      );
-    }
-    const Fallback: MarkdownModule['default'] = (({ children }) => (
-      <>{typeof children === 'string' ? children : ''}</>
-    )) as MarkdownModule['default'];
-    return { default: Fallback };
-  }
-});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -827,14 +808,52 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   const links = useChatEntityLinks();
   const { remarkPlugins } = useChatMarkdownOptions();
-  return (
-    <div className={className} data-component="markdown">
-      <Suspense fallback={<>{content}</>}>
-        <ReactMarkdown
+  const { status, Renderer } = useMarkdownRenderer();
+  if (Renderer) {
+    return (
+      <div className={className} data-component="markdown">
+        <Renderer
           components={links.enabled ? links.markdownComponents : undefined}
           remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
-        >{content}</ReactMarkdown>
-      </Suspense>
+        >{content}</Renderer>
+      </div>
+    );
+  }
+  if (status === 'failed') return <PlainMarkdown content={content} className={className} />;
+  return <MarkdownPlaceholder content={content} className={className} />;
+}
+
+/**
+ * While the renderer loads: skeleton lines sized from the source, never the
+ * source itself (it would show list markers, emphasis and escapes, then jump).
+ */
+function MarkdownPlaceholder({ content, className }: { content: string; className?: string }) {
+  const { lines, chars } = markdownPlaceholderShape(content);
+  const style = { '--cm-markdown-placeholder-chars': chars } as CSSProperties;
+  return (
+    <div className={className} data-component="markdown" data-state="loading" aria-busy="true" style={style}>
+      {Array.from({ length: lines }, (_, index) => (
+        <span key={index} data-element="markdown-placeholder-line" aria-hidden="true" />
+      ))}
+    </div>
+  );
+}
+
+/** When the renderer cannot be loaded: the text without Markdown syntax, paragraphs and lines kept. */
+function PlainMarkdown({ content, className }: { content: string; className?: string }) {
+  const paragraphs = markdownToPlainText(content).split(/\n{2,}/).filter((paragraph) => paragraph.trim());
+  return (
+    <div className={className} data-component="markdown" data-state="plain">
+      {paragraphs.map((paragraph, index) => (
+        <p key={index}>
+          {paragraph.split('\n').map((line, at) => (
+            <Fragment key={at}>
+              {at > 0 ? <br /> : null}
+              {line}
+            </Fragment>
+          ))}
+        </p>
+      ))}
     </div>
   );
 }

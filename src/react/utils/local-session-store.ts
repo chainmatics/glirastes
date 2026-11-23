@@ -162,6 +162,10 @@ export async function clearLocalSessionStore(options: {
  *   <VercelAiChat endpoint="/api/chat" session={createLocalSessionStore({ storageKey: `myapp:${userId}` })} />
  *
  * Create it once per user (module scope or `useMemo`), not on every render.
+ *
+ * Only messages are stored, no entity declarations: the ones the chat handler
+ * streams are gone after a reload. For mention chips in a loaded chat, set
+ * the provider's `entityDeclarations`.
  */
 export function createLocalSessionStore(options: LocalSessionStoreOptions): SessionConfig {
   const storage = options.storage === undefined ? browserStorage() : options.storage;

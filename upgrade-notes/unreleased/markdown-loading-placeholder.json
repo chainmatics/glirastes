@@ -1,0 +1,23 @@
+{
+  "id": "markdown-loading-placeholder",
+  "kind": "recommended",
+  "summary": "Visible change: until react-markdown has loaded, a message shows skeleton lines instead of its raw Markdown source; without react-markdown, plain text without Markdown syntax. The provider preloads it on mount; new preloadMarkdown() in glirastes/react.",
+  "howTo": "Nothing to do. The placeholder is div[data-component=\"markdown\"][data-state=\"loading\"][aria-busy=\"true\"] with span[data-element=\"markdown-placeholder-line\"] per estimated line; color --cm-markdown-placeholder (default --cm-border), it pulses unless prefers-reduced-motion. When react-markdown cannot be loaded the text renders in div[data-component=\"markdown\"][data-state=\"plain\"]. Call preloadMarkdown() earlier (for example when the chat button renders) to load it before the provider mounts; it never rejects and does nothing on the server. Server-rendered chats render the placeholder and hydrate to Markdown. Tests that read the raw text of [data-component=\"markdown\"] right after render, before the renderer loaded, wait for it (await preloadMarkdown() or waitFor). Apps with components.Markdown are unaffected and do not load react-markdown. To show mention chips in a chat restored with session.load or createLocalSessionStore before its next turn, set entityDeclarations; streamed declarations are not stored.",
+  "skill": "building-glirastes-chat-ui#sessions",
+  "affectedWhen": {
+    "symbols": [
+      "AiChatProvider",
+      "MessageBubble",
+      "createLocalSessionStore"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "preloadMarkdown",
+      "markdown-placeholder-line"
+    ]
+  },
+  "surface": [
+    "glirastes/react#preloadMarkdown"
+  ]
+}

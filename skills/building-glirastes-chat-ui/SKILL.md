@@ -207,7 +207,7 @@ repository, not shipped in the package) has the table and override format.
 
 `chatInteractions` makes the default `ChatInput` show `/` and `@` pills (`theme.colors.pill*`, `--cm-pill-*`, `glirastes/react/pills.css` when unstyled); keep it.
 `useChatComposer().chatAbout({ type, id, label })` opens the chat with the pills in it (composers on `useChatComposerInput` get them; other own composers: `useChatComposerTarget`); `useOptionalChatComposer()` is `null` outside the provider, and `onOpenRequest` on the provider shows a chat the app opens itself.
-`entityLinks={{ matchers, open }}` makes references in answers clickable chips; a replaced `Markdown` slot keeps them only through `useChatEntityLinks()`. Markdown: lists are styled by default; tables need `bun add remark-gfm` and `markdown={{ remarkPlugins: [remarkGfm] }}` (`ChatMarkdownOptions`, memoized).
+`entityLinks={{ matchers, open }}` makes references in answers clickable chips; a replaced `Markdown` slot keeps them only through `useChatEntityLinks()`. Markdown: lists are styled by default; tables need `bun add remark-gfm` and `markdown={{ remarkPlugins: [remarkGfm] }}` (`ChatMarkdownOptions`, memoized). Until react-markdown loads, a text shows skeleton lines (`[data-component="markdown"][data-state="loading"]`, `aria-busy`); the provider preloads it, `preloadMarkdown()` earlier.
 Methods, chip options and gotchas: [references/composer-chips-attachments.md](references/composer-chips-attachments.md).
 
 ## Commands, mentions and clarification
@@ -291,7 +291,7 @@ transport refuses files. Limits, error codes and the composer API:
 SDK `ChatMessage`s or flat `WireChatMessage`s. `SessionSwitcher` renders list,
 create, switch and rename (`variant="list"` for a side column).
 
-Corrupted stored sessions fail closed; clearing history needs a confirmation.
+Corrupted stored sessions fail closed; clearing history needs a confirmation. A loaded chat has no entity declarations (streamed `data-tool-entities` are not stored): set `entityDeclarations` for mention chips before its next turn.
 
 For several chats per user without a backend, pass
 `session={createLocalSessionStore({ storageKey: JSON.stringify([appId, environment, businessTenantId, userId]) })}`

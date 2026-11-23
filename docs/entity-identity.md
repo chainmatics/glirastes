@@ -123,6 +123,12 @@ The browser gets the declarations from the built-in chat handler
 `AiChatProvider`'s `entityDeclarations` prop (by model-facing tool name; wins
 per tool), e.g. for a server that is not `createAiChatHandler`.
 
+Streamed declarations are not stored with a chat: a history restored through
+`session.load` or `createLocalSessionStore` after a reload has no
+declarations until its next turn streams them again. To show
+mention chips and entity links in a loaded chat at once, set
+`entityDeclarations`.
+
 ## Entity link options
 
 | Option | Default | Meaning |

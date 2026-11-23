@@ -577,6 +577,11 @@ export interface SessionConfig {
    * on switch. Return either full SDK `ChatMessage`s (with `parts`) or
    * flat `WireChatMessage`s (with `content`) — the provider coerces
    * the wire shape automatically.
+   *
+   * Entity declarations are not part of the stored messages: the ones the
+   * chat handler streams (`data-tool-entities`) live only until the page is
+   * left. For mention chips and entity links in a loaded chat before its
+   * next turn, set the provider's `entityDeclarations`.
    */
   load?: (
     conversationId: string,
