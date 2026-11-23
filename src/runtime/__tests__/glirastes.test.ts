@@ -1,3 +1,4 @@
+import {createOpenAI} from '@ai-sdk/openai';
 import {mkdir,mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -958,7 +959,79 @@ describe('createGlirastes with a privacy policy', () => {
     }))).toBe('privacy_policy_unavailable');
   });
 
-  it('review residual: signed off classifier revocation during tool loading yields zero serialized HTTP requests',async()=>{
+  it.each(['stream','classifier'] as const)('temporal review: handler %s transport does not retry after a signed off revocation',async(mode)=>{
+    const {privateKey,publicKey}=generateKeyPairSync('ed25519');const revocations:SecurityRevocation[]=[];
+    const http=platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey,revocations});
+    const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>new SharedDurableTestStore(),fetchImpl:http.fetchImpl,push:false,pollIntervalMs:10,onError:vi.fn()}));
+    await runtime.ready();const pinned=runtime.accepted()!.policyRevision;const turn=await runtime.chatTurn(principal);const requests:unknown[]=[];
+    const provider=createOpenAI({apiKey:'synthetic-only',baseURL:'https://retry.fixture.invalid/v1',fetch:async(_url,init)=>{
+      requests.push(JSON.parse(String(init?.body)));
+      const unsigned={revocationId:id('3997'),environmentId:ENVIRONMENT_ID,effectiveAt:'2026-07-29T00:02:00.000Z',reasonCode:'privacy-off-revoked',toolIds:[],agentRevisionIds:[],policyRevisionIds:[pinned.revisionId]};
+      revocations.push({...unsigned,signature:{algorithm:'Ed25519',keyId:'runtime-key',value:sign(null,Buffer.from(canonicalRuntimeJson(unsigned)),privateKey).toString('base64url')}});
+      await vi.waitFor(()=>expect(runtime.revocations()).toHaveLength(1));
+      return Response.json({error:{message:'synthetic retry',type:'server_error'}},{status:503});
+    }});
+    const model=provider.chat('fixture');const modules=[{id:'mail',name:'Mail',description:'Mail',tools:[],classification:{hint:'Mail',examples:['send a mail']}}];
+    const pipeline=createLocalAiPipeline({modules,classifier:{modules,model},generateText:generateText as never});
+    const handler=createAiChatHandler({model,tools:{},...(mode==='classifier'?{pipeline}:{}),systemPrompt:'Assistant',managedRuntime:turn.managedRuntime,onError:()=>{}});
+    const response=await handler(new Request('https://app.example/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:[{id:'u1',role:'user',parts:[{type:'text',text:'Investigate retry.canary@example.invalid carefully please'}]}]})}));
+    await response.text();expect(requests).toHaveLength(1);expect(JSON.stringify(requests)).toContain('retry.canary@example.invalid');
+  },15000);
+
+  it.each(['heartbeat','storage'] as const)('temporal review: known protected refusal blocks before pending %s completes',async(phase)=>{
+    const {privateKey,publicKey}=generateKeyPairSync('ed25519');const deployments=[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})];
+    const http=platform({deployments,publicKey});const stateStore=new SharedDurableTestStore();
+    let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let waiting=false;
+    const save=stateStore.saveAtomic.bind(stateStore);
+    if(phase==='storage') stateStore.saveAtomic=async state=>{if(state.privacyFloor?.profile==='protected-text/v1'){waiting=true;await held;}await save(state);};
+    const fetchImpl=(async(input:RequestInfo|URL,init?:RequestInit)=>{
+      if(phase==='heartbeat'&&String(input).endsWith('/heartbeat')&&String(init?.body).includes('privacy_refused')){waiting=true;await held;}
+      return http.fetchImpl(input,init);
+    }) as typeof fetch;
+    const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>stateStore,fetchImpl,push:false,pollIntervalMs:10,onError:vi.fn()}));
+    try{
+      await runtime.ready();expect(runtime.privacyPolicy()).toBeNull();deployments.splice(0,1,activeDeployment(privateKey,[],block));
+      await vi.waitFor(()=>expect(waiting).toBe(true));expect(codeOf(()=>runtime.privacyPolicy())).toBe('privacy_not_configured');
+      const turn=await runtime.chatTurn(principal);const adapter=providerAdapters().openrouter;
+      const handler=createAiChatHandler({tools:{},model:adapter.model,systemPrompt:'Assistant',managedRuntime:turn.managedRuntime,onError:()=>{}});
+      const response=await handler(new Request('https://app.example/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:[{id:'u1',role:'user',parts:[{type:'text',text:'refusal.canary@example.invalid'}]}]})}));
+      expect(response.status).toBe(503);await response.text();expect(adapter.requests).toHaveLength(0);
+    }finally{release();await runtime.stop();}
+  });
+  it('temporal review: bound-only off cannot report applied from volatile state',async()=>{
+    const {privateKey,publicKey}=generateKeyPairSync('ed25519');const http=platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey});
+    const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>new MemoryRuntimeStateStore(),fetchImpl:http.fetchImpl,push:false,pollIntervalMs:60000,onError:vi.fn()}));
+    await runtime.ready();expect(runtime.accepted()).toBeUndefined();
+    const reports=http.calls.filter(c=>c.url.endsWith('/heartbeat')).map(c=>JSON.parse(String(c.init.body)));
+    expect(reports).toHaveLength(1);expect(reports[0]).toMatchObject({health:'unhealthy',technicalMetadata:{privacy:{state:'refused',reasons:['accepted_state_missing']}}});
+    expect(reports[0]).not.toHaveProperty('lastAppliedDeploymentId');
+  });
+  it('temporal review: an obsolete push response cannot reconcile the replacement connection',async()=>{
+    const {privateKey,publicKey}=generateKeyPairSync('ed25519');const valid=activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'});
+    const http=platform({deployments:[valid],publicKey});
+    let event:(()=>Promise<void>)|undefined;let delayNext=false,held=false,disconnect=false,reconnected=false;let release!:(value:Response)=>void;
+    const oldResponse=new Promise<Response>(resolve=>{release=resolve;});let lookups=0;
+    const fetchImpl=(async(input:RequestInfo|URL,init?:RequestInit)=>{
+      if(String(input).includes('/v1/runtime/connection')){lookups++;if(lookups>1)reconnected=true;}
+      if(String(input).includes('/sync?')){
+        if(delayNext){delayNext=false;held=true;return oldResponse;}
+        if(disconnect&&!reconnected)return json({code:'environment_place_required'},409);
+        if(reconnected){const bad=structuredClone(valid);bad.policyRevision.signature.value='invalid';return json({cursor:new Date().toISOString(),activeSnapshotComplete:true,deployments:[bad],revocations:[]});}
+      }
+      return http.fetchImpl(input,init);
+    }) as typeof fetch;
+    const push={connect:async({onEvent,signal}:{onEvent:()=>Promise<void>;signal:AbortSignal})=>{event=onEvent;await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true});});}};
+    const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>new SharedDurableTestStore(),fetchImpl,push:push as never,pollIntervalMs:10,onError:vi.fn()}));
+    try{
+      await runtime.ready();await vi.waitFor(()=>expect(event).toBeDefined());expect(runtime.privacyPolicy()).toBeNull();
+      delayNext=true;const pending=event!();await vi.waitFor(()=>expect(held).toBe(true));disconnect=true;
+      await vi.waitFor(()=>expect(reconnected).toBe(true));await vi.waitFor(()=>expect(codeOf(()=>runtime.privacyPolicy())).toBe('privacy_policy_unavailable'));
+      release(json({cursor:new Date().toISOString(),activeSnapshotComplete:true,deployments:[valid],revocations:[]}));await pending;
+      expect(codeOf(()=>runtime.privacyPolicy())).toBe('privacy_policy_unavailable');expect(codeOf(()=>runtime.speechPolicy())).toBe('privacy_policy_unavailable');
+    }finally{release(json({cursor:new Date().toISOString(),activeSnapshotComplete:true,deployments:[],revocations:[]}));await runtime.stop();}
+  });
+
+  it.each(['classifier','router'] as const)('review residual: signed off %s revocation during tool loading yields zero serialized HTTP requests',async(mode)=>{
     const {privateKey,publicKey}=generateKeyPairSync('ed25519');const revocations:SecurityRevocation[]=[];
     const http=platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey,revocations});
     const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>new SharedDurableTestStore(),fetchImpl:http.fetchImpl,push:false,pollIntervalMs:10,onError:vi.fn()}));
@@ -966,13 +1039,14 @@ describe('createGlirastes with a privacy policy', () => {
     const adapter=providerAdapters().openrouter;
     const modules=[{id:'mail',name:'Mail',description:'Mail',tools:[],classification:{hint:'Mail',examples:['send a mail']}}];
     const pipeline=createLocalAiPipeline({modules,classifier:{modules,model:adapter.model},generateText:generateText as never});
-    const handler=createAiChatHandler({model:adapter.model,pipeline,systemPrompt:'Assistant',managedRuntime:turn.managedRuntime,onError:()=>{},loadTools:async()=>{
+    const intentRouter=vi.fn(async(text:string)=>{await generateText({model:adapter.model,prompt:text});return{toolNames:[]};});
+    const handler=createAiChatHandler({model:adapter.model,...(mode==='classifier'?{pipeline}:{intentRouter}),systemPrompt:'Assistant',managedRuntime:turn.managedRuntime,onError:()=>{},loadTools:async()=>{
       const unsigned={revocationId:id('3997'),environmentId:ENVIRONMENT_ID,effectiveAt:'2026-07-29T00:02:00.000Z',reasonCode:'privacy-off-revoked',toolIds:[],agentRevisionIds:[],policyRevisionIds:[pinned.revisionId]};
       revocations.push({...unsigned,signature:{algorithm:'Ed25519',keyId:'runtime-key',value:sign(null,Buffer.from(canonicalRuntimeJson(unsigned)),privateKey).toString('base64url')}});
       await vi.waitFor(()=>expect(runtime.revocations()).toHaveLength(1));return {};
     }});
     const response=await handler(new Request('https://app.example/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:[{id:'u1',role:'user',parts:[{type:'text',text:'Investigate classifier canary@example.invalid carefully please'}]}]})}));
-    await response.text();expect(adapter.requests).toHaveLength(0);
+    await response.text();expect(adapter.requests).toHaveLength(0);if(mode==='router')expect(intentRouter).not.toHaveBeenCalled();
   });
 
   it.each(['openrouter','anthropic'] as const)('%s: signed off revocation blocks memory before provider HTTP', async (kind) => {
@@ -1346,7 +1420,7 @@ describe('createGlirastes with a privacy policy', () => {
     }))).toBe('privacy_policy_unavailable');
     const beat = http.calls.find(({ url }) => url.includes('/heartbeat'));
     expect(JSON.parse(String(beat?.init.body))).toMatchObject({
-      technicalMetadata: { privacy: { state: 'refused', reasons: ['store_missing'] } },
+      technicalMetadata: { privacy: { state: 'refused', reasons: ['accepted_state_missing'] } },
     });
   });
 });

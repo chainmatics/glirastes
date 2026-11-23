@@ -128,18 +128,15 @@ export function createManagedRuntimeSync(options: {
     onReconciled: options.onReconciled,
     validateDeployment: async (deployment, revisions) => {
       const privacy = privacyOfRevisions(revisions);
-      if (privacy.state === 'refused') {
-        if (!options.readOnly) {
-          // Reported, then rejected and recorded: traffic stays blocked.
-          await client.heartbeat({
-            health: 'unhealthy',
-            validatedDeploymentId: deployment.deploymentId,
-            technicalMetadata: { validationStage: 'privacy_refused', privacy },
-          }).catch((error: unknown) => options.onError?.(error));
-        }
-        throw new PrivacyRefusedError();
-      }
+      if (privacy.state === 'refused') throw new PrivacyRefusedError();
       await options.validateDeployment?.(deployment, revisions);
+    },
+    onPrivacyRefused: async (deployments) => {
+      if (options.readOnly) return;
+      for (const deployment of deployments) await client.heartbeat({
+        health: 'unhealthy', validatedDeploymentId: deployment.deploymentId,
+        technicalMetadata: {validationStage: 'privacy_refused', privacy: privacyOf(deployment)},
+      }).catch((error:unknown) => options.onError?.(error));
     },
     onPending: async (deployments) => {
       if (options.readOnly) return;

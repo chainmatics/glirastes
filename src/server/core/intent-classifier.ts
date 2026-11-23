@@ -377,10 +377,11 @@ export function createIntentClassifier(
       if (call) {
         await options?.beforeClassifierCall?.();
         try {
+          const selectedModel = !options?.classifierCall && options?.wrapModel ? options.wrapModel(call.model) : call.model;
           const result = await classifyWithLlm(
             input,
             modules,
-            !options?.classifierCall && options?.wrapModel ? options.wrapModel(call.model) : call.model,
+            options?.guardClassifierModel ? options.guardClassifierModel(selectedModel) : selectedModel,
             call.generateText,
             timeoutMs,
             conversationHistory,

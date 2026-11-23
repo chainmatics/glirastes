@@ -134,6 +134,7 @@ export class RuntimeSyncManager {
       revisions: MaterializedDeploymentRevisions,
     ) => void | Promise<void>;
     onReconciled?: () => void;
+    onPrivacyRefused?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
     onRevocations?: (revocations: SecurityRevocation[]) => void | Promise<void>;
     onPending?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
     onActivated?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
@@ -223,6 +224,7 @@ export class RuntimeSyncManager {
     const rejectedDeploymentIds: string[] = [];
     const privacyDowngradeDeploymentIds: string[] = [];
     const privacyRefusedDeploymentIds: string[] = [];
+    const privacyRefusedDeployments: RuntimeDeploymentBundle[] = [];
     let rejectedActive = false;
     let rejectedPending = false;
     for (const rawDeployment of wire.deployments) {
@@ -268,14 +270,24 @@ export class RuntimeSyncManager {
         materializedById.set(parsed.data.deploymentId, materialized);
       } catch (error) {
         if (error instanceof PrivacyDowngradeError) privacyDowngradeDeploymentIds.push(parsed.data.deploymentId);
-        if (error instanceof PrivacyRefusedError) privacyRefusedDeploymentIds.push(parsed.data.deploymentId);
+        if (error instanceof PrivacyRefusedError) { privacyRefusedDeploymentIds.push(parsed.data.deploymentId); privacyRefusedDeployments.push(parsed.data); }
         // A verified, in-scope protected requirement that is rejected, for
         // whatever reason, raises the floor: withdrawing it later never leads
         // back to an unprotected revision; only a newer protected policy this
         // runner accepts or a newer signed `off` lifts it. Material with a bad
         // signature or another scope never gets here (`verified` is unset).
         if (verified && !(error instanceof PrivacyDowngradeError)) {
-          state = { ...state, privacyFloor: raisedByRejection(state.privacyFloor, parsed.data.deploymentId, verified) };
+          state = {
+            ...state,
+            privacyFloor: raisedByRejection(state.privacyFloor, parsed.data.deploymentId, verified),
+            privacyRefusedDeploymentIds: [...new Set([
+              ...(state.privacyRefusedDeploymentIds ?? []), ...privacyRefusedDeploymentIds,
+            ])].slice(-64),
+          };
+          // Install the known refusal before verifying any subsequent bundle or
+          // awaiting telemetry. The consumer store holds its floor immediately,
+          // including while durable persistence is pending or fails.
+          await this.options.store.saveAtomic(state);
         }
         rejectedDeploymentIds.push(parsed.data.deploymentId);
         if (parsed.data.status === 'active') rejectedActive = true;
@@ -323,6 +335,7 @@ export class RuntimeSyncManager {
     await this.options.store.saveAtomic(state);
     // Cursor persistence (including early revocations) cannot establish fresh bootstrap.
     if (wire.activeSnapshotComplete && !rejectedActive && rejectedRevocationIds.length === 0) this.options.onReconciled?.();
+    if (privacyRefusedDeployments.length) await this.options.onPrivacyRefused?.(privacyRefusedDeployments);
     if (privacyDowngradeDeploymentIds.length > 0) {
       await this.options.onPrivacyDowngrade?.(privacyDowngradeDeploymentIds);
     }

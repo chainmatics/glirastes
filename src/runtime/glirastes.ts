@@ -270,6 +270,9 @@ class AcceptedStateStore implements RuntimeStateStore {
   private readonly held = new Map<string, RuntimePrivacyFloor>();
   /** The state came from a verified sync: a persisted one with a cursor, or one saved in this process. */
   private reconciled = false;
+  private pendingPrivacyRefusal = false;
+  private storageEpoch = 0;
+  private writes: Promise<void> = Promise.resolve();
 
   /** Binds the store to an environment without a persistent store. */
   bind(environmentId: string): void {
@@ -285,9 +288,12 @@ class AcceptedStateStore implements RuntimeStateStore {
   async attach(environmentId: string, persistent: RuntimeStateStore, targetAppId: string): Promise<void> {
     this.bind(environmentId);
     this.persistent = persistent;
+    const epoch = this.storageEpoch;
+    await this.writes.catch(() => undefined);
     let loaded: RuntimeSyncState | null;
     try {
       const raw = await persistent.load();
+      if (epoch !== this.storageEpoch) throw new Error('runtime_state_generation_changed');
       loaded = raw === null ? null : parseRuntimeSyncState(raw);
       if (loaded && ((loaded.scope && (loaded.scope.environmentId !== environmentId || loaded.scope.targetAppId !== targetAppId))
         || [loaded.stable, loaded.canary, ...loaded.pending].some(deployment => deployment && (
@@ -297,7 +303,7 @@ class AcceptedStateStore implements RuntimeStateStore {
         throw new PrivacyError('privacy_state_binding_mismatch');
       }
     } catch (error) {
-      this.unreadable = true;
+      if (epoch === this.storageEpoch) this.unreadable = true;
       throw error;
     }
     if (loaded) {
@@ -331,26 +337,34 @@ class AcceptedStateStore implements RuntimeStateStore {
     return strictest;
   }
 
-  async saveAtomic(state: RuntimeSyncState): Promise<void> {
-    if (this.unreadable) throw new Error('[glirastes] The persisted runtime state is unreadable');
-    try {
-      // Persisted first: memory never accepts more than survives a restart.
-      await this.persistent?.saveAtomic(state);
-    } catch (error) {
-      this.saveFailed = true;
-      this.hold(state.privacyFloor);
-      throw error;
-    }
-    this.remember(state);
-    this.saveFailed = false;
-    // The saved state was derived from `load()`, which carries the held
-    // floor: it holds that floor, or a newer signed `off` lowered it.
-    const held = this.environmentId ? this.held.get(this.environmentId) : undefined;
-    if (held && (state.privacyFloor?.policyRevision ?? 0) >= held.policyRevision) {
-      this.held.delete(this.environmentId!);
-    }
-
+  saveAtomic(state: RuntimeSyncState): Promise<void> {
+    const epoch = this.storageEpoch;
+    this.hold(state.privacyFloor);
+    if (state.privacyRefusedDeploymentIds?.length) this.pendingPrivacyRefusal = true;
+    const persistent = this.persistent;
+    const run = this.writes.then(async () => {
+      if (epoch !== this.storageEpoch) throw new Error('runtime_state_generation_changed');
+      if (this.unreadable) throw new Error('[glirastes] The persisted runtime state is unreadable');
+      try {
+        await persistent?.saveAtomic(state);
+      } catch (error) {
+        if (epoch === this.storageEpoch) { this.saveFailed = true; this.hold(state.privacyFloor); }
+        throw error;
+      }
+      // An old connection may finish a disk write, but cannot mutate a new
+      // connection's memory. Attach waits for these writes before reading disk.
+      if (epoch !== this.storageEpoch) throw new Error('runtime_state_generation_changed');
+      this.remember(state);
+      this.pendingPrivacyRefusal = false;
+      this.saveFailed = false;
+      const held = this.environmentId ? this.held.get(this.environmentId) : undefined;
+      if (held && (state.privacyFloor?.policyRevision ?? 0) >= held.policyRevision) this.held.delete(this.environmentId!);
+    });
+    this.writes = run.catch(() => undefined);
+    return run;
   }
+
+  invalidateReconciliation(): void { this.storageEpoch += 1; this.reconciled = false; }
 
   markReconciled(): void { this.reconciled = true; }
 
@@ -368,6 +382,7 @@ class AcceptedStateStore implements RuntimeStateStore {
    * Its protected floor is held, and a failed save stays failed.
    */
   clear(): void {
+    this.storageEpoch += 1;
     this.hold(this.state?.privacyFloor);
     this.environmentId = undefined;
     this.state = null;
@@ -402,7 +417,7 @@ class AcceptedStateStore implements RuntimeStateStore {
 
   /** A verified deployment's protected block this runner cannot enforce is outstanding. */
   privacyRefused(): boolean {
-    return (this.state?.privacyRefusedDeploymentIds?.length ?? 0) > 0;
+    return this.pendingPrivacyRefusal || (this.state?.privacyRefusedDeploymentIds?.length ?? 0) > 0;
   }
 
   /**
@@ -584,6 +599,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   let managed: { tenantId: string; source: LocalRuntimeSource } | undefined;
   let metrics: RuntimeMetricsSink | undefined;
   let stopSync: (() => void) | undefined;
+  let connectionGeneration = 0;
   let started = false;
   // Settles after the first attempt, successful or not: a turn waits for the
   // first sync at most once, not on every turn while the Platform is away.
@@ -662,6 +678,11 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       return false;
     }
     const environmentId = connection.environmentId;
+    if (options.stateStore && !validStateBinding) {
+      stateBindingMismatch = true;
+      onError(new PrivacyError('privacy_state_binding_mismatch'));
+      return true;
+    }
     if (stateEnvironmentId && environmentId !== stateEnvironmentId) {
       stateBindingMismatch = true;
       onError(new PrivacyError('privacy_state_binding_mismatch'));
@@ -714,6 +735,14 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     }
 
     let placeLost = false;
+    const generation = ++connectionGeneration;
+    const assertCurrentConnection = () => {
+      if (generation !== connectionGeneration || abort.signal.aborted) throw new Error('runtime_connection_generation_changed');
+    };
+    const scopedStateStore: RuntimeStateStore = {
+      load: async () => { assertCurrentConnection(); const state = await store.load(); assertCurrentConnection(); return state; },
+      saveAtomic: async (state) => { assertCurrentConnection(); await store.saveAtomic(state); assertCurrentConnection(); },
+    };
     let sync: ReturnType<typeof createManagedRuntimeSync>;
     try {
       sync = createManagedRuntimeSync({
@@ -724,15 +753,18 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         runnerKey: connection.runnerKey,
         ...(readOnly ? { readOnly } : {}),
         version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
-        stateStore: store,
-        onReconciled: () => store.markReconciled(),
+        stateStore: scopedStateStore,
+        onReconciled: () => { assertCurrentConnection(); store.markReconciled(); },
         setupArtifact: options.generated.setupArtifact,
-        privacyStatus: (revisions) => privacyRuntimeStatus(
-          pinnedOf(revisions.policyRevision),
-          options.privacy,
-          store.revocations(),
-          store.persistsDurably() && validStateBinding,
-        ),
+        privacyStatus: (revisions) => {
+          assertCurrentConnection();
+          return privacyRuntimeStatus(
+            pinnedOf(revisions.policyRevision),
+            managedPrivacy() ? { ...options.privacy, managed: true } : options.privacy,
+            store.revocations(),
+            store.persistsDurably() && validStateBinding,
+          );
+        },
         // Only a runner that can enforce and durably keep a protected policy claims the capability.
         privacyCapable: options.privacy?.shield?.profile === 'protected-text/v1' && store.persistsDurably() && validStateBinding,
         // A deployment that names a tool this code lacks, or has changed, keeps running on the local tool.
@@ -740,6 +772,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           validateLocalDeploymentBindings({ revisions, bindings: bound.bindings });
         },
         onError: (error) => {
+          if (generation !== connectionGeneration) return;
           if (isPlaceRequired(error) || isReferenceChanged(error)) {
             placeLost = true;
             stopSync?.();
@@ -766,7 +799,10 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         ...(options.fetchImpl ? { fetch: options.fetchImpl } : {}),
       });
     }
-    stopSync = () => sync.client.stop();
+    stopSync = () => {
+      if (generation === connectionGeneration) { connectionGeneration += 1; store.invalidateReconciliation(); }
+      sync.client.stop();
+    };
 
     while (!abort.signal.aborted && !placeLost) {
       try {
@@ -782,6 +818,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       } catch (error) {
         if (isPlaceRequired(error) || isReferenceChanged(error)) {
           placeLost = true;
+          stopSync?.();
           reportConnectionLoss(error, environmentId);
           break;
         }

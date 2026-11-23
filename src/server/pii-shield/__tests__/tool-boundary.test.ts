@@ -59,6 +59,17 @@ describe('authorized tool rehydration', () => {
     const wrapped=wrapToolsForPrivacy({write:{execute:original.execute}},boundary);
     expect(await (wrapped.write as unknown as {needsApproval:(input:unknown)=>Promise<boolean>}).needsApproval({})).toBe(true);
   });
+  it('review residual: converted approval keeps its original receiver and live mutable properties',async()=>{
+    const {boundary}=await setup();
+    const converted=toolToAiTool(defineTool({id:'write',description:'Write',inputSchema:z.object({}),execute:async()=>({ok:true})}),{currentDate:new Date(),locale:'en'});
+    const descriptor={...converted,required:false,get needsApproval():boolean{return this.required;}};
+    const wrapped=wrapToolsForPrivacy({write:descriptor},boundary);
+    expect(wrapped.write.needsApproval).toBe(false);descriptor.required=true;expect(wrapped.write.needsApproval).toBe(true);
+    const own={...converted,needsApproval:false};const second=wrapToolsForPrivacy({write:own},boundary);
+    own.needsApproval=true;expect(second.write.needsApproval).toBe(true);
+    const guarded={...converted,needsApproval:function(_input:unknown){return this===guarded;}};
+    const third=wrapToolsForPrivacy({write:guarded},boundary);expect(await third.write.needsApproval({} as never)).toBe(true);
+  });
   it('review residual: late-bound inherited boolean approval is preserved', async () => {
     const {boundary}=await setup();let required=false;
     const original=Object.assign(Object.create({get needsApproval(){return required;}}),{execute:async()=>({ok:true})});

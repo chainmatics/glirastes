@@ -1,3 +1,4 @@
+import {guardModelDispatch} from '../../pii-shield/dispatch-gate.js';
 import {
   toolsToAiTools,
   createFollowupTool,
@@ -1848,6 +1849,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         const signedBlock = pinnedSnapshot?.policyRevision.privacy;
         if (isProtectedPolicy(signedBlock) || privacy?.policy?.required === true) {
           protectedRequests.add(req);
+          if (intentRouter || guardrails) {
+            return Response.json({code: 'privacy_unsupported_content', feature: intentRouter ? 'intent-router' : 'guardrails',
+              error: 'Custom routing and guardrail callbacks are unavailable with pseudonymization. Use the local pipeline with an approved provider.'}, {status: 503});
+          }
           if (toolMiddleware?.length) {
             return Response.json({ code: 'privacy_unsupported_content', feature: 'middleware',
               error: 'Tool middleware is unavailable while pseudonymization is active.' }, { status: 503 });
@@ -2375,6 +2380,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // The app's own input check runs first in both modes, without any model call.
       let processedMessages = messages;
       if (guardrails) {
+        await beforeModelStep?.();
         const check = await guardrails(messages);
         if (!check.ok) {
           return new Response(
@@ -2481,7 +2487,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           };
         }
 
-        if (beforeModelStep) classifierOptions = { ...classifierOptions, beforeClassifierCall: beforeModelStep };
+        if (beforeModelStep) classifierOptions = { ...classifierOptions, beforeClassifierCall: beforeModelStep,
+          ...(!privacyTurn ? {guardClassifierModel: (model) => guardModelDispatch(model, beforeModelStep!)} : {}),
+        };
 
         // Run pipeline: guardrails + classification + routing + model selection
         const pipelineResult = await pipeline.process(
@@ -2682,6 +2690,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           });
         }
 
+        if (beforeModelStep && !privacyTurn) model = guardModelDispatch(model, beforeModelStep);
+
         // Lancer Approvals: delegate approval decisions to Glirastes
         if (lancer?.approvals) {
           aiTools = wrapToolsWithLancerApprovals(aiTools, lancer.approvals, sessionId) as typeof aiTools;
@@ -2804,11 +2814,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (intentRouter) {
         const text = clarificationResume?.routingText
           ?? extractLastUserText(processedMessages);
-        // A consumer router may call a model of its own: pseudonyms only.
-        routing = await intentRouter(
-          privacyTurn ? await privacyTurn.session.pseudonymizeText(text) : text,
-          allToolNames,
-        );
+        // Protected turns refuse opaque routers above; recheck live off authority.
+        const routingText = privacyTurn ? await privacyTurn.session.pseudonymizeText(text) : text;
+        await beforeModelStep?.();
+        routing = await intentRouter(routingText, allToolNames);
       } else if (enableToolDiscovery && intentRouting !== false) {
         // Routing only picks the start set; discovery stays bounded by what
         // this principal may use and can always widen it.
@@ -2911,6 +2920,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ...privacyTurn.toolHooks(),
         });
       }
+
+      if (beforeModelStep && !privacyTurn) model = guardModelDispatch(model, beforeModelStep);
 
       // Lancer Approvals: delegate approval decisions to Glirastes (legacy mode)
       if (lancer?.approvals) {

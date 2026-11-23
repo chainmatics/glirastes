@@ -528,3 +528,5 @@ the original environment UUID and store. Missing, empty or unreadable storage ne
 releases traffic before this process accepts a complete authenticated live snapshot.
 Removing both the stateStore factory and fixed UUID is the administrator/DR trust
 boundary. Do not remove one as a way to bypass a retained policy.
+
+Protected turns reject the legacy `intentRouter` and opaque `guardrails` callbacks with `503 privacy_unsupported_content` before passing content to them. Use the supported local `pipeline` classifier and its approved provider instead. Ordinary off callbacks remain available; managed model and classifier transports check the current policy on every attempt, including retries.

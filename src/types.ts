@@ -1082,6 +1082,8 @@ export interface IntentClassifierConfig {
 export interface PipelineCallOptions {
   /** Recheck live authority immediately before any classifier transport. */
   beforeClassifierCall?: () => void | Promise<void>;
+  /** Transport-only live gate; does not mark the prompt as pseudonymized. */
+  guardClassifierModel?: <M>(model: M) => M;
   wrapModel?: <M>(model: M) => M;
   /**
    * A protected turn's classifier call: exactly this model through this

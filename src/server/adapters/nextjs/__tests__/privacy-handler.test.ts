@@ -223,6 +223,14 @@ describe('real provider transport through the handler', () => {
 });
 
 describe('fail-closed refusals', () => {
+  it.each(['intent-router','guardrails'] as const)('temporal review: refuses an opaque %s callback before protected content reaches it',async(kind)=>{
+    const {tools}=registry();const {model,calls}=echoModel();const adapter=providerAdapters().openrouter;
+    const callback=vi.fn(async(...input:unknown[])=>{await generateText({model:adapter.model,prompt:JSON.stringify(input)});return {allowed:true};});
+    const handler=createAiChatHandler({tools,model,privacy:privacyConfig(),...(kind==='intent-router'?{intentRouter:callback}:{guardrails:callback})} as never);
+    const response=await handler(post([user(CANARY.email)]));expect(adapter.requests).toHaveLength(0);expect(response.status).toBe(503);expect(await response.json()).toMatchObject({code:'privacy_unsupported_content',feature:kind});
+    expect(callback).not.toHaveBeenCalled();expect(calls).toHaveLength(0);
+  });
+
   it('refuses incompatible configurations at construction', () => {
     const { tools } = registry();
     const { model } = echoModel();

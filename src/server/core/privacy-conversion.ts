@@ -28,10 +28,13 @@ export function preparePrivacyConversion<T extends object>(tool: T): T {
   // schema, approval predicate and all other consumer authorization metadata.
   const protectedTool = conversion.protectedTool() as { execute?: unknown; needsApproval?: unknown };
   return Object.create(Object.getPrototypeOf(tool), { ...Object.getOwnPropertyDescriptors(tool),
-    ...('needsApproval' in tool ? {} : { needsApproval: { enumerable: true, configurable: true, get: () => {
-      const guard = protectedTool.needsApproval;
-      return typeof guard === 'function' ? guard.bind(protectedTool) : guard;
-    } } }),
+    // The original descriptor remains the authorization receiver. Copies of
+    // own state would freeze mutable flags and change `this` inside guards.
+    needsApproval: { enumerable: true, configurable: true, get: () => {
+      const owner = 'needsApproval' in tool ? tool as { needsApproval?: unknown } : protectedTool;
+      const guard = owner.needsApproval;
+      return typeof guard === 'function' ? guard.bind(owner) : guard;
+    } },
     execute: { value: protectedTool.execute, enumerable: true, configurable: true },
   }) as T;
 }
