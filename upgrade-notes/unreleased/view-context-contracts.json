@@ -2,7 +2,7 @@
   "id": "view-context-contracts",
   "kind": "optional",
   "summary": "New in glirastes/contracts: the view context contract (what the user looks at, declared by the app): entry types and schemas, sanitizeViewContext for untrusted input and resolveViewContextPolicy for the coming viewContext server option. Nothing uses it yet.",
-  "howTo": "Nothing to do. sanitizeViewContext(input, { declaredTypes, factsSchemas, policy }) keeps up to 8 entries (a record of a declared entity type, a list view selection, or both) and drops invalid entries or fields with content-free reason counts (each saturating at VIEW_CONTEXT_LIMITS.maxDropCount, 1,000,000, then a lower bound); facts are kept only against a schema with safeParse (Zod or the runtime's JSON schema validator). The chat handler option, the browser registry and the model block follow in later releases.",
+  "howTo": "Nothing to do. sanitizeViewContext(input, { declaredTypes, factsSchemas, policy }) keeps up to 8 entries (a record of a declared entity type, a list view selection, or both) and drops invalid entries or fields with content-free reason counts (each stops at VIEW_CONTEXT_LIMITS.maxDropCount, 1,000,000: exact up to that many dropped, a lower bound only beyond); facts are kept only against a schema with safeParse (Zod or the runtime's JSON schema validator). The chat handler option, the browser registry and the model block follow in later releases.",
   "skill": "integrating-glirastes-nextjs",
   "adoptedWhen": {
     "patterns": [

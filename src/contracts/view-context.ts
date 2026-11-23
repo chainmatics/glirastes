@@ -83,11 +83,12 @@ export const VIEW_CONTEXT_LIMITS = Object.freeze({
   /** All kept entries as a JSON list, in UTF-8 bytes; a long selection is cut to fit before an entry is dropped. */
   maxTotalBytes: 2560,
   /**
-   * Every count in `dropped` and `droppedEntries` saturates here, so it
-   * stays a small safe integer whatever length a list has or claims (a
-   * proxy may claim any; plain JSON over 1,000,000 items, possible with a
-   * large body limit, saturates too). A saturated count is a lower bound:
-   * `droppedEntries + entries.length` then no longer equals the input length.
+   * Every count in `dropped` and `droppedEntries` stops here, so it stays a
+   * small safe integer whatever length a list has or claims (a proxy may
+   * claim any). Up to 1,000,000 dropped a count is exact; only when more are
+   * dropped for it (possible with plain JSON too, given a large body limit)
+   * is it a lower bound, and `droppedEntries + entries.length` is then less
+   * than the input length.
    */
   maxDropCount: 1_000_000,
 });
@@ -763,10 +764,11 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
 const MAX_SCHEMA_LIST_LENGTH = 10_000;
 
 /**
- * The first stage of a list schema: a copy of an array with an honest
- * `length` (read once, `listLength`, at most 10,000), so the `z.array` after
- * it reads a real array and never a length a proxy claims. Anything that is
- * not an array is passed on unchanged, so `z.array` reports it as always.
+ * The first stage of a list schema: a new array holding the same elements
+ * (not copied themselves) of an array with an honest `length` (read once,
+ * `listLength`, at most 10,000), so the `z.array` after it reads a real
+ * array and never a length a proxy claims. Anything that is not an array is
+ * passed on unchanged, so `z.array` reports it as always.
  */
 function honestList(maximum: number) {
   return z.unknown().transform((value, ctx) => {
@@ -806,13 +808,15 @@ const entryFields = {
 };
 
 /**
- * A sanitized entry (what {@link sanitizeViewContext} keeps), for stored view
- * contexts: an entity (with an optional selection) or a selection alone
- * (`entity` absent or `undefined`). Strict: it rejects an entry with neither,
- * a label that is not canonical, an id or route the policy does not allow and
- * facts that are not bounded, cleaned plain JSON. It does not know the
- * declared types or facts schemas; run untrusted input through
- * `sanitizeViewContext` instead.
+ * The shape of a sanitized entry (what {@link sanitizeViewContext} keeps),
+ * for trusted, stored view contexts: an entity (with an optional selection)
+ * or a selection alone (`entity` absent or `undefined`). It rejects unknown
+ * keys, an entry with neither, a label that is not canonical, an id or route
+ * the policy does not allow, facts that are not bounded, cleaned plain JSON,
+ * and `selection.ids` over 10,000 items before any item is checked. It
+ * promises no copy of the input: facts and composite ids in the result can
+ * be the input's own objects. It does not know the declared types or facts
+ * schemas; input from the browser goes through `sanitizeViewContext`.
  */
 export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
   z.object({ entity: entitySchema, selection: selectionSchema.optional(), ...entryFields }).strict(),
@@ -820,9 +824,11 @@ export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
 ]) as z.ZodType<ViewContextEntry>;
 
 /**
- * A sanitized view context: at most 8 entries. `z.array(ViewContextEntrySchema).max(8)`
- * behind an honest-length copy (a list whose `length` is not a safe
- * non-negative integer, or over 10,000, is refused before any loop).
+ * The shape of a sanitized view context, for trusted, stored data: at most 8
+ * entries of {@link ViewContextEntrySchema}. A list whose `length` is not a
+ * safe non-negative integer, or over 10,000, is refused before any entry is
+ * checked. It promises no copy of the input (see the entry schema); input
+ * from the browser goes through `sanitizeViewContext`.
  */
-export const ViewContextSchema = honestList(VIEW_CONTEXT_LIMITS.maxEntries)
+export const ViewContextSchema: z.ZodType<ViewContextEntry[]> = honestList(VIEW_CONTEXT_LIMITS.maxEntries)
   .pipe(z.array(ViewContextEntrySchema).max(VIEW_CONTEXT_LIMITS.maxEntries));
