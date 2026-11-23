@@ -98,6 +98,22 @@ const t = useTranslations('chat');
 resolved variables. Prefer `theme` and `classNames` over overriding the CSS:
 styles are variable-driven, inline overrides break under a strict CSP.
 
+### Cascade layer
+
+`glirastes/react/styles.layered.css` is `styles.css` inside
+`@layer glirastes`: every unlayered app rule wins without specificity fights
+(declare `@layer glirastes, app;` to order it among the app's layers). Load
+one of the two files, never both: unlayered beats layered, so with both the
+layer changes nothing. `AiChatPanel`, `AssistantShell` and `FloatingChatUI`
+import `styles.css` themselves, and bundlers that load CSS from packages
+(Next.js, Vite, webpack) then load it anyway; the layered file only takes
+effect for apps that build the chat from other parts or keep that import out
+of their bundle. Inside the layer the shipped `!important` declarations
+(full-screen window on phones, resize handles, a few hover backgrounds) beat
+the app's own `!important`, and an app `@keyframes` with a shipped name
+(`assistant-history-in`, …) wins regardless of order. `<glirastes-chat>` keeps
+its unlayered copy in its shadow root.
+
 ## Slots
 
 `components` replaces one rendered piece while the rest of the chat keeps

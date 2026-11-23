@@ -122,7 +122,7 @@ enforces it. The current Foundation package exposes:
 
 `glirastes` · `/contracts` · `/runtime` · `/runtime/ai-sdk` · `/ai-sdk` ·
 `/stt` · `/sync` · `/server` · `/server/http` · `/server/node` · `/server/nextjs` · `/adapter/nextjs` ·
-`/server/testing` · `/react` · `/react/vercel` · `/react/styles.css` · `/react/pills.css` ·
+`/server/testing` · `/react` · `/react/vercel` · `/react/styles.css` · `/react/styles.layered.css` · `/react/pills.css` ·
 `/react/audio-worklet-processor.js` · `/embed` ·
 `/browser` · `/codegen`
 

@@ -1,0 +1,17 @@
+{
+  "id": "styles-cascade-layer",
+  "kind": "optional",
+  "summary": "New export glirastes/react/styles.layered.css: the chat styles inside @layer glirastes, so unlayered app CSS wins without specificity fights. styles.css stays unlayered and the default.",
+  "howTo": "Nothing to do. To use it, import 'glirastes/react/styles.layered.css' instead of 'glirastes/react/styles.css', never both (unlayered beats layered, so with both the layer changes nothing). AiChatPanel, AssistantShell and FloatingChatUI import styles.css themselves; where the bundler loads that import the layered file has no effect. Inside the layer the shipped !important declarations beat an app's own !important. See the building-glirastes-chat-ui skill, Cascade layer.",
+  "skill": "building-glirastes-chat-ui#cascade-layer",
+  "affectedWhen": {
+    "patterns": [
+      "glirastes/react/styles\\.css"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "glirastes/react/styles\\.layered\\.css"
+    ]
+  }
+}
