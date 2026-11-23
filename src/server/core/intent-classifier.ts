@@ -5,6 +5,7 @@ import type {
   ModuleDefinition,
   ToolContext,
   ConversationMessage,
+  PipelineCallOptions,
 } from '../../types.js';
 import { newStemmer, algorithms, type Stemmer } from 'snowball-stemmers';
 
@@ -362,6 +363,7 @@ export function createIntentClassifier(
       input: string,
       _context?: ToolContext,
       conversationHistory?: ConversationMessage[],
+      options?: PipelineCallOptions,
     ): Promise<IntentClassification> {
       // Short-circuit: not enough tokens to classify meaningfully
       const tokens = tokenize(input);
@@ -369,14 +371,18 @@ export function createIntentClassifier(
         return { intent: 'ambiguous', confidence: 0 };
       }
 
-      // Try LLM classification when both model and generateText are available
-      if (model && generateText) {
+      // A protected turn's own call replaces the configured model and
+      // callback; otherwise LLM classification runs when both are available.
+      const call = options?.classifierCall ?? (model && generateText ? { model, generateText } : undefined);
+      if (call) {
+        await options?.beforeClassifierCall?.();
         try {
+          const selectedModel = !options?.classifierCall && options?.wrapModel ? options.wrapModel(call.model) : call.model;
           const result = await classifyWithLlm(
             input,
             modules,
-            model,
-            generateText,
+            options?.guardClassifierModel ? options.guardClassifierModel(selectedModel) : selectedModel,
+            call.generateText,
             timeoutMs,
             conversationHistory,
           );

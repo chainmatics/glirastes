@@ -6,7 +6,9 @@
  * @module
  */
 
-import { generateText } from 'ai';
+import { generateText, wrapLanguageModel } from 'ai';
+import type { LanguageModelV3 } from '@ai-sdk/provider';
+import { PrivacyError } from '../../pii-shield/detection-result.js';
 import { z } from 'zod';
 import { defineTool, type Tool } from '../../../types.js';
 import {
@@ -115,7 +117,10 @@ export interface ChatMemoryTurn {
 }
 
 export interface ChatMemoryRuntime {
-  begin(request: Request, body: unknown): Promise<ChatMemoryTurn>;
+  begin(request: Request, body: unknown, hooks?: {
+    /** Live permission of this pinned turn; also gates off policies after revocation. */
+    beforeOperation?: () => Promise<void>;
+  }): Promise<ChatMemoryTurn>;
 }
 
 // ---------------------------------------------------------------------------
@@ -412,7 +417,7 @@ const sameNote = (stored: string, given: string) =>
 
 function createNoteTools(
   sets: NoteSet[],
-  options: { sharedApproval: boolean; authorId?: string; onError?: (error: unknown) => void; changed: (set: NoteSet) => void },
+  options: { beforeOperation?: () => Promise<void>; sharedApproval: boolean; authorId?: string; onError?: (error: unknown) => void; changed: (set: NoteSet) => void },
 ): Tool[] {
   const writable = sets.filter((set) => set.writable);
   if (writable.length === 0) return [];
@@ -430,6 +435,7 @@ function createNoteTools(
     }),
     needsApproval: (input) => needsApproval(input.scope),
     execute: async (input) => {
+      await options.beforeOperation?.();
       const set = writable.find((candidate) => candidate.kind === input.scope);
       if (!set) return { success: false, error: 'This kind of memory is not available.' };
       // A note copied from the memory block carries its escape: the value is stored, the escape is presentation.
@@ -448,12 +454,15 @@ function createNoteTools(
           : { id: globalThis.crypto.randomUUID(), content: note, createdAt: new Date().toISOString() };
         if (set.store && set.scope) {
           // Another request may have filled the scope meanwhile: the note that landed beyond the limit goes.
+          await options.beforeOperation?.();
           const stored = await set.store.list(set.scope);
           if (stored.findIndex((candidate) => candidate.id === entry.id) >= set.max) {
+            await options.beforeOperation?.();
             await set.store.remove(set.scope, entry.id);
             return { success: false, error: full };
           }
         }
+        await options.beforeOperation?.();
         set.entries.push(entry);
         options.changed(set);
         return { success: true, scope: set.kind };
@@ -474,6 +483,7 @@ function createNoteTools(
     }),
     needsApproval: (input) => needsApproval(input.id.startsWith('s-') ? 'shared' : 'user'),
     execute: async (input) => {
+      await options.beforeOperation?.();
       for (const set of writable) {
         const entry = aliasesOf(set).get(input.id);
         if (!entry) continue;
@@ -537,11 +547,14 @@ export function createChatMemory(
     key: string | undefined,
     max: number,
     writable: boolean,
+    beforeOperation?: () => Promise<void>,
   ): Promise<NoteSet | null> => {
     if (!key) return null;
     const scope: MemoryScope = { kind, key };
     try {
+      await beforeOperation?.();
       const entries = readMemoryEntries(await store.list(scope), max);
+      await beforeOperation?.();
       return { kind, entries, max, writable, store, scope };
     } catch (error) {
       onError?.(error);
@@ -550,13 +563,16 @@ export function createChatMemory(
   };
 
   return {
-    async begin(request, body) {
+    async begin(request, body, hooks) {
+      const authorize = hooks?.beforeOperation;
+      await authorize?.();
       const keys = config.scope ? await config.scope(request) : {};
+      await authorize?.();
       const sets: NoteSet[] = [];
       if (sharedConfig) {
         const writable = sharedConfig.canWrite ? await sharedConfig.canWrite(request) : true;
         const set = await loadSet(
-          'shared', sharedConfig.store, keys.shared, sharedConfig.maxNotes ?? MEMORY_MAX_SHARED_NOTES, writable,
+          'shared', sharedConfig.store, keys.shared, sharedConfig.maxNotes ?? MEMORY_MAX_SHARED_NOTES, writable, authorize,
         );
         if (set) sets.push(set);
       }
@@ -564,7 +580,7 @@ export function createChatMemory(
       if (userConfig) {
         const max = userConfig.maxNotes ?? MEMORY_MAX_USER_NOTES;
         if (userConfig.store) {
-          const set = await loadSet('user', userConfig.store, keys.user, max, true);
+          const set = await loadSet('user', userConfig.store, keys.user, max, true, authorize);
           if (set) sets.push(set);
         } else {
           const sent = (body as Record<string, unknown> | null)?.[MEMORY_BODY_FIELD];
@@ -578,6 +594,7 @@ export function createChatMemory(
       const pending: MemoryStreamPart[] = [];
       const emit = (part: MemoryStreamPart) => (write ? write(part) : pending.push(part));
       const tools = createNoteTools(sets, {
+        beforeOperation: authorize,
         sharedApproval: sharedConfig?.approval !== false,
         ...(keys.user ? { authorId: keys.user } : {}),
         onError,
@@ -622,14 +639,27 @@ export function createChatMemory(
                       `Summary so far:\n${summary || '(none)'}`,
                       `Next part of the conversation:\n${piece}`,
                     ].join('\n\n');
+                    const configuredModel = config.model ?? model;
+                    // The middleware runs for every provider attempt, including
+                    // retries, after any async prompt preparation has completed.
+                    if (authorize && (configuredModel as LanguageModelV3 | null)?.specificationVersion !== 'v3') {
+                      throw new PrivacyError('privacy_unsupported_content');
+                    }
+                    const summaryModel = authorize ? wrapLanguageModel({model: configuredModel as LanguageModelV3,
+                      middleware: {specificationVersion:'v3',wrapGenerate:async ({doGenerate}) => {
+                        await authorize();
+                        return doGenerate();
+                      }},
+                    }) : configuredModel;
                     const result = await generateText({
-                      model: (config.model ?? model) as Parameters<typeof generateText>[0]['model'],
+                      model: summaryModel as Parameters<typeof generateText>[0]['model'],
                       system: summaryPrompt(Math.floor(maxTokens * 0.7)),
                       prompt: anonymize ? await anonymize(input) : input,
                       maxOutputTokens: maxTokens,
                       ...(modelOptions.temperature === null ? {} : { temperature: 0 }),
                       abortSignal: abortSignal ? AbortSignal.any([abortSignal, signal]) : signal,
                     });
+                    await authorize?.();
                     const text = (restore ? await restore(result.text) : result.text).trim();
                     if (!text) return;
                     summary = text.slice(0, MEMORY_MAX_SUMMARY_LENGTH);
@@ -638,8 +668,11 @@ export function createChatMemory(
                 }
               })().catch((error: unknown) => {
                 if (!abortSignal?.aborted) onError?.(error);
-              }).then(() => {
+              }).then(async () => {
+                await authorize?.();
                 if (done && !abortSignal?.aborted) emit({ type: MEMORY_SUMMARY_PART, data: done });
+              }).catch((error: unknown) => {
+                if (!abortSignal?.aborted) onError?.(error);
               });
             }
           }

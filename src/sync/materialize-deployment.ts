@@ -19,6 +19,13 @@ export interface MaterializedDeploymentRevisions {
 export function materializeDeploymentRevisions(
   deployment: RuntimeDeploymentBundle,
 ): MaterializedDeploymentRevisions {
+  for (const envelope of [deployment.agentRevision, deployment.manifestRevision, deployment.policyRevision, ...(deployment.configRevision ? [deployment.configRevision] : [])]) {
+    const payload = payloadObject(envelope);
+    const authoritative = { revisionId: envelope.revisionId, revision: envelope.revision, tenantId: envelope.tenantId, targetAppId: envelope.targetAppId, environmentId: envelope.environmentId, ...(envelope.revisionType === 'agent' ? {agentId: envelope.subjectId} : {}) };
+    for (const [key, value] of Object.entries(authoritative)) {
+      if (Object.prototype.hasOwnProperty.call(payload, key) && payload[key] !== value) throw new Error('runtime_payload_scope_mismatch');
+    }
+  }
   const policyRevision = RuntimePolicyRevisionSchema.parse({
     revisionId: deployment.policyRevision.revisionId,
     revision: deployment.policyRevision.revision,

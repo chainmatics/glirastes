@@ -1,4 +1,5 @@
 import type { PiiDetector, PiiEntity } from '../../types.js';
+import { REMOTE_DETECTOR } from './detection-result.js';
 
 /**
  * Shape of an Aegis-compatible analyze method (duck-typed, no Lancer dep).
@@ -19,6 +20,9 @@ export interface AegisLike {
 /**
  * Creates a PiiDetector that delegates to a Lancer Aegis namespace.
  *
+ * Legacy: it sends raw text to the injected `analyze`, which may run off the
+ * host. The protected-text profile (`createStrictPiiShield`) refuses it.
+ *
  * Usage:
  * ```ts
  * import { createAegisDetector } from './index.js';
@@ -26,7 +30,8 @@ export interface AegisLike {
  * ```
  */
 export function createAegisDetector(aegis: AegisLike): PiiDetector {
-  return {
+  const detector: PiiDetector & { [REMOTE_DETECTOR]: true } = {
+    [REMOTE_DETECTOR]: true,
     async detect(text: string, locales?: string[]): Promise<PiiEntity[]> {
       const result = await aegis.analyze(text, locales ?? ['de', 'en']);
       return result.entities.map((e) => ({
@@ -38,4 +43,5 @@ export function createAegisDetector(aegis: AegisLike): PiiDetector {
       }));
     },
   };
+  return detector;
 }

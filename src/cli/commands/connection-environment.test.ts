@@ -936,3 +936,19 @@ describe('secret file safety against a real Git repository', () => {
     await expect(readFile(join(root, '.env'), 'utf8')).resolves.toBe(`${original}GLIRASTES_API_KEY=${credential}\n`);
   });
 });
+
+
+describe('explicit managed privacy pairing', () => {
+  it.each([false, true])('only writes a new binding with explicit opt-in %s', async (privacy) => {
+    const {root, environmentPath} = await fixture();
+    await materializeConnectionEnvironment({projectRoot:root,framework:'nextjs',connection,apiKey:credential,privacy,isGitIgnored:async()=>true});
+    const env = await readFile(environmentPath,'utf8');
+    expect(env.includes('GLIRASTES_STATE_ENVIRONMENT_ID=')).toBe(privacy);
+  });
+  it('ordinary re-pairing preserves the existing durable binding', async () => {
+    const {root,environmentPath}=await fixture();
+    await writeFile(environmentPath,`GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\n`);
+    await materializeConnectionEnvironment({projectRoot:root,framework:'nextjs',connection,apiKey:credential,isGitIgnored:async()=>true});
+    expect(await readFile(environmentPath,'utf8')).toContain(`GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}`);
+  });
+});

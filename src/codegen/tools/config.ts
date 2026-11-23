@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
+import { PrivacyEntryIdSchema, ProviderBindingSchema } from '../../contracts/privacy-policy.js';
 import { LANGUAGE_TAG_PATTERN, MAX_TEXT_LANGUAGES } from '../../contracts/localized-text.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import { MAX_OUTPUT_FIELDS, normalizeOutputFields, parseAnyDepthKey } from '../../server/core/output-fields.js';
@@ -134,6 +135,17 @@ export const ToolsConfigSchema = z.object({
     /** The environment chain, lowest first (e.g. `["dev", "staging", "main"]`); a promotion between them is never enriched. */
     environments: z.array(z.string().regex(/^(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/)).max(20).optional(),
   }).strict().default({}),
+  /**
+   * Provider entries the runner offers under the privacy profile, each with
+   * the non-secret binding its registry entry has (`registry.bindingOf(id)`).
+   * Only id, label, adapter and the binding digest reach the setup artifact;
+   * the Platform approves those. No key and no key name belongs here.
+   */
+  privacyProviders: z.array(z.object({
+    id: PrivacyEntryIdSchema,
+    label: z.string().trim().min(1).max(80),
+    binding: ProviderBindingSchema,
+  }).strict()).max(32).optional(),
   ci: z.object({
     strict: z.boolean().optional(),
     /** `tools check` fails while an enabled tool has only a template description or field names. */
@@ -214,6 +226,10 @@ export const ToolsConfigSchema = z.object({
       path: ['emit', 'moduleResolution'],
       message: 'emit.moduleResolution applies to a .ts module; a JavaScript module keeps its import extensions',
     });
+  }
+  const providerIds = (config.privacyProviders ?? []).map((provider) => provider.id);
+  if (new Set(providerIds).size !== providerIds.length) {
+    context.addIssue({ code: 'custom', path: ['privacyProviders'], message: 'Privacy provider ids are unique' });
   }
   const sensitive = findSensitiveStringPath(config);
   if (sensitive) {

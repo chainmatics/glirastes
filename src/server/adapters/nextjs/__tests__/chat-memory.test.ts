@@ -1,3 +1,4 @@
+import { APICallError } from '@ai-sdk/provider';
 import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -420,6 +421,128 @@ describe('verifyMemoryStore', () => {
     };
     await expect(verifyMemoryStore(leaky)).rejects.toThrow(/verifyMemoryStore/);
   });
+});
+
+import { agentRevision, manifestRevision, policyRevision, principal, localLimits } from '../../../../runtime/__tests__/turn-snapshot.test.js';
+import { createTurnSnapshot } from '../../../../runtime/turn-snapshot.js';
+import { PrivacyError } from '../../../pii-shield/detection-result.js';
+
+describe('managed memory live gate', () => {
+ it('blocks summary and chat after pinned off is revoked', async () => {
+  let revoked = false;
+  const chat = chatModel(); const summary = summaryModel();
+  const gate = vi.fn(async () => { if(revoked) throw new PrivacyError('privacy_policy_revoked'); });
+  const handler = createAiChatHandler({
+    tools:{}, model:chat.model, systemPrompt:'Assistant',onError:()=>{},
+    managedRuntime:{
+      resolvePrincipal:async()=>principal,
+      resolveTurnSnapshot:async({turnId})=>createTurnSnapshot({turnId,agentRevision,manifestRevision,
+        policyRevision:{...policyRevision,privacy:{schemaVersion:1,profile:'off'}},principal,localLimits}),
+      privacyGate:gate,
+    },
+    memory:{model:summary.model,chat:{autoCompact:10,keepTurns:0},scope:async()=>{
+      // Represents a loaded revocation arriving during this asynchronous hook.
+      revoked=true; return {};
+    }},
+  });
+  const response = await handler(request([
+    user('u1','Confidential raw canary alice@example.com '+ 'earlier context '.repeat(20)),assistant('a1','Acknowledged'),
+    user('u2','Tell me what happened'),
+  ]));
+  await response.text();
+  expect(revoked).toBe(true);
+  expect(summary.prompts).toHaveLength(0);
+  expect(chat.prompts).toHaveLength(0);
+  expect(gate.mock.calls.length).toBeGreaterThan(1);
+ });
+});
+
+it('blocks memory note writes after revocation during model response', async () => {
+ let revoked=false;
+ const store=createInMemoryMemoryStore(); const add=vi.spyOn(store,'add');
+ const model=new MockLanguageModelV3({doStream:async()=>{
+   revoked=true;
+   return {stream:convertArrayToReadableStream([
+    {type:'stream-start',warnings:[]},
+    {type:'tool-call',toolCallId:'remember-1',toolName:'memory_remember',input:JSON.stringify({note:'Confidential alice@example.com',scope:'user'})},
+    {type:'finish',finishReason:{unified:'tool-calls',raw:undefined},usage},
+   ] as never)} as never;
+ }});
+ const gate=vi.fn(async()=>{if(revoked)throw new PrivacyError('privacy_policy_revoked');});
+ const handler=createAiChatHandler({tools:{},model,systemPrompt:'Assistant',onError:()=>{},
+  managedRuntime:{resolvePrincipal:async()=>principal,
+   resolveTurnSnapshot:async({turnId})=>createTurnSnapshot({turnId,agentRevision,manifestRevision,
+    policyRevision:{...policyRevision,privacy:{schemaVersion:1,profile:'off'}},principal,localLimits}),privacyGate:gate},
+  memory:{chat:false,user:{store},scope:()=>({user:'user-1'})},
+ });
+ await (await handler(request([user('u1','Remember my email')]))).text();
+ expect(revoked).toBe(true);
+ expect(add).not.toHaveBeenCalled();
+ expect((await store.list({kind:'user',key:'user-1'}))).toHaveLength(0);
+});
+
+
+it('rechecks summary dispatch after async preparation and between pieces', async () => {
+  for (const point of ['preparation','first-response'] as const) {
+    let revoked = false; let dispatched = 0;
+    const model = new MockLanguageModelV3({doGenerate:async () => {
+      dispatched++; revoked = true;
+      return {content:[{type:'text',text:'First summary'}],finishReason:{unified:'stop',raw:'stop'},usage,warnings:[]} as never;
+    }});
+    const memory = createChatMemory({model,chat:{autoCompact:10,keepTurns:0},onError:()=>{}})!;
+    const turn = await memory.begin(new Request('https://app.example'),{}, {beforeOperation:async()=>{
+      if(revoked) throw new PrivacyError('privacy_policy_revoked');
+    }});
+    const prepared = turn.prepare({model,messages:[user('u1','raw prior conversation '.repeat(900)),assistant('a1','ok'),user('u2','next')],
+      ...(point==='preparation'?{anonymize:async(text:string)=>{revoked=true;return text;}}:{})});
+    const updates:unknown[]=[];
+    await prepared.connect(part=>updates.push(part)).done();
+    expect(dispatched).toBe(point==='preparation'?0:1);
+    expect(updates).toEqual([]);
+  }
+});
+
+it('blocks a memory delete after revocation during model response', async () => {
+ let revoked=false;
+ const store=createInMemoryMemoryStore();
+ const scope={kind:'user' as const,key:'user-1'};
+ await store.add(scope,{content:'Stored private note'});
+ const remove=vi.spyOn(store,'remove');
+ const model=new MockLanguageModelV3({doStream:async()=>{
+   revoked=true;
+   return {stream:convertArrayToReadableStream([
+    {type:'stream-start',warnings:[]},
+    {type:'tool-call',toolCallId:'forget-1',toolName:'memory_forget',input:JSON.stringify({id:'u-1',note:'Stored private note'})},
+    {type:'finish',finishReason:{unified:'tool-calls',raw:undefined},usage},
+   ] as never)} as never;
+ }});
+ const handler=createAiChatHandler({tools:{},model,systemPrompt:'Assistant',onError:()=>{},
+  managedRuntime:{resolvePrincipal:async()=>principal,
+   resolveTurnSnapshot:async({turnId})=>createTurnSnapshot({turnId,agentRevision,manifestRevision,
+    policyRevision:{...policyRevision,privacy:{schemaVersion:1,profile:'off'}},principal,localLimits}),
+   privacyGate:async()=>{if(revoked)throw new PrivacyError('privacy_policy_revoked');}},
+  memory:{chat:false,user:{store},scope:()=>({user:'user-1'})},
+ });
+ await (await handler(request([user('u1','Forget my note')]))).text();
+ expect(remove).not.toHaveBeenCalled();
+ expect(await store.list(scope)).toHaveLength(1);
+});
+
+it('rechecks live permission on an automatic summary retry', async () => {
+  let revoked=false; let dispatched=0;
+  const model=new MockLanguageModelV3({doGenerate:async()=>{
+    dispatched++; revoked=true;
+    throw new APICallError({message:'temporary unavailable',url:'https://provider.example',requestBodyValues:{},statusCode:503,isRetryable:true});
+  }});
+  const memory=createChatMemory({model,chat:{autoCompact:10,keepTurns:0},onError:()=>{}})!;
+  const gate=vi.fn(async()=>{if(revoked)throw new PrivacyError('privacy_policy_revoked');});
+  const turn=await memory.begin(new Request('https://app.example'),{}, {beforeOperation:gate});
+  const prepared=turn.prepare({model,messages:[user('u1','earlier conversation '.repeat(40)),assistant('a1','ok'),user('u2','next')]});
+  const updates:unknown[]=[];
+  await prepared.connect(part=>updates.push(part)).done();
+  expect(dispatched).toBe(1);
+  expect(gate.mock.calls.length).toBeGreaterThanOrEqual(4);
+  expect(updates).toEqual([]);
 });
 
 describe('chat memory: the memory block cannot be closed by a note or summary', () => {

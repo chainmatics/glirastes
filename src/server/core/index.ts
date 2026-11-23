@@ -22,6 +22,14 @@ import { assertToolEntities, validInputEntities, validOutputEntities } from '../
 import { assertApprovalSubjectDeclarations } from '../../contracts/approval-subject.js';
 import { zodToCompactDescription } from './zod-compact.js';
 import {
+  AMBIGUOUS_HTTP_STATUS,
+  OUTCOME_UNKNOWN_HINT,
+  errorLeavesOutcomeUnknown,
+  isOutcomeUnknown,
+  markOutcomeUnknown,
+  ResponseUnreadableError,
+} from './tool-outcome.js';
+import {
   ENDPOINT_PATH_NOT_ALLOWED_ERROR,
   ENDPOINT_PATH_NOT_RELATIVE_ERROR,
   type ToolFailureClassifier,
@@ -52,7 +60,8 @@ import {
   notFoundHint,
 } from './tool-failure-result.js';
 import type { ResultStore } from './result-store.js';
-import { isResultReader } from './read-result-tool.js';
+import { markPrivacyConversion } from './privacy-conversion.js';
+import { isResultReader, markResultReader, unsupportedPrivateResultRead } from './result-reader.js';
 import { cleanToolResult } from './clean-tool-result.js';
 import { assertToolMiddleware, composeToolMiddleware, type ToolMiddleware } from './tool-middleware.js';
 export {
@@ -695,6 +704,11 @@ export function endpointToolToTool<TInput extends SchemaLike>(
           ...(classified ? { expectedFailure: expected } : {}),
         };
         Object.defineProperty(failure, ENDPOINT_FAILURE, { value: true });
+        // A gateway error or timeout answer after a write was sent: the
+        // backend may have acted.
+        if (fromBackend && AMBIGUOUS_HTTP_STATUS.has(response.status) && endpointTool.method !== 'GET') {
+          markOutcomeUnknown(failure);
+        }
         // Kept unserialized (non-enumerable) so the bound of the tool that shows it can reduce it.
         if (fromBackend) Object.defineProperty(failure, ENDPOINT_FAILURE_DATA, { value: response.data });
         return failure;
@@ -923,12 +937,20 @@ export interface ToolToAiToolOptions {
    */
   telemetry?: TelemetrySink;
   /**
+   * Protected profile: a failed tool answers the model and the audit event
+   * without the error message (backend messages can carry request data).
+   */
+  contentFreeErrors?: boolean;
+  /** Withhold oversized raw results and disable result stores/readers to prevent unregistered identity fragments. */
+  protectedResults?: boolean;
+  /**
    * Upper bound of a serialized successful tool result, in characters
    * (integer from 1,000 to 200,000; default 16,000). A tool's own
    * `maxResultChars` wins. See `truncateToolResult`.
    */
   maxResultChars?: number;
   /**
+   * Ignored when `protectedResults` is true; SDK readers are refused too.
    * The result store of the running turn (`createResultStore`). With it, a
    * successful record result larger than the tool's limit is kept in the
    * store and the model gets an overview with a `_result` handle that
@@ -1045,7 +1067,7 @@ export function toolToAiTool(
   const outputEntities = validOutputEntities(tool.outputEntities);
   const inputEntities = validInputEntities(tool.inputEntities);
 
-  return {
+  const converted = {
     _toolId: tool.id,
     // Strictly read-only (a GET or HEAD call that needs no approval): a budget continuation may run it again.
     ...(method !== undefined && readOnly && !requiresApproval ? { _readOnly: true as const } : {}),
@@ -1082,6 +1104,9 @@ export function toolToAiTool(
       const signals = [context.abortSignal, executionOptions?.abortSignal].filter((value): value is AbortSignal => Boolean(value));
       const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
       signal?.throwIfAborted();
+      if (options?.protectedResults && isResultReader(tool)) {
+        return unsupportedPrivateResultRead();
+      }
       const endpoint = context as Partial<EndpointToolContext>;
       const executionContext = signal ? {
         ...context, abortSignal: signal,
@@ -1092,7 +1117,7 @@ export function toolToAiTool(
       const startTime = Date.now();
       try {
         // A handle belongs to the principal the tool runs for: captured before it runs.
-        const store = options?.resultStore;
+        const store = options?.protectedResults ? undefined : options?.resultStore;
         const capturedOwner = store && !isResultReader(tool) ? await store.captureOwner() : undefined;
         // Guards have passed; the app's middleware wraps only the execution.
         const middleware = options?.toolMiddleware;
@@ -1125,7 +1150,7 @@ export function toolToAiTool(
           },
         });
 
-        const cleaned = cleanToolResult(tool, result, bound, name);
+        const cleaned = cleanToolResult(tool, result, bound, name, options?.protectedResults === true);
         let cleanResult: unknown = cleaned.value;
         const successful = cleaned.successful;
         const fromStore = store?.isIssued(result) === true;
@@ -1154,11 +1179,17 @@ export function toolToAiTool(
             })
           : undefined;
         // Without a handle the default view still applies; the rest cannot be read.
-        const unreadableView = !overview && viewed
+        const unreadableView = !options?.protectedResults && !overview && viewed
           ? applyDefaultViewWithoutStore(cleanResult as Record<string, unknown>, defaultTree!, resultLimit, { readOnly, inputSchema: tool.inputSchema })
           : undefined;
-        cleanResult = overview ?? unreadableView
-          ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
+        cleanResult = options?.protectedResults && (JSON.stringify(cleanResult)?.length ?? 0) > resultLimit
+          ? {
+              success: true,
+              outputWithheld: true,
+              message: 'The tool ran, but its result exceeds the protected result limit. Details were withheld. Do not repeat a write; narrow a read request instead.',
+            }
+          : overview ?? unreadableView ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
+
 
         const normalized = options?.uiActionSchema
           ? normalizeResultUiAction(cleanResult, options.uiActionSchema)
@@ -1177,14 +1208,27 @@ export function toolToAiTool(
           details: {
             toolId: tool.id,
             toolName: name,
-            error: error instanceof Error ? error.message : String(error),
+            error: options?.contentFreeErrors
+              ? 'tool_failed'
+              : error instanceof Error ? error.message : String(error),
             latencyMs: Date.now() - startTime,
           },
         });
 
         options?.onError?.(tool.id, error);
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage = options?.contentFreeErrors
+          ? 'tool_failed'
+          : error instanceof Error ? error.message : 'Unknown error';
+        // A timeout, abort, lost connection or unreadable answer after the
+        // request may have reached the backend: the call may have taken
+        // effect, so it is not reported as failed.
+        if (errorLeavesOutcomeUnknown(error)) {
+          return markOutcomeUnknown({
+            error: `Error in ${name}: ${options?.contentFreeErrors ? 'tool_outcome_unknown' : errorMessage}`,
+            outcome: 'unknown',
+            hint: OUTCOME_UNKNOWN_HINT,
+          });
+        }
         return normalizeResultUiAction(
           {
             // The name the model calls the tool by, never its internal id (a managed tool's id is a UUID).
@@ -1196,6 +1240,17 @@ export function toolToAiTool(
       }
     },
   };
+  const result = isResultReader(tool) ? markResultReader(converted) : converted;
+  return markPrivacyConversion(result, (): object => {
+    if (options?.toolMiddleware?.length) return {
+      ...result, execute: async () => ({ success: false, error: 'privacy_tool_middleware_unsupported' }),
+    };
+    return toolToAiTool(tool, context, toolName, {
+      ...options, protectedResults: true, contentFreeErrors: true,
+      // A low-level caller's raw error callback must not bypass the boundary.
+      ...(options?.onError ? { onError: (id, _error) => options.onError!(id, new Error('tool_failed')) } : {}),
+    });
+  });
 }
 
 /**
@@ -1398,7 +1453,14 @@ export function createFetchInternalApiCaller(
       }
 
       const response = await fetchImpl(url, init);
-      const data = await parseResponseBody(response, options.maxResponseBytes);
+      let data: unknown;
+      try {
+        data = await parseResponseBody(response, options.maxResponseBytes);
+      } catch (error) {
+        // The backend answered, so a write may have committed: not a plain failure.
+        if (errorLeavesOutcomeUnknown(error) || request.method === 'GET' || request.method === 'HEAD') throw error;
+        throw new ResponseUnreadableError(error instanceof Error ? error.message : undefined);
+      }
 
       if (!response.ok) {
         return {

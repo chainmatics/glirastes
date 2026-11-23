@@ -65,10 +65,13 @@ export {
   TechnicalRuntimeEventV2Schema,
   TOOL_CONTRACT_REJECTED_STATUSES,
   ToolContractRejectedEventSchema,
+  PRIVACY_DECISIONS_MAX_CODES,
+  PrivacyDecisionsEventSchema,
   TurnContinuationSchema,
   TurnContinuedEventSchema,
 } from './events.js';
 export type {
+  PrivacyDecisionsEvent,
   RuntimeCostSource,
   RuntimeMetricEvent,
   TurnContinuation,
@@ -175,6 +178,48 @@ export type {
   PairingTokenResult,
   PlatformConnectionDescriptor,
 } from './platform-connection.js';
+
+export {
+  DEFAULT_PRIVACY_IMAGE_TYPES,
+  PRIVACY_DECISION_CODES,
+  PRIVACY_DECISION_MAX_COUNT,
+  PRIVACY_DECISION_MAX_WINDOW_MS,
+  PRIVACY_LOCAL_DEFAULTS,
+  PRIVACY_LOCAL_RESTRICTION_CODES,
+  PRIVACY_LOOSENING_CODES,
+  PRIVACY_POLICY_SCHEMA_VERSIONS,
+  PRIVACY_PROFILES,
+  PRIVACY_RUNTIME_REASONS,
+  PRIVACY_RUNTIME_STATES,
+  PrivacyDigestSchema,
+  PrivacyEntryIdSchema,
+  PrivacyImageTypeSchema,
+  PrivacyPolicyBlockSchema,
+  PrivacyProviderApprovalSchema,
+  PrivacyProviderReportSchema,
+  PrivacyRuntimeStatusSchema,
+  PrivacyScreenshotModeSchema,
+  ProviderBindingSchema,
+  isProtectedPolicy,
+  mergePrivacyPolicy,
+  normalizeProviderEndpoint,
+  privacyLoosening,
+} from './privacy-policy.js';
+export type {
+  EffectivePrivacyPolicy,
+  LocalPrivacyPolicy,
+  LocalPrivacyProviders,
+  PrivacyDecisionCode,
+  PrivacyImageType,
+  PrivacyLocalRestrictionCode,
+  PrivacyLooseningCode,
+  PrivacyPolicyBlock,
+  PrivacyProviderApproval,
+  PrivacyProviderReport,
+  PrivacyRuntimeStatus,
+  ProtectedTextPolicyBlock,
+  ProviderBinding,
+} from './privacy-policy.js';
 
 export {
   isLanguageTag,

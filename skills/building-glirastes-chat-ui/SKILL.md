@@ -352,23 +352,10 @@ unmount release the microphone as well. `voice.adapter` plugs in another provide
 (an `SttProviderAdapter`; `DeepgramSttAdapter` and `RecordedSttAdapter` ship in
 `glirastes/stt`); keep its identity stable. Every voice input (`RecordedSttAdapter` too) needs the audio worklet served: chain `glirastes stt worklet` into `predev`/`prebuild`, see [speech worklet](references/hooks-and-building-blocks.md#speech-worklet).
 
-A finished recording (`RecordedSttAdapter`, `audio/wav` to
-`/api/ai/speech-recognize`) needs one route to the app's transcription service,
-or to [local speech recognition](references/local-speech.md) in its own server:
-
-```ts
-// src/app/api/ai/speech-recognize/route.ts
-import { createRecordingTranscriptionHandler } from 'glirastes/server/nextjs';
-import { resolvePrincipal } from '@/lib/glirastes-principal';
-
-export const runtime = 'nodejs';
-export const POST = createRecordingTranscriptionHandler({
-  authorize: async (request) => Boolean(await resolvePrincipal(request)),
-  url: process.env.STT_RECORDING_URL,
-  apiKey: process.env.STT_RECORDING_API_KEY,
-  model: process.env.STT_RECORDING_MODEL,
-});
-```
+A finished recording needs an authenticated app route. See
+[local speech](references/local-speech.md) for in-process transcription and
+[recording transcription](references/recording-transcription.md) for service
+routing, limits and protected-policy checks. Keep provider keys server-side.
 
 `useStt` is the hook, `VoiceInputButton` and `RecordingBar` the surface. Speech
 traffic goes directly between the target app's local provider adapter and its

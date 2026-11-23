@@ -16,6 +16,7 @@ export type {
   RuntimeSyncState,
 } from './state-store.js';
 export {
+  PrivacyRefusedError,
   RuntimeSyncManager,
 } from './sync-manager.js';
 export type {

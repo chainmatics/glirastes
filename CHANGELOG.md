@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-23
+
+### Privacy integration
+
+- SDK pseudonymization is explicit opt-in. Missing/false `required` preserves ordinary behavior without mapping or keyring dependencies. Managed PII Shield uses signed Business/Enterprise Platform authority and a fixed environment binding plus durable state; local self-configuration provides no Platform assurance.
+- Managed model and classifier transports recheck authority for every attempt, including retries. Verified revocations and refused protection close the local gate before slow persistence or telemetry; obsolete connections cannot establish fresh bootstrap.
+- Protected turns visibly refuse opaque routers/guardrails, tool middleware, direct commands, approval subject/list lookups and mentions. Plain-text protected tools retain scoped approvals, encrypted identity mapping and protected server history. GID local STT is deferred; protected GID speech is blocked.
+
+- Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.
+
+- Protected turns withhold tool results exceeding `maxResultChars` with a visible
+  `outputWithheld` notice. Clipping raw strings before identity registration can
+  create identifying fragments; narrow read requests instead. Writes are not
+  retried. Ordinary off-profile result compaction remains available.
+
+- Memory operations on a permitted off turn recheck its live privacy gate
+  before provider dispatch (including automatic retries), note mutations,
+  and summary publication. Revoking the pinned off policy also stops memory.
+
+- Protected chat explicitly refuses enabled chat memory with HTTP 503,
+  `privacy_unsupported_content`, feature `chat-memory`, before note stores,
+  note tools or the summary provider run. Use `memory: false` for protected
+  requests. Rolling summaries and persistent/browser notes are not yet bound
+  to privacy mapping generations; they cannot safely restore expired, deleted
+  or cross-scope context. Ordinary chat memory remains available when the
+  effective privacy profile is off. There is no embedding or retrieval model
+  call in the current memory implementation.
+- Screenshots require explicit signed `screenshots.mode: allow-original` in
+  managed protected mode. Attachment options can narrow this permission;
+  they cannot enable images on their own. Allowed images remain unprotected.
+
 ## [0.24.2] - 2026-11-23
 
 ### Added
@@ -1255,3 +1286,4 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.25.0]: https://github.com/chainmatics/glirastes/compare/v0.24.2...v0.25.0

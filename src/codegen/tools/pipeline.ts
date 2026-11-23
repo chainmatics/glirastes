@@ -1,3 +1,4 @@
+import { providerBindingDigest } from '../../sync/privacy-digest.js';
 import { resolveToolEntities } from './entity-declarations.js';
 import { resolveApprovalSubjects } from './approval-subject-declarations.js';
 import { existsSync } from 'node:fs';
@@ -933,6 +934,16 @@ async function generate(
     ...(previous.artifact ? { previous: previous.artifact } : {}),
     now: options.mode === 'write' ? dependencies.now ?? (() => new Date()) : null,
     exclusions: excluded,
+    ...(config.privacyProviders
+      ? {
+          privacyProviders: config.privacyProviders.map((provider) => ({
+            id: provider.id,
+            label: provider.label,
+            adapter: provider.binding.adapter,
+            bindingDigest: providerBindingDigest(provider.binding),
+          })),
+        }
+      : {}),
   });
   assertAppSetupSemanticParity(built.artifact, inventory.executions.map((execution) => execution.definitionId));
   const inventoryRaw = renderInventory(generation.state);

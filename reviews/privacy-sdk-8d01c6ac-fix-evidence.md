@@ -1,0 +1,19 @@
+# Fix evidence for SDK8d01c6ac review (2026-11-23)
+
+Original immutable review: `privacy-sdk-8d01c6ac-codex-review.md`, independent Codex gpt-6.2-sol. This is implementation-author evidence, not independent verification.
+
+- High approval replacement: rebuild only execute projection; retain consumer schema and current needsApproval. Added strengthened/added approval tests and unchanged modified-execute denial.
+- High managed bootstrap: explicit managed choice blocks without connection/reference or durable state, including signed off; no capability/healthy acceptance for volatile state.
+- High offline retained authority: coordinator authorized fixed nonsecret `stateEnvironmentId` / `GLIRASTES_STATE_ENVIRONMENT_ID` (message msg_4ab5c6ec05fc), no new registry. Load scoped state before live discovery; reject mismatch; keep authority after activation removal. A fresh inactive installation retains ordinary behavior. Two actual processes test activation removal plus offline restart with zero model/cloud-audio dispatch. Store+binding removal/change is the documented admin/DR boundary.
+- Medium scope: managed sync supplies configured app, optionally authenticated tenant; reject foreign signed/restored bundles before floor evaluation. Stored signatures are rechecked on initial reconciliation. Signed revocations carry only the globally unique environment UUID in the unchanged wire contract.
+- Medium failure projection: error-only and success:false use the same receipt/failure classification; protected native and converted outputs withhold raw failure detail, including actual serialized provider canaries. Unknown outcomes remain unknown.
+- Medium cross-build provenance: non-writable Symbol.for metadata on exact execute functions survives both CJS/ESM directions without a module-local registry; four built-package probes cover converter/reader execute-only adapters.
+- Medium release graph: required PG suite, egress and source/test gates move before both publications; image also waits for native-STT addon gate. npm rebuilds the same checked source in its own job. No actual workflow publication run.
+- Low diagnostics: enum names, new sanitized error instances, no duck-typed raw extras.
+- Low ordinary transcription: no implicit local queue and no upload-inclusive local deadline without activation/limits; policy rechecked before dispatch after queue/upload.
+
+Reproduction: nine new cases against immutable8d01c6ac fail (`/tmp/privacy-sdk-8d01c6ac-review-red.log`), covering approval, failure projection, expected app/tenant/restored scope, managed missing connection and diagnostic content. This targeted selection intentionally deselects unrelated tests; those skips are not a full-gate result.
+
+Focused fixed runs: 170 passed with required isolated PG and no skips (`/tmp/privacy-sdk-review-second-focused.log`); 145 binding/restart/scope cases passed while ten CLI exact-env fixtures initially failed because of the newly emitted binding, then CLI pairing88 passed after expected-field updates (`/tmp/privacy-sdk-pairing-binding-focused.log`); release/default/provenance/speech53 passed (`/tmp/privacy-sdk-review-release-default-speech.log`). Built CJS/ESM provenance4 passed. Source/test typechecks, build and egress60/0 passed. These are source-bound checkpoints; full final fixed-SHA gate and independent verification must be recorded separately.
+
+Fixed upstream full baseline and all exception identities: `privacy-sdk-f29b3607-baseline-exceptions.md`. A real unconfigured built-handler HTTP canary exactly matched fixed upstreamf29b3607 request JSON/status/response behavior, with no privacy status event and no errors. The captured synthetic fixture and reproducible probe are committed in `tests/fixtures/privacy-default-*`; this is local transport evidence, not a live vendor call.

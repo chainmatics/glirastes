@@ -46,6 +46,20 @@ export interface RuntimeMetricsSinkOptions {
   onDrop?: (drop: { reason: RuntimeMetricsDropReason; count: number }) => void;
 }
 
+const closeSteps = new WeakMap<RuntimeMetricsSink, Array<() => void>>();
+
+/**
+ * Runs `step` once when a sink of `createRuntimeMetricsSink` closes, before
+ * it stops accepting events, so a buffer that records into it (the privacy
+ * decision windows) hands over its last events. A step that throws is
+ * ignored. Other sink implementations never run it.
+ */
+export function onRuntimeMetricsSinkClose(sink: RuntimeMetricsSink, step: () => void): void {
+  const steps = closeSteps.get(sink) ?? [];
+  steps.push(step);
+  closeSteps.set(sink, steps);
+}
+
 export interface BatchingRuntimeMetricsSink extends RuntimeMetricsSink {
   /** Events waiting for delivery. */
   readonly pending: number;
@@ -186,7 +200,7 @@ export function createRuntimeMetricsSink(
     });
   };
 
-  return {
+  const sink: BatchingRuntimeMetricsSink = {
     identity,
     get pending() {
       return queued();
@@ -221,6 +235,15 @@ export function createRuntimeMetricsSink(
     },
     flush,
     async close() {
+      const steps = closeSteps.get(sink) ?? [];
+      closeSteps.delete(sink);
+      for (const step of steps) {
+        try {
+          step();
+        } catch {
+          // A buffer that fails to hand over loses its events, nothing else.
+        }
+      }
       closed = true;
       if (timer) {
         clearInterval(timer);
@@ -229,6 +252,7 @@ export function createRuntimeMetricsSink(
       await flush();
     },
   };
+  return sink;
 }
 
 /**

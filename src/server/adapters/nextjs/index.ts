@@ -54,11 +54,14 @@ export {
 export {
   createRecordingTranscriptionHandler,
   DEFAULT_RECORDING_LANGUAGES,
+  isPrivateServiceUrl,
+  wavDurationSeconds,
   TranscriptionUnavailableError,
   type LocalRecordingTranscriptionHandlerConfig,
   type RecordingAudio,
   type RecordingTranscriber,
   type RecordingTranscriptionHandlerConfig,
+  type SpeechPrivacyPolicy,
 } from './recording-transcription-handler.js';
 export {
   withModelFacingUiOutcomes,

@@ -15,6 +15,7 @@ import type {
   SchemaLike,
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
+import type { ChatPrivacyConfig } from '../../pii-shield/chat-privacy.js';
 import type { ToolMiddleware } from '../../core/tool-middleware.js';
 import type { ApprovalStore } from './approval-binding.js';
 import type { ApprovalSubjectLimits } from './approval-subject-lookup.js';
@@ -145,6 +146,27 @@ export interface ManagedLocalRuntimeConfig {
   onBudgetSignal?: (
     signal: ManagedTurnBudgetSignal,
   ) => void | Promise<void>;
+
+  /**
+   * Runs after the snapshot is pinned and before the privacy turn opens,
+   * and again before every model call and tool call of the turn. Throws a
+   * `PrivacyError` when the runtime cannot serve a turn under its privacy
+   * policy (no verified deployment yet, a refused or revoked policy, an
+   * unmet privacy floor); the handler answers with the code, content-free.
+   */
+  privacyGate?: (
+    context: { request: Request; snapshot: TurnSnapshot },
+  ) => void | Promise<void>;
+
+  /**
+   * The digest of the effective privacy policy the runtime reports for this
+   * snapshot (`null` when off). A turn whose own merged policy differs (another
+   * registry or local policy than the runtime's) is refused with
+   * `privacy_not_configured`: what runs is what the heartbeat reports.
+   */
+  privacyEffectiveDigest?: (
+    context: { request: Request; snapshot: TurnSnapshot },
+  ) => string | null;
 }
 
 export interface StepUsage {
@@ -499,7 +521,7 @@ export interface AiChatHandlerConfig {
    * instructions. With `memory.chat` on, `maxContextMessages` and
    * `history.maxTurns` no longer drop earlier turns.
    */
-  memory?: ChatMemoryConfig;
+  memory?: ChatMemoryConfig | false;
 
   /**
    * The app's own input check. Runs before the pipeline or the intent router,
@@ -518,6 +540,17 @@ export interface AiChatHandlerConfig {
    * tool-call arguments are re-hydrated, and responses are de-anonymized.
    */
   piiShield?: PiiShield;
+
+  /**
+   * Protected-text profile (`protected-text/v1`): one privacy boundary per
+   * turn around every model call (answer, tool steps, retries, classifier),
+   * a persistent scoped mapping, rehydrated tool input and a display
+   * projection for the principal only. Every failure stops the turn with a
+   * content-free code; nothing is sent unprotected. Replaces `piiShield`
+   * (both together are refused) and cannot be combined with `lancer` or
+   * `telemetry`, which send content to Platform services.
+   */
+  privacy?: ChatPrivacyConfig;
 
   wrapHandler?: <T>(callback: () => T | Promise<T>, req: Request) => Promise<T>;
   /**
@@ -583,6 +616,8 @@ export interface AiChatHandlerConfig {
    */
   maxResultChars?: number;
   /**
+   * Disabled for an effective protected privacy turn, including explicit true.
+   * Oversized protected results are withheld; stored retrieval is unsupported.
    * Turn-scoped result handles (on by default). A successful record result
    * of a model turn that exceeds its limit (`maxResultChars`) is kept in
    * full for the running turn, after the PII shield when `piiShield` is set,
@@ -867,7 +902,9 @@ export interface AiChatHandlerConfig {
    * File and image attachments in user messages; off by default, and a file
    * part is then refused with 400. Attachments bypass the PII shield, so
    * with `piiShield` set the handler refuses to start unless
-   * `allowWithPiiShield` is true.
+   * `allowWithPiiShield` is true. With `privacy`, the screenshot rule of
+   * the privacy config decides instead: blocked by default, and images
+   * are never pseudonymized when allowed.
    */
   attachments?: ChatAttachmentsConfig;
 

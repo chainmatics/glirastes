@@ -87,6 +87,8 @@ const GUESS_PATTERNS: ReadonlyArray<[string, RegExp]> = [
 ];
 
 const ALLOWED: ReadonlyArray<{ file: string; pattern: string; why: string }> = [
+  { file: 'server/pii-shield/known-identities.ts', pattern: 'identity field-name literal', why: 'personal-data detection for pseudonymization, not generic record label inference; intentionally excludes arbitrary title fields' },
+  { file: 'server/pii-shield/pseudonyms.ts', pattern: 'UUID regex', why: 'format-preserving UUID pseudonym generation, not record identity inference' },
   { file: 'contracts/entity-identity.ts', pattern: '*', why: 'the one module' },
   { file: 'sync/control-plane-client.ts', pattern: 'UUID regex', why: 'format of a setup run id, not a record' },
   { file: 'react/bridges/rest-session-bridge.ts', pattern: 'name-key list', why: 'rows of the app chat-session store, not tool-result records' },

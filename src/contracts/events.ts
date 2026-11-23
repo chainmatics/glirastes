@@ -3,6 +3,12 @@ import {
   findForbiddenContentPath,
   findForbiddenPlatformContentPath,
 } from './content-boundary.js';
+import {
+  PRIVACY_DECISION_CODES,
+  PRIVACY_DECISION_MAX_COUNT,
+  PRIVACY_DECISION_MAX_WINDOW_MS,
+  PrivacyDigestSchema,
+} from './privacy-policy.js';
 
 export const TechnicalRuntimeEventSchema = z.object({
   eventId: z.uuid(),
@@ -276,11 +282,87 @@ export const ToolContractRejectedEventSchema = z.object({
 
 export type ToolContractRejectedEvent = z.infer<typeof ToolContractRejectedEventSchema>;
 
-/** Every content-free metric event of the runtime: finished and continued turns, contract rejections. */
+/** Most distinct decision codes one `privacy.decisions` event carries. */
+export const PRIVACY_DECISIONS_MAX_CODES = 32;
+
+/**
+ * Counted privacy decisions of one runner in one window (at most one hour).
+ * Content-free: codes and counts under the policy the runner pinned. The
+ * runner key comes from the authenticated request, never from the event.
+ * Positive codes (`turn_protected`, `model_call_protected`,
+ * `tool_call_rehydrated`) are counted only where the protection ran; they
+ * show reported protected calls, not that no other path sent content.
+ */
+export const PrivacyDecisionsEventSchema = z.object({
+  schemaVersion: z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION),
+  eventId: z.uuid(),
+  eventType: z.literal('privacy.decisions'),
+  occurredAt: z.iso.datetime({ offset: true }),
+  appId: z.uuid(),
+  environmentId: z.uuid(),
+  buildId: metricLabel.nullable(),
+  instanceId: metricLabel,
+  /** The pinned policy revision, `null` when the profile came from local configuration only. */
+  policyRevisionId: z.uuid().nullable(),
+  /** Digest of the signed Platform block, `null` without one. */
+  privacyDigest: PrivacyDigestSchema.nullable(),
+  /** Digest of the policy enforced after local tightening. */
+  effectivePolicyDigest: PrivacyDigestSchema,
+  window: z.object({
+    startedAt: z.iso.datetime({ offset: true }),
+    endedAt: z.iso.datetime({ offset: true }),
+    /** Per-process window counter; with `instanceId` it orders the windows of one runner. */
+    sequence: z.number().int().nonnegative().max(RUNTIME_METRIC_MAX_COUNT),
+  }).strict(),
+  decisions: z.array(z.object({
+    code: z.enum(PRIVACY_DECISION_CODES),
+    count: z.number().int().min(1).max(PRIVACY_DECISION_MAX_COUNT),
+  }).strict()).min(1).max(PRIVACY_DECISIONS_MAX_CODES),
+  /** Earlier windows the bounded client buffer dropped before this one was sent. */
+  droppedWindows: z.number().int().nonnegative().max(RUNTIME_METRIC_MAX_COUNT),
+}).strict().superRefine((event, context) => {
+  const started = Date.parse(event.window.startedAt);
+  const ended = Date.parse(event.window.endedAt);
+  if (!(ended > started) || ended - started > PRIVACY_DECISION_MAX_WINDOW_MS) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A decision window ends after it starts and lasts at most one hour',
+      path: ['window', 'endedAt'],
+    });
+  }
+  const codes = event.decisions.map((decision) => decision.code);
+  if (new Set(codes).size !== codes.length) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Each decision code is counted once',
+      path: ['decisions'],
+    });
+  }
+  if ((event.policyRevisionId === null) !== (event.privacyDigest === null)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A policy revision and its privacy digest are known together',
+      path: ['privacyDigest'],
+    });
+  }
+  const forbidden = findForbiddenPlatformContentPath(event);
+  if (forbidden) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Runtime metric events must not contain content or credentials',
+      path: forbidden,
+    });
+  }
+});
+
+export type PrivacyDecisionsEvent = z.infer<typeof PrivacyDecisionsEventSchema>;
+
+/** Every content-free metric event of the runtime: finished and continued turns, contract rejections, privacy decisions. */
 export const RuntimeMetricEventSchema = z.discriminatedUnion('eventType', [
   TechnicalRuntimeEventV2Schema,
   TurnContinuedEventSchema,
   ToolContractRejectedEventSchema,
+  PrivacyDecisionsEventSchema,
 ]);
 
 export type RuntimeMetricEvent = z.infer<typeof RuntimeMetricEventSchema>;

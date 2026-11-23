@@ -1,4 +1,5 @@
 import { findForbiddenContentPath } from '../contracts/content-boundary.js';
+import { PRIVACY_POLICY_SCHEMA_VERSIONS } from '../contracts/privacy-policy.js';
 import {
   DISCOVERY_DIGEST_PATTERN,
   POLICY_RELAXATIONS_VERSION,
@@ -81,6 +82,13 @@ export class RuntimeControlPlaneClient {
      * effect here (D16). Registration then reports `policyRelaxations`.
      */
     policyRelaxations?: boolean;
+    /**
+     * True when this runner can enforce a protected privacy policy and keeps
+     * its accepted state and privacy floor in a durable store (managed
+     * privacy). Registration then reports `privacyPolicyVersions`; without
+     * it the Platform must not count the runner as privacy-ready.
+     */
+    privacyCapable?: boolean;
     manager: RuntimeSyncManager;
     fetchImpl?: typeof fetch;
     push?: RuntimePushConnector;
@@ -138,6 +146,19 @@ export class RuntimeControlPlaneClient {
       throw new Error('capabilities.policyRelaxations is reported by the runtime');
     }
     if (relaxations !== undefined) capabilities.policyRelaxations = relaxations;
+    // The privacy block versions this runner can enforce with a durable
+    // accepted state. Reported by the runtime only, and only by a
+    // privacy-capable runner: a claim the code cannot keep would let a
+    // protected policy pass as ready and applied. A runner without it still
+    // verifies a block and refuses a protected one.
+    const privacyVersions = this.options.privacyCapable ? [...PRIVACY_POLICY_SCHEMA_VERSIONS] : undefined;
+    if (
+      capabilities.privacyPolicyVersions !== undefined
+      && JSON.stringify(capabilities.privacyPolicyVersions) !== JSON.stringify(privacyVersions)
+    ) {
+      throw new Error('capabilities.privacyPolicyVersions is reported by the runtime');
+    }
+    if (privacyVersions) capabilities.privacyPolicyVersions = privacyVersions;
     this.assertTechnicalMetadata(capabilities);
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
     this.assertWritable('register');
@@ -172,6 +193,9 @@ export class RuntimeControlPlaneClient {
 
   async syncOnce() {
     const query = new URLSearchParams({ runnerKey: this.options.runnerKey });
+    if (this.options.readOnly && this.options.privacyCapable) {
+      query.set('privacyPolicyVersions', PRIVACY_POLICY_SCHEMA_VERSIONS.join(','));
+    }
     if (this.cursor) query.set('cursor', this.cursor);
     const bundle = await this.request(`sync?${query.toString()}`, {
       method: 'GET',

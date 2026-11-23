@@ -851,7 +851,7 @@ describe('an approved call followed by a silent model step', () => {
           buildId: 'git:4f2c9e1',
           instanceId: 'web-1',
         },
-        record: (event) => { if (event.eventType !== 'tool_contract_rejected') events.push(event); },
+        record: (event) => { if (event.eventType === 'turn.continued') events.push(event); },
         flush: async () => undefined,
         close: async () => undefined,
       },
@@ -861,6 +861,6 @@ describe('an approved call followed by a silent model step', () => {
     const second = await streamChunks(await handler(post([user, answered(message, true)])));
     expect(second.some((chunk) => chunk.type === 'tool-output-available')).toBe(true);
     expect(JSON.stringify(second)).not.toContain('did not produce an answer');
-    expect(events).toEqual([expect.objectContaining({ status: 'completed', errorCode: null })]);
+    expect(events).toEqual([expect.objectContaining({ eventType: 'turn.continued', continuation: 'approval', status: 'completed', errorCode: null })]);
   });
 });

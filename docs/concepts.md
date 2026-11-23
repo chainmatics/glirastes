@@ -541,3 +541,5 @@ Layer 2 (depends on Layer 0 + 1):
 - **Pro (proprietary)**: server-pro (pipeline with Lancer delegation)
 - **Lancer free tier**: telemetry reporting to Glirastes dashboard
 - **Lancer pro tier**: guardrails, intent routing, PII protection, dynamic config, approval flows
+
+Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.

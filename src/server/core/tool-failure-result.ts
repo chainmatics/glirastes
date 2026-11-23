@@ -3,6 +3,8 @@
  * failed backend call, its status and (cut) body. Shared by `toolToAiTool`
  * and `executeTool`.
  */
+import { isOutcomeUnknown, markOutcomeUnknown } from './tool-outcome.js';
+import { OUTCOME_UNKNOWN_HINT } from './tool-outcome.js';
 import { reduceFailureBody, type OutputBound } from './output-fields.js';
 
 const MAX_TOOL_ERROR_MESSAGE_CHARS = 1_000;
@@ -124,15 +126,33 @@ export function endpointFailureFields(data: unknown, bound: OutputBound | undefi
 export function boundedToolFailure(
   result: Readonly<Record<string, unknown>>,
   bound?: OutputBound,
+  protectedResult = false,
 ): Record<string, unknown> {
   const rawError = result.error;
-  const cutError = typeof rawError === 'string'
+  const cutError = protectedResult
+    ? (rawError === 'privacy_tool_conversion_unsupported' || rawError === 'privacy_tool_middleware_unsupported' ? rawError : 'tool_execution_failed')
+    : typeof rawError === 'string'
     ? cutToolErrorText(rawError, MAX_TOOL_ERROR_MESSAGE_CHARS)
     : '';
   // Also when the cut leaves nothing but whitespace.
   const error = cutError.trim().length > 0 ? cutError : 'Tool execution failed.';
 
   const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;
+  if (isOutcomeUnknown(result)) {
+    return markOutcomeUnknown({
+      success: false, error, outcome: 'unknown', hint: OUTCOME_UNKNOWN_HINT,
+      ...(fromEndpoint && Number.isInteger(result.status) ? { status: result.status } : {}),
+    });
+  }
+  // Cutting raw errors or backend bodies can create identity fragments that
+  // the later privacy boundary cannot recognize. Preserve only technical
+  // outcome information; never clip sensitive failure data into model input.
+  if (protectedResult) return {
+    success: false, error, retryable: result.retryable === true,
+    ...(fromEndpoint && Number.isInteger(result.status) ? { status: result.status } : {}),
+    ...(fromEndpoint && typeof result.expectedFailure === 'boolean' ? { expectedFailure: result.expectedFailure } : {}),
+    bodyWithheld: 'Failure details withheld by pseudonymization.',
+  };
   let body: Record<string, unknown> = {
     ...(fromEndpoint && result.body !== undefined ? { body: result.body } : {}),
     ...(fromEndpoint && result.bodyTruncated === true ? { bodyTruncated: true } : {}),
@@ -159,4 +179,11 @@ export function boundedToolFailure(
     // `false` too: the app's classifier said `'error'` (the browser then shows it as failed, whatever the status).
     ...(fromEndpoint && typeof result.expectedFailure === 'boolean' ? { expectedFailure: result.expectedFailure } : {}),
   };
+}
+
+/** The same failure shapes drive receipts and protected model projection. */
+export function isToolFailureResult(result: unknown): result is Record<string, unknown> {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return false;
+  const record = result as Record<string, unknown>;
+  return record.success === false || (typeof record.error === 'string' && record.error.length > 0);
 }

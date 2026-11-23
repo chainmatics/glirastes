@@ -1,0 +1,71 @@
+{
+  "status": 200,
+  "requests": [
+    {
+      "model": "fixture",
+      "max_tokens": 600,
+      "temperature": 0.2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Baseline assistant\n\nNever write technical ids (UUIDs, database ids, userId, teamId and the like) in your answers, not even in parentheses or lists. Name things by their title, name or readable key instead."
+        },
+        {
+          "role": "user",
+          "content": "Contact OrdinaryBaselineCanary at ordinary.canary@example.invalid"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_result",
+            "description": "Read more of a large tool result that was shown as an overview with a \"_result\" marker: omitted fields or further entries. Pass its resultId, optionally \"fields\" (paths such as \"data[].name\", \"data[].owner.name\" or \"meta\"; \"[]\" means every element of an array, \"[2]\" one element, returned keyed by its index: \"data[2].items\") and \"offset\"/\"limit\" for the entries; entries read below an array keep their id and name. Works only within the current turn and never calls the original tool again.",
+            "parameters": {
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "type": "object",
+              "properties": {
+                "resultId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "fields": {
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                }
+              },
+              "required": [
+                "resultId"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto",
+      "stream": true,
+      "stream_options": {
+        "include_usage": true
+      }
+    }
+  ],
+  "errors": [],
+  "privacyStatus": false,
+  "responsePresent": true
+}

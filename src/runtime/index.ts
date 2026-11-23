@@ -194,6 +194,7 @@ export {
   type GlirastesGeneratedModule,
   type GlirastesPrincipalFactory,
 } from './glirastes.js';
+export type { GlirastesPrivacyOptions } from './privacy-runtime.js';
 export {
   lookupRuntimeConnection,
   type ResolvedRuntimeConnection,

@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { defineTool, type ToolRegistry } from '../../../../types.js';
 import { createAiChatHandler, type StreamHandlerContext } from '../create-ai-chat-handler.js';
 import { wrapToolsForVercelAi } from '../prepare-model-messages.js';
+import { PrivacyError } from '../../../pii-shield/detection-result.js';
 import { createTurnSnapshot, type TurnSnapshot } from '../../../../runtime/turn-snapshot.js';
 import {
   agentRevision,
@@ -316,6 +317,85 @@ describe('approval execution gate', () => {
         const second = await streamChunks(await handler(post([user, approve(await clientMessage(first))])));
         expect(archive).not.toHaveBeenCalled();
         expect(second).toContainEqual(expect.objectContaining({ type: 'tool-output-error', toolCallId: 'call-1' }));
+      });
+    });
+
+    describe('whose privacy gate locks between two requests or two calls (K2/K3)', () => {
+      /** The runtime's privacy gate: once locked (a refusal or a raised floor arrived), it refuses. */
+      function lockingRuntime() {
+        const state = { locked: false, gateCalls: 0 };
+        return {
+          state,
+          runtime: {
+            ...managedRuntime,
+            privacyGate: () => {
+              state.gateCalls += 1;
+              if (state.locked) throw new PrivacyError('privacy_not_configured');
+            },
+          },
+        };
+      }
+
+      it('a lock after the approval request refuses the resumed call before it runs', async () => {
+        const { registry, archive } = managedTools();
+        const { state, runtime } = lockingRuntime();
+        const handler = createAiChatHandler({
+          tools: registry, systemPrompt: 'A', approvalSecret: SECRET, managedRuntime: runtime,
+          model: scriptedModel([toolCall('tasks_archive', { id: 't1' })]),
+        });
+        const first = await streamChunks(await handler(post([user])));
+        expect(first.find((chunk) => chunk.type === 'tool-approval-request')).toMatchObject({ toolCallId: 'call-1' });
+        state.locked = true;
+        const resumed = await handler(post([user, approve(await clientMessage(first))]));
+        expect(resumed.status).toBe(503);
+        expect(await resumed.json()).toEqual({ error: 'privacy_not_configured' });
+        expect(archive).not.toHaveBeenCalled();
+      });
+
+      it('a lock that arrives during an unprotected turn stops the next tool call and model step', async () => {
+        const { registry, list } = managedTools();
+        const { state, runtime } = lockingRuntime();
+        const steps: number[] = [];
+        const model = scriptedModel([toolCall('tasks_list', { query: 'x' }, 'call-0')]);
+        const doStream = model.doStream.bind(model);
+        model.doStream = async (options) => {
+          steps.push(steps.length + 1);
+          // The refusal reaches the runner while the first model step runs.
+          state.locked = true;
+          return doStream(options);
+        };
+        const handler = createAiChatHandler({ tools: registry, systemPrompt: 'A', approvalSecret: SECRET, managedRuntime: runtime, model });
+        const chunks = await streamChunks(await handler(post([user])));
+        expect(list).not.toHaveBeenCalled();
+        expect(steps).toEqual([1]);
+        expect(state.gateCalls).toBeGreaterThanOrEqual(2);
+        expect(JSON.stringify(chunks)).not.toContain('Done.');
+      });
+
+      it('a lock that arrives while a permitted tool runs stops the next model step: its result is never sent', async () => {
+        const { state, runtime } = lockingRuntime();
+        const list = vi.fn(async (_input: unknown) => {
+          // The refusal reaches the runner while the permitted tool executes.
+          state.locked = true;
+          return { tasks: ['private result'] };
+        });
+        const registry: ToolRegistry = {
+          tasks_list: defineTool({ id: 'tasks.list', description: 'List.', inputSchema: z.object({ query: z.string() }).strict(), execute: list }),
+        };
+        const prompts: unknown[] = [];
+        const model = scriptedModel([toolCall('tasks_list', { query: 'x' }, 'call-0')]);
+        const doStream = model.doStream.bind(model);
+        model.doStream = async (options) => {
+          prompts.push(options.prompt);
+          return doStream(options);
+        };
+        const handler = createAiChatHandler({ tools: registry, systemPrompt: 'A', approvalSecret: SECRET, managedRuntime: runtime, model });
+        const chunks = await streamChunks(await handler(post([user])));
+        expect(list).toHaveBeenCalledTimes(1);
+        // One model call only: the step that would carry the tool result never starts.
+        expect(prompts).toHaveLength(1);
+        expect(JSON.stringify(prompts)).not.toContain('private result');
+        expect(JSON.stringify(chunks)).not.toContain('Done.');
       });
     });
 

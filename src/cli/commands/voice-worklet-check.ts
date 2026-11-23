@@ -117,7 +117,7 @@ export async function inspectVoiceWorklet(
   const mismatched = missingUrls.filter((url) => !underBase(url)
     && !unknown && !(elsewhere && fileName(url) === AUDIO_WORKLET_FILE));
   if (mismatched.length > 0) {
-    return { voice, status: 'mismatch', mismatch: { workletUrls: mismatched, copyTargets: [...copyTargets] } };
+    return { voice, status: 'mismatch', mismatch: { workletUrls: mismatched.map(fileOf), copyTargets: [...copyTargets] } };
   }
   return { voice, status: missingUrls.every((url) => createdUrls.has(fileOf(url))) ? 'copy-pending' : 'unverifiable' };
 }

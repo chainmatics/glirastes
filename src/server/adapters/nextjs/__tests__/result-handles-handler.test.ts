@@ -668,7 +668,9 @@ describe('review fixes', () => {
     });
 
     it('clears the store when the stream fails', async () => {
-      const { response, readAgain } = await turnWithBody(new ReadableStream({ pull(controller) { controller.error(new Error('boom')); } }));
+      let fail!: () => void;
+      const { response, readAgain } = await turnWithBody(new ReadableStream({ start(controller) { fail = () => controller.error(new Error('boom')); } }));
+      fail();
       await expect(response.text()).rejects.toThrow('boom');
       expect(await readAgain()).toMatchObject({ error: 'result_expired' });
     });
