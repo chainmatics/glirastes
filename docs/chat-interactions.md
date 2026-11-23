@@ -263,7 +263,7 @@ noncharacters, U+2800, lone surrogates, `}`, `{{`, `<!`, `-->` or `--!>`
 (or a type with `:` or over 200 UTF-16 units) keeps the token the user saw
 (`@acme`) without a marker: the model loses the id, no label or id of it
 enters the text, and the context block does not list it. The chat warns
-once per type in the console (outside production), without the type, id or
+once per type in the console (only when `NODE_ENV === 'development'`), without the type, id or
 label. Spaces, single `<` `>` `{`, `/`, `@`, `+`, non-ASCII letters and
 capitals are fine in types and ids, and `:` in ids, as before; a type with
 `:` is refused. An id with the emoji or

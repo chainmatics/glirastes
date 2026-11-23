@@ -63,6 +63,41 @@ const MARKER_OPEN = '{{mention:';
 const READ_MAX_PART = 200;
 const READ_MAX_LABEL = 1_000;
 
+/**
+ * Engine features this module relies on beyond ES2018 are probed, never
+ * assumed: a regular expression with a Unicode property or script the
+ * engine does not know is built through `compiled`, which returns
+ * `undefined` instead of throwing, so the module always loads. ES2018
+ * property escapes (General_Category, the ES2018 binary properties such as
+ * Emoji, Default_Ignorable_Code_Point, Ideographic, Regional_Indicator) are
+ * the baseline of the ES2022 target and stay literals. Guarded:
+ * - Script_Extensions values (each script probed alone): an unknown script
+ *   loses its joiner exception, its ZWJ/ZWNJ are removed; none known, no
+ *   script joiner exception at all.
+ * - Extended_Pictographic (ES2020): falls back to Emoji_Presentation, so
+ *   fewer emoji ZWJ sequences keep their joiners.
+ * - Intl.Segmenter: the code point cut rule of `splitsSequence`.
+ * No lookbehind and no `v` flag are used.
+ */
+function compiled(source: string, flags: string): RegExp | undefined {
+  try {
+    return new RegExp(source, flags);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Matches nothing. */
+const NEVER = /(?!)/;
+
+/** A letter or mark of one of `scripts`; scripts the engine does not know are left out. */
+function scriptLetter(scripts: readonly string[], marks: boolean): RegExp {
+  const known = scripts.filter((script) => compiled(`\\p{scx=${script}}`, 'u') !== undefined);
+  if (known.length === 0) return NEVER;
+  const kind = marks ? '[\\p{L}\\p{M}]' : '\\p{L}';
+  return compiled(`^(?=${kind})[${known.map((script) => `\\p{scx=${script}}`).join('')}]$`, 'u') ?? NEVER;
+}
+
 const LONE_SURROGATE = /\p{Cs}/gu;
 /**
  * Hidden code points: format characters, default ignorables (joiners,
@@ -82,28 +117,28 @@ const READ_TYPE = /^[^:}]{1,200}$/;
 const EMOJI = /^\p{Emoji}$/u;
 const KEYCAP_BASE = /^[0-9#*]$/;
 const KEYCAP = '\u20E3';
-const PICTOGRAPHIC = /^\p{Extended_Pictographic}$/u;
+const PICTOGRAPHIC = compiled('^\\p{Extended_Pictographic}$', 'u') ?? /^\p{Emoji_Presentation}$/u;
 const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u;
 const IDEOGRAPH = /^\p{Ideographic}$/u;
 const IVS = /^[\u{E0100}-\u{E01EF}]$/u;
-const MONGOLIAN_LETTER = /^(?=\p{L})\p{scx=Mong}$/u;
+const MONGOLIAN_LETTER = scriptLetter(['Mong'], false);
 const MONGOLIAN_FVS = /^[\u180B-\u180D\u180F]$/u;
 const MONGOLIAN_VOWEL_SEPARATOR = '\u180E';
 /**
  * Letters and marks of scripts whose words need ZWJ/ZWNJ (cursive joining
  * and Brahmic conjuncts). Not Latin, Greek, Cyrillic, Han, Kana or Hangul.
  */
-const JOINING_LETTER = new RegExp(`^(?=[\\p{L}\\p{M}])[${[
+const JOINING_LETTER = scriptLetter([
   'Arab', 'Syrc', 'Nkoo', 'Mand', 'Mani', 'Phlp', 'Rohg', 'Sogd', 'Ougr', 'Chrs', 'Adlm', 'Mong', 'Phag',
   'Deva', 'Beng', 'Guru', 'Gujr', 'Orya', 'Taml', 'Telu', 'Knda', 'Mlym', 'Sinh', 'Khmr', 'Mymr', 'Tibt',
   'Gran', 'Shrd', 'Tirh', 'Kthi', 'Modi', 'Takr', 'Khoj', 'Sind', 'Mahj', 'Bali', 'Java',
   'Mtei', 'Cakm', 'Lana', 'Sund', 'Newa', 'Limb', 'Kali', 'Thaa',
-].map((script) => `\\p{scx=${script}}`).join('')}]$`, 'u');
+], true);
 const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u;
 /** Viramas (and the Khmer coeng, Myanmar asat, Tibetan halanta) of the joining scripts. */
 const VIRAMA = /^[\u094D\u09CD\u0A4D\u0ACD\u0B4D\u0BCD\u0C4D\u0CCD\u0D4D\u0DCA\u0F84\u1039\u103A\u17D2\u1A60\u1B44\u1BAA\u1BAB\uA9C0\uAAF6\uABED\u{11046}\u{110B9}\u{11133}\u{111C0}\u{11235}\u{112EA}\u{1134D}\u{11442}\u{114C2}\u{115BF}\u{1163F}\u{116B6}\u{11839}]$/u;
 const MALAYALAM_VIRAMA = '\u0D4D';
-const MALAYALAM_LETTER = /^(?=\p{L})\p{scx=Mlym}$/u;
+const MALAYALAM_LETTER = scriptLetter(['Mlym'], false);
 /** Code points that belong to the one before them: a cut never falls in front of one. */
 const ATTACHED = /^[\p{M}\p{Emoji_Modifier}\u200C\u200D\u180B-\u180F\u{E0020}-\u{E007F}\u{E0100}-\u{E01EF}]$/u;
 const ZWJ = '\u200D';
@@ -233,14 +268,37 @@ function withoutHiddenChars(text: string): string {
  * blocks.
  */
 export function cleanDisplayText(text: string): string {
-  // Hidden characters go before NFC: removed later, they could leave a base
-  // and a combining mark that NFC composes. They are checked again after
-  // NFC, which can change a neighbour (`<` and U+0338 become `≮`).
-  const composed = withoutHiddenChars(text.replace(LONE_SURROGATE, '')).normalize('NFC');
-  return withoutHiddenChars(composed)
-    .normalize('NFC')
-    .replace(LINE_BREAKING_RUNS, ' ')
-    .trim();
+  return cleanDisplayTextWithPassLimit(text, MAX_CLEAN_PASSES);
+}
+
+/** Passes of removal and NFC before the strict fallback; real text needs one or two. */
+const MAX_CLEAN_PASSES = 8;
+const ANY_HIDDEN_CHAR = new RegExp(`[${HIDDEN_CLASS}]`, 'gu');
+
+/**
+ * `cleanDisplayText` with a bound on the passes, for tests of the bound.
+ * Internal. Removal and NFC repeat until a pass changes nothing: removing
+ * a character can let NFC reorder or compose the marks around it, which
+ * changes the neighbours a kept joiner or selector depends on. Each pass
+ * only removes characters or composes, so it ends; if `maxPasses` passes
+ * still change the text, every remaining hidden character is removed (also
+ * the joiners and selectors the rules keep), which no later pass changes.
+ */
+export function cleanDisplayTextWithPassLimit(text: string, maxPasses: number): string {
+  let current = text.replace(LONE_SURROGATE, '');
+  let stable = false;
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    // Hidden characters go before NFC: removed later, they could leave a
+    // base and a combining mark that NFC composes.
+    const next = withoutHiddenChars(current).normalize('NFC');
+    if (next === current) {
+      stable = true;
+      break;
+    }
+    current = next;
+  }
+  if (!stable) current = current.replace(ANY_HIDDEN_CHAR, '').normalize('NFC');
+  return current.replace(LINE_BREAKING_RUNS, ' ').trim();
 }
 
 function visibleLabel(label: string): string {
