@@ -12,10 +12,18 @@
  * is invalid is dropped, and the result says how often each reason applied
  * (counts only, never a value), so diagnostics stay content-free.
  *
- * Characters. One policy ({@link VIEW_CONTEXT_CHARACTER_POLICY}) decides which
- * characters never reach the model: labels and fact strings lose them, ids
- * and routes that contain one are invalid (an id reaches the server exactly
- * as the app wrote it, or not at all).
+ * Characters. The character policy of the mention marker
+ * (`mention-marker.ts`) decides which characters never reach the model, so
+ * the SDK has one policy. Labels are canonical mention labels (60 code
+ * points); fact strings go through `cleanDisplayText` (hidden characters
+ * removed with the emoji, flag and joining-script exceptions, NFC, each run
+ * of control or line/paragraph separator characters one space, trimmed).
+ * Both read at most 4096 code points, more than a label keeps and more than
+ * a fact string may have (2048 UTF-16 units), so nothing a fact holds is left
+ * unread. Ids and routes are never cleaned: one hidden, control, unassigned
+ * or separator character (`hasHiddenChar`, without the display exceptions)
+ * makes them invalid, so an id reaches the server exactly as the app wrote
+ * it, or not at all.
  *
  * Delimiters. Labels have comment and marker delimiters replaced by visible
  * look-alikes (the mention marker's canonical label rules, so a name reads
@@ -27,11 +35,11 @@
  * block inside an HTML comment (`<!--context:...-->`), `escapeJsonForBlock`
  * (`<`) for a tag-delimited block (`<view-context>`). `escapeJsonForBlock`
  * alone does not cover `-->`. Line and paragraph separators cannot occur:
- * the character policy removes them.
+ * cleaning turns them into spaces, and ids and routes holding one are invalid.
  *
  * Cost. Entries, entities and selections are read by their known keys only
  * (unknown keys are ignored, never enumerated); at most 32 entries and 100
- * selection ids are looked at; labels are cut before they are cleaned; facts
+ * selection ids are looked at; labels are read up to 4096 code points; facts
  * are enumerated (at most three passes) and stop at their bounds. What stays
  * linear in the input is the enumeration of a facts object's keys, so the
  * HTTP body size limit of the chat route is the outer bound.
@@ -44,6 +52,7 @@
  */
 import { z } from 'zod';
 import { ENTITY_TYPE_PATTERN, isEntityIdValue, MAX_ENTITY_ID_PARTS } from './entity-declaration.js';
+import { canonicalMentionLabel, cleanDisplayText, hasHiddenChar } from './mention-marker.js';
 
 // ============================================================================
 // Limits
@@ -128,8 +137,8 @@ const ENTRY_REASONS: ReadonlySet<ViewContextDropReason> = new Set([
 
 /**
  * The id of a record, exactly as the app has it: a non-empty string of at
- * most 200 characters without surrounding whitespace and without a character
- * the {@link VIEW_CONTEXT_CHARACTER_POLICY} removes, or a safe integer; for a
+ * most 200 characters without surrounding whitespace and without a hidden,
+ * control, unassigned or separator character, or a safe integer; for a
  * composite key the list of its 2 to 4 parts in the declared order. Never
  * normalised; two ids with the same NFC form count as the same record.
  */
@@ -163,7 +172,7 @@ export type ViewContextFacts = { readonly [key: string]: ViewContextFactValue };
 
 /** The fields every view context entry may carry. */
 interface ViewContextEntryFields {
-  /** A short name for the view, canonical: at most 60 code points, NFC, one line, no character the policy removes, comment and marker delimiters replaced. */
+  /** A short name for the view, canonical: at most 60 code points, the canonical mention label form (NFC, one line, no hidden characters, comment and marker delimiters replaced). */
   readonly label?: string;
   /** At most 2 KB as JSON, what the schema of the entity type (of the selection type in a list view) kept, strings cleaned. */
   readonly facts?: ViewContextFacts;
@@ -250,108 +259,6 @@ export interface ViewContextSanitizeResult {
 }
 
 // ============================================================================
-// Character policy (one primitive for labels, fact strings, ids and routes)
-// ============================================================================
-
-/**
- * Which characters never reach the model. `removed`: dropped from labels and
- * fact strings, an id or route containing one is invalid. `breaks`: become a
- * space in labels (runs collapse to one) and fact strings, invalid in ids and
- * routes. `kept`: the exceptions to `removed`, only in the position named.
- */
-export const VIEW_CONTEXT_CHARACTER_POLICY = Object.freeze({
-  breaks: 'Cc (controls, tab, CR, LF, NUL), Zl (U+2028), Zp (U+2029)',
-  removed: [
-    'Cf (format: bidi controls, zero-width characters, soft hyphen, BOM, tag characters)',
-    'Cs (lone surrogates)',
-    'Co (private use)',
-    'Cn (unassigned, noncharacters such as U+FFFF and U+FDD0..U+FDEF)',
-    'Default_Ignorable_Code_Point (variation selectors U+FE00..U+FE0F and U+E0100..U+E01EF, U+034F, Hangul fillers U+115F, U+1160, U+3164, U+FFA0, U+17B4, U+17B5, U+180B..U+180F)',
-    'U+2800 (braille blank)',
-  ].join('; '),
-  kept: [
-    'one U+FE0E or U+FE0F directly after a character with the Emoji property (❤\ufe0f, 1\ufe0f⃣)',
-    'U+200D between two emoji (after an Extended_Pictographic, its modifier or U+FE0F, before an Extended_Pictographic)',
-    'U+200D and U+200C between two letters or marks, one joiner at a time',
-    'the tag sequences of the three RGI subdivision flags after U+1F3F4 (England, Scotland, Wales)',
-  ].join('; '),
-});
-
-const BREAK = /^[\p{Cc}\p{Zl}\p{Zp}]$/u;
-const SPACE = /^\s$/u;
-const REMOVED = /^[\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Default_Ignorable_Code_Point}\u2800\u034f\u115f\u1160\u3164\uffa0]$/u;
-const PICTOGRAPHIC = /^\p{Extended_Pictographic}$/u;
-const EMOJI = /^\p{Emoji}$/u;
-const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u;
-const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
-const ZWJ = '\u200d';
-const ZWNJ = '\u200c';
-const BLACK_FLAG = '\u{1f3f4}';
-const CANCEL_TAG = '\u{e007f}';
-const SUBDIVISION_TAGS: ReadonlyArray<string> = ['gbeng', 'gbsct', 'gbwls']
-  .map((code) => [...code].map((char) => String.fromCodePoint(0xe0000 + char.charCodeAt(0))).join('') + CANCEL_TAG);
-const TAG_SEQUENCE_LENGTH = 6;
-
-const isVariationSelector = (char: string) => char === '\ufe0e' || char === '\ufe0f';
-const isTag = (char: string) => { const cp = char.codePointAt(0)!; return cp >= 0xe0000 && cp <= 0xe007f; };
-const isJoinable = (char: string | undefined) =>
-  char !== undefined && LETTER_OR_MARK.test(char) && !REMOVED.test(char) && !BREAK.test(char);
-
-type CleanMode = 'label' | 'fact' | 'exact';
-
-/**
- * `text` under the character policy, in one pass over its code points.
- * `label`: breaks and whitespace runs become one space (none at the ends),
- * `{` and `}` become `｛` and `｝`. `fact`: each break becomes a space.
- * `exact`: breaks are removed (the caller compares with the input).
- */
-function cleanText(text: string, mode: CleanMode): string {
-  const chars = Array.from(text);
-  let out = '';
-  let prev = '';
-  let emojiTail = false;
-  let pendingSpace = false;
-  const emit = (char: string, tail: boolean) => {
-    if (pendingSpace) { out += ' '; pendingSpace = false; }
-    out += char;
-    prev = char;
-    emojiTail = tail;
-  };
-  const blank = () => {
-    if (mode === 'label') { if (out !== '') pendingSpace = true; }
-    else if (mode === 'fact') emit(' ', false);
-  };
-  for (let index = 0; index < chars.length; index += 1) {
-    const char = chars[index]!;
-    const next = chars[index + 1];
-    if (BREAK.test(char)) { blank(); continue; }
-    const adjacent = !pendingSpace && prev !== '';
-    if (char === ZWJ || char === ZWNJ) {
-      const betweenEmoji = char === ZWJ && emojiTail && next !== undefined && PICTOGRAPHIC.test(next) && !REMOVED.test(next);
-      const betweenLetters = LETTER_OR_MARK.test(prev) && !isVariationSelector(prev) && isJoinable(next);
-      if (adjacent && (betweenEmoji || betweenLetters)) emit(char, false);
-      continue;
-    }
-    if (isVariationSelector(char)) {
-      if (adjacent && EMOJI.test(prev)) emit(char, emojiTail);
-      continue;
-    }
-    if (REMOVED.test(char)) continue;
-    if (mode === 'label' && SPACE.test(char)) { blank(); continue; }
-    const tail = PICTOGRAPHIC.test(char) || (emojiTail && EMOJI_MODIFIER.test(char));
-    emit(mode === 'label' && char === '{' ? '｛' : mode === 'label' && char === '}' ? '｝' : char, tail);
-    if (char === BLACK_FLAG) {
-      const tags = chars.slice(index + 1, index + 1 + TAG_SEQUENCE_LENGTH).join('');
-      if (SUBDIVISION_TAGS.includes(tags)) { out += tags; index += TAG_SEQUENCE_LENGTH; }
-    }
-  }
-  return out;
-}
-
-/** Whether `text` is unchanged under the character policy (nothing to remove, no break). */
-const isExactText = (text: string): boolean => cleanText(text, 'exact') === text;
-
-// ============================================================================
 // Labels, routes, ids
 // ============================================================================
 
@@ -369,47 +276,16 @@ function utf8Length(text: string): number {
   return bytes;
 }
 
-/** `text` cut to at most `limit` code units without splitting a surrogate pair. */
-function cutUnits(text: string, limit: number): string {
-  if (text.length <= limit) return text;
-  const code = text.charCodeAt(limit - 1);
-  return text.slice(0, code >= 0xd800 && code <= 0xdbff ? limit - 1 : limit);
-}
-
 /**
- * The canonical form of a label, idempotent: cleaned under the character
- * policy (breaks and whitespace runs become one space, `{` / `}` become
- * `｛` / `｝`), then NFC (after cleaning, so a removed character never blocks
- * a composition), then `<!`, `-->` and `--!>` become `‹!`, `--›` and `--!›`;
- * longer than `max` code points: the first `max - 1` (without a dangling
- * joiner, partial flag tag sequence or space) and `…`. The rules of the
- * mention marker's canonical label with a shorter bound; to be unified with
- * that module once it is merged. Single `<` and `>` stay (the renderer
- * escapes them).
+ * The canonical form of a view context label: the canonical mention label
+ * (`canonicalMentionLabel` with `maxLength` 60: `cleanDisplayText`, then
+ * `{` `}` `<!` `-->` `--!>` replaced by visible look-alikes, cut at a
+ * grapheme boundary with `…`), so a name reads the same in a chip, a marker
+ * and this block. Empty when nothing visible is left (the label is then
+ * dropped; a mention label would fall back to its id). Idempotent.
  */
 export function canonicalViewContextLabel(text: string, max: number = VIEW_CONTEXT_LIMITS.maxLabelLength): string {
-  // A longer input is cut first, so a 10 MB label costs as much as a short one.
-  const bound = max * 8;
-  const cut = text.length > bound;
-  let cleaned = cleanText(cut ? cutUnits(text, bound) : text, 'label').normalize('NFC');
-  // A composition can change the neighbour a joiner or variation selector was
-  // kept for (`>` + U+0338 becomes `≯`): clean again until nothing changes.
-  // Every round only removes characters, so this ends within the bounded length.
-  for (let next = cleanText(cleaned, 'label').normalize('NFC'); next !== cleaned; next = cleanText(next, 'label').normalize('NFC')) {
-    cleaned = next;
-  }
-  const out = cleaned.replaceAll('<!', '‹!').replaceAll('--!>', '--!›').replaceAll('-->', '--›');
-  const points = [...out];
-  if (out === '' || (!cut && points.length <= max)) return out;
-  const kept = points.slice(0, max - 1);
-  if (points.length > max - 1) {
-    // Cutting may leave a joiner without its next character or half a flag tag sequence.
-    if (kept.length > 0 && isTag(kept[kept.length - 1]!) && kept[kept.length - 1] !== CANCEL_TAG) {
-      while (kept.length > 0 && isTag(kept[kept.length - 1]!)) kept.pop();
-    }
-    while (kept.length > 0 && [ZWJ, ZWNJ, ' '].includes(kept[kept.length - 1]!)) kept.pop();
-  }
-  return kept.length > 0 ? `${kept.join('')}…` : '';
+  return cleanDisplayText(text) === '' ? '' : canonicalMentionLabel(text, { maxLength: max });
 }
 
 const ROUTE_ASCII = /^[A-Za-z0-9\-._~!$&'()*+,=:@/]$/;
@@ -419,7 +295,7 @@ const ROUTE_UNICODE = /^[\p{L}\p{M}\p{N}]$/u;
  * Whether `value` is a route as a view context carries it: a decoded path of
  * at most 256 characters starting with one `/`. Allowed: ASCII letters,
  * digits and `- . _ ~ ! $ & ' ( ) * + , = : @ /`, and non-ASCII letters,
- * marks and digits the character policy keeps (send `/städte/köln`, not
+ * marks and digits without a hidden character (`hasHiddenChar`) (send `/städte/köln`, not
  * `/st%C3%A4dte/k%C3%B6ln`). Never: `%` (no encoded `/`, `\`, `.` or control
  * can hide), `;`, `?`, `#`, `\`, whitespace, a scheme or host (`//`), or a
  * `.` / `..` segment.
@@ -428,7 +304,7 @@ export function isViewContextRoute(value: unknown): value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > VIEW_CONTEXT_LIMITS.maxRouteLength) return false;
   if (!value.startsWith('/') || value.startsWith('//')) return false;
   for (const char of value) {
-    if (char.charCodeAt(0) < 0x80 ? !ROUTE_ASCII.test(char) : !ROUTE_UNICODE.test(char) || REMOVED.test(char)) return false;
+    if (char.charCodeAt(0) < 0x80 ? !ROUTE_ASCII.test(char) : !ROUTE_UNICODE.test(char) || hasHiddenChar(char)) return false;
   }
   return value.split('/').every((segment) => segment !== '.' && segment !== '..');
 }
@@ -436,7 +312,7 @@ export function isViewContextRoute(value: unknown): value is string {
 function idPart(value: unknown): string | number | undefined {
   if (!isEntityIdValue(value)) return undefined;
   if (typeof value === 'number') return value;
-  return value.trim() === value && isExactText(value) ? value : undefined;
+  return value.trim() === value && !hasHiddenChar(value) ? value : undefined;
 }
 
 /** A valid id exactly as given; undefined when invalid. */
@@ -513,7 +389,7 @@ function plainFacts(value: unknown, clean: boolean): FactsCheck {
       if (input.length > maxFactsBytes) throw new Stop('facts-too-large');
       grow(input.length + 2);
       if (!clean) return input;
-      const cleaned = cleanText(input, 'fact');
+      const cleaned = cleanDisplayText(input);
       if (cleaned !== input) changed = true;
       return cleaned;
     }

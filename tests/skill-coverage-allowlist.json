@@ -542,7 +542,6 @@
   "UiPatternType": "Pre-Foundation root-barrel API (hand-written tool definitions, pipeline, PII); Foundation apps derive tools with glirastes tools refresh.",
   "UiToolCommandSource": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "UpdateAppSetupStatus": "Managed-mode sync client internals; glirastes connect and sync drive them.",
-  "VIEW_CONTEXT_CHARACTER_POLICY": "View context contract ahead of the feature: nothing uses it yet; the skill documents it with the chat handler option and browser hook that consume it.",
   "VIEW_CONTEXT_DROP_REASONS": "View context contract ahead of the feature: nothing uses it yet; the skill documents it with the chat handler option and browser hook that consume it.",
   "VIEW_CONTEXT_HISTORY_MODES": "View context contract ahead of the feature: nothing uses it yet; the skill documents it with the chat handler option and browser hook that consume it.",
   "VIEW_CONTEXT_LIMITS": "View context contract ahead of the feature: nothing uses it yet; the skill documents it with the chat handler option and browser hook that consume it.",

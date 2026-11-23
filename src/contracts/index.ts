@@ -221,7 +221,6 @@ export {
   isViewContextRoute,
   resolveViewContextPolicy,
   sanitizeViewContext,
-  VIEW_CONTEXT_CHARACTER_POLICY,
   VIEW_CONTEXT_DROP_REASONS,
   VIEW_CONTEXT_HISTORY_MODES,
   VIEW_CONTEXT_LIMITS,

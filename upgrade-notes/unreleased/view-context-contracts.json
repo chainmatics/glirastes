@@ -11,7 +11,6 @@
   },
   "surface": [
     "glirastes/contracts#ResolvedViewContextPolicy.*",
-    "glirastes/contracts#VIEW_CONTEXT_CHARACTER_POLICY",
     "glirastes/contracts#VIEW_CONTEXT_DROP_REASONS",
     "glirastes/contracts#VIEW_CONTEXT_HISTORY_MODES",
     "glirastes/contracts#VIEW_CONTEXT_LIMITS",

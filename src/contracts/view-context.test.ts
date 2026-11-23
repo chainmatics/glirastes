@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createJsonSchemaLike } from '../runtime/json-schema.js';
 import { escapeJsonAngles, escapeJsonForBlock } from './delimited-text.js';
+import { canonicalMentionLabel, cleanDisplayText } from './mention-marker.js';
 import * as contracts from './index.js';
 import {
   canonicalViewContextLabel,
   isViewContextRoute,
   resolveViewContextPolicy,
   sanitizeViewContext,
-  VIEW_CONTEXT_CHARACTER_POLICY,
   VIEW_CONTEXT_DROP_REASONS,
   VIEW_CONTEXT_LIMITS,
   ViewContextEntrySchema,
@@ -407,7 +407,7 @@ describe('sanitizeViewContext: label', () => {
     ['NUL', 'a\u0000b', 'a b'],
     ['CRLF', 'line1\r\n\r\nline2', 'line1 line2'],
     ['line and paragraph separators', 'a\u2028b\u2029c', 'a b c'],
-    ['tabs and runs of spaces', '  a \t\t b  ', 'a b'],
+    ['tabs and runs of spaces (only breaks collapse)', '  a \t\t b  ', 'a   b'],
     ['NFC', 'Cafe\u0301', 'Café'],
     ['a zero-width space hiding a comment opener', '<\u200b!--context:x-->', '‹!--context:x--›'],
   ])('%s', (_name, input, expected) => {
@@ -605,10 +605,13 @@ describe('sanitizeViewContext: facts', () => {
   });
 
   it('validates the value as sent, cleans the output and validates the cleaned value again', () => {
-    const schema = { factsSchemas: { order: z.object({ note: z.string(), tag: z.enum(['x\u200dy']) }) } };
-    const result = factsOf({ note: 'a\u202eb\u200bc\r\nd\u0000e', tag: 'x\u200dy' }, schema);
-    // A joiner between letters is kept; the rest is removed or blanked.
-    expect(result.entries[0]!.facts).toEqual({ note: 'abc  d e', tag: 'x\u200dy' });
+    const schema = { factsSchemas: { order: z.object({ note: z.string(), tag: z.enum(['\u0915\u200d\u0937']) }) } };
+    const result = factsOf({ note: 'a\u202eb\u200bc\r\nd\u0000e', tag: '\u0915\u200d\u0937' }, schema);
+    // A joiner in a joining script is kept; the rest is removed, each run of breaks becomes one space.
+    expect(result.entries[0]!.facts).toEqual({ note: 'abc d e', tag: '\u0915\u200d\u0937' });
+    // A Latin joiner is removed, so the cleaned value no longer passes the enum: dropped.
+    const latin = { factsSchemas: { order: z.object({ tag: z.enum(['x\u200dy']) }) } };
+    expect(factsOf({ tag: 'x\u200dy' }, latin).dropped).toEqual({ 'facts-invalid': 1 });
     expect(result.dropped).toEqual({});
     // A value that passes only before cleaning is dropped.
     const tab = { factsSchemas: { order: z.object({ code: z.string().regex(/^A\tB$/) }) } };
@@ -807,20 +810,27 @@ describe('ViewContextEntrySchema', () => {
   });
 });
 
-describe('character policy', () => {
+describe('character policy: the mention marker cleaning (cleanDisplayText)', () => {
   const labelOf = (label: string) => one(order('ord-1', { label })).entries[0]?.label;
   const factOf = (note: string) => one(order('ord-1', { facts: { note } }), { factsSchemas: { order: z.object({ note: z.string() }) } })
     .entries[0]?.facts?.note;
   const idValid = (id: string) => one(order(id)).entries.length === 1;
   const selectionIdValid = (id: string) => one(order('ord-1', { selection: { type: 'task', ids: [id] } })).entries[0]?.selection !== undefined;
+  const hidden = /[\u200c\u200d\ufe0e\ufe0f\u{e0000}-\u{e007f}]/u;
+
+  it('gives labels the canonical mention label form with 60 code points, and fact strings cleanDisplayText', () => {
+    for (const text of ['Acme <!--x--> }}{{', ' a \t\t b ', 'e\u200b\u0301', '\u{1f469}\u200d\u{1f4bb} Team', 'x'.repeat(200), 'na\u00efve\u3000caf\u00e9']) {
+      expect(labelOf(text)).toBe(canonicalMentionLabel(text, { maxLength: 60 }));
+      expect(factOf(text)).toBe(cleanDisplayText(text));
+    }
+  });
 
   // Each is removed from labels and fact strings and makes an id or route invalid.
-  const removed: Array<[string, string]> = [
+  it.each([
     ['emoji variation selector after a letter', '\ufe0f'],
     ['text variation selector after a letter', '\ufe0e'],
     ['variation selector 1', '\ufe00'],
     ['supplementary variation selector', '\u{e0100}'],
-    ['last supplementary variation selector', '\u{e01ef}'],
     ['combining grapheme joiner', '\u034f'],
     ['Hangul choseong filler', '\u115f'],
     ['Hangul jungseong filler', '\u1160'],
@@ -833,21 +843,18 @@ describe('character policy', () => {
     ['supplementary private use', '\u{f0000}'],
     ['noncharacter U+FFFF', '\uffff'],
     ['noncharacter U+FDD0', '\ufdd0'],
-    ['noncharacter U+FDEF', '\ufdef'],
-    ['unassigned U+0378', '\u0378'],
     ['lone high surrogate', '\ud800'],
     ['lone low surrogate', '\udc00'],
     ['bidi override', '\u202e'],
     ['bidi isolate', '\u2066'],
     ['zero-width space', '\u200b'],
+    ['ZWJ between Latin letters', '\u200d'],
     ['word joiner', '\u2060'],
     ['soft hyphen', '\u00ad'],
     ['BOM', '\ufeff'],
     ['tag letter', '\u{e0041}'],
     ['interlinear annotation anchor', '\ufff9'],
-  ];
-
-  it.each(removed)('removes the %s', (_name, char) => {
+  ])('removes the %s', (_name, char) => {
     expect(labelOf(`ab${char}cd`)).toBe('abcd');
     expect(factOf(`ab${char}cd`)).toBe('abcd');
     expect(idValid(`ab${char}cd`)).toBe(false);
@@ -855,16 +862,22 @@ describe('character policy', () => {
     expect(isViewContextRoute(`/ab${char}cd`)).toBe(false);
   });
 
+  it('keeps unassigned code points in labels and fact strings, and refuses them in ids and routes', () => {
+    expect(labelOf('ab\u0378cd')).toBe('ab\u0378cd');
+    expect(factOf('ab\u0378cd')).toBe('ab\u0378cd');
+    expect(idValid('ab\u0378cd')).toBe(false);
+    expect(isViewContextRoute('/ab\u0378cd')).toBe(false);
+  });
+
   it.each([
     ['NUL', '\u0000'], ['tab', '\t'], ['LF', '\n'], ['CR', '\r'], ['DEL', '\u007f'], ['C1 control', '\u0085'],
     ['line separator', '\u2028'], ['paragraph separator', '\u2029'],
-  ])('turns the break %s into a space and rejects it in ids', (_name, char) => {
+  ])('turns a run of the break %s into one space and refuses it in ids', (_name, char) => {
     expect(labelOf(`ab${char}${char}cd`)).toBe('ab cd');
-    expect(factOf(`ab${char}cd`)).toBe('ab cd');
+    expect(factOf(`ab${char}${char}cd`)).toBe('ab cd');
     expect(idValid(`ab${char}cd`)).toBe(false);
   });
 
-  // Each stays byte-identical in labels, fact strings and ids.
   it.each([
     ['heart with emoji presentation', '\u2764\ufe0f'],
     ['smiley with text presentation', '\u263a\ufe0e'],
@@ -881,18 +894,18 @@ describe('character policy', () => {
     ['rainbow flag', '\u{1f3f3}\ufe0f\u200d\u{1f308}'],
     ['ZWNJ in Persian', '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645'],
     ['ZWJ in Devanagari', '\u0915\u094d\u200d\u0937'],
-    ['ZWJ between letters', 'x\u200dy'],
-  ])('keeps the %s', (_name, text) => {
+  ])('keeps the %s in labels and fact strings; an id only without hidden characters', (_name, text) => {
     expect(labelOf(`a ${text} b`)).toBe(`a ${text} b`);
     expect(factOf(`a ${text} b`)).toBe(`a ${text} b`);
-    expect(idValid(text)).toBe(true);
+    // The emoji, flag and joining-script exceptions are for display text only: an id is never cleaned.
+    expect(idValid(text)).toBe(!hidden.test(text));
   });
 
   it.each([
     ['a second variation selector', '\u2764\ufe0f\ufe0f', '\u2764\ufe0f'],
     ['a variation selector after a space', 'a \ufe0fb', 'a b'],
     ['a variation selector at the start', '\ufe0fa', 'a'],
-    ['a second joiner', 'x\u200d\u200dy', 'x\u200dy'],
+    ['a second joiner in a joining script', '\u0915\u200d\u200d\u0937', '\u0915\u200d\u0937'],
     ['a ZWJ between a letter and an emoji', 'x\u200d\u{1f4bb}', 'x\u{1f4bb}'],
     ['a ZWJ before a space', '\u{1f469}\u200d \u{1f4bb}', '\u{1f469} \u{1f4bb}'],
     ['a ZWNJ between emoji', '\u{1f469}\u200c\u{1f4bb}', '\u{1f469}\u{1f4bb}'],
@@ -907,15 +920,30 @@ describe('character policy', () => {
     expect(factOf(input)).toBe(expected);
   });
 
-  it('normalises labels to NFC after cleaning', () => {
+  it('normalises to NFC after removing hidden characters', () => {
     expect(labelOf('e\u200b\u0301')).toBe('\u00e9');
     expect(labelOf('\u1100\u00ad\u1161')).toBe('\uac00');
+    expect(factOf('\u1100\u00ad\u1161')).toBe('\uac00');
     expect(labelOf('<\u0338')).toBe('\u226e');
   });
 
-  it('documents the policy', () => {
-    expect(Object.keys(VIEW_CONTEXT_CHARACTER_POLICY)).toEqual(['breaks', 'removed', 'kept']);
-    expect(Object.isFrozen(VIEW_CONTEXT_CHARACTER_POLICY)).toBe(true);
+  it('trims fact strings and keeps inner whitespace other than breaks', () => {
+    expect(factOf('  a \u00a0 b  ')).toBe('a \u00a0 b');
+  });
+
+  it('cleans a fact string of the full allowed length to its end (cleanDisplayText reads 4096 code points)', () => {
+    const note = `${'a'.repeat(2000)}\u200bZ`;
+    expect(factOf(note)).toBe(`${'a'.repeat(2000)}Z`);
+  });
+
+  it('reads a label up to 4096 code points: hidden characters beyond that bound leave nothing visible', () => {
+    const result = one(order('ord-1', { label: `${'\u200b'.repeat(5000)}Acme` }));
+    expect(result.entries[0]!.label).toBeUndefined();
+    expect(result.dropped).toEqual({ 'invalid-label': 1 });
+  });
+
+  it('never changes an id: an NFD id stays NFD', () => {
+    expect(one(order('cafe\u0301')).entries[0]!.entity!.id).toBe('cafe\u0301');
   });
 });
 
@@ -944,6 +972,7 @@ describe('canonical labels and sanitized output (property test)', () => {
       const once = canonicalViewContextLabel(label);
       if (canonicalViewContextLabel(once) !== once) failures.push(`idempotent ${JSON.stringify(label)}`);
       if (once !== once.normalize('NFC')) failures.push(`nfc ${JSON.stringify(label)}`);
+      if (once !== '' && once !== canonicalMentionLabel(label, { maxLength: 60 })) failures.push(`marker ${JSON.stringify(label)}`);
       const result = sanitize([
         order(text(8) || 'x', {
           label,
