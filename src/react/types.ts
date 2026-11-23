@@ -498,7 +498,9 @@ export interface UiToolCommandSource {
    * Stable, unique list identity and mention id of this command; defaults to
    * `definitionId`. One definition can back several commands (a single
    * `ui.navigate` with a `destination` enum becomes one command per
-   * destination). No `:` or `}`, max 200 characters.
+   * destination). No `:` or `}`, max 200 characters; a command id with
+   * control, format or invisible characters, `{{`, `<!` or `-->` is sent
+   * without a mention marker (`isMentionMarkerId` of `glirastes/contracts`).
    */
   readonly commandId?: string;
   readonly label: string;
@@ -514,6 +516,21 @@ export interface MentionSerializationConfig {
   enabled?: boolean;
   includeContextBlock?: boolean;
   contextLabel?: string;
+  /**
+   * `canonical` (default): a mention's label is sent in its canonical form
+   * (`canonicalMentionLabel` of `glirastes/contracts`): `{` `}` `<!` `-->`
+   * `--!>` replaced by visible look-alikes, hidden characters removed
+   * except those of ordinary names, NFC, trimmed, at most `maxLabelLength`
+   * code points; ordinary labels are unchanged. A mention whose type or id
+   * carries characters that can hide text keeps its typed token, without a
+   * marker. `raw`: label, type and id as given, without validation (a
+   * label can then end the marker early or carry text the chat hides from
+   * the bubble but the model reads); the one-pass replacement applies in
+   * both modes (each token occurrence once, no nested markers).
+   */
+  labels?: 'canonical' | 'raw';
+  /** Code points of a sent label with `labels: 'canonical'`; 8-120 (1-7 means 8), default 120 (also for any other value). */
+  maxLabelLength?: number;
 }
 
 // ============================================================================
