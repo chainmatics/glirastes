@@ -7,6 +7,8 @@ import type {
 import { escapeCommentDelimiters, escapeJsonAngles } from '../../contracts/delimited-text.js';
 import {
   canonicalMentionLabel,
+  firstCodePoints,
+  MAX_INPUT_CODE_POINTS,
   parseMentionMarkers,
   serializeMentionMarker,
 } from '../../contracts/mention-marker.js';
@@ -144,7 +146,8 @@ export function inferMentionPrefix(type: string): string {
 }
 
 export function normalizeMentionSlug(value: string): string {
-  return value
+  // Capped before NFKD, which is quadratic on long runs of combining marks.
+  return firstCodePoints(value, MAX_INPUT_CODE_POINTS)
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[^\w\s-]/g, '')

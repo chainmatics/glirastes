@@ -74,8 +74,10 @@ const READ_MAX_LABEL = 1_000;
  * - Script_Extensions values (each script probed alone): an unknown script
  *   loses its joiner exception, its ZWJ/ZWNJ are removed; none known, no
  *   script joiner exception at all.
- * - Extended_Pictographic (ES2020): falls back to Emoji_Presentation, so
- *   fewer emoji ZWJ sequences keep their joiners.
+ * - Extended_Pictographic (ES2020): falls back to Emoji_Presentation
+ *   without regional indicators and skin-tone modifiers; emoji that have
+ *   text presentation by default (❤, ☠, ©) then lose their joiners, so a
+ *   degraded engine keeps a subset of the joiners a full one keeps.
  * - Intl.Segmenter: the code point cut rule of `splitsSequence`.
  * No lookbehind and no `v` flag are used.
  */
@@ -117,7 +119,10 @@ const READ_TYPE = /^[^:}]{1,200}$/;
 const EMOJI = /^\p{Emoji}$/u;
 const KEYCAP_BASE = /^[0-9#*]$/;
 const KEYCAP = '\u20E3';
-const PICTOGRAPHIC = compiled('^\\p{Extended_Pictographic}$', 'u') ?? /^\p{Emoji_Presentation}$/u;
+// Fallback: emoji-presentation characters without regional indicators and skin-tone modifiers,
+// which Extended_Pictographic does not contain either, so a degraded engine keeps no more joiners.
+const PICTOGRAPHIC = compiled('^\\p{Extended_Pictographic}$', 'u')
+  ?? /^(?![\p{Regional_Indicator}\p{Emoji_Modifier}])\p{Emoji_Presentation}$/u;
 const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u;
 const IDEOGRAPH = /^\p{Ideographic}$/u;
 const IVS = /^[\u{E0100}-\u{E01EF}]$/u;
@@ -271,6 +276,29 @@ export function cleanDisplayText(text: string): string {
   return cleanDisplayTextWithPassLimit(text, MAX_CLEAN_PASSES);
 }
 
+/**
+ * Code points of a label (or slug source) read before any normalisation:
+ * `normalize` is quadratic on long runs of combining marks. 4096 is 34
+ * times the 120 code points a label keeps, so a label is only read
+ * differently when more than 3976 of its first 4096 code points are removed
+ * as hidden characters (then what follows them is not read); every label
+ * that long was already cut to 120 code points.
+ */
+export const MAX_INPUT_CODE_POINTS = 4_096;
+
+/** The first `max` code points of `text`, never splitting a surrogate pair. Linear in `max`. */
+export function firstCodePoints(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let units = 0;
+  for (let points = 0; points < max && units < text.length; points += 1) {
+    const unit = text.charCodeAt(units);
+    const pair = unit >= 0xd800 && unit <= 0xdbff && units + 1 < text.length
+      && text.charCodeAt(units + 1) >= 0xdc00 && text.charCodeAt(units + 1) <= 0xdfff;
+    units += pair ? 2 : 1;
+  }
+  return text.slice(0, units);
+}
+
 /** Passes of removal and NFC before the strict fallback; real text needs one or two. */
 const MAX_CLEAN_PASSES = 8;
 const ANY_HIDDEN_CHAR = new RegExp(`[${HIDDEN_CLASS}]`, 'gu');
@@ -285,7 +313,7 @@ const ANY_HIDDEN_CHAR = new RegExp(`[${HIDDEN_CLASS}]`, 'gu');
  * the joiners and selectors the rules keep), which no later pass changes.
  */
 export function cleanDisplayTextWithPassLimit(text: string, maxPasses: number): string {
-  let current = text.replace(LONE_SURROGATE, '');
+  let current = firstCodePoints(text, MAX_INPUT_CODE_POINTS).replace(LONE_SURROGATE, '');
   let stable = false;
   for (let pass = 0; pass < maxPasses; pass += 1) {
     // Hidden characters go before NFC: removed later, they could leave a

@@ -93,7 +93,8 @@ whitespace trimmed, control runs one space; at most `maxLabelLength`
 (8-120, default 120) code points, cut at a grapheme boundary (`…`). A type
 or id with control, format, invisible, private-use or unassigned
 characters, `}`, `{{`, `<!`, `-->` or `--!>` gets no marker: the typed
-token stays and the model loses the id (console warning once per type).
+token stays and the model loses the id (console warning once per type,
+only in development).
 `labels: 'raw'` sends the old format. Reading is unchanged so far (stored
 text shows as before).
 
