@@ -785,7 +785,7 @@ export function AiChatProvider({
   const classNames = useMemo(() => userClassNames ?? {}, [userClassNames]);
   const components = useMemo(() => userComponents ?? {}, [userComponents]);
   // Load the default Markdown renderer now, not when the first message renders.
-  const usesDefaultMarkdown = !userComponents?.Markdown && !userComponents?.MessageBubble;
+  const usesDefaultMarkdown = !userComponents?.Markdown && !userComponents?.MessageBubble && markdown?.preload !== false;
   useEffect(() => {
     if (usesDefaultMarkdown) void preloadMarkdown();
   }, [usesDefaultMarkdown]);

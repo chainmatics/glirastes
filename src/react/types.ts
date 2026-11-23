@@ -2738,4 +2738,10 @@ export interface AiTriggerButtonProps {
 export interface ChatMarkdownOptions {
   /** remark plugins, e.g. `remark-gfm` (installed by the host, not by glirastes). */
   remarkPlugins?: ReadonlyArray<unknown>;
+  /**
+   * Load react-markdown when the provider mounts (default `true`). `false`:
+   * load it when the first message renders, as before; `preloadMarkdown()`
+   * still works.
+   */
+  preload?: boolean;
 }

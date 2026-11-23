@@ -4,12 +4,15 @@
 // gracefully degrades to raw text when the optional peer dep isn't installed.
 type MarkdownModule = typeof import('react-markdown');
 
-let markdownModule: Promise<{ default: MarkdownModule['default'] }> | undefined;
+type LoadedModule = { default: MarkdownModule['default'] };
+
+let markdownModule: Promise<LoadedModule> | undefined;
+let loaded: LoadedModule | undefined;
 let preloaded: Promise<void> | undefined;
 
 /** The cached import (started on the first call); never rejects. */
-export function loadMarkdownModule(): Promise<{ default: MarkdownModule['default'] }> {
-  markdownModule ??= (async () => {
+export function loadMarkdownModule(): Promise<LoadedModule> {
+  markdownModule ??= (async (): Promise<LoadedModule> => {
     try {
       const mod = await import('react-markdown');
       return { default: mod.default };
@@ -24,8 +27,21 @@ export function loadMarkdownModule(): Promise<{ default: MarkdownModule['default
       )) as MarkdownModule['default'];
       return { default: Fallback };
     }
-  })();
+  })().then((module) => (loaded = module));
   return markdownModule;
+}
+
+/**
+ * Factory for `lazy`: once the shared import has resolved, a thenable that
+ * calls back synchronously, so React's `lazy` resolves without suspending
+ * (a resolved promise only calls back in a microtask, after React suspended).
+ */
+export function markdownModuleForLazy(): Promise<LoadedModule> {
+  if (!loaded) return loadMarkdownModule();
+  const module = loaded;
+  // React's lazy only calls `then`; the type asks for a full Promise.
+  const resolvedNow: PromiseLike<LoadedModule> = { then: (onFulfilled) => onFulfilled?.(module) as never };
+  return resolvedNow as Promise<LoadedModule>;
 }
 
 /**

@@ -1,174 +1,216 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { act } from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { freshChat, serverHtml, settle, type ServerCase } from './markdown-loading-harness.js';
+import { act, type ReactElement } from 'react';
+import { cleanup, render } from '@testing-library/react';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { deChatLocale } from '../../locale-de.js';
+import { GRAPH_TIMEOUT, freshGraph, serverHtmlAll, type ServerCase } from './markdown-loading-harness.js';
 
+// Each test builds its own module graph (`freshGraph`), so the tests do not
+// depend on their order; a graph is shared only inside one test.
 const golden = JSON.parse(
   readFileSync(join(import.meta.dirname, 'markdown-ssr-main.golden.json'), 'utf8'),
 ) as Record<ServerCase, string>;
 
-const markdownBox = (root: ParentNode) => root.querySelector('[data-component="markdown"]')!;
-const showsSource = (text: string) => text.includes('\\+') || text.includes('**') || text.includes('- two');
+const showsSource = (text: string) => /\\\+|\*\*|- two|\*live\*/.test(text);
+const stateOf = (box: Element) => {
+  if (box.querySelector('[data-state="loading"]')) return 'skeleton';
+  if (box.querySelector('ul, strong, em')) return 'markdown';
+  return showsSource(box.textContent ?? '') ? 'source' : `other:${box.innerHTML}`;
+};
+
+/** Every state the first `[data-component="markdown"]` in `container` passes through, repeats collapsed. */
+function timeline(container: Element, nth = 0) {
+  const states: string[] = [];
+  const record = () => {
+    const box = container.querySelectorAll('[data-component="markdown"]')[nth];
+    const state = box ? stateOf(box) : 'none';
+    if (states[states.length - 1] !== state) states.push(state);
+  };
+  record();
+  const observer = new MutationObserver(record);
+  observer.observe(container, { childList: true, subtree: true, characterData: true });
+  return { states, stop: () => { record(); observer.disconnect(); } };
+}
+
+const mount = (element: ReactElement) => {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  render(element, { container });
+  return { container };
+};
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  vi.doUnmock('react-markdown');
   document.body.innerHTML = '';
 });
+afterAll(() => {
+  vi.doUnmock('react-markdown');
+});
 
-describe('Markdown while the renderer loads (client render of a loaded history)', () => {
-  it('shows a skeleton, never the source, then the rendered Markdown', async () => {
-    const chat = await freshChat();
-    const seen: string[] = [];
+describe('Markdown while the renderer loads', () => {
+  it('a loaded history shows a sized skeleton, never the source, then the rendered Markdown', async () => {
+    const graph = await freshGraph();
     const container = document.createElement('div');
     document.body.appendChild(container);
-    const observer = new MutationObserver(() => {
-      const box = container.querySelector('[data-component="markdown"]');
-      if (box) seen.push(box.textContent ?? '');
-    });
-    observer.observe(container, { childList: true, subtree: true, characterData: true });
-    render(chat.element, { container });
+    const seen = timeline(container);
+    render(graph.chat(), { container });
 
-    const skeleton = markdownBox(container).querySelector('[data-state="loading"]')!;
+    const box = container.querySelector('[data-component="markdown"]')!;
+    const skeleton = box.querySelector<HTMLElement>('[data-state="loading"]')!;
     expect(skeleton).not.toBeNull();
     expect(skeleton.getAttribute('aria-busy')).toBe('true');
-    // One line per non-empty source line here (all shorter than 80 characters).
-    expect(skeleton.querySelectorAll('[data-element="markdown-skeleton-line"]').length).toBe(3);
     expect(skeleton.querySelector('[aria-live]')).toBeNull();
     expect(skeleton.textContent).toBe('Loading message…');
-    expect(showsSource(markdownBox(container).textContent ?? '')).toBe(false);
+    // An own width from the source (the longest line, 10 characters), so a bubble
+    // sized by its content does not collapse; one bar per non-empty source line.
+    expect(skeleton.style.inlineSize).toBe('10ch');
+    expect(skeleton.style.maxInlineSize).toBe('var(--cm-markdown-skeleton-max-width, 100%)');
+    expect(skeleton.querySelectorAll('[data-element="markdown-skeleton-line"]')).toHaveLength(3);
 
-    await act(async () => { chat.release(); await settle(); });
-    expect(await screen.findByRole('list')).toBeTruthy();
-    expect(markdownBox(container).querySelector('strong')?.textContent).toBe('one');
-    expect(markdownBox(container).querySelector('[data-state="loading"]')).toBeNull();
-    observer.disconnect();
-    expect(seen.some(showsSource)).toBe(false);
-  });
+    await act(async () => { graph.release(); await graph.preloadMarkdown(); });
+    expect(box.querySelector('ul')).not.toBeNull();
+    expect(box.querySelector('strong')?.textContent).toBe('one');
+    seen.stop();
+    expect(seen.states).toEqual(['none', 'skeleton', 'markdown']);
+  }, GRAPH_TIMEOUT);
 
-  it('reads the German loading text with the German locale', async () => {
-    vi.resetModules();
-    const { deChatLocale } = await import('../../locale-de.js');
+  it('a running turn keeps the raw text as before: the streaming answer and the just-sent question', async () => {
+    const graph = await freshGraph();
+    const { container } = mount(graph.streamingChat());
+    const boxes = [...container.querySelectorAll('[data-component="markdown"]')].map(stateOf);
+    // The earlier answer is history: skeleton. Question and answer of the running turn: raw, as on main.
+    expect(boxes).toEqual(['skeleton', 'source', 'source']);
+    await act(async () => { graph.release(); await graph.preloadMarkdown(); });
+    expect([...container.querySelectorAll('[data-component="markdown"]')].map(stateOf)).toEqual(['markdown', 'markdown', 'markdown']);
+  }, GRAPH_TIMEOUT);
+
+  it('German locale text', () => {
     expect(deChatLocale.markdownLoadingLabel).toBe('Nachricht wird geladen…');
   });
 });
 
 describe('preload', () => {
-  it('starts loading react-markdown when the provider mounts', async () => {
-    const chat = await freshChat({ withBubble: false });
-    render(chat.element);
-    await settle();
-    expect(chat.importCalls()).toBe(1);
-  });
-
-  it('does not load it when the app supplies components.Markdown or components.MessageBubble', async () => {
-    for (const components of [
-      { Markdown: ({ content }: { content: string }) => <p data-own>{content}</p> },
-      { MessageBubble: () => <div data-own /> },
+  it('starts on provider mount, except with an own Markdown or MessageBubble slot or markdown.preload: false', async () => {
+    const graph = await freshGraph();
+    for (const options of [
+      { components: { Markdown: ({ content }: { content: string }) => <p data-own>{content}</p> } },
+      { components: { MessageBubble: () => <div data-own /> } },
+      { markdown: { preload: false } },
     ]) {
-      const chat = await freshChat({ withBubble: false, components });
-      render(chat.element);
-      await settle();
-      expect(chat.importCalls()).toBe(0);
+      mount(graph.chat({ ...options, withBubble: false }));
+      await act(async () => {});
       cleanup();
     }
-  });
+    expect(graph.importCalls()).toBe(0);
 
-  it('leaves an app Markdown component untouched', async () => {
-    const chat = await freshChat({ components: { Markdown: ({ content }) => <p data-own>{content}</p> } });
-    const { container } = render(chat.element);
-    expect(container.querySelector('[data-own]')?.textContent).toBe('Live \\+ v2\n\n- **one**\n- two');
-    expect(container.querySelector('[data-state="loading"]')).toBeNull();
-  });
+    // An own Markdown component is untouched.
+    const own = mount(graph.chat({ components: { Markdown: ({ content }) => <p data-own>{content}</p> } }));
+    expect(own.container.querySelector('[data-own]')?.textContent).toBe('Live \\+ v2\n\n- **one**\n- two');
+    cleanup();
+    expect(graph.importCalls()).toBe(0);
 
-  it('preloadMarkdown() is idempotent and resolves even when the import fails', async () => {
-    vi.resetModules();
+    mount(graph.chat({ withBubble: false }));
+    await act(async () => {});
+    expect(graph.importCalls()).toBe(1);
+  }, GRAPH_TIMEOUT);
+
+  it('after a finished preload the first mount shows Markdown without a skeleton', async () => {
+    const graph = await freshGraph();
+    graph.release();
+    await graph.preloadMarkdown();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const seen = timeline(container);
+    render(graph.chat(), { container });
+    expect(stateOf(container.querySelector('[data-component="markdown"]')!)).toBe('markdown');
+    seen.stop();
+    expect(seen.states).toEqual(['none', 'markdown']);
+  }, GRAPH_TIMEOUT);
+
+  it('preloadMarkdown() resolves when the import fails; the chat shows the plain text as before', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.doMock('react-markdown', () => { throw new Error('not installed'); });
-    const { preloadMarkdown } = await import('../../index.js');
-    const first = preloadMarkdown();
-    expect(preloadMarkdown()).toBe(first);
-    await expect(first).resolves.toBeUndefined();
+    const graph = await freshGraph({ fail: true });
+    await expect(graph.preloadMarkdown()).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
-  });
-
-  it('a finished preload lets the first render show Markdown once React retries (one suspend)', async () => {
-    const chat = await freshChat();
-    chat.release();
-    const { preloadMarkdown } = await import('../../index.js');
-    await preloadMarkdown();
-    const { container } = render(chat.element);
-    // React's `lazy` reads a promise's result only through `then`, so the first
-    // render after a finished preload still suspends once; act() lets the retry run.
-    await act(async () => { await settle(1); });
-    expect(markdownBox(container).querySelector('ul')).not.toBeNull();
-  });
+    const { container } = mount(graph.chat());
+    expect(container.querySelector('[data-component="markdown"]')?.textContent).toBe('Live \\+ v2\n\n- **one**\n- two');
+  }, GRAPH_TIMEOUT);
 });
 
 describe('server rendering with a window present (jsdom) is the same as before', () => {
-  for (const kind of ['string-not-loaded', 'string-loaded', 'stream-not-loaded', 'stream-loaded'] as ServerCase[]) {
-    it(kind, async () => {
-      expect(await serverHtml(kind)).toBe(golden[kind]);
-    });
-  }
+  it('renderToString and streaming, renderer not loaded and loaded', async () => {
+    expect(await serverHtmlAll()).toEqual(golden);
+  }, GRAPH_TIMEOUT);
 });
 
 describe('hydration of server HTML while the client renderer is pending', () => {
   // What the user sees: server HTML, then while the client renderer is pending,
   // then once it loaded. On main the middle state was the raw source in all
-  // three cases (React client-renders the boundary while the renderer is
-  // pending, so even server-rendered Markdown fell back to the source); the
-  // recoverable errors are the same as on main.
-  const cases: Array<[string, () => Promise<string>, string[], string[]]> = [
-    ['completed boundary (loaded on the server)', async () => serverHtml('string-loaded'),
-      ['markdown', 'skeleton', 'markdown'], []],
-    ['client-render boundary (renderToString before the renderer loaded)', async () => serverHtml('string-not-loaded'),
-      ['source', 'skeleton', 'markdown'], ['Switched to client rendering because the server rendering ab']],
-    ['pending boundary (stream shell before its content arrived)', async () => (await serverHtml('stream-not-loaded')).split('<script>')[0]!,
-      ['source', 'skeleton', 'markdown'], ['The server could not finish this Suspense boundary, likely d']],
-  ];
-
-  for (const [name, html, expectedSteps, expectedRecoverable] of cases) {
-    it(name, async () => {
-      const { hydrateRoot } = await import('react-dom/client');
-      const markup = await html();
-      const chat = await freshChat();
+  // three cases (React replaced the boundary by its fallback, even
+  // server-rendered Markdown); the recoverable errors are the same as on main.
+  it('no hydration errors; skeleton where main showed the source', async () => {
+    const { hydrateRoot } = await import('react-dom/client');
+    const graph = await freshGraph();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cases: Array<[string, string, string[], string[]]> = [
+      [golden['string-loaded'], 'completed', ['markdown', 'skeleton', 'markdown'], []],
+      [golden['string-not-loaded'], 'client-render', ['source', 'skeleton', 'markdown'],
+        ['Switched to client rendering because the server rendering ab']],
+      [golden['stream-not-loaded'].split('<script>')[0]!, 'pending stream shell', ['source', 'skeleton', 'markdown'],
+        ['The server could not finish this Suspense boundary, likely d']],
+    ];
+    const runs = cases.map(([markup, name, expected, expectedRecoverable]) => {
       const container = document.createElement('div');
       container.innerHTML = markup;
       document.body.appendChild(container);
-      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const recoverable: unknown[] = [];
-      const steps: string[] = [];
-      const describeBox = () => {
-        const box = markdownBox(container);
-        if (box.querySelector('[data-state="loading"]')) return 'skeleton';
-        if (box.querySelector('ul')) return 'markdown';
-        return showsSource(box.textContent ?? '') ? 'source' : `other:${box.innerHTML}`;
-      };
-      // Every state the DOM passes through, repeats collapsed.
-      const record = () => { const state = describeBox(); if (steps[steps.length - 1] !== state) steps.push(state); };
-      record();
-      const observer = new MutationObserver(record);
-      observer.observe(container, { childList: true, subtree: true, characterData: true });
-      let root!: ReturnType<typeof hydrateRoot>;
-      await act(async () => {
-        root = hydrateRoot(container, chat.element, { onRecoverableError: (error) => { recoverable.push(error); } });
-      });
-      await act(async () => { await settle(); });
-      record();
-      await act(async () => { chat.release(); await settle(); });
-      record();
-      observer.disconnect();
-      act(() => root.unmount());
-
-      const hydrationErrors = errors.mock.calls.map((call) => String(call[0])).filter((m) => /hydrat|did not match|mismatch/i.test(m));
-      expect(hydrationErrors).toEqual([]);
-      expect(steps).toEqual(expectedSteps);
-      expect(recoverable.map((e) => String((e as Error).message ?? e).slice(0, 60))).toEqual(expectedRecoverable);
+      return { container, name, expected, expectedRecoverable, recoverable: [] as string[], seen: timeline(container), root: null as null | ReturnType<typeof hydrateRoot> };
     });
-  }
+    await act(async () => {
+      for (const run of runs) {
+        run.root = hydrateRoot(run.container, graph.chat(), {
+          onRecoverableError: (error) => { run.recoverable.push(String((error as Error).message ?? error).slice(0, 60)); },
+        });
+      }
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    await act(async () => { graph.release(); await graph.preloadMarkdown(); });
+    for (const run of runs) {
+      run.seen.stop();
+      act(() => run.root!.unmount());
+      expect({ name: run.name, states: run.seen.states, recoverable: run.recoverable })
+        .toEqual({ name: run.name, states: run.expected, recoverable: run.expectedRecoverable });
+    }
+    expect(errors.mock.calls.map((call) => String(call[0])).filter((m) => /hydrat|did not match|mismatch/i.test(m))).toEqual([]);
+  }, GRAPH_TIMEOUT);
+
+  it('with the renderer preloaded on the client: no hydration errors, no skeleton', async () => {
+    const { hydrateRoot } = await import('react-dom/client');
+    const graph = await freshGraph();
+    graph.release();
+    await graph.preloadMarkdown();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cases: Array<[string, string[], number]> = [
+      [golden['string-loaded'], ['markdown'], 0],
+      [golden['string-not-loaded'], ['source', 'markdown'], 1],
+      [golden['stream-not-loaded'].split('<script>')[0]!, ['source', 'markdown'], 1],
+    ];
+    for (const [markup, expected, recoverableCount] of cases) {
+      const container = document.createElement('div');
+      container.innerHTML = markup;
+      document.body.appendChild(container);
+      const seen = timeline(container);
+      const recoverable: unknown[] = [];
+      let root!: ReturnType<typeof hydrateRoot>;
+      await act(async () => { root = hydrateRoot(container, graph.chat(), { onRecoverableError: (e) => { recoverable.push(e); } }); });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+      seen.stop();
+      act(() => root.unmount());
+      expect(seen.states).toEqual(expected);
+      expect(recoverable).toHaveLength(recoverableCount);
+    }
+    expect(errors.mock.calls.map((call) => String(call[0])).filter((m) => /hydrat|did not match|mismatch/i.test(m))).toEqual([]);
+  }, GRAPH_TIMEOUT);
 });

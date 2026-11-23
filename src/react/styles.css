@@ -174,7 +174,7 @@
 }
 /* While react-markdown loads: skeleton lines. Their size is inline, so they take
    space without this stylesheet too; adjust with --cm-markdown-skeleton-color,
-   -line-height, -gap, -radius and -padding. This only adds the pulse. */
+   -line-height, -gap, -radius, -padding and -max-width. This only adds the pulse. */
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] [data-element="markdown-skeleton-line"] {
   animation: cm-markdown-skeleton 1.6s ease-in-out infinite;
 }

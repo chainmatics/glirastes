@@ -1,55 +1,76 @@
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';
-import type { ChatComponents, ChatMessage, ChatTransport } from '../../types.js';
+import type { ChatComponents, ChatMarkdownOptions, ChatMessage, ChatTransport } from '../../types.js';
 
 /** A history text with a list, emphasis and an escape: what a loaded chat shows. */
 export const MARKDOWN_SOURCE = 'Live \\+ v2\n\n- **one**\n- two';
 
-const transport = (): ChatTransport => ({
-  messages: [], status: 'ready', error: null,
+/** Importing a fresh provider graph can take seconds on a loaded machine. */
+export const GRAPH_TIMEOUT = 60_000;
+
+const text = (id: string, role: 'user' | 'assistant', value: string) =>
+  ({ id, role, parts: [{ type: 'text', text: value }] }) as unknown as ChatMessage;
+
+export const message = text('m1', 'assistant', MARKDOWN_SOURCE);
+
+const transport = (messages: ChatMessage[] = [], status: ChatTransport['status'] = 'ready'): ChatTransport => ({
+  messages, status, error: null,
   sendMessage: vi.fn(async () => {}), stop: vi.fn(), setMessages: vi.fn(), addToolApprovalResponse: vi.fn(async () => {}),
 });
 
-export const message = {
-  id: 'm1',
-  role: 'assistant',
-  parts: [{ type: 'text', text: MARKDOWN_SOURCE }],
-} as unknown as ChatMessage;
-
-export interface FreshChat {
-  element: ReactElement;
+export interface Graph {
+  /** The chat with one loaded assistant message (or none). */
+  chat: (options?: { components?: ChatComponents; markdown?: ChatMarkdownOptions; withBubble?: boolean }) => ReactElement;
+  /** A running turn: an older answer, the just-sent question and the answer streaming in. */
+  streamingChat: () => ReactElement;
   /** Lets the (mocked) `import('react-markdown')` resolve. */
   release: () => void;
   importCalls: () => number;
+  /** The shared import of this module graph; resolves once the renderer is there. */
+  preloadMarkdown: () => Promise<void>;
 }
 
 /**
- * Fresh module state (no renderer loaded yet) with a `react-markdown` import
- * that waits until `release()`. Independent of test order.
+ * A fresh module graph (no renderer loaded yet) whose `react-markdown` import
+ * waits until `release()`; `fail` makes the import throw instead.
  */
-export async function freshChat(options: { components?: ChatComponents; withBubble?: boolean } = {}): Promise<FreshChat> {
+export async function freshGraph(options: { fail?: boolean } = {}): Promise<Graph> {
   vi.resetModules();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   let calls = 0;
   vi.doMock('react-markdown', async () => {
     calls += 1;
+    if (options.fail) throw new Error('not installed');
     await gate;
     return vi.importActual<typeof import('react-markdown')>('react-markdown');
   });
   const { AiChatProvider } = await import('../../provider/ai-chat-provider.js');
   const { MessageBubble } = await import('../message-bubble.js');
-  const element = (
-    <AiChatProvider transport={transport()} components={options.components}>
-      {options.withBubble === false ? null : <MessageBubble message={message} />}
-    </AiChatProvider>
-  );
-  return { element, release, importCalls: () => calls };
+  const { preloadMarkdown } = await import('../../markdown-module.js');
+  return {
+    chat: ({ components, markdown, withBubble = true } = {}) => (
+      <AiChatProvider transport={transport()} components={components} markdown={markdown}>
+        {withBubble ? <MessageBubble message={message} /> : null}
+      </AiChatProvider>
+    ),
+    streamingChat: () => {
+      const messages = [
+        text('old', 'assistant', 'Earlier **answer**'),
+        text('q', 'user', 'Show *live* items'),
+        text('a', 'assistant', 'Streaming **now**'),
+      ];
+      return (
+        <AiChatProvider transport={transport(messages, 'streaming')}>
+          {messages.map((m) => <MessageBubble key={m.id} message={m} />)}
+        </AiChatProvider>
+      );
+    },
+    release,
+    importCalls: () => calls,
+    preloadMarkdown,
+  };
 }
-
-export const settle = async (rounds = 5) => {
-  for (let i = 0; i < rounds; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-};
 
 /** The component stack in renderToString's client-render template carries absolute paths with line numbers. */
 export const maskStackPaths = (html: string) => html.replace(/ \((?:\/|[A-Za-z]:\\)[^)]*\)/g, ' (<path>)');
@@ -67,17 +88,21 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
 
 export type ServerCase = 'string-not-loaded' | 'string-loaded' | 'stream-not-loaded' | 'stream-loaded';
 
-/** Server HTML of the chat in one of the four cases, from a fresh module state. */
-export async function serverHtml(kind: ServerCase): Promise<string> {
+/**
+ * Server HTML of the chat in all four cases, in order on one fresh graph:
+ * renderToString and a stream before the renderer loaded (the stream
+ * finishes once it is released), then both once the import has resolved.
+ */
+export async function serverHtmlAll(): Promise<Record<ServerCase, string>> {
   const { renderToString, renderToReadableStream } = await import('react-dom/server');
-  const chat = await freshChat();
-  if (kind.endsWith('-loaded') && !kind.endsWith('not-loaded')) {
-    renderToString(chat.element); // starts the lazy import
-    chat.release();
-    await settle();
-  }
-  if (kind.startsWith('string')) return maskStackPaths(renderToString(chat.element));
-  const stream = await renderToReadableStream(chat.element);
-  chat.release();
-  return readAll(stream);
+  const graph = await freshGraph();
+  const out = {} as Record<ServerCase, string>;
+  out['string-not-loaded'] = maskStackPaths(renderToString(graph.chat()));
+  const stream = await renderToReadableStream(graph.chat());
+  graph.release();
+  out['stream-not-loaded'] = await readAll(stream);
+  await graph.preloadMarkdown();
+  out['string-loaded'] = maskStackPaths(renderToString(graph.chat()));
+  out['stream-loaded'] = await readAll(await renderToReadableStream(graph.chat()));
+  return out;
 }

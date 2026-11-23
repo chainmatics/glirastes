@@ -1,7 +1,7 @@
-import { Fragment, Suspense, lazy, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, Suspense, createContext, lazy, useContext, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
-import { loadMarkdownModule } from '../markdown-module.js';
+import { markdownModuleForLazy } from '../markdown-module.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { useComposerContext } from '../provider/composer-context.js';
@@ -48,12 +48,12 @@ import type {
   TurnNoticeStatus,
   TurnOutcome,
 } from '../types.js';
-import { turnStartId } from '../utils/turn-outcomes.js';
+import { latestUserMessageId, turnStartId } from '../utils/turn-outcomes.js';
 
 // Lazy-load react-markdown over the shared import (`preloadMarkdown`).
 type ReactMarkdownOptions = import('react-markdown').Options;
 
-const ReactMarkdown = lazy(loadMarkdownModule);
+const ReactMarkdown = lazy(markdownModuleForLazy);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -364,6 +364,9 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   const planItems = isAssistant ? readLatestPlan(message.parts) : null;
   const hasPlan = (planItems?.length ?? 0) >= 2;
   const turnActive = isLatestMessage && isLoading;
+  // The answer streaming in and the question it answers keep the raw text while react-markdown loads.
+  const liveTurnText = isLoading && (isLatestMessage
+    || (message.role === 'user' && message.id === latestUserMessageId(messages ?? [])));
   const turnId = turnOutcomes && turnOutcomes.size > 0 ? turnStartId(messages ?? [message], message.id) : null;
   const turnOutcome: TurnOutcome | null = (turnId ? turnOutcomes?.get(turnId) : undefined) ?? null;
   // `noticeScope: 'every'` (default): an earlier turn shows its recorded outcome, the latest one too once its
@@ -459,6 +462,10 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   }
 
   const textNodes = cleanTextParts.map((text, i) => {
+    const node = textNode(text, i);
+    return node === null ? null : <LiveTurnTextContext.Provider key={`text-${i}`} value={liveTurnText}>{node}</LiveTurnTextContext.Provider>;
+  });
+  function textNode(text: string, i: number): ReactNode {
     const segments = parseMentionSegments(text, mentionPrefix);
     const hasMention = segments.some((segment) => segment.kind === 'mention');
 
@@ -510,7 +517,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         })}
       </div>
     );
-  });
+  }
   /** The approval of a tool part, read once when asked for (`MessagePartEntry.approval`, the nodes below). */
   const approvals = new Map<number, ToolPartApproval | undefined>();
   const toolResultNodes = message.parts.map((part, i) => {
@@ -810,9 +817,10 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   const links = useChatEntityLinks();
   const { remarkPlugins } = useChatMarkdownOptions();
+  const live = useContext(LiveTurnTextContext);
   return (
     <div className={className} data-component="markdown">
-      <Suspense fallback={<MarkdownLoading content={content} />}>
+      <Suspense fallback={live ? <>{content}</> : <MarkdownLoading content={content} />}>
         <ReactMarkdown
           components={links.enabled ? links.markdownComponents : undefined}
           remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
@@ -822,22 +830,28 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
   );
 }
 
+/** True inside a message of the running turn: its Markdown keeps the raw text while the renderer loads, as before. */
+const LiveTurnTextContext = createContext(false);
+
 const subscribeNothing = () => () => {};
 const onClient = () => true;
 const onServer = () => false;
 
 const MAX_SKELETON_LINES = 8;
-const SKELETON_CHARS_PER_LINE = 80;
+/** Characters per skeleton line, also its widest size in `ch`. */
+const SKELETON_COLUMNS = 40;
 const SKELETON_SCAN_LIMIT = 2_000;
 
 /**
- * Lines and last-line width (percent) the rendered text will roughly take: one
- * line per non-empty source line plus one per 80 characters. A single pass over
- * at most the first 2,000 characters, stopped at 8 lines.
+ * Lines, width (in `ch`) and last-line width (percent) the rendered text will
+ * roughly take: one line per non-empty source line plus one per 40 characters,
+ * as wide as its longest line up to 40. A single pass over at most the first
+ * 2,000 characters, stopped at 8 lines.
  */
-function estimateSkeletonLines(content: string): { lines: number; lastWidth: number } {
+function estimateSkeleton(content: string): { lines: number; columns: number; lastWidth: number } {
   let lines = 0;
   let lineLength = 0;
+  let columns = 1;
   const end = Math.min(content.length, SKELETON_SCAN_LIMIT);
   for (let i = 0; i < end && lines < MAX_SKELETON_LINES; i += 1) {
     if (content.charCodeAt(i) === 10) {
@@ -845,42 +859,51 @@ function estimateSkeletonLines(content: string): { lines: number; lastWidth: num
       lineLength = 0;
       continue;
     }
-    lineLength += 1;
-    if (lineLength > SKELETON_CHARS_PER_LINE) {
+    if (lineLength === SKELETON_COLUMNS) {
       lines += 1;
-      lineLength = 1;
+      lineLength = 0;
     }
+    lineLength += 1;
+    if (lineLength > columns) columns = lineLength;
   }
   if (lineLength > 0 && lines < MAX_SKELETON_LINES) lines += 1;
   const lastWidth = lines < MAX_SKELETON_LINES && lineLength > 0
-    ? Math.max(30, Math.round((lineLength / SKELETON_CHARS_PER_LINE) * 100))
+    ? Math.max(30, Math.round((lineLength / columns) * 100))
     : 100;
-  return { lines: Math.max(1, lines), lastWidth: Math.min(100, lastWidth) };
+  return { lines: Math.max(1, lines), columns, lastWidth };
 }
 
 const VISUALLY_HIDDEN: CSSProperties = {
   position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
   overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
 };
-const SKELETON_STYLE: CSSProperties = {
-  display: 'grid',
-  rowGap: 'var(--cm-markdown-skeleton-gap, 0.625em)',
-  paddingBlock: 'var(--cm-markdown-skeleton-padding, 0.3125em)',
-};
 
 /**
  * Suspense fallback while react-markdown loads. The server (and hydration)
  * renders the source text as before, so server HTML stays unchanged; a client
  * render shows skeleton lines instead of the raw source. The geometry is
- * inline (CSS variables) so it takes space without the SDK stylesheet too.
+ * inline (CSS variables) so it takes space without the SDK stylesheet too,
+ * also in a bubble sized by its content.
  */
 function MarkdownLoading({ content }: { content: string }) {
   const client = useSyncExternalStore(subscribeNothing, onClient, onServer);
   const { locale } = useChatContext();
   if (!client) return <>{content}</>;
-  const { lines, lastWidth } = estimateSkeletonLines(content);
+  const { lines, columns, lastWidth } = estimateSkeleton(content);
   return (
-    <div data-element="markdown-skeleton" data-state="loading" aria-busy="true" style={SKELETON_STYLE}>
+    <div
+      data-element="markdown-skeleton"
+      data-state="loading"
+      aria-busy="true"
+      style={{
+        display: 'grid',
+        // A plain length (no percentage), so a bubble sized by its content gets this width.
+        inlineSize: `${columns}ch`,
+        maxInlineSize: 'var(--cm-markdown-skeleton-max-width, 100%)',
+        rowGap: 'var(--cm-markdown-skeleton-gap, 0.625em)',
+        paddingBlock: 'var(--cm-markdown-skeleton-padding, 0.3125em)',
+      }}
+    >
       <span style={VISUALLY_HIDDEN}>{locale.markdownLoadingLabel ?? 'Loading message…'}</span>
       {Array.from({ length: lines }, (_, index) => (
         <span
