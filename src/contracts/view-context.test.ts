@@ -1125,7 +1125,11 @@ describe('values read once (getters and proxies)', () => {
 });
 
 describe('schemas return checked copies (#189)', () => {
-  /** A list that counts reads of `length` and of each index (`get` only). */
+  /**
+   * A list that counts reads of `length` and of each index (`get` only). A
+   * read past the real items throws, so a regression fails by assertion
+   * instead of looping over a claimed length.
+   */
   const counted = (items: unknown[], claimedLength: number = items.length) => {
     const reads = { length: 0, index: new Map<number, number>() };
     const list = new Proxy(items, {
@@ -1134,6 +1138,7 @@ describe('schemas return checked copies (#189)', () => {
         if (typeof key === 'string' && /^\d+$/.test(key)) {
           const index = Number(key);
           reads.index.set(index, (reads.index.get(index) ?? 0) + 1);
+          if (index >= target.length) throw new Error(`index ${index} past the real items read`);
         }
         return Reflect.get(target, key, receiver);
       },
@@ -1217,6 +1222,43 @@ describe('schemas return checked copies (#189)', () => {
     }
     const list = ViewContextSchema.safeParse(counted([{ entity: { type: 'order', id: 1 } }], 10_001).list);
     expect(list.error!.issues.map((issue) => ({ code: issue.code, path: issue.path }))).toEqual([{ code: 'too_big', path: [] }]);
+  });
+
+  it('encode reads the entry list once and returns checked copies (items may be read again, never unchecked)', () => {
+    const composite = counted(['lobby', 4]);
+    const ids = counted(['a', 'b', 'c']);
+    const factList = counted(['x', 'y']);
+    const entries = counted([{ entity: { type: 'order', id: composite.list }, selection: { type: 'task', ids: ids.list }, facts: { list: factList.list } }]);
+    const result = z.safeEncode(ViewContextSchema, entries.list as never);
+    expect(result.success).toBe(true);
+    onceEach(entries.reads, 1);
+    const entry = (result.data as ViewContextEntry[])[0]!;
+    expect(entry).toEqual({ entity: { type: 'order', id: ['lobby', 4] }, selection: { type: 'task', ids: ['a', 'b', 'c'] }, facts: { list: ['x', 'y'] } });
+    expect(entry.entity!.id).not.toBe(composite.list);
+    expect(entry.selection!.ids).not.toBe(ids.list);
+    expect((entry.facts as { list: unknown }).list).not.toBe(factList.list);
+  });
+
+  it('encode refuses lying or huge lengths without reading an item or throwing', () => {
+    for (const length of [5e6, 10_001, -1, Number.NaN, 1.5]) {
+      const list = counted([{ entity: { type: 'order', id: 1 } }], length);
+      let result: { success: boolean } | undefined;
+      expect(() => { result = z.safeEncode(ViewContextSchema, list.list as never); }).not.toThrow();
+      expect(result!.success).toBe(false);
+      expect(list.reads.index.size).toBe(0);
+      const ids = counted(['a'], length);
+      expect(() => { result = z.safeEncode(ViewContextEntrySchema, { selection: { type: 'task', ids: ids.list } } as never); }).not.toThrow();
+      expect(result!.success).toBe(false);
+      expect(ids.reads.index.size).toBe(0);
+    }
+  });
+
+  it('encode refuses 20,000 ids before checking any of them', () => {
+    const ids = counted(Array.from({ length: 20_000 }, (_, index) => `t-${index}`));
+    const result = z.safeEncode(ViewContextEntrySchema, { selection: { type: 'task', ids: ids.list } } as never);
+    expect(result.success).toBe(false);
+    expect(ids.reads.index.size).toBe(0);
+    expect(result.error!.issues.map((issue) => ({ code: issue.code, path: issue.path }))).toEqual([{ code: 'too_big', path: ['selection', 'ids'] }]);
   });
 
   it('encodes: z.encode returns an equal copy of valid entries and refuses invalid ones', () => {
@@ -1371,12 +1413,19 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     ['ids not a list', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: 'a' } }]],
     ['frozen ids', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: Object.freeze(['a']) } }]],
     ['51 ids', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: Array.from({ length: 51 }, (_, i) => i) } }]],
+    ['51 ids, one invalid', () => [{ selection: { type: 'task', ids: [...Array.from({ length: 50 }, (_, i) => `t-${i}`), ' bad'] } }]],
   ];
+  // Code and path of an issue, and of the issues of each union branch.
+  const shape = (issue: any): unknown => ({
+    code: issue.code,
+    path: issue.path,
+    ...(issue.errors ? { errors: issue.errors.map((branch: any[]) => branch.map(shape)) } : {}),
+  });
   const run = (schema: any, input: unknown) => {
     const result = schema.safeParse(input);
     return result.success
       ? { success: true, json: JSON.stringify(result.data), copy: result.data !== input }
-      : { success: false, issues: result.error.issues.map((issue: any) => ({ code: issue.code, path: issue.path })) };
+      : { success: false, issues: result.error.issues.map(shape) };
   };
   const expected: Record<string, unknown> = {
     "list: valid": {
@@ -1441,6 +1490,24 @@ describe('schemas behave as before for lists with an honest length (frozen from 
           "code": "invalid_union",
           "path": [
             3
+          ],
+          "errors": [
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              }
+            ],
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "selection"
+                ]
+              }
+            ]
           ]
         }
       ]
@@ -1465,6 +1532,34 @@ describe('schemas behave as before for lists with an honest length (frozen from 
           "code": "invalid_union",
           "path": [
             0
+          ],
+          "errors": [
+            [
+              {
+                "code": "custom",
+                "path": [
+                  "selection",
+                  "ids",
+                  1
+                ]
+              }
+            ],
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              },
+              {
+                "code": "custom",
+                "path": [
+                  "selection",
+                  "ids",
+                  1
+                ]
+              }
+            ]
           ]
         }
       ]
@@ -1476,6 +1571,26 @@ describe('schemas behave as before for lists with an honest length (frozen from 
           "code": "invalid_union",
           "path": [
             0
+          ],
+          "errors": [
+            [
+              {
+                "code": "unrecognized_keys",
+                "path": []
+              }
+            ],
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              },
+              {
+                "code": "unrecognized_keys",
+                "path": []
+              }
+            ]
           ]
         }
       ]
@@ -1497,6 +1612,20 @@ describe('schemas behave as before for lists with an honest length (frozen from 
           "code": "invalid_union",
           "path": [
             1
+          ],
+          "errors": [
+            [
+              {
+                "code": "invalid_type",
+                "path": []
+              }
+            ],
+            [
+              {
+                "code": "invalid_type",
+                "path": []
+              }
+            ]
           ]
         }
       ]
@@ -1508,6 +1637,32 @@ describe('schemas behave as before for lists with an honest length (frozen from 
           "code": "invalid_union",
           "path": [
             0
+          ],
+          "errors": [
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "selection",
+                  "ids"
+                ]
+              }
+            ],
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              },
+              {
+                "code": "invalid_type",
+                "path": [
+                  "selection",
+                  "ids"
+                ]
+              }
+            ]
           ]
         }
       ]
@@ -1526,6 +1681,45 @@ describe('schemas behave as before for lists with an honest length (frozen from 
             0,
             "selection",
             "ids"
+          ]
+        }
+      ]
+    },
+    "list: 51 ids, one invalid": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": [
+            0
+          ],
+          "errors": [
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              },
+              {
+                "code": "custom",
+                "path": [
+                  "selection",
+                  "ids",
+                  50
+                ]
+              }
+            ],
+            [
+              {
+                "code": "custom",
+                "path": [
+                  "selection",
+                  "ids",
+                  50
+                ]
+              }
+            ]
           ]
         }
       ]
@@ -1562,7 +1756,35 @@ describe('schemas behave as before for lists with an honest length (frozen from 
       "issues": [
         {
           "code": "invalid_union",
-          "path": []
+          "path": [],
+          "errors": [
+            [
+              {
+                "code": "custom",
+                "path": [
+                  "selection",
+                  "ids",
+                  1
+                ]
+              }
+            ],
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              },
+              {
+                "code": "custom",
+                "path": [
+                  "selection",
+                  "ids",
+                  1
+                ]
+              }
+            ]
+          ]
         }
       ]
     },
@@ -1571,7 +1793,27 @@ describe('schemas behave as before for lists with an honest length (frozen from 
       "issues": [
         {
           "code": "invalid_union",
-          "path": []
+          "path": [],
+          "errors": [
+            [
+              {
+                "code": "unrecognized_keys",
+                "path": []
+              }
+            ],
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              },
+              {
+                "code": "unrecognized_keys",
+                "path": []
+              }
+            ]
+          ]
         }
       ]
     },
@@ -1595,7 +1837,33 @@ describe('schemas behave as before for lists with an honest length (frozen from 
       "issues": [
         {
           "code": "invalid_union",
-          "path": []
+          "path": [],
+          "errors": [
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "selection",
+                  "ids"
+                ]
+              }
+            ],
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              },
+              {
+                "code": "invalid_type",
+                "path": [
+                  "selection",
+                  "ids"
+                ]
+              }
+            ]
+          ]
         }
       ]
     },
@@ -1615,10 +1883,47 @@ describe('schemas behave as before for lists with an honest length (frozen from 
           ]
         }
       ]
+    },
+    "entry: 51 ids, one invalid": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": [],
+          "errors": [
+            [
+              {
+                "code": "invalid_type",
+                "path": [
+                  "entity"
+                ]
+              },
+              {
+                "code": "custom",
+                "path": [
+                  "selection",
+                  "ids",
+                  50
+                ]
+              }
+            ],
+            [
+              {
+                "code": "custom",
+                "path": [
+                  "selection",
+                  "ids",
+                  50
+                ]
+              }
+            ]
+          ]
+        }
+      ]
     }
   };
 
-  it('gives the same success, output (a copy, same key order) and issues (code, path)', () => {
+  it('gives the same success, output (a copy, same key order) and issues (code, path, union branches)', () => {
     const out: Record<string, unknown> = {};
     for (const [name, make] of listCases) out[`list: ${name}`] = run(ViewContextSchema, make());
     for (const [name, make] of listCases) {

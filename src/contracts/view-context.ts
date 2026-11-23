@@ -768,13 +768,15 @@ const MAX_SCHEMA_LIST_LENGTH = 10_000;
  * A value checked and copied by `check` in both directions (`parse` and
  * `z.encode`): the result is the copy `check` returned, never the input, so
  * a getter or proxy cannot show other content after the check. `check`
- * reads the input once; `undefined` means invalid (one `custom` issue).
- * Built as a codec, not a transform, so `z.encode` works.
+ * reads the input once; `undefined` means invalid: one `custom` issue that
+ * aborts like the one of `z.custom` (`continue: false`), so a list holding
+ * it reports no further size issue. Built as a codec, not a transform, so
+ * `z.encode` works.
  */
 function checkedCopy<T>(check: (value: unknown) => T | undefined, message: string): z.ZodType<T> {
   const run = (value: unknown, payload: { issues: unknown[] }): T => {
     const copy = check(value);
-    if (copy === undefined) payload.issues.push({ code: 'custom', message, input: value });
+    if (copy === undefined) payload.issues.push({ code: 'custom', message, input: value, continue: false });
     return copy as T;
   };
   return z.codec(z.unknown(), z.custom<T>(() => true), { decode: run, encode: run }) as unknown as z.ZodType<T>;
@@ -787,6 +789,9 @@ function checkedCopy<T>(check: (value: unknown) => T | undefined, message: strin
  * Anything that is not an array is passed on unchanged, so `z.array` reports
  * it as always. Over 10,000 items is one `too_big` that does not abort the
  * parent, so a union reports it at its path instead of `invalid_union`.
+ * The length check comes first in both directions: `parse` runs it before
+ * `z.array`, `z.encode` (which runs a codec's output side first) through
+ * the inner codec, so neither ever loops over a claimed length or throws.
  */
 function honestList<T>(item: z.ZodType<T>, minimum: number, maximum: number): z.ZodType<T[]> {
   const run = (value: unknown, payload: { issues: unknown[] }): unknown => {
@@ -803,7 +808,10 @@ function honestList<T>(item: z.ZodType<T>, minimum: number, maximum: number): z.
     return Array.from({ length }, (_, index) => value[index]);
   };
   const list = minimum > 0 ? z.array(item).min(minimum).max(maximum) : z.array(item).max(maximum);
-  return z.codec(z.unknown(), list, { decode: run as never, encode: run as never }) as unknown as z.ZodType<T[]>;
+  const same = (value: unknown) => value;
+  // Encoding runs `encodeFirst` before `list`; parsing runs `run` before it.
+  const encodeFirst = z.codec(list, z.unknown(), { decode: same, encode: run as never });
+  return z.codec(z.unknown(), encodeFirst, { decode: run as never, encode: same }) as unknown as z.ZodType<T[]>;
 }
 
 const typeSchema = z.string().regex(ENTITY_TYPE_PATTERN);
@@ -834,10 +842,12 @@ const entryFields = {
  * the policy does not allow, facts that are not bounded, cleaned plain JSON,
  * and `selection.ids` over 10,000 items before any item is checked. The
  * result holds no object of the input: lists, composite ids and facts are
- * the copies that were checked (each list `length` and index read once),
- * in both directions (`parse` and `z.encode`). It does not know the declared
- * types or facts schemas; input from the browser goes through
- * `sanitizeViewContext`.
+ * the copies that were checked. `parse` reads each list `length` and index
+ * once. `z.encode` / `z.safeEncode` also bound every list length before any
+ * loop, never throw on a lying length and return checked copies, but may
+ * read an item more than once (the read-once promise is for `parse`). It
+ * does not know the declared types or facts schemas; input from the browser
+ * goes through `sanitizeViewContext`.
  */
 export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
   z.object({ entity: entitySchema, selection: selectionSchema.optional(), ...entryFields }).strict(),
