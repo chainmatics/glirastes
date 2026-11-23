@@ -13,6 +13,7 @@ import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import { MessageList } from '../components/message-list.js';
 import { useVercelAiChatTransport } from '../transports/vercel.js';
 import type { AiChatProviderConfig, ChatMessage, ChatTransport, SessionConfig } from '../types.js';
+import { useChatContext } from '../provider/chat-context.js';
 import { ctx, Probe, StreamingChat } from './streaming-chat.js';
 import { carried, stubControlledFetch, textChunks, type ControlledRequest } from './controlled-fetch.js';
 
@@ -160,8 +161,11 @@ describe('C1 an app-owned AI SDK Chat per conversation', () => {
     expect(textOf(chats.get('B')!.messages)).toEqual(['user:b question', 'assistant:b answer']);
   });
 
-  // KNOWN DEFECT (main): A's turn, which ends while A is open again, gets no outcome (no `completed`).
-  // The design's row "A->B->A, A laeuft" expects the live turn to report (docs/plans/2026-11-23-design-left-chat.md).
+  // KNOWN DEFECT (main): A's turn, which ends while A is open again, gets no outcome (no `completed`): returning
+  // to a live A loses the turn binding.
+  // Not covered by the pool design: the app-owned adapter has no `sessions` capability, so no row of
+  // docs/plans/2026-11-23-design-left-chat.md applies and no planned PR flips this. A defect of the app-owned-Chat
+  // pattern on main, to be decided separately.
   it.fails('KNOWN DEFECT A to B to A while A streams: A\'s turn is recorded as completed when it ends in A', async () => {
     const chats = appChats();
     const view = render(<AppOwnedChats chats={chats} activeId="A" />);
@@ -223,8 +227,11 @@ describe('C1 an app-owned AI SDK Chat per conversation', () => {
 });
 
 describe('C1 known defects of outcome attribution', () => {
-  // KNOWN DEFECT (main): switching from B (running) to A (running) keeps the request binding of B, so the stop
-  // in A is recorded on B's turn and A's turn gets no outcome.
+  // KNOWN DEFECT (main): returning to a live A loses A's turn binding (as above), so a stop in A records nothing
+  // on A's turn; whether B sent meanwhile does not matter (see the control below).
+  // Not covered by the pool design: the app-owned adapter has no `sessions` capability, so no row of
+  // docs/plans/2026-11-23-design-left-chat.md applies and no planned PR flips this. A defect of the app-owned-Chat
+  // pattern on main, to be decided separately.
   it.fails('KNOWN DEFECT back in A while A and B stream: stop() records the aborted outcome on A\'s turn', async () => {
     const chats = appChats();
     const view = render(<AppOwnedChats chats={chats} activeId="A" />);
@@ -236,6 +243,24 @@ describe('C1 known defects of outcome attribution', () => {
     await waitFor(() => expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER ']));
     await act(async () => { ctx.stop(); });
     await waitFor(() => expect(chats.get('A')!.status).toBe('ready'));
+    expect(ctx.turnOutcomes.get(ctx.messages[0]!.id)?.status).toBe('aborted');
+  });
+
+  // Same defect without a request of B: A to B to A while A streams, stop in A.
+  // Not covered by the pool design: the app-owned adapter has no `sessions` capability, so no row of
+  // docs/plans/2026-11-23-design-left-chat.md applies and no planned PR flips this. A defect of the app-owned-Chat
+  // pattern on main, to be decided separately.
+  it.fails('KNOWN DEFECT A to B to A while A streams (B never sends): stop() records the aborted outcome on A\'s turn', async () => {
+    const chats = appChats();
+    const view = render(<AppOwnedChats chats={chats} activeId="A" />);
+    await aStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="B" />);
+    await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
+    view.rerender(<AppOwnedChats chats={chats} activeId="A" />);
+    await waitFor(() => expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER ']));
+    await act(async () => { ctx.stop(); });
+    await waitFor(() => expect(chats.get('A')!.status).toBe('ready'));
+    expect(requests[0]!.aborted).toBe(true);
     expect(ctx.turnOutcomes.get(ctx.messages[0]!.id)?.status).toBe('aborted');
   });
 });
@@ -283,6 +308,9 @@ describe('C1 with a session store (load/save) next to the app-owned Chats', () =
   // KNOWN DEFECT (main): A's answer completes in A's Chat while B is open, but is never saved under A (only the
   // open chat is saved). Opening A again loads the stored partial answer into A's Chat (`setMessages`), so the
   // completed answer is lost from the Chat and the store.
+  // Not covered by the pool design: the app-owned adapter has no `sessions` capability, so no row of
+  // docs/plans/2026-11-23-design-left-chat.md applies and no planned PR flips this. A defect of the app-owned-Chat
+  // pattern on main, to be decided separately.
   it.fails('KNOWN DEFECT A to B while A streams, A ends in the background, then A again: A shows and stores the whole answer', async () => {
     const chats = appChats();
     const store = hostStore({ A: [], B });
@@ -390,7 +418,7 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
     expect(carried(requests[1]!)).toEqual(['user:first question', 'assistant:ANSWER DONE', 'user:second']);
   });
 
-  it('C2b with a slow load and a chunk arriving while it loads (as of main): the end state is right; while loading the chat shows the answer without its question', async () => {
+  it('C2b with a slow load and a chunk arriving while it loads: the end state is right, nothing is aborted', async () => {
     const store = draftStore();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -400,9 +428,7 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
     view.rerender(<VercelHost session={{ activeId: 'real', load, save: store.save }} />);
     await waitFor(() => expect(ctx.activeSessionId).toBe('real'));
     await settle();
-    // The provider emptied the transport for the load; the chunk is written into the empty history.
     await act(async () => { requests[0]!.push({ type: 'text-delta', id: 't', delta: 'MID ' }); });
-    await waitFor(() => expect(textOf(ctx.messages)).toEqual(['assistant:ANSWER MID ']));
     await act(async () => { release(); });
     await waitFor(() => expect(loaded).toContain('real'));
     await settle();
@@ -417,7 +443,30 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
     expect(carried(requests[1]!)).toEqual(['user:first question', 'assistant:ANSWER MID DONE', 'user:second']);
   });
 
+  // KNOWN DEFECT (main): while the real id's history loads, the provider has emptied the transport and the next
+  // chunk writes the answer into it, so the chat shows the answer without its question until the load ends.
+  // With the design's `renamedFrom` no load happens (row "Entwurf->echt mit renamedFrom" of
+  // docs/plans/2026-11-23-design-left-chat.md); without the signal no planned PR changes it.
+  it.fails('KNOWN DEFECT C2b with a slow load: while it loads the chat never shows the answer without its question', async () => {
+    const store = draftStore();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { load } = draftLoad(store, false, gate);
+    const view = render(<VercelHost session={{ activeId: 'draft', load, save: store.save }} />);
+    await firstRequestInDraft();
+    view.rerender(<VercelHost session={{ activeId: 'real', load, save: store.save }} />);
+    await waitFor(() => expect(ctx.activeSessionId).toBe('real'));
+    await settle();
+    await act(async () => { requests[0]!.push({ type: 'text-delta', id: 't', delta: 'MID ' }); });
+    await settle();
+    const shown = textOf(ctx.messages);
+    await act(async () => { release(); });
+    expect(shown.length === 0 || shown[0] === 'user:first question').toBe(true);
+  });
+
   // KNOWN DEFECT (main), same as below plus the race: the stored partial and the streamed answer both stay.
+  // It can only flip once `renamedFrom` exists: without the signal the design deliberately keeps the answer under
+  // the draft id (row "Entwurf->echt ohne Signal, Ids umbenannt" of docs/plans/2026-11-23-design-left-chat.md).
   it.fails('KNOWN DEFECT C2c with a slow load and a chunk arriving while it loads: the next request carries one answer', async () => {
     const store = draftStore();
     let release!: () => void;
@@ -442,7 +491,7 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
     expect(carried(requests[1]!)).toEqual(['user:first question', 'assistant:ANSWER MID DONE', 'user:second']);
   });
 
-  it('C2c with load returning re-id\'d messages: the first request is not aborted and the chat shows one answer bubble', async () => {
+  it('C2c with load returning re-id\'d messages (as of main, changes with renamedFrom): the first request is not aborted and the chat shows one answer bubble', async () => {
     const store = draftStore();
     const { load, loaded } = draftLoad(store, true);
     const view = render(<VercelHost session={{ activeId: 'draft', load, save: store.save }} />);
@@ -455,6 +504,8 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
 
   // KNOWN DEFECT (main): the loaded partial answer `srv-1` stays in the history as a message of its own next to
   // the streamed answer; the UI merges them into one bubble, but the store and the next request carry both.
+  // It can only flip once `renamedFrom` exists: without the signal the design deliberately keeps the answer under
+  // the draft id (row "Entwurf->echt ohne Signal, Ids umbenannt" of docs/plans/2026-11-23-design-left-chat.md).
   it.fails('KNOWN DEFECT C2c: neither the stored history nor the next request carries the loaded partial answer next to the streamed one', async () => {
     const store = draftStore();
     const { load, loaded } = draftLoad(store, true);
@@ -473,7 +524,9 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
 // ---------------------------------------------------------------------------------------------------------------
 
 const renders = { host: 0, inner: 0 };
+/** Inside the provider and reading its context: renders whenever the provider's value changes. */
 function RenderCount() {
+  useChatContext();
   renders.inner += 1;
   return null;
 }
@@ -494,16 +547,17 @@ const countRenders = () => ({ ...renders });
 const since = (start: typeof renders) => ({ host: renders.host - start.host, inner: renders.inner - start.inner });
 
 describe('C3 a transport wrapper that is a new object on every render', () => {
-  it('renders a bounded number of times (idle and while streaming); send, stop and a switch act on the right request', async () => {
+  it('renders a bounded number of times (idle and while streaming); send and stop act on the open chat\'s request, before and after a switch while idle', async () => {
     renders.host = 0;
     renders.inner = 0;
     const store = hostStore({ A: [], B });
     const view = render(<WrappedHost session={store.session('A')} />);
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     await settle();
-    // Measured on main: 3 renders of the host and of a component inside the provider until idle.
-    expect(renders.host).toBeLessThanOrEqual(6);
-    expect(renders.inner).toBeLessThanOrEqual(6);
+    // Measured on main (deterministic): 3 renders of the host and 3 of a context reader inside the provider until
+    // idle; the bound is that plus a fixed slack of 2.
+    expect(renders.host).toBeLessThanOrEqual(3 + 2);
+    expect(renders.inner).toBeLessThanOrEqual(3 + 2);
     let start = countRenders();
     await settle();
     expect(since(start)).toEqual({ host: 0, inner: 0 });
@@ -519,9 +573,9 @@ describe('C3 a transport wrapper that is a new object on every render', () => {
       await act(async () => { requests[0]!.push({ type: 'text-delta', id: 't', delta: ` ${index}` }); });
     }
     await waitFor(() => expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:partial 0 1 2 3 4']));
-    // Measured on main: 8 renders each for the send and six streamed chunks; about twice that is the bound.
-    expect(since(start).host).toBeLessThanOrEqual(16);
-    expect(since(start).inner).toBeLessThanOrEqual(16);
+    // Measured on main: 8 renders each for the send and six streamed chunks; the bound is that plus 2.
+    expect(since(start).host).toBeLessThanOrEqual(8 + 2);
+    expect(since(start).inner).toBeLessThanOrEqual(8 + 2);
     // While streaming and nothing arrives: no render.
     start = countRenders();
     await settle();
@@ -562,6 +616,15 @@ describe('C3 a transport wrapper that is a new object on every render', () => {
 // pinned in chat-queue-session-switch, turn-outcome-attribution and turn-end-callback; this adds what is missing.
 // ---------------------------------------------------------------------------------------------------------------
 
+/**
+ * The optional members of `ChatTransport` the provider may look for, also the planned `sessions` capability (and
+ * `setAutomaticSendsPaused` of the clear() fix). Edit this list when `ChatTransport` grows.
+ */
+const KNOWN_OPTIONAL_MEMBERS = [
+  'subscribeToData', 'addToolOutput', 'continueTurn', 'continueAfterBudgetStop', 'setUiOutcomeReporting',
+  'setRequestLanguage', 'setAutomaticSendsPaused', 'sessions',
+];
+
 /** What the provider does with the transport object it is given: property writes and reads of absent members. */
 function watched(chat: StreamingChat) {
   const writes: PropertyKey[] = [];
@@ -577,6 +640,10 @@ function watched(chat: StreamingChat) {
         get(target, key, receiver) {
           if (typeof key === 'string' && !(key in target)) absentReads.push(key);
           return Reflect.get(target, key, receiver);
+        },
+        has(target, key) {
+          if (typeof key === 'string' && !(key in target)) absentReads.push(key);
+          return Reflect.has(target, key);
         },
         set(_target, key) { writes.push(key); return false; },
         defineProperty(_target, key) { writes.push(key); return false; },
@@ -600,7 +667,7 @@ function WatchedHost({ chat, transport, session }: { chat: StreamingChat; transp
 }
 
 describe('C4 a custom transport without a session capability', () => {
-  it('a host switch A to B to A while A runs neither stops nor resends; the provider writes nothing into the transport and asks it for no session capability', async () => {
+  it('a host switch A to B to A while A runs neither stops nor resends; the provider writes nothing to the app\'s transport and reads no unknown member', async () => {
     const store = hostStore({ A: [], B });
     const chat = new StreamingChat();
     const seen = watched(chat);
@@ -618,15 +685,14 @@ describe('C4 a custom transport without a session capability', () => {
     expect(chat.stop).not.toHaveBeenCalled();
     expect(chat.sendMessage).toHaveBeenCalledTimes(1);
     expect(seen.writes).toEqual([]);
-    // The optional members it looks for are the ones of today's ChatTransport; no session capability.
-    expect([...new Set(seen.absentReads)].sort()).toEqual([
-      'addToolOutput', 'continueAfterBudgetStop', 'continueTurn', 'setRequestLanguage', 'setUiOutcomeReporting',
-    ]);
+    // Every absent member it looks for is a known optional one (it need not look for all of them).
+    expect([...new Set(seen.absentReads)].filter((key) => !KNOWN_OPTIONAL_MEMBERS.includes(String(key)))).toEqual([]);
   });
 
-  // As of main (the shared transport): B is busy with A's request; stop() in B stops it (the only one running),
-  // records nothing on B's turn and the outcome joins A's turn. B's pipeline state shows the stop (R4-like).
-  it('stop() in B after a host switch while A runs (as of main): stops the one shared request, the aborted outcome joins A\'s turn', async () => {
+  // The shared transport (intended to stay for transports without `sessions`, per the design): B is busy with
+  // A's request; stop() in B stops it (the only one running), records nothing on B's turn and the outcome joins
+  // A's turn. B's pipeline state shows the stop (R4-like).
+  it('stop() in B after a host switch while A runs (intended to stay without sessions): stops the one shared request, the aborted outcome joins A\'s turn', async () => {
     const store = hostStore({ A: [], B });
     const chat = new StreamingChat();
     const seen = watched(chat);
