@@ -1,0 +1,21 @@
+{
+  "id": "assistant-history-backdrop-class",
+  "kind": "optional",
+  "summary": "classNames.historyBackdrop styles the backdrop of the full-screen chat drawer; the drawer states (data-drawer=\"true\", hidden, role=\"dialog\") are documented as stable. The docked sidebar no longer triggers React's flex/flexShrink style warning.",
+  "howTo": "Replace CSS on [data-element=\"history-backdrop\"] with classNames={{ historyBackdrop: 'my-backdrop' }} if you like; the attribute selector keeps working. Select the drawer with [data-element=\"history\"][data-drawer], the open one with :not([hidden]). Nothing to do for the style fix: after the window grows past narrowWidth the sidebar keeps flex-shrink: 0 again, as on a fresh mount. A renderButton that opens a tooltip on focus shows it when focus returns to the chats toggle after the drawer closes; open it on :focus-visible or hover only. See placing-the-assistant.md, Replacing shell parts.",
+  "skill": "building-glirastes-chat-ui#replacing-shell-parts",
+  "affectedWhen": {
+    "symbols": [
+      "AssistantShell",
+      "AssistantWorkspace"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "historyBackdrop"
+    ]
+  },
+  "surface": [
+    "glirastes/react#AssistantShellClassNames.historyBackdrop"
+  ]
+}

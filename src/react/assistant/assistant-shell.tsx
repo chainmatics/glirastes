@@ -90,8 +90,10 @@ export interface AssistantShellClassNames {
   railExpand: string;
   resizeHandle: string;
   windowHandle: string;
-  /** The chat column in full screen (`[data-element="history"]`). */
+  /** The chat column in full screen (`[data-element="history"]`; as a drawer it also has `data-drawer="true"`). */
   history?: string;
+  /** The backdrop behind the open drawer below 900 px (`[data-element="history-backdrop"]`). */
+  historyBackdrop?: string;
 }
 
 /** One entry of the layout menu. */
@@ -702,7 +704,9 @@ export function AssistantShell({
     modes, current: ui.mode, setMode: ui.setMode, label: layoutLabel, title: layoutTitle, entries: modeEntries,
   }), [modes, ui.mode, ui.setMode, layoutLabel, layoutTitle, modeEntries]);
   const placement: CSSProperties = sidebar
-    ? (fillsRow ? { flex: '1 1 0%', minWidth: 0 } : { width: ui.collapsed ? railWidth : width })
+    // Longhands only: with the `flex` shorthand next to `flexShrink`, React warned and lost
+    // `flex-shrink: 0` when the sidebar stopped filling the row.
+    ? (fillsRow ? { flexGrow: 1, flexBasis: '0%', minWidth: 0 } : { width: ui.collapsed ? railWidth : width })
     : fullscreen
       ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', maxWidth: 'none', maxHeight: 'none' }
       // Before the window is measured it opens bottom right, as it will afterwards.
@@ -720,7 +724,7 @@ export function AssistantShell({
       style={{
         ...chat?.themeVars, ...style,
         display: ui.open ? 'flex' : 'none', flexDirection: hasPane ? 'row' : 'column', maxWidth: '100vw',
-        ...(sidebar ? { position: 'relative', flexShrink: 0, height: '100%', maxHeight: '100%' } : { position: 'fixed', maxHeight: '100dvh' }),
+        ...(sidebar ? { position: 'relative', flexShrink: fillsRow ? 1 : 0, height: '100%', maxHeight: '100%' } : { position: 'fixed', maxHeight: '100dvh' }),
         ...placement,
       }}>
       {sidebar && !ui.collapsed && !fillsRow && <SidebarResizeHandle label={labels.resize} width={width} min={minWidth} max={available}
@@ -756,7 +760,7 @@ export function AssistantShell({
         {historyHeading}
         {pane}
       </div>}
-      {drawer && drawerOpen && <div data-element="history-backdrop" aria-hidden="true"
+      {drawer && drawerOpen && <div data-element="history-backdrop" aria-hidden="true" className={classNames.historyBackdrop}
         style={{ position: 'absolute', inset: 0, zIndex: 3 }} onClick={() => closeDrawer('toggle')} />}
       <div ref={frameRef} data-element="frame" style={{ display: sidebar && ui.collapsed ? 'none' : 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0, ...(hasPane ? { minWidth: 0 } : {}) }}>
         <header data-element="header" className={classNames.header}

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `AssistantShell` / `AssistantWorkspace`: `classNames.historyBackdrop` for the backdrop of the full-screen chat drawer (`[data-element="history-backdrop"]`). Without it the backdrop has no `class`, as before. The column and drawer states (`data-drawer="true"`, `hidden`, `inert`, `role="dialog"`, backdrop only while open) are now documented as stable and pinned by a test.
+
+### Fixed
+
+- Docked assistant: React no longer warns "Removing a style property during rerender (flex) when a conflicting property is set (flexShrink)" when the sidebar starts or stops filling the row on a narrow window (`narrowWidth`). The inline style now uses `flexGrow`, `flexShrink` and `flexBasis` instead of mixing the `flex` shorthand with `flexShrink`. The sidebar now gets `flex-shrink: 0` back when the window grows past `narrowWidth` again; before, it kept the browser default `flex-shrink: 1` until the next mount. Computed flex values of every other state are unchanged. Non-functional DOM text change: after that transition the `style` attribute contains `flex-shrink: 0;` again (before `width`); the serialised `style` of a fresh mount and of the filling state is unchanged in jsdom (`flex: 1 1 0%`); a browser may serialise the three longhands differently.
+
 ## [0.24.1] - 2026-11-23
 
 0.24.0 was tagged but never published (its release preflight found an unreleased note); 0.24.1 is the first published 0.24 and contains everything listed under 0.24.0.

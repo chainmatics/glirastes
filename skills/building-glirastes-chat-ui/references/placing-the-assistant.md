@@ -180,7 +180,26 @@ behaviour and styles as before.
 - Heading of the column: `historyTitle` replaces
   `[data-element="history-title"]` with a node, or a function with the same
   argument (e.g. a close button in the drawer); `false` drops it, `null` keeps
-  the default. `classNames.history` sets a class on the column.
+  the default. `classNames.history` sets a class on the column,
+  `classNames.historyBackdrop` on the drawer's backdrop.
+- Column and drawer states, stable for app CSS and tests (on
+  `[data-element="history"]`, toggle `[data-action="history"]`):
+  - wide column shown: no `data-drawer`, no `hidden`; toggle
+    `aria-expanded="true"`;
+  - wide column hidden by its toggle: `hidden` and `inert`; toggle
+    `aria-expanded="false"`;
+  - drawer closed (below 900 px): `data-drawer="true"`, `hidden`, `inert`, no
+    `role`; no backdrop;
+  - drawer open: `data-drawer="true"`, `role="dialog"`, `aria-modal="true"`,
+    named after `labels.history`; `[data-element="history-backdrop"]` exists
+    only now; the conversation (`[data-element="frame"]`) is `inert`.
+  Select the drawer with `[data-element="history"][data-drawer]` and the open
+  one with `:not([hidden])`.
+- After `close('toggle')`, Escape or the backdrop closes the drawer, focus is
+  on the chats toggle. An app `renderButton` that opens a tooltip on focus
+  shows it then, and that tooltip catches the next Escape (which would
+  otherwise leave full screen); open tooltips on `:focus-visible` or hover
+  only, or let Escape pass when the tooltip has nothing to close.
 - Session icons: `icons.newChat`, `icons.rename` and `icons.delete` replace
   the "+" of new chat and the rename and delete icons in the shell's own
   session switchers (header and chat column). The default "+" stays the text
