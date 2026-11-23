@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { act, type ReactElement } from 'react';
+import { act, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { deChatLocale } from '../../locale-de.js';
-import { GRAPH_TIMEOUT, freshGraph, serverHtmlAll, type ServerCase } from './markdown-loading-harness.js';
+import type { ChatMessage } from '../../types.js';
+import { messageClipboardContent } from '../../utils/copy-message.js';
+import { GRAPH_TIMEOUT, MARKDOWN_SOURCE, freshGraph, serverHtmlAll, streamingHistory, type ServerCase } from './markdown-loading-harness.js';
 
 // Each test builds its own module graph (`freshGraph`), so the tests do not
 // depend on their order; a graph is shared only inside one test.
@@ -66,7 +68,9 @@ describe('Markdown while the renderer loads', () => {
     expect(skeleton.textContent).toBe('Loading message…');
     // An own width from the source (the longest line, 10 characters), so a bubble
     // sized by its content does not collapse; one bar per non-empty source line.
-    expect(skeleton.style.inlineSize).toBe('10ch');
+    // Wrapping 5ch spacers in the first bar: 2 of them for 10 characters.
+    const spacers = skeleton.querySelector('[data-element="markdown-skeleton-line"]')!.querySelectorAll<HTMLElement>(':scope > span');
+    expect([...spacers].map((spacer) => spacer.style.inlineSize)).toEqual(['5ch', '5ch']);
     expect(skeleton.style.maxInlineSize).toBe('var(--cm-markdown-skeleton-max-width, 100%)');
     expect(skeleton.querySelectorAll('[data-element="markdown-skeleton-line"]')).toHaveLength(3);
 
@@ -85,6 +89,50 @@ describe('Markdown while the renderer loads', () => {
     expect(boxes).toEqual(['skeleton', 'source', 'source']);
     await act(async () => { graph.release(); await graph.preloadMarkdown(); });
     expect([...container.querySelectorAll('[data-component="markdown"]')].map(stateOf)).toEqual(['markdown', 'markdown', 'markdown']);
+  }, GRAPH_TIMEOUT);
+
+  it('copying a loading message yields the source text, as before, never the loading label', async () => {
+    const graph = await freshGraph();
+    const { container } = mount(graph.chat());
+    const bubble = container.querySelector('[data-component="message-bubble"]')!;
+    expect(bubble.querySelector('[data-state="loading"]')).not.toBeNull();
+    // What the bubble held before the skeleton: the source as text in the Markdown block.
+    const before = document.createElement('div');
+    const block = document.createElement('div');
+    block.setAttribute('data-component', 'markdown');
+    block.textContent = MARKDOWN_SOURCE;
+    before.appendChild(block);
+    expect(messageClipboardContent(bubble, '')).toEqual(messageClipboardContent(before, ''));
+  }, GRAPH_TIMEOUT);
+
+  it('a running-turn bubble keeps the raw text when the turn stops or pauses before the renderer loaded', async () => {
+    const graph = await freshGraph();
+    const { container, rerender } = (() => {
+      const box = document.createElement('div');
+      document.body.appendChild(box);
+      const view = render(graph.chatWith(streamingHistory, 'streaming'), { container: box });
+      return { container: box, rerender: view.rerender };
+    })();
+    const states = () => [...container.querySelectorAll('[data-component="markdown"]')].map(stateOf);
+    expect(states()).toEqual(['skeleton', 'source', 'source']);
+    for (const status of ['ready', 'submitted', 'error', 'ready'] as const) {
+      rerender(graph.chatWith(streamingHistory, status));
+      expect(states(), status).toEqual(['skeleton', 'source', 'source']);
+    }
+    await act(async () => { graph.release(); await graph.preloadMarkdown(); });
+    expect(states()).toEqual(['markdown', 'markdown', 'markdown']);
+  }, GRAPH_TIMEOUT);
+
+  it('a tool-only answer of the running turn keeps its raw summary like other running-turn text', async () => {
+    const graph = await freshGraph();
+    const toolAnswer = {
+      id: 'a',
+      role: 'assistant',
+      parts: [{ type: 'tool-search', toolCallId: 't1', state: 'output-available', input: {}, output: { message: 'Found **2** items' } }],
+    } as unknown as ChatMessage;
+    const { container } = mount(graph.chatWith([streamingHistory[1]!, toolAnswer], 'streaming', { toolResults: { mode: 'default' } }));
+    const boxes = [...container.querySelectorAll('[data-component="markdown"]')];
+    expect(boxes.map(stateOf)).toEqual(['source', 'source']);
   }, GRAPH_TIMEOUT);
 
   it('German locale text', () => {
@@ -137,6 +185,36 @@ describe('preload', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     const { container } = mount(graph.chat());
     expect(container.querySelector('[data-component="markdown"]')?.textContent).toBe('Live \\+ v2\n\n- **one**\n- two');
+  }, GRAPH_TIMEOUT);
+});
+
+describe('message part nodes keep their shape', () => {
+  it('a text node is the Markdown element with the same props as before; cloneElement still applies', async () => {
+    const graph = await freshGraph();
+    const { useMessageParts } = await import('../message-bubble.js');
+    let text: ReactNode = null;
+    let entryNode: ReactNode = null;
+    function Own({ message }: { message: ChatMessage }) {
+      const parts = useMessageParts(message);
+      text = parts.text;
+      entryNode = parts.parts.find((entry) => entry.kind === 'text')?.node ?? null;
+      return <div data-own>{isValidElement(entryNode) ? cloneElement(entryNode as ReactElement<{ className?: string }>, { className: 'own' }) : null}</div>;
+    }
+    const history = [streamingHistory[0]!];
+    const { AiChatProvider } = await import('../../provider/ai-chat-provider.js');
+    const { container } = mount(
+      <AiChatProvider transport={{ messages: history, status: 'ready', error: null, sendMessage: async () => {}, stop() {}, setMessages() {}, addToolApprovalResponse: async () => {} }}>
+        <Own message={history[0]!} />
+      </AiChatProvider>,
+    );
+    expect(isValidElement(entryNode)).toBe(true);
+    const node = entryNode as unknown as ReactElement<Record<string, unknown>>;
+    expect(typeof node.type).toBe('function');
+    expect((node.type as { name?: string }).name).toBe('DefaultMarkdown');
+    expect(node.props).toEqual({ content: 'Earlier **answer**' });
+    expect(text).not.toBeNull();
+    expect(container.querySelector('[data-component="markdown"]')?.className).toBe('own');
+    void graph;
   }, GRAPH_TIMEOUT);
 });
 

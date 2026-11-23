@@ -2741,7 +2741,10 @@ export interface ChatMarkdownOptions {
   /**
    * Load react-markdown when the provider mounts (default `true`). `false`:
    * load it when the first message renders, as before; `preloadMarkdown()`
-   * still works.
+   * still works. Skipped with an own `components.Markdown` or
+   * `components.MessageBubble`; an own bubble built on `useMessageParts`
+   * still renders the default Markdown, which then starts loading when it
+   * first renders: call `preloadMarkdown()` yourself to avoid the wait.
    */
   preload?: boolean;
 }

@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';
+import type { AiChatProviderProps } from '../../provider/ai-chat-provider.js';
 import type { ChatComponents, ChatMarkdownOptions, ChatMessage, ChatTransport } from '../../types.js';
 
 /** A history text with a list, emphasis and an escape: what a loaded chat shows. */
@@ -13,6 +14,12 @@ const text = (id: string, role: 'user' | 'assistant', value: string) =>
 
 export const message = text('m1', 'assistant', MARKDOWN_SOURCE);
 
+export const streamingHistory = [
+  text('old', 'assistant', 'Earlier **answer**'),
+  text('q', 'user', 'Show *live* items'),
+  text('a', 'assistant', 'Streaming **now**'),
+];
+
 const transport = (messages: ChatMessage[] = [], status: ChatTransport['status'] = 'ready'): ChatTransport => ({
   messages, status, error: null,
   sendMessage: vi.fn(async () => {}), stop: vi.fn(), setMessages: vi.fn(), addToolApprovalResponse: vi.fn(async () => {}),
@@ -23,6 +30,8 @@ export interface Graph {
   chat: (options?: { components?: ChatComponents; markdown?: ChatMarkdownOptions; withBubble?: boolean }) => ReactElement;
   /** A running turn: an older answer, the just-sent question and the answer streaming in. */
   streamingChat: () => ReactElement;
+  /** Any history and status; every message in a default bubble. */
+  chatWith: (messages: ChatMessage[], status: ChatTransport['status'], props?: Partial<AiChatProviderProps>) => ReactElement;
   /** Lets the (mocked) `import('react-markdown')` resolve. */
   release: () => void;
   importCalls: () => number;
@@ -46,6 +55,11 @@ export async function freshGraph(options: { fail?: boolean } = {}): Promise<Grap
     return vi.importActual<typeof import('react-markdown')>('react-markdown');
   });
   const { AiChatProvider } = await import('../../provider/ai-chat-provider.js');
+  const chatWith: Graph['chatWith'] = (messages, status, props) => (
+    <AiChatProvider transport={transport(messages, status)} {...props}>
+      {messages.map((m) => <MessageBubble key={m.id} message={m} />)}
+    </AiChatProvider>
+  );
   const { MessageBubble } = await import('../message-bubble.js');
   const { preloadMarkdown } = await import('../../markdown-module.js');
   return {
@@ -54,18 +68,8 @@ export async function freshGraph(options: { fail?: boolean } = {}): Promise<Grap
         {withBubble ? <MessageBubble message={message} /> : null}
       </AiChatProvider>
     ),
-    streamingChat: () => {
-      const messages = [
-        text('old', 'assistant', 'Earlier **answer**'),
-        text('q', 'user', 'Show *live* items'),
-        text('a', 'assistant', 'Streaming **now**'),
-      ];
-      return (
-        <AiChatProvider transport={transport(messages, 'streaming')}>
-          {messages.map((m) => <MessageBubble key={m.id} message={m} />)}
-        </AiChatProvider>
-      );
-    },
+    streamingChat: () => chatWith(streamingHistory, 'streaming'),
+    chatWith,
     release,
     importCalls: () => calls,
     preloadMarkdown,

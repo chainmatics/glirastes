@@ -48,6 +48,11 @@ function exportNode(node: Node, target: HTMLElement, doc: Document): void {
     return;
   }
   if (DROPPED.has(tag)) return;
+  // Markdown still loading: its source text, as the bubble showed before the skeleton.
+  if (element.getAttribute('data-element') === 'markdown-skeleton') {
+    target.append(doc.createTextNode(element.getAttribute('data-markdown-source') ?? ''));
+    return;
+  }
   if (tag === 'INPUT') {
     if (element.getAttribute('type') === 'checkbox') {
       target.append(doc.createTextNode((element as HTMLInputElement).checked ? '☑ ' : '☐ '));

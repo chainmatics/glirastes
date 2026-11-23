@@ -1,4 +1,4 @@
-import { Fragment, Suspense, createContext, lazy, useContext, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
 import { markdownModuleForLazy } from '../markdown-module.js';
@@ -367,6 +367,8 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   // The answer streaming in and the question it answers keep the raw text while react-markdown loads.
   const liveTurnText = isLoading && (isLatestMessage
     || (message.role === 'user' && message.id === latestUserMessageId(messages ?? [])));
+  // Internal prop of the default Markdown only, and only then: the nodes keep their props otherwise.
+  const liveTurnProps = liveTurnText && MarkdownComponent === DefaultMarkdown ? { liveTurn: true } : undefined;
   const turnId = turnOutcomes && turnOutcomes.size > 0 ? turnStartId(messages ?? [message], message.id) : null;
   const turnOutcome: TurnOutcome | null = (turnId ? turnOutcomes?.get(turnId) : undefined) ?? null;
   // `noticeScope: 'every'` (default): an earlier turn shows its recorded outcome, the latest one too once its
@@ -462,10 +464,6 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   }
 
   const textNodes = cleanTextParts.map((text, i) => {
-    const node = textNode(text, i);
-    return node === null ? null : <LiveTurnTextContext.Provider key={`text-${i}`} value={liveTurnText}>{node}</LiveTurnTextContext.Provider>;
-  });
-  function textNode(text: string, i: number): ReactNode {
     const segments = parseMentionSegments(text, mentionPrefix);
     const hasMention = segments.some((segment) => segment.kind === 'mention');
 
@@ -475,6 +473,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         <MarkdownComponent
           key={`text-${i}`}
           content={text}
+          {...liveTurnProps}
         />
       );
     }
@@ -484,7 +483,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
       const { content, mentions } = markdownWithMentionMarkers(segments);
       return (
         <MentionMarkers key={`text-${i}`} mentions={mentions}>
-          <MarkdownComponent content={content} />
+          <MarkdownComponent content={content} {...liveTurnProps} />
         </MentionMarkers>
       );
     }
@@ -517,7 +516,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         })}
       </div>
     );
-  }
+  });
   /** The approval of a tool part, read once when asked for (`MessagePartEntry.approval`, the nodes below). */
   const approvals = new Map<number, ToolPartApproval | undefined>();
   const toolResultNodes = message.parts.map((part, i) => {
@@ -703,7 +702,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         <>
           {textNodes}
           {/* Fallback summary if no text parts */}
-          {!hasTextContent && fallbackSummary && <MarkdownComponent content={fallbackSummary} />}
+          {!hasTextContent && fallbackSummary && <MarkdownComponent content={fallbackSummary} {...liveTurnProps} />}
         </>
       )
       : null,
@@ -814,13 +813,16 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   );
 }
 
-function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
+function DefaultMarkdown({ content, className, liveTurn }: { content: string; className?: string; liveTurn?: boolean }) {
   const links = useChatEntityLinks();
   const { remarkPlugins } = useChatMarkdownOptions();
-  const live = useContext(LiveTurnTextContext);
+  // Text of the running turn keeps the raw fallback while react-markdown loads,
+  // as before, and keeps it once shown (no raw → skeleton when the turn stops or pauses).
+  const [keepsRaw, setKeepsRaw] = useState(liveTurn === true);
+  if (liveTurn && !keepsRaw) setKeepsRaw(true);
   return (
     <div className={className} data-component="markdown">
-      <Suspense fallback={live ? <>{content}</> : <MarkdownLoading content={content} />}>
+      <Suspense fallback={keepsRaw ? <>{content}</> : <MarkdownLoading content={content} />}>
         <ReactMarkdown
           components={links.enabled ? links.markdownComponents : undefined}
           remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
@@ -829,9 +831,6 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
     </div>
   );
 }
-
-/** True inside a message of the running turn: its Markdown keeps the raw text while the renderer loads, as before. */
-const LiveTurnTextContext = createContext(false);
 
 const subscribeNothing = () => () => {};
 const onClient = () => true;
@@ -878,6 +877,18 @@ const VISUALLY_HIDDEN: CSSProperties = {
   overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
 };
 
+const SPACER_COLUMNS = 5;
+const SPACER_STYLE: CSSProperties = { flex: 'none', inlineSize: `${SPACER_COLUMNS}ch`, blockSize: 0 };
+
+/**
+ * Empty wrapping boxes that give the skeleton its width from the source: as
+ * wide as `columns` characters where there is room (a bubble sized by its
+ * content), but they wrap, so the skeleton never widens a narrower container.
+ */
+function widthSpacers(columns: number): ReactNode[] {
+  return Array.from({ length: Math.ceil(columns / SPACER_COLUMNS) }, (_, index) => <span key={index} style={SPACER_STYLE} />);
+}
+
 /**
  * Suspense fallback while react-markdown loads. The server (and hydration)
  * renders the source text as before, so server HTML stays unchanged; a client
@@ -895,10 +906,10 @@ function MarkdownLoading({ content }: { content: string }) {
       data-element="markdown-skeleton"
       data-state="loading"
       aria-busy="true"
+      // The copy button copies this source, as before the skeleton.
+      data-markdown-source={content}
       style={{
         display: 'grid',
-        // A plain length (no percentage), so a bubble sized by its content gets this width.
-        inlineSize: `${columns}ch`,
         maxInlineSize: 'var(--cm-markdown-skeleton-max-width, 100%)',
         rowGap: 'var(--cm-markdown-skeleton-gap, 0.625em)',
         paddingBlock: 'var(--cm-markdown-skeleton-padding, 0.3125em)',
@@ -911,13 +922,17 @@ function MarkdownLoading({ content }: { content: string }) {
           aria-hidden="true"
           data-element="markdown-skeleton-line"
           style={{
-            display: 'block',
+            display: 'flex',
+            flexWrap: 'wrap',
+            overflow: 'hidden',
             width: index === lines - 1 ? `${lastWidth}%` : '100%',
             height: 'var(--cm-markdown-skeleton-line-height, 0.875em)',
             borderRadius: 'var(--cm-markdown-skeleton-radius, 0.25em)',
             background: 'var(--cm-markdown-skeleton-color, rgba(127, 127, 127, 0.2))',
           }}
-        />
+        >
+          {index === 0 ? widthSpacers(columns) : null}
+        </span>
       ))}
     </div>
   );
