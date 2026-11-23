@@ -1170,6 +1170,8 @@ export function AiChatProvider({
   const [discarding, setDiscarding] = useState<{ sessionId: string } | null>(null);
   const discardingRunRef = useRef(false);
   const discardingRun = discarding !== null;
+  // The pause of automatic sends this provider set, on the transport it set it on.
+  const pausedTransportRef = useRef<((paused: boolean) => void) | null>(null);
   // The failure the cleared request ended with: not shown in the emptied chat (until the next request starts).
   const [discardedError, setDiscardedError] = useState<Error | null>(null);
   // A message sent during the window without the queue: sent into the emptied chat once the window closed.
@@ -1249,8 +1251,8 @@ export function AiChatProvider({
     setMessages,
     addToolApprovalResponse,
   } = resolvedTransport;
-  // A chat opened during the window shows what it loaded (the cleared request may still write into it: the
-  // shared-transport case of docs/plans/2026-11-23-design-left-chat.md).
+  // A chat opened during the window shows what it loaded (the cleared request may still write into it when one
+  // transport serves every chat, as a request running while the host opens another chat does).
   const hidesTransport = discarding !== null && discarding.sessionId === activeSessionId;
   const rawMessages = hidesTransport ? (NO_MESSAGES as unknown as typeof transportMessages) : transportMessages;
   const clearedRunFailure = discardingRun || (rawTransportError != null && rawTransportError === discardedError);
@@ -2378,8 +2380,13 @@ export function AiChatProvider({
     if (running) {
       requestTurnRef.current = { sessionId: null, userMessageId: null };
       discardingRunRef.current = true;
-      // The transport starts nothing by itself for the cleared request (a continuation of a step it ends).
-      transportRef.current.setAutomaticSendsPaused?.(true);
+      // The transport starts nothing by itself for the cleared request (a continuation of a step it ends): paused
+      // now, before the stop; the effect below owns the pause and ends it.
+      const pause = transportRef.current.setAutomaticSendsPaused;
+      if (pause && !pausedTransportRef.current) {
+        pause.call(transportRef.current, true);
+        pausedTransportRef.current = pause;
+      }
       setDiscarding({ sessionId: activeSessionId });
     }
     // A message held for the emptied chat belonged to it too.
@@ -2422,9 +2429,24 @@ export function AiChatProvider({
     setPipelineState(null);
     setTruncation(null);
     discardingRunRef.current = false;
-    transportRef.current.setAutomaticSendsPaused?.(false);
     setDiscarding(null);
   }, [discarding, transportLoading, rawTransportError, setMessages]);
+
+  // The pause of automatic sends lasts as long as the window, on the transport it was set on: ended when the
+  // window closes, the transport changes or the provider unmounts.
+  const setAutomaticSendsPaused = resolvedTransport.setAutomaticSendsPaused;
+  useEffect(() => {
+    if (!discarding) return undefined;
+    if (setAutomaticSendsPaused && pausedTransportRef.current !== setAutomaticSendsPaused) {
+      pausedTransportRef.current?.(false);
+      setAutomaticSendsPaused(true);
+      pausedTransportRef.current = setAutomaticSendsPaused;
+    }
+    return () => {
+      pausedTransportRef.current?.(false);
+      pausedTransportRef.current = null;
+    };
+  }, [discarding, setAutomaticSendsPaused]);
 
   // The next request starts: a failure from then on is shown, also the same error object again.
   useEffect(() => {

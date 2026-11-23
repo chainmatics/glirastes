@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 // clear() while a request runs: the request is stopped and its answer is neither shown nor stored, also when
 // parts of it still arrive afterwards. Nothing of it is recorded (no outcome, no onTurnEnd).
-// docs/plans/2026-11-23-design-left-chat.md ("clear() im Lauf").
 
 import React, { StrictMode, useMemo } from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
@@ -15,6 +14,9 @@ import { useVercelAiChatTransport } from '../transports/vercel.js';
 import { useLangGraphChatTransport } from '../transports/langgraph.js';
 import type { AiChatProviderConfig, ChatMessage, ChatTransport, MentionData, SessionConfig, TurnEndInfo, TurnOutcome } from '../types.js';
 import { defineChatCommand } from '../interactions/definitions.js';
+import { useChatContext } from '../provider/chat-context.js';
+import { MEMORY_NOTES_PART } from '../../contracts/memory.js';
+import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
 import { ctx, Host, Probe, StreamingChat } from './streaming-chat.js';
 import { carried, stubControlledFetch, textChunks, type ControlledRequest } from './controlled-fetch.js';
 
@@ -808,5 +810,196 @@ describe('a held message passes the checks of a normal send', () => {
     await act(async () => { chat.fail(); });
     await settle();
     expect(chat.sent).toEqual(['a question']);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Review round 3: the pause of automatic sends never outlives the clearing window.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** A transport owned above the provider, as an app that mounts the chat conditionally holds it. */
+const owned: {
+  transports: ChatTransport[];
+  data: string[];
+  memoryWrites: unknown[];
+} = { transports: [], data: [], memoryWrites: [] };
+const memory: BrowserMemoryStore = {
+  read: () => [],
+  write: (entries: unknown) => { owned.memoryWrites.push(entries); },
+};
+
+function useOwnedTransport() {
+  return useVercelAiChatTransport({ endpoint: '/api/chat', memory, onData: (part) => { owned.data.push(part.type); } });
+}
+function ChatOn({ transport, providerKey }: { transport: ChatTransport; providerKey?: string }) {
+  return <AiChatProvider key={providerKey} transport={transport}><Probe /><MessageList /></AiChatProvider>;
+}
+function Parent({ show = true, providerKey, strict = false, which = 0, twice = false }: {
+  show?: boolean; providerKey?: string; strict?: boolean; which?: number; twice?: boolean;
+}) {
+  const first = useOwnedTransport();
+  const second = useOwnedTransport();
+  owned.transports = [first, second];
+  const transport = which === 0 ? first : second;
+  const chat = show ? <ChatOn transport={transport} providerKey={providerKey} /> : null;
+  const both = twice ? <>{chat}<div data-testid="other"><ChatOnOther transport={transport} /></div></> : chat;
+  return strict ? <StrictMode>{both}</StrictMode> : both;
+}
+/** A second provider on the same transport, driven through `otherCtx`. */
+let otherCtx: ReturnType<typeof useChatContext>;
+function OtherProbe() {
+  otherCtx = useChatContext();
+  return null;
+}
+function ChatOnOther({ transport }: { transport: ChatTransport }) {
+  return <AiChatProvider transport={transport}><OtherProbe /><MessageList /></AiChatProvider>;
+}
+
+/** Clears while a request runs; the abort settles only in a later macrotask, so the window is still open. */
+async function clearWithOpenWindow() {
+  await waitFor(() => expect(ctx.canCompose).toBe(true));
+  await act(async () => { ctx.send('a question'); });
+  await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+  const request = requests.at(-1)!;
+  for (const chunk of textChunks('ANSWER ')) request.push(chunk);
+  await waitFor(() => expect(seen()).toContain('ANSWER'));
+  act(() => { ctx.clear(); });
+  expect(ctx.isLoading).toBe(true);
+}
+
+/** On `transport`: an approval continuation is sent, and data parts reach the app and memory notes. */
+async function everythingWorksOn(transport: ChatTransport) {
+  const before = requests.length;
+  // Its promise ends with the request: not awaited.
+  await act(async () => { void transport.sendMessage({ text: 'delete t1' }); });
+  await waitFor(() => expect(requests).toHaveLength(before + 1));
+  const first = requests[before]!;
+  owned.data.length = 0;
+  owned.memoryWrites.length = 0;
+  await act(async () => {
+    first.push({ type: 'start' });
+    first.push({ type: 'data-ping', data: { ok: true } });
+    first.push({ type: MEMORY_NOTES_PART, data: { user: [{ id: 'n1', text: 'likes tea' }] } });
+    first.push({ type: 'start-step' });
+    first.push({ type: 'tool-input-available', toolCallId: 'c9', toolName: 'tasks_delete', input: { id: 't1' } });
+    first.push({ type: 'tool-approval-request', approvalId: 'ap-9', toolCallId: 'c9' });
+    first.push({ type: 'finish-step' });
+    first.push({ type: 'finish' });
+    first.end();
+  });
+  await waitFor(() => expect(transport.status).toBe('ready'));
+  expect(owned.data).toContain('data-ping');
+  expect(owned.memoryWrites).toHaveLength(1);
+  await act(async () => { await transport.addToolApprovalResponse({ id: 'ap-9', approved: true }); });
+  // The AI SDK sends the history with the approval answer by itself.
+  await waitFor(() => expect(requests).toHaveLength(before + 2));
+  await act(async () => { requests[before + 1]!.answer('Deleted.'); });
+}
+
+describe('the pause of automatic sends ends with the clearing window', () => {
+  it('after a window that closed normally: continuations, data parts and memory notes work again', async () => {
+    render(<Parent />);
+    await clearWithOpenWindow();
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    await everythingWorksOn(owned.transports[0]!);
+  });
+
+  it('during the window the memory notes of the cleared request are not written', async () => {
+    render(<Parent />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    owned.memoryWrites.length = 0;
+    act(() => {
+      ctx.clear();
+      requests[0]!.push({ type: MEMORY_NOTES_PART, data: { user: [{ id: 'n1', text: 'from the cleared chat' }] } });
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(owned.memoryWrites).toEqual([]);
+  });
+
+  it('the provider unmounts during the window and mounts again', async () => {
+    const view = render(<Parent />);
+    await clearWithOpenWindow();
+    view.rerender(<Parent show={false} />);
+    await settle();
+    view.rerender(<Parent />);
+    await settle();
+    await everythingWorksOn(owned.transports[0]!);
+  });
+
+  it('the provider is remounted with a new key during the window', async () => {
+    const view = render(<Parent providerKey="one" />);
+    await clearWithOpenWindow();
+    view.rerender(<Parent providerKey="two" />);
+    await settle();
+    await everythingWorksOn(owned.transports[0]!);
+  });
+
+  it('under StrictMode, unmounted during the window', async () => {
+    const view = render(<Parent strict />);
+    await clearWithOpenWindow();
+    view.rerender(<Parent strict show={false} />);
+    await settle();
+    await everythingWorksOn(owned.transports[0]!);
+  });
+
+  it('two providers on one transport: one clearing does not keep it paused, and the other unmounting does not end its window early', async () => {
+    const view = render(<Parent twice />);
+    await clearWithOpenWindow();
+    view.rerender(<Parent />);
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    await everythingWorksOn(owned.transports[0]!);
+  });
+
+  it('two providers on one transport both clear: the one unmounting does not end the other\'s pause', async () => {
+    const view = render(<Parent twice />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('delete t1'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => {
+      requests[0]!.push({ type: 'start' });
+      requests[0]!.push({ type: 'start-step' });
+      requests[0]!.push({ type: 'tool-input-available', toolCallId: 'c1', toolName: 'tasks_delete', input: { id: 't1' } });
+      requests[0]!.push({ type: 'tool-approval-request', approvalId: 'ap-1', toolCallId: 'c1' });
+      requests[0]!.push({ type: 'finish-step' });
+      requests[0]!.push({ type: 'finish' });
+      requests[0]!.end();
+    });
+    await waitFor(() => expect(ctx.pendingApprovals).toHaveLength(1));
+    await act(async () => { await ctx.approve('ap-1'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    act(() => {
+      ctx.clear();
+      otherCtx.clear();
+    });
+    // The other provider goes away while the window is open; this one still holds the pause.
+    view.rerender(<Parent />);
+    act(() => {
+      requests[1]!.push({ type: 'start' });
+      requests[1]!.push({ type: 'text-start', id: 'late' });
+      requests[1]!.push({ type: 'text-delta', id: 'late', delta: 'LATE' });
+      requests[1]!.push({ type: 'text-end', id: 'late' });
+      requests[1]!.push({ type: 'finish-step' });
+      requests[1]!.push({ type: 'finish' });
+      requests[1]!.end();
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(requests).toHaveLength(2);
+    await everythingWorksOn(owned.transports[0]!);
+  });
+
+  it('the transport prop switches to another instance during the window: the first one is not left paused', async () => {
+    const view = render(<Parent which={0} />);
+    await clearWithOpenWindow();
+    view.rerender(<Parent which={1} />);
+    await settle();
+    await everythingWorksOn(owned.transports[0]!);
   });
 });

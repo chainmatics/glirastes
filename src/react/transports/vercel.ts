@@ -136,11 +136,13 @@ export function useVercelAiChatTransport(
   const reportsUiOutcomes = () => uiActionOutcomesRef.current && reportingRef.current;
   const autoResumeRef = useRef(autoResumeOnApproval);
   autoResumeRef.current = autoResumeOnApproval;
-  // Set by the provider while a request cleared with clear() still ends: no request starts by itself and
-  // none of its data parts is handed on.
+  // Set by a provider while a request cleared with clear() still ends: no request starts by itself and none of
+  // its data parts is handed on. Counted, so two providers on this transport each end only their own pause.
+  const pausesRef = useRef(0);
   const pausedRef = useRef(false);
   const setAutomaticSendsPaused = useCallback((paused: boolean) => {
-    pausedRef.current = paused;
+    pausesRef.current = Math.max(0, pausesRef.current + (paused ? 1 : -1));
+    pausedRef.current = pausesRef.current > 0;
   }, []);
 
   const headersRef = useRef(userHeaders);

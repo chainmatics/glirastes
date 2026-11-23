@@ -368,7 +368,9 @@ the transport sends the history again once all marked results of the step
 have one (`shouldContinueChat`), so the model answers after it. The composer
 stays locked meanwhile (`isLoading`). A custom `ChatTransport` opts in with
 `addToolOutput`, `continueTurn` and `setUiOutcomeReporting`, and sends the
-flag itself. The activity log shows the outcome per step (locale keys
+flag itself; one that continues by itself also implements
+`setAutomaticSendsPaused(paused)` (counted per provider) and starts nothing
+while paused, so a request cleared with `clear()` is not continued. The activity log shows the outcome per step (locale keys
 `activityUiPendingLabel`, `activityUiRejectedContract`,
 `activityUiRejectedHandler`, `activityUiUnavailable`, `activityUiFailed`,
 `activityUiInitiated`, `activityUiUnconfirmed`). A request with the flag

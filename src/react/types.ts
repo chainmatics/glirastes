@@ -111,7 +111,9 @@ export interface ChatTransport {
   /**
    * Called by the provider while a request cleared with `clear()` is still ending: while paused the
    * transport starts no request by itself (no continuation after approvals or UI outcomes) and hands no
-   * data part of that request on. The bundled Vercel transport implements it.
+   * data part of that request on. Every `true` is followed by one `false` from the same provider (also on
+   * its unmount or a transport change), so a transport shared by several providers counts them. The
+   * bundled Vercel transport implements it.
    */
   setAutomaticSendsPaused?(paused: boolean): void;
   /**
