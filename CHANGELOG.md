@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-23
+
 ### Privacy integration
+
+- SDK pseudonymization is explicit opt-in. Missing/false `required` preserves ordinary behavior without mapping or keyring dependencies. Managed PII Shield uses signed Business/Enterprise Platform authority and a fixed environment binding plus durable state; local self-configuration provides no Platform assurance.
+- Managed model and classifier transports recheck authority for every attempt, including retries. Verified revocations and refused protection close the local gate before slow persistence or telemetry; obsolete connections cannot establish fresh bootstrap.
+- Protected turns visibly refuse opaque routers/guardrails, tool middleware, direct commands, approval subject/list lookups and mentions. Plain-text protected tools retain scoped approvals, encrypted identity mapping and protected server history. GID local STT is deferred; protected GID speech is blocked.
 
 - Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.
 
@@ -1273,3 +1279,4 @@ No code changes — patch-level docs release.
 [0.23.0]: https://github.com/chainmatics/glirastes/compare/v0.22.0...v0.23.0
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
+[0.25.0]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.25.0
