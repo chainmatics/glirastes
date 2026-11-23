@@ -1,9 +1,10 @@
-import { relative, resolve, sep } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isFoundationDiagnosticError } from '../../../diagnostics/index.js';
 import { resolveSttModelDir, STT_ATTRIBUTION_TEXT } from '../../../server/stt-local/models.js';
 import { parseToolArgs, ToolsUsageError, type ToolArgsSpec } from '../tools/args.js';
 import { pullSttModels, type SttPullDependencies } from './pull.js';
-import { provideAudioWorklet } from './worklet.js';
+import { isLiteralGitignorePath, provideAudioWorklet, withAudioWorkletGitignoreEntry } from './worklet.js';
 
 export type { SttPullDependencies, SttPullResult } from './pull.js';
 export { pullSttModels } from './pull.js';
@@ -12,14 +13,15 @@ export { AUDIO_WORKLET_COMMAND, AUDIO_WORKLET_FILE, provideAudioWorklet } from '
 /** Every `glirastes stt` subcommand with its flags and values; the shipped skills are linted against it. */
 export const STT_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
   pull: { flags: ['--json'], values: ['--dir', '--mirror'] },
-  worklet: { flags: ['--json'], values: ['--out', '--root'] },
+  worklet: { flags: ['--json', '--no-gitignore'], values: ['--out', '--root'] },
 };
 
 export const STT_USAGE = [
   'Usage: glirastes stt pull [--dir <path>] [--mirror <url>] [--json]',
   '         download the sha256-pinned local speech models (Parakeet TDT 0.6b v3 int8, Silero VAD) for glirastes/server/stt-local',
-  '       glirastes stt worklet [--out <dir>] [--root <path>] [--json]',
-  '         copy the audio worklet voice input needs into public/ (or --out), served at /audio-worklet-processor.js',
+  '       glirastes stt worklet [--out <dir>] [--root <path>] [--no-gitignore] [--json]',
+  '         copy the audio worklet voice input needs into public/ (or --out), served at /audio-worklet-processor.js;',
+  '         lists the copy in an existing .gitignore (never creates one) unless --no-gitignore',
 ].join('\n');
 
 export async function runSttCommand(
@@ -92,8 +94,12 @@ async function runWorklet(
       ...(source !== undefined ? { source } : {}),
     });
     const shown = relative(root, result.path).split(sep).join('/');
-    if (json) log(JSON.stringify({ path: shown, status: result.status }));
-    else log(`${result.status === 'written' ? 'Wrote' : 'Up to date:'} ${shown}`);
+    const gitignore = args.flags.has('--no-gitignore') ? 'skipped' : await ignoreCopy(root, shown, error);
+    if (json) log(JSON.stringify({ path: shown, status: result.status, gitignore }));
+    else {
+      log(`${result.status === 'written' ? 'Wrote' : 'Up to date:'} ${shown}`);
+      if (gitignore === 'added') log(`Added /${shown} to .gitignore`);
+    }
     return 0;
   } catch (caught) {
     if (caught instanceof ToolsUsageError) {
@@ -106,6 +112,38 @@ async function runWorklet(
       return 1;
     }
     throw caught;
+  }
+}
+
+/**
+ * Lists the copy in the root's existing .gitignore, as init does; never
+ * creates one. `none`: no .gitignore, a copy outside the root, or a path
+ * gitignore would read as a pattern. Fails soft: the copy is done, so an
+ * unreadable or read-only .gitignore is a warning (`failed`), not an error.
+ */
+async function ignoreCopy(
+  root: string,
+  shown: string,
+  warn: (line: string) => void,
+): Promise<'added' | 'listed' | 'none' | 'failed'> {
+  if (shown.startsWith('../') || isAbsolute(shown) || !isLiteralGitignorePath(shown)) return 'none';
+  const path = join(root, '.gitignore');
+  try {
+    let current: string;
+    try {
+      current = await readFile(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'none';
+      throw error;
+    }
+    const next = withAudioWorkletGitignoreEntry(current, shown);
+    if (next === undefined) return 'listed';
+    await writeFile(path, next);
+    return 'added';
+  } catch (caught) {
+    const code = (caught as NodeJS.ErrnoException).code;
+    warn(`Warning: could not add /${shown} to .gitignore${code ? ` (${code})` : ''}; add it yourself or pass --no-gitignore.`);
+    return 'failed';
   }
 }
 
