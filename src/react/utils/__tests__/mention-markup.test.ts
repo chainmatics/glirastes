@@ -459,13 +459,13 @@ describe('serializeMentionsForSend: one pass over the original text', () => {
   });
 });
 
-describe('serializeMentionsForSend is linear', () => {
-  // Counted steps, not time: every loop of serializeMentionsForSend (and of stripContextBlocks,
-  // claimOccurrences, the sort comparators and the context block it builds) adds to
-  // `serializeWork.steps`, so quadratic work in any of them shows in a deterministic count that
-  // cannot flake under load. Known gap: the counter only sees code that counts; a NEW loop added
-  // without counting (e.g. an overlap check over the found list) is invisible to it. The wall-clock
-  // cap below is the secondary guard for that case only, generous so it cannot flake.
+describe('serializeMentionsForSend: the work of its JavaScript loops', () => {
+  // Counted steps, not time: every JavaScript loop of serializeMentionsForSend (stripContextBlocks,
+  // the matches claimOccurrences looks at, positions checked or claimed, sort comparators, the
+  // writing and listing loops, the context block) adds to `serializeWork.steps`, so quadratic work
+  // in any of them shows in a deterministic count. Not counted: the token search itself, which is
+  // the native regular expression (see 'the token search costs what base's search costs' below),
+  // and any new loop that does not count. The wall-clock cap is a secondary guard only.
   const work = (text: string, mentions: MentionData[]) => {
     serializeMentionsForSend(text, mentions);
     return serializeWork.steps;
@@ -503,4 +503,100 @@ describe('serializeMentionsForSend is linear', () => {
     expect(large).toBeGreaterThanOrEqual(40_000);
     expect(large).toBeLessThanOrEqual(4 * small + 64);
   });
+});
+
+describe('the token search: real matches, claimed positions, near misses', () => {
+  const m = (id: string, label: string, slug: string, prefix = '@'): MentionData => ({ id, type: 'user', label, slug, prefix });
+
+  it('replaces real matches and leaves near misses', () => {
+    expect(serializeMentionsForSend('@a @ab x@a @a, @a', [m('1', 'A', 'a')]))
+      .toBe('{{mention:user:1:A}} @ab x@a @a, {{mention:user:1:A}}');
+  });
+
+  it('skips a claimed position: a label with a later token gets no marker inside it', () => {
+    const sent = serializeMentionsForSend('@q @a', [m('1', 'x @a y', 'q'), m('2', 'A', 'a')]);
+    expect(sent).toBe('{{mention:user:1:x @a y}} {{mention:user:2:A}}');
+    expect(serializeWork.matches).toBe(2);
+  });
+
+  it('a match overlapping an earlier claim is dropped and the search goes on behind it', () => {
+    expect(serializeMentionsForSend('@a b @a b', [m('1', 'A', 'a'), m('2', 'AB', 'a b')]))
+      .toBe('{{mention:user:1:A}} b {{mention:user:1:A}} b');
+    // Two matches of '@a', two of '@a b' that overlap them and are dropped.
+    expect(serializeWork.matches).toBe(4);
+  });
+
+  it('multi-word tokens and overlapping repeats', () => {
+    expect(serializeMentionsForSend('#t @p @p @p', [m('1', 'T', 't @p', '#'), m('2', 'P', 'p @p')]))
+      .toBe('{{mention:user:1:T}} {{mention:user:2:P}}');
+    expect(serializeMentionsForSend('@p @p @p @p @p', [m('1', 'P', 'p @p')]))
+      .toBe('{{mention:user:1:P}} {{mention:user:1:P}} @p');
+  });
+});
+
+describe('the token search costs what base\'s search costs', () => {
+  // The search is the native regular expression, so no step counter is claimed here. What this
+  // shows: on the same input, serializeMentionsForSend takes at most a constant factor of base's
+  // own search (the same `(^|\s)token(?=\s|$)` replacement, run in this test), and grows like it
+  // from n to 4n. Both are timed in batches long enough to be measurable, best of five, so machine
+  // speed and load cancel out of the ratios; the factors are generous. What it does not show: a
+  // bound in steps, or the cost of inputs other than these two (see the changelog's known limit).
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const baseSearch = (text: string, token: string) =>
+    text.replace(new RegExp(`(^|\\s)${escape(token)}(?=\\s|$)`, 'g'), (_match, leading: string) => `${leading}{{x}}`);
+
+  function batchTime(run: () => void, repeat: number): number {
+    let best = Infinity;
+    for (let round = 0; round < 5; round += 1) {
+      const started = performance.now();
+      for (let i = 0; i < repeat; i += 1) run();
+      best = Math.min(best, performance.now() - started);
+    }
+    return best;
+  }
+
+  /** Repeats so that one batch of `run` takes at least 5 ms. */
+  function repeatsFor(run: () => void): number {
+    let repeat = 1;
+    for (;;) {
+      const started = performance.now();
+      for (let i = 0; i < repeat; i += 1) run();
+      if (performance.now() - started >= 5 || repeat >= 1 << 16) return repeat;
+      repeat *= 2;
+    }
+  }
+
+  function compare(text: (n: number) => string, mention: (n: number) => MentionData, token: (n: number) => string, n: number) {
+    const ours = (size: number) => () => { serializeMentionsForSend(text(size), [mention(size)]); };
+    const base = (size: number) => () => { baseSearch(text(size), token(size)); };
+    const repeat = repeatsFor(base(4 * n));
+    const oursSmall = batchTime(ours(n), repeat);
+    const oursLarge = batchTime(ours(4 * n), repeat);
+    const baseLarge = batchTime(base(4 * n), repeat);
+    return { oursSmall, oursLarge, baseLarge };
+  }
+
+  it('(i) a periodic token in a text without whitespace', () => {
+    const { oursSmall, oursLarge, baseLarge } = compare(
+      (n) => 'a'.repeat(n),
+      (n) => ({ id: '1', type: 'user', label: 'A', prefix: 'a', slug: 'a'.repeat(n / 10 - 1) }),
+      (n) => 'a'.repeat(n / 10),
+      50_000,
+    );
+    // Linear: 4x the input, about 4x the time; quadratic would be 16x. Base's search: tens of microseconds.
+    expect(oursLarge).toBeLessThanOrEqual(10 * oursSmall + 5);
+    expect(oursLarge).toBeLessThanOrEqual(50 * baseLarge + 5);
+  }, 60_000);
+
+  it('(ii) many near misses of a long token from the label', () => {
+    const word = `@${'a'.repeat(3_999)}b `;
+    const { oursSmall, oursLarge, baseLarge } = compare(
+      (n) => word.repeat(Math.ceil(n / word.length)),
+      () => ({ id: '1', type: 'user', label: 'a'.repeat(4_000), prefix: '@' }),
+      () => `@${'a'.repeat(4_000)}`,
+      100_000,
+    );
+    expect(oursLarge).toBeLessThanOrEqual(10 * oursSmall + 5);
+    expect(oursLarge).toBeLessThanOrEqual(50 * baseLarge + 5);
+  }, 60_000);
 });

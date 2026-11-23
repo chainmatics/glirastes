@@ -22,12 +22,14 @@ const MAX_TOOL_ARGS_LENGTH = 2_000;
  * indexOf instead of one lazy regex, which is quadratic on many unclosed openers.
  */
 /**
- * Steps of the last `serializeMentionsForSend` call, for the linearity
- * test: every loop it runs adds one per iteration (context blocks
- * stripped, token candidates, text positions checked or claimed, sort
- * comparisons, claims written and listed, context entries). Internal.
+ * Work of the last `serializeMentionsForSend` call, for the runtime
+ * tests. `steps`: one per iteration of every loop it runs in JavaScript
+ * (context blocks stripped, token matches looked at, text positions
+ * checked or claimed, sort comparisons, claims written and listed, context
+ * entries). `matches`: the token matches the regular expression returned.
+ * The regular expression's own search is native and not counted. Internal.
  */
-export const serializeWork = { steps: 0 };
+export const serializeWork = { steps: 0, matches: 0 };
 
 export function stripContextBlocks(text: string): string {
   let kept = '';
@@ -247,47 +249,44 @@ function warnRefusedMention(type: string): void {
 }
 
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
- * The occurrences base's `(^|\s)token(?=\s|$)` replacement of this token
- * found, left to right: a candidate must not overlap a position an earlier
- * mention claimed (`claimed`); a boundary character counts only if it is
- * not claimed and, before the token, lies at or after the end of this
- * token's previous match (base consumed it), and the next one starts after it. Claims the
- * accepted occurrences. Steps: one per candidate and per position checked
- * or claimed, so linear in the text for one token.
+ * The occurrences of this token that base's `(^|\s)token(?=\s|$)`
+ * replacement found, found with the same regular expression on the
+ * original text, left to right. A match is dropped when the token, the
+ * whitespace before it or the character after it lies in a position an
+ * earlier mention claimed (`claimed`: in base's text that is marker text);
+ * the search then continues one character after the start of the dropped
+ * match. Claims the accepted occurrences. The search itself is the native
+ * regular expression (the same as base); `serializeWork` counts the matches
+ * looked at and the positions checked or claimed, not the regex's work.
  */
 function claimOccurrences(text: string, token: string, claimed: Uint8Array): Array<{ start: number; end: number }> {
   const found: Array<{ start: number; end: number }> = [];
-  let from = 0;
-  /** End of this token's previous match: base's regex consumed the whitespace before a match. */
-  let previousEnd = 0;
-  // In base's text a claimed position is marker text, never whitespace.
-  const isBoundary = (index: number) => !claimed[index] && /\s/.test(text[index]!);
+  const tokenPattern = new RegExp(`(^|\\s)${escapeRegex(token)}(?=\\s|$)`, 'g');
   for (;;) {
-    const start = text.indexOf(token, from);
-    if (start < 0) return found;
+    const match = tokenPattern.exec(text);
+    if (match === null) return found;
     serializeWork.steps += 1;
+    serializeWork.matches += 1;
+    const leading = match[1]!.length;
+    const start = match.index + leading;
     const end = start + token.length;
-    const before = start === 0 || (start - 1 >= previousEnd && isBoundary(start - 1));
-    const after = end === text.length || isBoundary(end);
-    if (!before || !after) {
-      from = start + 1;
-      continue;
-    }
-    let free = true;
-    for (let i = start; i < end; i += 1) {
+    let free = !claimed[end];
+    for (let i = match.index; free && i < end; i += 1) {
       serializeWork.steps += 1;
-      if (claimed[i]) { free = false; break; }
+      if (claimed[i]) free = false;
     }
     if (!free) {
-      from = start + 1;
+      tokenPattern.lastIndex = match.index + 1;
       continue;
     }
     claimed.fill(1, start, end);
     serializeWork.steps += end - start;
     found.push({ start, end });
-    from = end;
-    previousEnd = end;
   }
 }
 
@@ -307,6 +306,7 @@ export function serializeMentionsForSend(
   options?: MentionSerializationConfig,
 ): string {
   serializeWork.steps = 0;
+  serializeWork.matches = 0;
   const enabled = options?.enabled ?? true;
   if (!enabled || mentions.length === 0) {
     return stripContextBlocks(text);
