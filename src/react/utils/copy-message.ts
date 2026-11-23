@@ -53,6 +53,7 @@ function exportNode(node: Node, target: HTMLElement, doc: Document): void {
   if (DROPPED.has(tag)) return;
   // Markdown still loading: its source text, as the bubble showed before the skeleton.
   if (element.getAttribute('data-element') === 'markdown-skeleton') {
+    // No entry (a second copy of this module): nothing rather than the hidden loading label.
     target.append(doc.createTextNode(loadingMarkdownSources.get(element) ?? ''));
     return;
   }

@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { act, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { Suspense, act, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { cleanup, render } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { deChatLocale } from '../../locale-de.js';
 import type { ChatMessage } from '../../types.js';
 import { GRAPH_TIMEOUT, MARKDOWN_SOURCE, freshGraph, serverHtmlAll, streamingHistory, type Graph, type ServerCase } from './markdown-loading-harness.js';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Each test builds its own module graph (`freshGraph`), so the tests do not
 // depend on their order; a graph is shared only inside one test.
@@ -318,3 +320,80 @@ describe('hydration is the same as before', () => {
     }
   }, GRAPH_TIMEOUT);
 });
+
+const BASE_SEQUENCES: Record<string, string[]> = {
+  'root raw': ['source', 'markdown'],
+  'root markdown': ['markdown', 'source', 'markdown'],
+  'boundary raw': ['source', 'markdown'],
+  'boundary markdown': ['markdown', 'source', 'markdown'],
+};
+
+describe('failed hydration (React client-renders the server HTML) is the same as before', () => {
+  // A mismatch elsewhere in the root, or in an app Suspense boundary holding the
+  // chat, makes React give up hydrating and render that part on the client.
+  // Sequences recorded on main (the same for both mismatch positions), renderer
+  // pending on the client.
+  const wrap = (level: 'root' | 'boundary', side: string, inner: ReactElement, where: 'before' | 'after') => {
+    const parts = where === 'before' ? <><span>{side}</span>{inner}</> : <>{inner}<span>{side}</span></>;
+    return level === 'root' ? <div>{parts}</div> : <div><Suspense fallback={null}>{parts}</Suspense></div>;
+  };
+  const expected: Record<string, string[]> = {
+    'root raw': BASE_SEQUENCES['root raw']!,
+    'root markdown': BASE_SEQUENCES['root markdown']!,
+    'boundary raw': BASE_SEQUENCES['boundary raw']!,
+    'boundary markdown': BASE_SEQUENCES['boundary markdown']!,
+  };
+  for (const where of ['before', 'after'] as const) for (const level of ['root', 'boundary'] as const) {
+    for (const server of ['raw', 'markdown'] as const) {
+      it(`${level}, server ${server}, mismatch ${where} the chat`, async () => {
+        const { renderToString } = await import('react-dom/server');
+        const serverGraph = await freshGraph();
+        if (server === 'markdown') {
+          renderToString(serverGraph.chat()); // starts the lazy import, also where it is not shared (main)
+          serverGraph.release();
+          await serverGraph.preloadMarkdown();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        const markup = renderToString(wrap(level, 'server', serverGraph.chat(), where));
+        expect(markup.includes('<strong>'), 'server variant').toBe(server === 'markdown');
+        const { hydrateRoot } = await import('react-dom/client');
+        const graph = await freshGraph();
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const container = host();
+        container.innerHTML = markup;
+        const seen = timelines(container);
+        let root!: ReturnType<typeof hydrateRoot>;
+        await act(async () => { root = hydrateRoot(container, wrap(level, 'client', graph.chat(), where), { onRecoverableError: () => {} }); });
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+        await loaded(graph);
+        seen.stop();
+        act(() => root.unmount());
+        // Declared difference: a mismatch before the chat (in tree order) stops hydration before the
+        // chat renders at all, so nothing tells its later client render apart from a fresh mount.
+        const declared = server === 'raw' ? ['source', 'skeleton', 'markdown'] : ['markdown', 'skeleton', 'markdown'];
+        expect(seen.states[0]).toEqual(where === 'after' ? expected[`${level} ${server}`] : declared);
+      }, GRAPH_TIMEOUT);
+    }
+  }
+
+  it('an SSR page hydrated without problems still shows the skeleton for history that arrives later on the client', async () => {
+    const { renderToString } = await import('react-dom/server');
+    const serverGraph = await freshGraph();
+    const markup = renderToString(serverGraph.chatWith([], 'ready'));
+    const { hydrateRoot } = await import('react-dom/client');
+    const graph = await freshGraph();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const container = host();
+    container.innerHTML = markup;
+    let root!: ReturnType<typeof hydrateRoot>;
+    await act(async () => { root = hydrateRoot(container, graph.chatWith([], 'ready')); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    await act(async () => { root.render(graph.chatWith([msg('h1', 'assistant', MARKDOWN_SOURCE)], 'ready')); });
+    expect(boxes(container).map(stateOf)).toEqual(['skeleton']);
+    await loaded(graph);
+    expect(boxes(container).map(stateOf)).toEqual(['markdown']);
+    act(() => root.unmount());
+    expect(errors.mock.calls.map((call) => String(call[0]).slice(0, 120))).toEqual([]);
+  }, GRAPH_TIMEOUT);
+});
+
