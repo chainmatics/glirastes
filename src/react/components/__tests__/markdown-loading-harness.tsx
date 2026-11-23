@@ -27,7 +27,7 @@ const transport = (messages: ChatMessage[] = [], status: ChatTransport['status']
 
 export interface Graph {
   /** The chat with one loaded assistant message (or none). */
-  chat: (options?: { components?: ChatComponents; markdown?: ChatMarkdownOptions; withBubble?: boolean }) => ReactElement;
+  chat: (options?: { components?: ChatComponents; markdown?: ChatMarkdownOptions; withBubble?: boolean; wrapBubble?: (bubble: ReactElement) => ReactElement }) => ReactElement;
   /** A running turn: an older answer, the just-sent question and the answer streaming in. */
   streamingChat: () => ReactElement;
   /** Any history and status; every message in a default bubble. */
@@ -72,9 +72,9 @@ export async function freshGraph(options: { fail?: boolean } = {}): Promise<Grap
   }
   const { preloadMarkdown } = await import('../../markdown-module.js');
   return {
-    chat: ({ components, markdown, withBubble = true } = {}) => (
+    chat: ({ components, markdown, withBubble = true, wrapBubble = (bubble: ReactElement) => bubble } = {}) => (
       <AiChatProvider transport={transport()} components={components} markdown={markdown}>
-        {withBubble ? <MessageBubble message={message} /> : null}
+        {withBubble ? wrapBubble(<MessageBubble message={message} />) : null}
       </AiChatProvider>
     ),
     streamingChat: () => chatWith(streamingHistory, 'streaming'),

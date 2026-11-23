@@ -1,4 +1,4 @@
-import { Fragment, Suspense, lazy, useContext, useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, useContext, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
 import { ChatContext, useChatContext } from '../provider/chat-context.js';
@@ -813,19 +813,19 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
   const { remarkPlugins } = useChatMarkdownOptions();
   // Optional: rendered outside the provider (print, renderToStaticMarkup) it behaves as before.
   const chat = useContext(ChatContext);
-  const client = useSyncExternalStore(subscribeNothing, onClient, onServer);
+  // Outside a provider both snapshots are `false`: no re-render after hydration, as before.
+  const client = useSyncExternalStore(subscribeNothing, chat ? onClient : onServer, onServer);
   // Skeleton or raw text while react-markdown loads, decided on the first render
   // and kept until Markdown renders; decided again only for a text that no
   // longer continues the decided one (a bubble reused for another message).
   // The server and the hydration render decide raw, as before.
   const decide = (): FallbackChoice => ({
     content,
-    skeleton: client && !hydrating && chat !== null && !chat.isLoading && needsMarkdown(content, links.enabled),
+    skeleton: client && chat !== null && !chat.isLoading && needsMarkdown(content, links.enabled),
   });
   const [choice, setChoice] = useState(decide);
-  useEffect(() => { hydrating = false; }, []);
   let skeleton = choice.skeleton;
-  if (!content.startsWith(choice.content)) {
+  if (chat && !content.startsWith(choice.content)) {
     const next = decide();
     skeleton = next.skeleton;
     setChoice(next);
@@ -846,17 +846,7 @@ interface FallbackChoice { content: string; skeleton: boolean }
 
 const subscribeNothing = () => () => {};
 const onClient = () => true;
-/**
- * Set when React reads the server snapshot in the browser, i.e. while it
- * hydrates a default Markdown; cleared by the next default Markdown effect
- * (a commit). A bubble that decides in between is React rendering that
- * server HTML anew after it gave up hydrating: raw text, as before.
- */
-let hydrating = false;
-const onServer = () => {
-  if (typeof window !== 'undefined') hydrating = true;
-  return false;
-};
+const onServer = () => false;
 
 /**
  * Whether Markdown could show `content` differently from its raw text. One

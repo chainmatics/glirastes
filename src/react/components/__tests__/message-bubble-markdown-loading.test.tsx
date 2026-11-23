@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Suspense, act, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { Suspense, act, cloneElement, isValidElement, lazy, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { cleanup, render } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
@@ -321,27 +321,13 @@ describe('hydration is the same as before', () => {
   }, GRAPH_TIMEOUT);
 });
 
-const BASE_SEQUENCES: Record<string, string[]> = {
-  'root raw': ['source', 'markdown'],
-  'root markdown': ['markdown', 'source', 'markdown'],
-  'boundary raw': ['source', 'markdown'],
-  'boundary markdown': ['markdown', 'source', 'markdown'],
-};
-
-describe('failed hydration (React client-renders the server HTML) is the same as before', () => {
-  // A mismatch elsewhere in the root, or in an app Suspense boundary holding the
-  // chat, makes React give up hydrating and render that part on the client.
-  // Sequences recorded on main (the same for both mismatch positions), renderer
-  // pending on the client.
+describe('React builds server-rendered chat HTML on the client instead of hydrating it (declared difference)', () => {
+  // After a hydration mismatch (before or after the chat), main showed the raw
+  // source until Markdown rendered (server Markdown: Markdown → source →
+  // Markdown); now a client render inside the provider shows the skeleton.
   const wrap = (level: 'root' | 'boundary', side: string, inner: ReactElement, where: 'before' | 'after') => {
     const parts = where === 'before' ? <><span>{side}</span>{inner}</> : <>{inner}<span>{side}</span></>;
     return level === 'root' ? <div>{parts}</div> : <div><Suspense fallback={null}>{parts}</Suspense></div>;
-  };
-  const expected: Record<string, string[]> = {
-    'root raw': BASE_SEQUENCES['root raw']!,
-    'root markdown': BASE_SEQUENCES['root markdown']!,
-    'boundary raw': BASE_SEQUENCES['boundary raw']!,
-    'boundary markdown': BASE_SEQUENCES['boundary markdown']!,
   };
   for (const where of ['before', 'after'] as const) for (const level of ['root', 'boundary'] as const) {
     for (const server of ['raw', 'markdown'] as const) {
@@ -368,14 +354,51 @@ describe('failed hydration (React client-renders the server HTML) is the same as
         await loaded(graph);
         seen.stop();
         act(() => root.unmount());
-        // Declared difference: a mismatch before the chat (in tree order) stops hydration before the
-        // chat renders at all, so nothing tells its later client render apart from a fresh mount.
-        const declared = server === 'raw' ? ['source', 'skeleton', 'markdown'] : ['markdown', 'skeleton', 'markdown'];
-        expect(seen.states[0]).toEqual(where === 'after' ? expected[`${level} ${server}`] : declared);
+        // main: ['source', 'markdown'] / ['markdown', 'source', 'markdown'].
+        expect(seen.states[0]).toEqual(server === 'raw' ? ['source', 'skeleton', 'markdown'] : ['markdown', 'skeleton', 'markdown']);
       }, GRAPH_TIMEOUT);
     }
   }
 
+  it('a still-dehydrated app Suspense boundary (lazy part before the bubbles) that React renders on the client', async () => {
+    const makePart = () => {
+      let resolve!: () => void;
+      const ready = new Promise<{ default: () => ReactElement }>((done) => { resolve = () => done({ default: () => <span>part</span> }); });
+      return { Part: lazy(() => ready), resolve, ready };
+    };
+    const { renderToString } = await import('react-dom/server');
+    const serverGraph = await freshGraph();
+    const serverPart = makePart();
+    serverPart.resolve();
+    const serverWrap = (bubble: ReactElement) => <Suspense fallback={null}><serverPart.Part />{bubble}</Suspense>;
+    renderToString(serverGraph.chat({ wrapBubble: serverWrap }));
+    await serverPart.ready;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const markup = renderToString(serverGraph.chat({ wrapBubble: serverWrap }));
+    expect(markup).toContain('<span>part</span>');
+    const { hydrateRoot } = await import('react-dom/client');
+    const graph = await freshGraph();
+    const clientPart = makePart();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const container = host();
+    container.innerHTML = markup;
+    const seen = timelines(container);
+    let root!: ReturnType<typeof hydrateRoot>;
+    const clientChat = () => graph.chat({ wrapBubble: (bubble) => <Suspense fallback={null}><clientPart.Part />{bubble}</Suspense> });
+    await act(async () => { root = hydrateRoot(container, clientChat(), { onRecoverableError: () => {} }); });
+    // An update from above (here a re-render of the root) reaches the boundary while it is still dehydrated.
+    await act(async () => { root.render(clientChat()); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    await act(async () => { clientPart.resolve(); await clientPart.ready; });
+    await loaded(graph);
+    seen.stop();
+    act(() => root.unmount());
+    // main: ['source', 'markdown'].
+    expect(seen.states[0]).toEqual(['source', 'skeleton', 'markdown']);
+  }, GRAPH_TIMEOUT);
+});
+
+describe('client mounts in a server-rendered page', () => {
   it('an SSR page hydrated without problems still shows the skeleton for history that arrives later on the client', async () => {
     const { renderToString } = await import('react-dom/server');
     const serverGraph = await freshGraph();
@@ -394,6 +417,48 @@ describe('failed hydration (React client-renders the server HTML) is the same as
     expect(boxes(container).map(stateOf)).toEqual(['markdown']);
     act(() => root.unmount());
     expect(errors.mock.calls.map((call) => String(call[0]).slice(0, 120))).toEqual([]);
+  }, GRAPH_TIMEOUT);
+
+  it('a renderToString in the same module graph does not change a later client mount', async () => {
+    const { renderToString } = await import('react-dom/server');
+    const graph = await freshGraph();
+    renderToString(graph.chat());
+    const { container } = mount(graph.chat());
+    expect(boxes(container).map(stateOf)).toEqual(['skeleton']);
+  }, GRAPH_TIMEOUT);
+
+  it('a text node hydrated outside the provider keeps the server Markdown, as before', async () => {
+    const { renderToString } = await import('react-dom/server');
+    const capture = async (graph: Graph) => {
+      // The provider of the same module graph as the hook.
+      const { AiChatProvider } = await import('../../provider/ai-chat-provider.js');
+      let text: ReactNode = null;
+      const { useMessageParts } = graph;
+      function Capture() { text = useMessageParts(streamingHistory[0]!).text; return null; }
+      const transport = { messages: [streamingHistory[0]!], status: 'ready' as const, error: null, sendMessage: async () => {}, stop() {}, setMessages() {}, addToolApprovalResponse: async () => {} };
+      renderToString(<AiChatProvider transport={transport}><Capture /></AiChatProvider>);
+      return text;
+    };
+    const serverGraph = await freshGraph();
+    serverGraph.release();
+    await serverGraph.preloadMarkdown();
+    renderToString(<>{await capture(serverGraph)}</>);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const markup = renderToString(<>{await capture(serverGraph)}</>);
+    expect(markup).toContain('<strong>answer</strong>');
+    const graph = await freshGraph();
+    const text = await capture(graph);
+    const { hydrateRoot } = await import('react-dom/client');
+    const container = host();
+    container.innerHTML = markup;
+    const seen = timelines(container);
+    let root!: ReturnType<typeof hydrateRoot>;
+    await act(async () => { root = hydrateRoot(container, <>{text}</>); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    await loaded(graph);
+    seen.stop();
+    act(() => root.unmount());
+    expect(seen.states[0]).toEqual(['markdown']);
   }, GRAPH_TIMEOUT);
 });
 
