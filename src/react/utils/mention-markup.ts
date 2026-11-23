@@ -5,10 +5,13 @@ import type {
   MentionSerializationConfig,
 } from '../types.js';
 import { escapeCommentDelimiters, escapeJsonAngles } from '../../contracts/delimited-text.js';
+import {
+  canonicalMentionLabel,
+  parseMentionMarkers,
+  serializeMentionMarker,
+} from '../../contracts/mention-marker.js';
 
 const CONTEXT_OPEN_RE = /<!--\s*context:/iy;
-// Bounded parts keep the scan linear on hostile text with many unclosed markers.
-const MENTION_MARKER_RE = /\{\{mention:([^:}]{1,200}):([^:}]{1,200}):([^}]{1,1000})\}\}/g;
 const DEFINITION_ID_RE = /^[A-Za-z0-9_.-]{1,200}$/;
 const MAX_TOOL_ARGS_LENGTH = 2_000;
 
@@ -156,14 +159,9 @@ export function parseMentionSegments(
 ): MentionTextSegment[] {
   const segments: MentionTextSegment[] = [];
   let cursor = 0;
-  let match: RegExpExecArray | null;
-  MENTION_MARKER_RE.lastIndex = 0;
 
-  while ((match = MENTION_MARKER_RE.exec(text)) !== null) {
-    const [raw, type, id, label] = match;
-    const start = match.index;
-    const end = start + raw.length;
-
+  // Read as written: a legacy marker keeps its label here (the read path is not canonical yet).
+  for (const { type, id, label, span: { start, end } } of parseMentionMarkers(text)) {
     if (start > cursor) {
       segments.push({ kind: 'text', text: text.slice(cursor, start) });
     }
@@ -227,6 +225,8 @@ export function serializeMentionsForSend(
 
   const cleaned = stripContextBlocks(text);
   let nextText = cleaned;
+  const labels = options?.labels === 'raw' ? 'raw' : 'canonical';
+  const markerOptions = { labels, maxLabelLength: options?.maxLabelLength } as const;
   const serializedMentions: SerializableMention[] = [];
 
   // One command can arrive twice: as a chip read back from the editor DOM
@@ -263,21 +263,26 @@ export function serializeMentionsForSend(
       : inferMentionPrefix(type);
 
     const token = `${prefix}${slug}`;
-    const marker = `{{mention:${type}:${id}:${label}}}`;
+    const marker = serializeMentionMarker({ type, id, label }, markerOptions);
+    // Without a valid type or id there is no marker, only what the user saw: prefix and label.
+    const sentLabel = labels === 'raw'
+      ? label
+      : canonicalMentionLabel(label, { ...(marker ? { id } : {}), maxLength: options?.maxLabelLength });
+    const replacement = marker ?? (sentLabel ? `${prefix}${sentLabel}` : token);
     const tokenPattern = new RegExp(`(^|\\s)${escapeRegex(token)}(?=\\s|$)`, 'g');
     let wasInserted = false;
 
     nextText = nextText.replace(tokenPattern, (fullMatch, leading: string) => {
       wasInserted = true;
-      return `${leading}${marker}`;
+      return `${leading}${replacement}`;
     });
 
-    if (wasInserted) {
+    if (wasInserted && marker) {
       serializedMentions.push({
         id,
         type,
-        label,
-        displayName: label,
+        label: sentLabel,
+        displayName: sentLabel,
         slug,
         prefix,
         toolReference: toolReferences.get(`${type}\u0000${id}`),

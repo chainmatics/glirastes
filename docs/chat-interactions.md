@@ -220,16 +220,49 @@ component keeps the chips with `useChatEntityLinks().markdownComponents`
 against the ids the conversation showed by declaration (`verifyMentions`,
 default on); see [entity identity](entity-identity.md#entity-link-options).
 
+## Mention markers
+
 A picked mention reaches the model as `{{mention:type:id:label}}`; a
 tool-backed command (and every mention with `includeContextBlock`) is also
 listed in a leading `<!--context:[…]-->` block. Inside that block a `-->`,
 `--!>` or `<!--` in a label or id is sent with `\u003e` / `\u003c` (since the release
 after 0.20.0), so the block the SDK writes cannot be closed early or nested
-by its own entries. Known limits (a format change is planned): the label goes
-unescaped into the marker, so a label can end it early (`}}`) or carry a whole
-forged `<!--context:…-->` block that reaches the model and is hidden from the
-bubble; and a label can forge sibling entries (`Bob (ID: 9), Admin (ID: 1, …)`)
-inside the block.
+by its own entries.
+
+Since the release after 0.23.0 the label is sent in its canonical form
+(`mentions: { serialize: { labels: 'canonical' } }`, the default), so the
+marker carries nothing the bubble hides from the user but the model reads:
+
+| In the label | Sent as |
+| --- | --- |
+| `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (a `}}` can no longer end the marker, a `<!--context:…-->` is visible text of the chip) |
+| control characters, line and paragraph separators, whitespace runs | one space; trimmed |
+| format characters (zero-width, bidi such as RLO, tag characters, soft hyphen) | removed; this also takes the ZWJ out of emoji sequences (a family emoji shows its people side by side) and the ZWNJ out of Persian words |
+| more than `maxLabelLength` code points (1-120, default 120) | the first 119 and `…`, never inside a surrogate pair |
+| nothing visible left | the id |
+
+The text is NFC. Ordinary labels (`ACME <Süd> & Co. -> a/b`) are sent
+byte-identical; a single `<` or `>` stays. A mention whose type is not
+`[a-z][a-z0-9_.-]{0,63}` (the entity type pattern) or whose id has `:` `{` `}` `<` `>`, whitespace,
+control or format characters or more than 200 UTF-16 units gets no marker:
+the text is the prefix and the canonical label (`@Acme`), and the context
+block does not list it. `labels: 'raw'` sends the format of releases
+before. Queued messages and restored drafts keep the structured mention and
+are serialized the same way when they are sent. `glirastes/contracts`
+exports the grammar for own parsers and server code:
+`canonicalMentionLabel`, `parseMentionMarkers` (`type`, `id`, `label`,
+`canonical`, `span`; the same matches as the reader before, linear in the
+text), `serializeMentionMarker`, `isMentionMarkerType`, `isMentionMarkerId`.
+
+Known limits (planned): reading is unchanged so far. Text stored by an
+older release, by `labels: 'raw'`, by an own client or added in
+`onBeforeSend` can still carry a raw marker whose label ends it early
+(`}}`) or holds a whole `<!--context:…-->` block: the bubble hides it, the
+model reads it, and a `<!--glirastes:clarification …-->` inside it still
+parses as a clarification answer. And a label can forge sibling entries
+(`Bob (ID: 9), Admin (ID: 1, …)`) inside the free-text context block. The
+default `react-markdown` renderer shows other HTML comments as text; a
+custom `Markdown` with `rehype-raw` hides them, while the model reads them.
 
 ## Custom composers
 

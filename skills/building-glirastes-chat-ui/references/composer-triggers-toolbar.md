@@ -6,6 +6,7 @@ All names below come from `glirastes/react` unless noted.
 
 - Triggers
   - Sent mentions and `types`
+  - Mention markers
 - What a pick does
   - Sub-lists
 - Opening a list from a button
@@ -79,6 +80,28 @@ provider calls `session.save(id, messages, { mentionPrefix })`. A custom
 store may use that third argument for its titles or ignore it; a store
 that wraps `createLocalSessionStore` forwards it (`save: (id, messages, options) =>
 base.save!(id, messages, options)`).
+
+### Mention markers
+
+A sent mention carries its canonical label (`mentions.serialize.labels`,
+default `'canonical'`): ordinary labels are byte-identical; `{` `}` `<!`
+`-->` `--!>` become `｛` `｝` `‹!` `--›` `--!›`, control, format (zero-width,
+bidi, tag, also ZWJ/ZWNJ) and line-break characters go, whitespace runs
+become one space, NFC, at most `maxLabelLength` (1-120, default 120) code
+points (`…`). A type outside `[a-z][a-z0-9_.-]{0,63}` (the entity type pattern) or an id with `:` `{`
+`}` `<` `>`, whitespace, control or format characters gets no marker: the
+text is prefix and label. `labels: 'raw'` sends the old format. Reading is
+unchanged so far (stored text shows as before).
+
+From `glirastes/contracts`, for own parsers and server code:
+`canonicalMentionLabel(label, { id?, maxLength? })` (`CanonicalMentionLabelOptions`),
+`parseMentionMarkers(text)` (`ParsedMentionMarker`: `type`, `id`, `label`,
+`canonical`, `span`; same matches as the old regex, linear),
+`serializeMentionMarker({ type, id, label }, { labels?, maxLabelLength? })`
+(`MentionMarker`, `SerializeMentionMarkerOptions`; `undefined` for an
+invalid type or id), `isMentionMarkerType`, `isMentionMarkerId`,
+`MENTION_MARKER_TYPE_PATTERN`, `MENTION_MARKER_MAX_LABEL_LENGTH` (120),
+`MENTION_MARKER_MAX_ID_LENGTH` (200).
 
 ## What a pick does
 

@@ -22,6 +22,7 @@ import {
 import { attachmentIdOf, attachmentPlaceholderText } from '../../../contracts/attachments.js';
 import { declarationsForRead, type EntityDeclarationsByTool, type OutputEntityDeclaration } from '../../../contracts/entity-declaration.js';
 import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
+import { parseMentionMarkers } from '../../../contracts/mention-marker.js';
 import { sanitizeModelMessages } from './sanitize-model-messages.js';
 import { withModelFacingToolErrors } from './stream-error-text.js';
 import { withoutApprovalSubjectParts } from './approval-subject-lookup.js';
@@ -314,8 +315,6 @@ interface ModelMessageLike {
   content: unknown;
 }
 
-/** `{{mention:type:id:label}}`, as the chat UI parses it. */
-const MENTION_MARKER = /\{\{mention:([^:}]{1,200}):([^:}]{1,200}):([^}]{1,1000})\}\}/g;
 
 function textsOf(message: ModelMessageLike): string[] {
   if (typeof message.content === 'string') return [message.content];
@@ -336,8 +335,8 @@ async function unresolvedMarkerCount(
   entities: EntityDeclarationsByTool | undefined,
 ): Promise<number> {
   const markers = raw.filter((message) => message.role === 'assistant')
-    .flatMap((message) => textsOf(message).flatMap((text) => [...text.matchAll(MENTION_MARKER)]))
-    .filter((match) => match[1] !== 'command');
+    .flatMap((message) => textsOf(message).flatMap((text) => parseMentionMarkers(text)))
+    .filter((marker) => marker.type !== 'command');
   if (markers.length === 0) return 0;
   const earlier = earlierMessages && earlierMessages.length > 0
     ? await convertToModelMessages(withModelFacingToolErrors(withoutApprovalSubjectParts(earlierMessages)), { ignoreIncompleteToolCalls: true }) as ModelMessageLike[]
@@ -348,10 +347,10 @@ async function unresolvedMarkerCount(
   for (const message of all) {
     if (message.role !== 'user') continue;
     for (const text of textsOf(message)) {
-      for (const [, type, id] of text.matchAll(MENTION_MARKER)) seen.add(mentionReferenceKey(type!, id!));
+      for (const { type, id } of parseMentionMarkers(text)) seen.add(mentionReferenceKey(type, id));
     }
   }
-  return markers.filter(([, type, id]) => !seen.has(mentionReferenceKey(type!, id!)) && !seen.has(mentionReferenceKey('', id!))).length;
+  return markers.filter(({ type, id }) => !seen.has(mentionReferenceKey(type, id)) && !seen.has(mentionReferenceKey('', id))).length;
 }
 
 /**

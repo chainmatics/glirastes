@@ -1,0 +1,40 @@
+{
+  "id": "mention-marker-canonical-labels",
+  "kind": "recommended",
+  "summary": "Behavior change: a picked mention is sent with its canonical label. Ordinary labels stay byte-identical; a label with { } <! -->, control or format characters, line breaks or over 120 code points is sent changed, and a mention with an invalid type or id is sent as @label without a marker.",
+  "howTo": "Nothing to do for the new default. What changes: { } <! --> --!> become ｛ ｝ ‹! --› --!›; control, line and paragraph separators and whitespace runs become one space; format characters are removed (zero-width, bidi, tag characters, soft hyphen, also the ZWJ of emoji sequences and the ZWNJ of Persian words); NFC; over 120 code points the label is cut to 119 and …. A mention whose type is not [a-z][a-z0-9_.-]{0,63}, the entity type pattern (capitals, non-ASCII), or whose id has : { } < >, whitespace, control or format characters or more than 200 UTF-16 units gets no marker, its text is prefix and label. Stored older text is read as before. An app that needs the old format sets mentions: { serialize: { labels: 'raw' } } on the chat provider; maxLabelLength (1-120) cuts shorter. Own parsers and server code can use canonicalMentionLabel, parseMentionMarkers, serializeMentionMarker, isMentionMarkerType and isMentionMarkerId from glirastes/contracts. See docs/chat-interactions.md, Mention markers.",
+  "skill": "building-glirastes-chat-ui#mention-markers",
+  "affectedWhen": {
+    "symbols": [
+      "AiChatProvider",
+      "serializeMentionsForSend",
+      "MentionSerializationConfig"
+    ],
+    "patterns": [
+      "{{mention:"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "labels: 'raw'",
+      "maxLabelLength",
+      "canonicalMentionLabel"
+    ]
+  },
+  "surface": [
+    "glirastes/contracts#canonicalMentionLabel",
+    "glirastes/contracts#CanonicalMentionLabelOptions.*",
+    "glirastes/contracts#isMentionMarkerId",
+    "glirastes/contracts#isMentionMarkerType",
+    "glirastes/contracts#MENTION_MARKER_MAX_ID_LENGTH",
+    "glirastes/contracts#MENTION_MARKER_MAX_LABEL_LENGTH",
+    "glirastes/contracts#MENTION_MARKER_TYPE_PATTERN",
+    "glirastes/contracts#MentionMarker.*",
+    "glirastes/contracts#parseMentionMarkers",
+    "glirastes/contracts#ParsedMentionMarker.*",
+    "glirastes/contracts#serializeMentionMarker",
+    "glirastes/contracts#SerializeMentionMarkerOptions.*",
+    "*#MentionSerializationConfig.labels",
+    "*#MentionSerializationConfig.maxLabelLength"
+  ]
+}
