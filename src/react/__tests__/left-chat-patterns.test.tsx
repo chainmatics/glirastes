@@ -2,17 +2,18 @@
 // CHARACTERISATION (green on main): app patterns around a running request and a change of the open chat that
 // work today. The session pool planned in docs/plans/2026-11-23-design-left-chat.md must keep every one of them.
 // The defect itself (one transport shared by every chat) is reproduced in left-chat-defect.repro.test.tsx.
+// Tests marked KNOWN DEFECT are `it.fails`: they assert the correct behaviour that main does not have yet.
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Chat, useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import { MessageList } from '../components/message-list.js';
 import { useVercelAiChatTransport } from '../transports/vercel.js';
 import type { AiChatProviderConfig, ChatMessage, ChatTransport, SessionConfig } from '../types.js';
-import { ctx, Host, Probe, StreamingChat } from './streaming-chat.js';
+import { ctx, Probe, StreamingChat } from './streaming-chat.js';
 import { carried, stubControlledFetch, textChunks, type ControlledRequest } from './controlled-fetch.js';
 
 let requests: ControlledRequest[];
@@ -20,7 +21,10 @@ beforeEach(() => {
   ({ requests } = stubControlledFetch());
 });
 afterEach(() => {
+  // No stream stays open past its test.
+  for (const request of requests) request.close();
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 const user = (id: string, text: string): ChatMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
@@ -38,6 +42,19 @@ function finish(request: ControlledRequest, tail: string) {
   request.push({ type: 'finish-step' });
   request.push({ type: 'finish' });
   request.end();
+}
+
+/** A store whose `activeId` the host owns. */
+function hostStore(initial: Record<string, ChatMessage[]>) {
+  const histories: Record<string, ChatMessage[]> = { ...initial };
+  const saves: Array<{ id: string; text: string }> = [];
+  const loads: string[] = [];
+  const session = (activeId: string): SessionConfig => ({
+    activeId,
+    load: async (id: string) => { loads.push(id); return histories[id] ?? []; },
+    save: (id: string, messages: ChatMessage[]) => { saves.push({ id, text: JSON.stringify(messages) }); histories[id] = messages; },
+  });
+  return { histories, saves, loads, session };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -58,10 +75,17 @@ function useAppChatTransport(chat: Chat<UIMessage>): ChatTransport {
   }), [messages, status, error, sendMessage, stop, setMessages, addToolApprovalResponse]);
 }
 
-function AppOwnedChats({ chats, activeId }: { chats: Map<string, Chat<UIMessage>>; activeId: string }) {
+function AppOwnedChats({ chats, activeId, session, wrap = false }: {
+  chats: Map<string, Chat<UIMessage>>;
+  activeId: string;
+  session?: SessionConfig;
+  /** C3 on top: a new transport object on every render. */
+  wrap?: boolean;
+}) {
   const transport = useAppChatTransport(chats.get(activeId)!);
+  const handed = wrap ? { ...transport, stop: () => transport.stop() } : transport;
   return (
-    <AiChatProvider transport={transport} session={{ activeId }}>
+    <AiChatProvider transport={handed} session={session ?? { activeId }}>
       <Probe />
       <MessageList />
     </AiChatProvider>
@@ -75,15 +99,29 @@ function appChats() {
   return new Map([['A', make('A')], ['B', make('B', B as unknown as UIMessage[])]]);
 }
 
+/** A sends and streams the start of its answer (request 0). */
+async function aStreams(chats: Map<string, Chat<UIMessage>>) {
+  await waitFor(() => expect(ctx.canCompose).toBe(true));
+  await act(async () => { ctx.send('a question'); });
+  await waitFor(() => expect(requests).toHaveLength(1));
+  for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+  await waitFor(() => expect(chats.get('A')!.status).toBe('streaming'));
+}
+
+/** In the open chat B: sends and streams the start of B's answer (request 1). */
+async function bStreams(chats: Map<string, Chat<UIMessage>>) {
+  await act(async () => { ctx.send('b follow-up'); });
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(carried(requests[1]!)).toEqual(['user:b question', 'assistant:b answer', 'user:b follow-up']);
+  for (const chunk of textChunks('B ANSWER ')) requests[1]!.push(chunk);
+  await waitFor(() => expect(chats.get('B')!.status).toBe('streaming'));
+}
+
 describe('C1 an app-owned AI SDK Chat per conversation', () => {
   it('A to B while A streams: nothing is stopped, A\'s Chat gets the answer, B stays as it was', async () => {
     const chats = appChats();
     const view = render(<AppOwnedChats chats={chats} activeId="A" />);
-    await waitFor(() => expect(ctx.canCompose).toBe(true));
-    await act(async () => { ctx.send('a question'); });
-    await waitFor(() => expect(requests).toHaveLength(1));
-    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
-    await waitFor(() => expect(chats.get('A')!.status).toBe('streaming'));
+    await aStreams(chats);
 
     view.rerender(<AppOwnedChats chats={chats} activeId="B" />);
     await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
@@ -107,11 +145,7 @@ describe('C1 an app-owned AI SDK Chat per conversation', () => {
   it('A to B to A while A streams: A shows its live request and its whole answer, nothing is stopped', async () => {
     const chats = appChats();
     const view = render(<AppOwnedChats chats={chats} activeId="A" />);
-    await waitFor(() => expect(ctx.canCompose).toBe(true));
-    await act(async () => { ctx.send('a question'); });
-    await waitFor(() => expect(requests).toHaveLength(1));
-    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
-    await waitFor(() => expect(chats.get('A')!.status).toBe('streaming'));
+    await aStreams(chats);
 
     view.rerender(<AppOwnedChats chats={chats} activeId="B" />);
     await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
@@ -125,10 +159,154 @@ describe('C1 an app-owned AI SDK Chat per conversation', () => {
     expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER OF A']);
     expect(textOf(chats.get('B')!.messages)).toEqual(['user:b question', 'assistant:b answer']);
   });
+
+  // KNOWN DEFECT (main): A's turn, which ends while A is open again, gets no outcome (no `completed`).
+  // The design's row "A->B->A, A laeuft" expects the live turn to report (docs/plans/2026-11-23-design-left-chat.md).
+  it.fails('KNOWN DEFECT A to B to A while A streams: A\'s turn is recorded as completed when it ends in A', async () => {
+    const chats = appChats();
+    const view = render(<AppOwnedChats chats={chats} activeId="A" />);
+    await aStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="B" />);
+    await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
+    view.rerender(<AppOwnedChats chats={chats} activeId="A" />);
+    await waitFor(() => expect(ctx.isLoading).toBe(true));
+    await act(async () => { finish(requests[0]!, 'OF A'); });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(ctx.turnOutcomes.get(ctx.messages[0]!.id)?.status).toBe('completed');
+  });
+
+  it.each([false, true])('stop() in B aborts only B\'s request; A streams on and completes (wrapper per render: %s)', async (wrap) => {
+    const chats = appChats();
+    const view = render(<AppOwnedChats chats={chats} activeId="A" wrap={wrap} />);
+    await aStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="B" wrap={wrap} />);
+    await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
+    await bStreams(chats);
+
+    await act(async () => { ctx.stop(); });
+    await waitFor(() => expect(chats.get('B')!.status).toBe('ready'));
+    expect(requests[1]!.aborted).toBe(true);
+    expect(requests[0]!.aborted).toBe(false);
+    expect(chats.get('A')!.status).toBe('streaming');
+    // B's stopped turn is B's: its partial answer stays and the turn is recorded as stopped.
+    expect(textOf(ctx.messages)).toEqual(['user:b question', 'assistant:b answer', 'user:b follow-up', 'assistant:B ANSWER ']);
+    expect(ctx.turnOutcomes.get(ctx.messages[2]!.id)?.status).toBe('aborted');
+
+    await act(async () => { finish(requests[0]!, 'OF A'); });
+    await waitFor(() => expect(chats.get('A')!.status).toBe('ready'));
+    expect(textOf(chats.get('A')!.messages)).toEqual(['user:a question', 'assistant:ANSWER OF A']);
+  });
+
+  it.each([false, true])('back in A while A and B stream: stop() aborts only A\'s request; B completes in B (wrapper per render: %s)', async (wrap) => {
+    const chats = appChats();
+    const view = render(<AppOwnedChats chats={chats} activeId="A" wrap={wrap} />);
+    await aStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="B" wrap={wrap} />);
+    await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
+    await bStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="A" wrap={wrap} />);
+    await waitFor(() => expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER ']));
+
+    await act(async () => { ctx.stop(); });
+    await waitFor(() => expect(chats.get('A')!.status).toBe('ready'));
+    expect(requests[0]!.aborted).toBe(true);
+    expect(requests[1]!.aborted).toBe(false);
+    expect(chats.get('B')!.status).toBe('streaming');
+    expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER ']);
+
+    await act(async () => { finish(requests[1]!, 'DONE'); });
+    await waitFor(() => expect(chats.get('B')!.status).toBe('ready'));
+    expect(textOf(chats.get('B')!.messages)).toEqual(['user:b question', 'assistant:b answer', 'user:b follow-up', 'assistant:B ANSWER DONE']);
+    expect(textOf(chats.get('A')!.messages)).toEqual(['user:a question', 'assistant:ANSWER ']);
+  });
+});
+
+describe('C1 known defects of outcome attribution', () => {
+  // KNOWN DEFECT (main): switching from B (running) to A (running) keeps the request binding of B, so the stop
+  // in A is recorded on B's turn and A's turn gets no outcome.
+  it.fails('KNOWN DEFECT back in A while A and B stream: stop() records the aborted outcome on A\'s turn', async () => {
+    const chats = appChats();
+    const view = render(<AppOwnedChats chats={chats} activeId="A" />);
+    await aStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="B" />);
+    await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
+    await bStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="A" />);
+    await waitFor(() => expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER ']));
+    await act(async () => { ctx.stop(); });
+    await waitFor(() => expect(chats.get('A')!.status).toBe('ready'));
+    expect(ctx.turnOutcomes.get(ctx.messages[0]!.id)?.status).toBe('aborted');
+  });
+});
+
+describe('C1 with a session store (load/save) next to the app-owned Chats', () => {
+  it('A to B while A streams: nothing is stopped, A\'s Chat gets the answer, B shows and keeps its own history', async () => {
+    const chats = appChats();
+    const store = hostStore({ A: [], B });
+    const view = render(<AppOwnedChats chats={chats} activeId="A" session={store.session('A')} />);
+    await aStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="B" session={store.session('B')} />);
+    await waitFor(() => expect(store.loads).toContain('B'));
+    await settle();
+    expect(textOf(ctx.messages)).toEqual(['user:b question', 'assistant:b answer']);
+    await act(async () => { finish(requests[0]!, 'OF A'); });
+    await waitFor(() => expect(chats.get('A')!.status).toBe('ready'));
+    await settle();
+    expect(requests[0]!.aborted).toBe(false);
+    expect(textOf(chats.get('A')!.messages)).toEqual(['user:a question', 'assistant:ANSWER OF A']);
+    expect(textOf(chats.get('B')!.messages)).toEqual(['user:b question', 'assistant:b answer']);
+    expect(textOf(store.histories.B!)).toEqual(['user:b question', 'assistant:b answer']);
+    expect(store.saves.filter((entry) => entry.id === 'B' && entry.text.includes('ANSWER'))).toEqual([]);
+  });
+
+  it('A to B to A while A streams: A\'s live request ends in A\'s Chat, is shown and saved under A, nothing is stopped', async () => {
+    const chats = appChats();
+    const store = hostStore({ A: [], B });
+    const view = render(<AppOwnedChats chats={chats} activeId="A" session={store.session('A')} />);
+    await aStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="B" session={store.session('B')} />);
+    await waitFor(() => expect(store.loads).toContain('B'));
+    await settle();
+    view.rerender(<AppOwnedChats chats={chats} activeId="A" session={store.session('A')} />);
+    await waitFor(() => expect(store.loads.filter((id) => id === 'A')).toHaveLength(2));
+    await settle();
+    expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER ']);
+    await act(async () => { finish(requests[0]!, 'OF A'); });
+    await waitFor(() => expect(chats.get('A')!.status).toBe('ready'));
+    await settle();
+    expect(requests[0]!.aborted).toBe(false);
+    expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER OF A']);
+    expect(textOf(store.histories.A!)).toEqual(['user:a question', 'assistant:ANSWER OF A']);
+  });
+
+  // KNOWN DEFECT (main): A's answer completes in A's Chat while B is open, but is never saved under A (only the
+  // open chat is saved). Opening A again loads the stored partial answer into A's Chat (`setMessages`), so the
+  // completed answer is lost from the Chat and the store.
+  it.fails('KNOWN DEFECT A to B while A streams, A ends in the background, then A again: A shows and stores the whole answer', async () => {
+    const chats = appChats();
+    const store = hostStore({ A: [], B });
+    const view = render(<AppOwnedChats chats={chats} activeId="A" session={store.session('A')} />);
+    await aStreams(chats);
+    view.rerender(<AppOwnedChats chats={chats} activeId="B" session={store.session('B')} />);
+    await waitFor(() => expect(store.loads).toContain('B'));
+    await settle();
+    await act(async () => { finish(requests[0]!, 'OF A'); });
+    await waitFor(() => expect(chats.get('A')!.status).toBe('ready'));
+    await settle();
+    view.rerender(<AppOwnedChats chats={chats} activeId="A" session={store.session('A')} />);
+    await waitFor(() => expect(store.loads.filter((id) => id === 'A')).toHaveLength(2));
+    await settle();
+    expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:ANSWER OF A']);
+    expect(textOf(store.histories.A!)).toEqual(['user:a question', 'assistant:ANSWER OF A']);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------
 // C2: a draft id replaced by the real id while the first request runs (one built-in Vercel transport).
+// The "rename without a signal, with re-id'd messages" case (C2c) is expected to change with `renamedFrom`:
+// see the design's tables "Semantik ('background')" (rows "Entwurf->echt ...") and "Verhaltensaenderungen",
+// item 5, in docs/plans/2026-11-23-design-left-chat.md.
 // ---------------------------------------------------------------------------------------------------------------
 
 function VercelHost({ session, config }: { session: SessionConfig; config?: Partial<AiChatProviderConfig> }) {
@@ -143,9 +321,8 @@ function VercelHost({ session, config }: { session: SessionConfig; config?: Part
 
 function draftStore() {
   const histories: Record<string, ChatMessage[]> = {};
-  const saves: Array<{ id: string; messages: ChatMessage[] }> = [];
-  const save = (id: string, messages: ChatMessage[]) => { saves.push({ id, messages }); histories[id] = messages; };
-  return { histories, saves, save };
+  const save = (id: string, messages: ChatMessage[]) => { histories[id] = messages; };
+  return { histories, save };
 }
 
 /** Sends the first message in the draft chat and streams the start of its answer. */
@@ -155,6 +332,29 @@ async function firstRequestInDraft() {
   await waitFor(() => expect(requests).toHaveLength(1));
   for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
   await waitFor(() => expect(textOf(ctx.messages)).toEqual(['user:first question', 'assistant:ANSWER ']));
+}
+
+/** The draft's stored history under the real id: as stored, or re-id'd by the backend. */
+function draftLoad(store: ReturnType<typeof draftStore>, reId: boolean, gate?: Promise<void>) {
+  const loaded: string[] = [];
+  const load = async (id: string) => {
+    if (id !== 'real') return store.histories[id] ?? [];
+    const stored = store.histories.draft ?? [];
+    if (gate) await gate;
+    loaded.push(id);
+    return reId ? stored.map((message, index) => ({ ...message, id: `srv-${index}` })) : stored;
+  };
+  return { load, loaded };
+}
+
+/** Renames draft to real, ends the first request, then sends a second message. */
+async function renameAndFinish(view: ReturnType<typeof render>, load: SessionConfig['load'], loaded: string[], save: SessionConfig['save']) {
+  view.rerender(<VercelHost session={{ activeId: 'real', load, save }} />);
+  await waitFor(() => expect(loaded).toContain('real'));
+  await settle();
+  await act(async () => { finish(requests[0]!, 'DONE'); });
+  await waitFor(() => expect(ctx.isLoading).toBe(false));
+  await settle();
 }
 
 describe('C2 a draft id replaced by the real id while the first request runs', () => {
@@ -178,49 +378,93 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
 
   it('C2b with load returning the same messages: the answer ends in the chat under the real id, nothing is aborted', async () => {
     const store = draftStore();
-    // The app moves the draft's stored history to the real id.
-    const loaded: string[] = [];
-    const load = async (id: string) => { loaded.push(id); return store.histories[id === 'real' ? 'draft' : id] ?? []; };
+    const { load, loaded } = draftLoad(store, false);
     const view = render(<VercelHost session={{ activeId: 'draft', load, save: store.save }} />);
     await firstRequestInDraft();
-    view.rerender(<VercelHost session={{ activeId: 'real', load, save: store.save }} />);
-    await waitFor(() => expect(loaded).toContain('real'));
-    await settle();
-    await act(async () => { finish(requests[0]!, 'DONE'); });
-    await waitFor(() => expect(ctx.isLoading).toBe(false));
-    await settle();
+    await renameAndFinish(view, load, loaded, store.save);
     expect(requests[0]!.aborted).toBe(false);
     expect(textOf(ctx.messages)).toEqual(['user:first question', 'assistant:ANSWER DONE']);
     expect(textOf(store.histories.real!)).toEqual(['user:first question', 'assistant:ANSWER DONE']);
+    await act(async () => { ctx.send('second'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(carried(requests[1]!)).toEqual(['user:first question', 'assistant:ANSWER DONE', 'user:second']);
   });
 
-  it('C2c with load returning re-id\'d messages (as of main): not aborted; the loaded partial answer stays in the history as its own message next to the streamed answer, the chat shows one bubble', async () => {
+  it('C2b with a slow load and a chunk arriving while it loads (as of main): the end state is right; while loading the chat shows the answer without its question', async () => {
     const store = draftStore();
-    // The backend hands back what it stored for the draft under its own ids.
-    const loaded: string[] = [];
-    const load = async (id: string) => {
-      loaded.push(id);
-      return id === 'real'
-        ? (store.histories.draft ?? []).map((message, index) => ({ ...message, id: `srv-${index}` }))
-        : store.histories[id] ?? [];
-    };
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { load, loaded } = draftLoad(store, false, gate);
     const view = render(<VercelHost session={{ activeId: 'draft', load, save: store.save }} />);
     await firstRequestInDraft();
     view.rerender(<VercelHost session={{ activeId: 'real', load, save: store.save }} />);
+    await waitFor(() => expect(ctx.activeSessionId).toBe('real'));
+    await settle();
+    // The provider emptied the transport for the load; the chunk is written into the empty history.
+    await act(async () => { requests[0]!.push({ type: 'text-delta', id: 't', delta: 'MID ' }); });
+    await waitFor(() => expect(textOf(ctx.messages)).toEqual(['assistant:ANSWER MID ']));
+    await act(async () => { release(); });
     await waitFor(() => expect(loaded).toContain('real'));
     await settle();
     await act(async () => { finish(requests[0]!, 'DONE'); });
     await waitFor(() => expect(ctx.isLoading).toBe(false));
     await settle();
     expect(requests[0]!.aborted).toBe(false);
-    // Shown: the loaded question and one answer bubble with the whole streamed text.
+    expect(textOf(ctx.messages)).toEqual(['user:first question', 'assistant:ANSWER MID DONE']);
+    expect(textOf(store.histories.real!)).toEqual(['user:first question', 'assistant:ANSWER MID DONE']);
+    await act(async () => { ctx.send('second'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(carried(requests[1]!)).toEqual(['user:first question', 'assistant:ANSWER MID DONE', 'user:second']);
+  });
+
+  // KNOWN DEFECT (main), same as below plus the race: the stored partial and the streamed answer both stay.
+  it.fails('KNOWN DEFECT C2c with a slow load and a chunk arriving while it loads: the next request carries one answer', async () => {
+    const store = draftStore();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { load, loaded } = draftLoad(store, true, gate);
+    const view = render(<VercelHost session={{ activeId: 'draft', load, save: store.save }} />);
+    await firstRequestInDraft();
+    view.rerender(<VercelHost session={{ activeId: 'real', load, save: store.save }} />);
+    await waitFor(() => expect(ctx.activeSessionId).toBe('real'));
+    await settle();
+    await act(async () => { requests[0]!.push({ type: 'text-delta', id: 't', delta: 'MID ' }); });
+    await act(async () => { release(); });
+    await waitFor(() => expect(loaded).toContain('real'));
+    await settle();
+    await act(async () => { finish(requests[0]!, 'DONE'); });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(requests[0]!.aborted).toBe(false);
+    expect(textOf(ctx.messages)).toEqual(['user:first question', 'assistant:ANSWER MID DONE']);
+    await act(async () => { ctx.send('second'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(carried(requests[1]!)).toEqual(['user:first question', 'assistant:ANSWER MID DONE', 'user:second']);
+  });
+
+  it('C2c with load returning re-id\'d messages: the first request is not aborted and the chat shows one answer bubble', async () => {
+    const store = draftStore();
+    const { load, loaded } = draftLoad(store, true);
+    const view = render(<VercelHost session={{ activeId: 'draft', load, save: store.save }} />);
+    await firstRequestInDraft();
+    await renameAndFinish(view, load, loaded, store.save);
+    expect(requests[0]!.aborted).toBe(false);
     expect(textOf(ctx.messages)).toEqual(['user:first question', 'assistant:ANSWER DONE']);
-    const streamedId = shownIds()[1]!;
-    expect(shownIds()).toEqual(['srv-0', streamedId]);
-    expect(streamedId).not.toBe('srv-1');
-    // Stored (and held by the transport): the loaded partial answer `srv-1` stays as a message of its own.
-    expect(store.histories.real!.map((message) => message.id)).toEqual(['srv-0', 'srv-1', streamedId]);
-    expect(textOf(store.histories.real!)).toEqual(['user:first question', 'assistant:ANSWER ', 'assistant:ANSWER DONE']);
+    expect(shownIds()[0]).toBe('srv-0');
+  });
+
+  // KNOWN DEFECT (main): the loaded partial answer `srv-1` stays in the history as a message of its own next to
+  // the streamed answer; the UI merges them into one bubble, but the store and the next request carry both.
+  it.fails('KNOWN DEFECT C2c: neither the stored history nor the next request carries the loaded partial answer next to the streamed one', async () => {
+    const store = draftStore();
+    const { load, loaded } = draftLoad(store, true);
+    const view = render(<VercelHost session={{ activeId: 'draft', load, save: store.save }} />);
+    await firstRequestInDraft();
+    await renameAndFinish(view, load, loaded, store.save);
+    await act(async () => { ctx.send('second'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(textOf(store.histories.real!).filter((text) => text.startsWith('assistant:'))).toEqual(['assistant:ANSWER DONE']);
+    expect(carried(requests[1]!)).toEqual(['user:first question', 'assistant:ANSWER DONE', 'user:second']);
   });
 });
 
@@ -228,69 +472,88 @@ describe('C2 a draft id replaced by the real id while the first request runs', (
 // C3: a wrapper that hands the provider a new transport object on every render.
 // ---------------------------------------------------------------------------------------------------------------
 
-let renders = 0;
+const renders = { host: 0, inner: 0 };
+function RenderCount() {
+  renders.inner += 1;
+  return null;
+}
 function WrappedHost({ session }: { session: SessionConfig }) {
-  renders += 1;
+  renders.host += 1;
   const transport = useVercelAiChatTransport({ endpoint: '/api/chat' });
   // A new object per render, as an app's own wrapper often does.
   const wrapped: ChatTransport = { ...transport, stop: () => transport.stop() };
   return (
     <AiChatProvider transport={wrapped} session={session}>
       <Probe />
+      <RenderCount />
       <MessageList />
     </AiChatProvider>
   );
 }
+const countRenders = () => ({ ...renders });
+const since = (start: typeof renders) => ({ host: renders.host - start.host, inner: renders.inner - start.inner });
 
 describe('C3 a transport wrapper that is a new object on every render', () => {
-  it('renders a bounded number of times; send, stop and a switch act on the right request', async () => {
-    renders = 0;
-    const histories: Record<string, ChatMessage[]> = { A: [], B };
-    const session = (activeId: string): SessionConfig => ({
-      activeId,
-      load: async (id: string) => histories[id] ?? [],
-      save: (id: string, messages: ChatMessage[]) => { histories[id] = messages; },
-    });
-    const view = render(<WrappedHost session={session('A')} />);
+  it('renders a bounded number of times (idle and while streaming); send, stop and a switch act on the right request', async () => {
+    renders.host = 0;
+    renders.inner = 0;
+    const store = hostStore({ A: [], B });
+    const view = render(<WrappedHost session={store.session('A')} />);
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     await settle();
-    const idle = renders;
+    // Measured on main: 3 renders of the host and of a component inside the provider until idle.
+    expect(renders.host).toBeLessThanOrEqual(6);
+    expect(renders.inner).toBeLessThanOrEqual(6);
+    let start = countRenders();
     await settle();
-    expect(renders).toBe(idle);
+    expect(since(start)).toEqual({ host: 0, inner: 0 });
 
     // Send: one request with A's message.
+    start = countRenders();
     await act(async () => { ctx.send('a question'); });
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(carried(requests[0]!)).toEqual(['user:a question']);
     for (const chunk of textChunks('partial')) requests[0]!.push(chunk);
     await waitFor(() => expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:partial']));
+    for (let index = 0; index < 5; index += 1) {
+      await act(async () => { requests[0]!.push({ type: 'text-delta', id: 't', delta: ` ${index}` }); });
+    }
+    await waitFor(() => expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:partial 0 1 2 3 4']));
+    // Measured on main: 8 renders each for the send and six streamed chunks; about twice that is the bound.
+    expect(since(start).host).toBeLessThanOrEqual(16);
+    expect(since(start).inner).toBeLessThanOrEqual(16);
+    // While streaming and nothing arrives: no render.
+    start = countRenders();
+    await settle();
+    expect(since(start)).toEqual({ host: 0, inner: 0 });
 
     // Stop: aborts that request, the partial answer stays, the turn is recorded as stopped.
     await act(async () => { ctx.stop(); });
     await waitFor(() => expect(ctx.isLoading).toBe(false));
     expect(requests[0]!.aborted).toBe(true);
-    expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:partial']);
+    expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:partial 0 1 2 3 4']);
     const aUser = ctx.messages[0]!.id;
     expect(ctx.turnOutcomes.get(aUser)?.status).toBe('aborted');
 
-    // Switch while idle: B is shown and B's next request carries B's history only.
-    view.rerender(<WrappedHost session={session('B')} />);
+    // Switch while idle: B is shown and B's next request carries B's history only; stop acts on B's request.
+    view.rerender(<WrappedHost session={store.session('B')} />);
     await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     await act(async () => { ctx.send('b follow-up'); });
     await waitFor(() => expect(requests).toHaveLength(2));
     expect(carried(requests[1]!)).toEqual(['user:b question', 'assistant:b answer', 'user:b follow-up']);
-    await act(async () => { requests[1]!.answer('B DONE'); });
+    for (const chunk of textChunks('B partial')) requests[1]!.push(chunk);
+    await waitFor(() => expect(JSON.stringify(ctx.messages)).toContain('B partial'));
+    await act(async () => { ctx.stop(); });
     await waitFor(() => expect(ctx.isLoading).toBe(false));
-    expect(requests[1]!.aborted).toBe(false);
-    expect(textOf(histories.A!)).toEqual(['user:a question', 'assistant:partial']);
+    expect(requests[1]!.aborted).toBe(true);
+    expect(ctx.turnOutcomes.get(ctx.messages[2]!.id)?.status).toBe('aborted');
+    expect(textOf(store.histories.A!)).toEqual(['user:a question', 'assistant:partial 0 1 2 3 4']);
 
-    // Bounded: no render loop once idle again.
+    // No render loop once idle again.
+    start = countRenders();
     await settle();
-    const after = renders;
-    await settle();
-    expect(renders).toBe(after);
-    expect(after).toBeLessThan(200);
+    expect(since(start)).toEqual({ host: 0, inner: 0 });
   });
 });
 
@@ -299,26 +562,93 @@ describe('C3 a transport wrapper that is a new object on every render', () => {
 // pinned in chat-queue-session-switch, turn-outcome-attribution and turn-end-callback; this adds what is missing.
 // ---------------------------------------------------------------------------------------------------------------
 
+/** What the provider does with the transport object it is given: property writes and reads of absent members. */
+function watched(chat: StreamingChat) {
+  const writes: PropertyKey[] = [];
+  const absentReads: PropertyKey[] = [];
+  let current: ChatTransport | null = null;
+  let proxy: ChatTransport | null = null;
+  const transport = () => {
+    const next = chat.transport;
+    // One proxy per transport state, as an app would hand the same object until something changed.
+    if (!current || next.messages !== current.messages || next.status !== current.status || next.error !== current.error) {
+      current = Object.freeze({ ...next });
+      proxy = new Proxy(current, {
+        get(target, key, receiver) {
+          if (typeof key === 'string' && !(key in target)) absentReads.push(key);
+          return Reflect.get(target, key, receiver);
+        },
+        set(_target, key) { writes.push(key); return false; },
+        defineProperty(_target, key) { writes.push(key); return false; },
+        deleteProperty(_target, key) { writes.push(key); return false; },
+      });
+    }
+    return proxy!;
+  };
+  return { writes, absentReads, transport };
+}
+
+function WatchedHost({ chat, transport, session }: { chat: StreamingChat; transport: () => ChatTransport; session: SessionConfig }) {
+  const [, force] = React.useReducer((count: number) => count + 1, 0);
+  useEffect(() => chat.subscribe(force), [chat]);
+  return (
+    <AiChatProvider transport={transport()} session={session}>
+      <Probe />
+      <MessageList />
+    </AiChatProvider>
+  );
+}
+
 describe('C4 a custom transport without a session capability', () => {
-  it('a host switch A to B to A while A runs neither stops nor resends; the transport object is the app\'s, unchanged', async () => {
-    const histories: Record<string, ChatMessage[]> = { A: [], B };
-    const session = (activeId: string): SessionConfig => ({
-      activeId,
-      load: async (id: string) => histories[id] ?? [],
-      save: (id: string, messages: ChatMessage[]) => { histories[id] = messages; },
-    });
+  it('a host switch A to B to A while A runs neither stops nor resends; the provider writes nothing into the transport and asks it for no session capability', async () => {
+    const store = hostStore({ A: [], B });
     const chat = new StreamingChat();
-    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    const seen = watched(chat);
+    const view = render(<WatchedHost chat={chat} transport={seen.transport} session={store.session('A')} />);
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     await act(async () => { ctx.send('a question'); });
     act(() => chat.stream([{ type: 'text', text: 'partial' }]));
-    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    view.rerender(<WatchedHost chat={chat} transport={seen.transport} session={store.session('B')} />);
     await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
-    view.rerender(<Host chat={chat} config={{ session: session('A') }} />);
+    view.rerender(<WatchedHost chat={chat} transport={seen.transport} session={store.session('A')} />);
     await waitFor(() => expect(ctx.activeSessionId).toBe('A'));
+    await settle();
+    await act(async () => { chat.finish(); });
     await settle();
     expect(chat.stop).not.toHaveBeenCalled();
     expect(chat.sendMessage).toHaveBeenCalledTimes(1);
-    expect(Object.keys(chat.transport)).not.toContain('sessions');
+    expect(seen.writes).toEqual([]);
+    // The optional members it looks for are the ones of today's ChatTransport; no session capability.
+    expect([...new Set(seen.absentReads)].sort()).toEqual([
+      'addToolOutput', 'continueAfterBudgetStop', 'continueTurn', 'setRequestLanguage', 'setUiOutcomeReporting',
+    ]);
+  });
+
+  // As of main (the shared transport): B is busy with A's request; stop() in B stops it (the only one running),
+  // records nothing on B's turn and the outcome joins A's turn. B's pipeline state shows the stop (R4-like).
+  it('stop() in B after a host switch while A runs (as of main): stops the one shared request, the aborted outcome joins A\'s turn', async () => {
+    const store = hostStore({ A: [], B });
+    const chat = new StreamingChat();
+    const seen = watched(chat);
+    const view = render(<WatchedHost chat={chat} transport={seen.transport} session={store.session('A')} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    const aUser = ctx.messages[0]!.id;
+    act(() => chat.stream([{ type: 'text', text: 'partial' }]));
+    view.rerender(<WatchedHost chat={chat} transport={seen.transport} session={store.session('B')} />);
+    await waitFor(() => expect(shownIds()).toEqual(['b-u1', 'b-a1']));
+    expect(ctx.isLoading).toBe(true);
+    await act(async () => { ctx.stop(); });
+    await settle();
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    expect(ctx.isLoading).toBe(false);
+    expect(textOf(ctx.messages)).toEqual(['user:b question', 'assistant:b answer']);
+    expect(ctx.turnOutcomes.size).toBe(0);
+    expect(ctx.pipelineState?.status).toBe('aborted');
+    expect(textOf(store.histories.B!)).toEqual(['user:b question', 'assistant:b answer']);
+    view.rerender(<WatchedHost chat={chat} transport={seen.transport} session={store.session('A')} />);
+    await waitFor(() => expect(store.loads.filter((id) => id === 'A')).toHaveLength(2));
+    await waitFor(() => expect(ctx.turnOutcomes.get(aUser)?.status).toBe('aborted'));
+    expect(textOf(ctx.messages)).toEqual(['user:a question', 'assistant:partial']);
   });
 });

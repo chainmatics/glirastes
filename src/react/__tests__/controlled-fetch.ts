@@ -9,6 +9,11 @@ export interface ControlledRequest {
   push(chunk: Record<string, unknown>): void;
   /** Ends the stream as the server does (`[DONE]`, then close). */
   end(): void;
+  /**
+   * Ends a stream that is still open the way a dropped connection does (an `AbortError`), so the AI SDK sends
+   * nothing after it; for the end of a test.
+   */
+  close(): void;
   /** Streams a text answer: start, one step with `text`, finish, and ends the stream unless `open`. */
   answer(text: string, options?: { open?: boolean }): void;
 }
@@ -40,6 +45,11 @@ export function stubControlledFetch() {
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         open = false;
         controller.close();
+      },
+      close() {
+        if (!open) return;
+        open = false;
+        controller.error(new DOMException('The test ended.', 'AbortError'));
       },
       answer(text, options) {
         for (const chunk of textChunks(text)) request.push(chunk);

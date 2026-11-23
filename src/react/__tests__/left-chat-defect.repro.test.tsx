@@ -2,14 +2,15 @@
 // REPRODUCTIONS (`it.fails`, red on main by design): a request of chat A that still runs when the host opens
 // chat B (`session.activeId`) writes into B, because one transport (one AI SDK `Chat`) serves every chat.
 // Design: docs/plans/2026-11-23-design-left-chat.md (variant V1, session pool + `transport.sessions`).
-// The pull requests of that design flip them to `it`: R1 to R4 the transport pool and the provider policy
+// The pull requests of that design flip them to `it`: R1, R3 and R4 the transport pool and the provider policy
 // (PR2 and PR3 of the design's cut; the fake transport then gets the `sessions` capability), R5 the
-// `VercelAiChat` step (PR5). `clear()` during a run is not here: it is fixed and tested on its own.
+// `VercelAiChat` step (PR5). R2 (`clear()` during a run) is not here: it ships with its own fix (#171) as a
+// passing test (clear-during-run.test.tsx).
 // The patterns the fix must keep are pinned in left-chat-patterns.test.tsx.
 
 import React from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import { MessageList } from '../components/message-list.js';
 import { useVercelAiChatTransport } from '../transports/vercel.js';
@@ -22,7 +23,12 @@ let requests: ControlledRequest[];
 beforeEach(() => {
   ({ requests } = stubControlledFetch());
 });
-afterEach(cleanup);
+afterEach(() => {
+  // No stream stays open past its test.
+  for (const request of requests) request.close();
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const user = (id: string, text: string): ChatMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
 const answer = (id: string, text: string): ChatMessage => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
@@ -155,19 +161,12 @@ describe('R4 the pipeline of a left chat', () => {
 });
 
 describe('R5 VercelAiChat with sessions', () => {
-  it.fails('a continuation request of chat A carries sessionId A, also when B is active by then', async () => {
-    const sessions = (activeId: string): SessionConfig => ({
-      activeId,
-      load: async () => [],
-      save: () => {},
-    });
-    const view = render(<VercelAiChat endpoint="/api/chat" sessions={sessions('A')}><Probe /></VercelAiChat>);
+  /** A's request asks for an approval; the user approves while the run still streams. */
+  async function approvedWhileStreaming() {
     await waitFor(() => expect(ctx.canCompose).toBe(true));
     await act(async () => { ctx.send('delete t1'); });
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0]!.body.sessionId).toBe('A');
-    // A's run asks for an approval; the user approves while the run still streams, so the AI SDK sends the
-    // continuation once the run ended.
     await act(async () => {
       requests[0]!.push({ type: 'start' });
       requests[0]!.push({ type: 'start-step' });
@@ -176,13 +175,36 @@ describe('R5 VercelAiChat with sessions', () => {
     });
     await waitFor(() => expect(ctx.pendingApprovals).toHaveLength(1));
     await act(async () => { await ctx.approve('ap-1'); });
+  }
+  const endRun = () => act(async () => {
+    requests[0]!.push({ type: 'finish-step' });
+    requests[0]!.push({ type: 'finish' });
+    requests[0]!.end();
+  });
+  const sessions = (activeId: string): SessionConfig => ({ activeId, load: async () => [], save: () => {} });
+
+  // Control for the repro below: the same setup without a switch works today, so a broken setup cannot hide
+  // behind `it.fails`.
+  it('control: without a switch the continuation is sent once the run ended, with sessionId A and the approval answer', async () => {
+    render(<VercelAiChat endpoint="/api/chat" sessions={sessions('A')}><Probe /></VercelAiChat>);
+    await approvedWhileStreaming();
+    expect(requests).toHaveLength(1);
+    await endRun();
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]!.body.sessionId).toBe('A');
+    const parts = (requests[1]!.body.messages as Array<{ role: string; parts: Array<{ toolCallId?: string; approval?: unknown }> }>)
+      .at(-1)!.parts.filter((part) => part.toolCallId === 'c1');
+    expect(parts.map((part) => part.approval)).toEqual([expect.objectContaining({ id: 'ap-1', approved: true })]);
+    await act(async () => { requests[1]!.answer('Deleted.'); });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+  });
+
+  it.fails('a continuation request of chat A carries sessionId A, also when B is active by then', async () => {
+    const view = render(<VercelAiChat endpoint="/api/chat" sessions={sessions('A')}><Probe /></VercelAiChat>);
+    await approvedWhileStreaming();
     view.rerender(<VercelAiChat endpoint="/api/chat" sessions={sessions('B')}><Probe /></VercelAiChat>);
     await settle();
-    await act(async () => {
-      requests[0]!.push({ type: 'finish-step' });
-      requests[0]!.push({ type: 'finish' });
-      requests[0]!.end();
-    });
+    await endRun();
     await waitFor(() => expect(requests).toHaveLength(2));
     expect(requests[1]!.body.sessionId).toBe('A');
   });
