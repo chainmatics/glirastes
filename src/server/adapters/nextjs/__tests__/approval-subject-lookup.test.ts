@@ -3,7 +3,7 @@ import { createAiSdkTools } from '../../../../runtime/ai-sdk/engine.js';
 import type { ManagedTurnGuard } from '../../../../runtime/managed-turn.js';
 import { ToolExecutionDeniedError } from '../../../../runtime/tool-denial.js';
 import { z } from 'zod';
-import { parseApprovalSubjectsPart } from '../../../../contracts/approval-subject.js';
+import { MAX_PART_SUBJECTS, parseApprovalSubjectsPart } from '../../../../contracts/approval-subject.js';
 import { defineEndpointTool, defineTool, type PiiShield, type ToolContext } from '../../../../types.js';
 import { endpointToolsToRegistry } from '../../../core/index.js';
 import {
@@ -621,5 +621,177 @@ describe('approval subject lookups and toolMiddleware', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     await late?.catch(() => {});
     expect(backend.calls).toEqual([]);
+  });
+});
+
+describe('arguments that hold a list of ids', () => {
+  const people: Record<string, string> = { u1: 'Ann Admin', u2: 'Bob Builder', u3: 'Cy Coder', u4: 'Di Dev', u5: 'Ed Editor', u6: 'Flo Former' };
+  const userRoutes = (names: Record<string, string> = people) => Object.fromEntries(Object.entries(names).map(([id, displayName]) => [
+    `GET /users/${id}`, () => ok({ user_id: id, displayName }),
+  ]));
+  /** `teams.create` (leader and members as references named in refs) and `teams/[teamId]/members` POST (userIds as target). */
+  const teamTools = (approvalSubject: Record<string, unknown> = {}) => endpointToolsToRegistry([
+    defineEndpointTool({
+      id: 'users.get', toolName: 'get_user', description: 'Get a user.', method: 'GET', path: '/users/:user_id',
+      inputSchema: z.object({ user_id: z.string() }).strict(),
+      outputEntities: [{ type: 'user', id: 'user_id', name: 'displayName', path: '' }],
+      entityLookup: { type: 'user', params: { user_id: 'user_id' } },
+    }),
+    defineEndpointTool({
+      id: 'teams.create', toolName: 'create_team', description: 'Create a team.', method: 'POST', path: '/teams',
+      inputSchema: z.object({ name: z.string(), leaderId: z.string(), memberIds: z.array(z.string()) }).strict(),
+      inputEntities: [{ type: 'user', args: 'leaderId', role: 'reference' }, { type: 'user', args: 'memberIds', role: 'reference' }],
+      approvalSubject: { refs: ['leaderId', 'memberIds'], ...approvalSubject },
+    }),
+    defineEndpointTool({
+      id: 'teams.members.add', toolName: 'add_team_members', description: 'Add members.', method: 'POST', path: '/teams/:teamId/members',
+      inputSchema: z.object({ teamId: z.string(), userIds: z.array(z.string()) }).strict(),
+      inputEntities: [{ type: 'team', args: 'teamId', role: 'parent' }, { type: 'user', args: 'userIds' }],
+    }),
+  ]);
+  const create = (memberIds: unknown, leaderId = 'u1') => ({ toolName: 'create_team', toolCallId: 'c1', input: { name: 'Ops', leaderId, memberIds } });
+  const summary = (subjects: ReadonlyArray<Record<string, unknown>>) => subjects.map((subject) => (
+    [subject.path, subject.id, subject.check === 'found' ? subject.name : subject.reason]
+  ));
+
+  it('looks every id of a list up as its own subject under the argument path, once per distinct id', async () => {
+    const { resolver, backend } = resolverFor(userRoutes(), { registry: teamTools() });
+    expect(resolver.isDeclared('create_team')).toBe(true);
+    expect(await resolver.resolve(create(['u2', 'u1', 'u2']))).toBeUndefined();
+    const { part, canonical } = resolver.take('c1')!;
+    expect(summary(part.subjects as never)).toEqual([
+      ['leaderId', 'u1', 'Ann Admin'],
+      ['memberIds', 'u2', 'Bob Builder'],
+      ['memberIds', 'u1', 'Ann Admin'],
+    ]);
+    expect(part.subjects[1]).toEqual({
+      type: 'user', role: 'reference', id: 'u2', ids: { user_id: 'u2' }, path: 'memberIds',
+      status: 'named', check: 'found', name: 'Bob Builder', idKind: 'opaque',
+    });
+    // The leader and the same id in the list share one read.
+    expect(backend.calls.map((call) => call.path)).toEqual(['/users/u1', '/users/u2']);
+    expect(parseApprovalSubjectsPart(part)?.subjects).toHaveLength(3);
+    expect(canonical).toHaveLength(3);
+    // A list of a target reference without approvalSubject is looked up too (its type has a read source).
+    expect(resolver.isDeclared('add_team_members')).toBe(true);
+    await resolver.resolve({ toolName: 'add_team_members', toolCallId: 'c2', input: { teamId: 't1', userIds: ['u3', 'u4'] } });
+    expect(summary(resolver.take('c2')!.part.subjects as never)).toEqual([['userIds', 'u3', 'Cy Coder'], ['userIds', 'u4', 'Di Dev']]);
+  });
+
+  it('refuses the call when one id of the list does not exist', async () => {
+    const { resolver, backend } = resolverFor(userRoutes({ u1: 'Ann Admin', u2: 'Bob Builder' }), { registry: teamTools() });
+    const outcome = await resolver.resolve(create(['u2', 'gone']));
+    expect(outcome?.deny).toBeInstanceOf(ApprovalSubjectRefusedError);
+    expect(outcome?.deny).toMatchObject({ code: 'approval_subject_not_found', entityType: 'user' });
+    expect(resolver.take('c1')).toBeUndefined();
+    expect(backend.calls.map((call) => call.path)).toContain('/users/gone');
+  });
+
+  it('keeps an element that cannot be checked a not checkable subject of its own (warn), refused with block', async () => {
+    const routes = { ...userRoutes(), 'GET /users/u3': () => failure(503) };
+    const warn = resolverFor(routes, { registry: teamTools() });
+    expect(await warn.resolver.resolve(create(['u2', 'u3']))).toBeUndefined();
+    expect(summary(warn.resolver.take('c1')!.part.subjects as never)).toEqual([
+      ['leaderId', 'u1', 'Ann Admin'], ['memberIds', 'u2', 'Bob Builder'], ['memberIds', 'u3', 'unavailable'],
+    ]);
+    const block = resolverFor(routes, { registry: teamTools({ onUnavailable: 'block' }) });
+    expect((await block.resolver.resolve(create(['u2', 'u3'])))?.deny).toMatchObject({ code: 'approval_subject_unavailable' });
+  });
+
+  it('counts each element against maxSubjectsPerCall and maxLookupsPerTurn: the rest are limit, never looked up', async () => {
+    const perCall = resolverFor(userRoutes(), { registry: teamTools() });
+    await perCall.resolver.resolve(create(['u2', 'u3', 'u4', 'u5', 'u6']));
+    expect(summary(perCall.resolver.take('c1')!.part.subjects as never)).toEqual([
+      ['leaderId', 'u1', 'Ann Admin'], ['memberIds', 'u2', 'Bob Builder'], ['memberIds', 'u3', 'Cy Coder'], ['memberIds', 'u4', 'Di Dev'],
+      ['memberIds', 'u5', 'limit'], ['memberIds', 'u6', 'limit'],
+    ]);
+    expect(perCall.backend.calls.map((call) => call.path)).toEqual(['/users/u1', '/users/u2', '/users/u3', '/users/u4']);
+
+    const perTurn = resolverFor(userRoutes(), {
+      registry: teamTools(), limits: { ...DEFAULT_APPROVAL_SUBJECT_LIMITS, maxSubjectsPerCall: 16, maxLookupsPerTurn: 2 },
+    });
+    await perTurn.resolver.resolve(create(['u2', 'u3']));
+    expect(summary(perTurn.resolver.take('c1')!.part.subjects as never).map((entry) => entry[2])).toEqual(['Ann Admin', 'Bob Builder', 'limit']);
+    expect(perTurn.backend.calls).toHaveLength(2);
+
+    const block = resolverFor(userRoutes(), { registry: teamTools({ onUnavailable: 'block' }) });
+    expect((await block.resolver.resolve(create(['u2', 'u3', 'u4', 'u5'])))?.deny).toMatchObject({ code: 'approval_subject_unavailable' });
+  });
+
+  it('names nothing for an empty list, and never passes a list it cannot index (non-id element, more ids than a part holds)', async () => {
+    const empty = resolverFor(userRoutes(), { registry: teamTools({ onUnavailable: 'block' }) });
+    expect(await empty.resolver.resolve(create([]))).toBeUndefined();
+    expect(summary(empty.resolver.take('c1')!.part.subjects as never)).toEqual([['leaderId', 'u1', 'Ann Admin']]);
+
+    const many = Array.from({ length: MAX_PART_SUBJECTS + 1 }, (_, index) => `x${index}`);
+    for (const memberIds of [['u2', ''], ['u2', { id: 'u3' }], many]) {
+      const block = resolverFor(userRoutes(), { registry: teamTools({ onUnavailable: 'block' }) });
+      expect((await block.resolver.resolve(create(memberIds)))?.deny).toMatchObject({ code: 'approval_subject_unavailable' });
+      for (const recheck of ['exists', 'unchanged'] as const) {
+        const again = resolverFor(userRoutes(), { registry: teamTools({ recheck }) });
+        expect(await again.resolver.recheck({ toolName: 'create_team', input: create(memberIds).input, digestOf: () => 'x', subjectDigest: 'x' }))
+          .toBe('approval_subject_unavailable');
+      }
+      // warn: the card asks without server subjects for the list, so the browser keeps its own for that path.
+      const warn = resolverFor(userRoutes(), { registry: teamTools() });
+      expect(await warn.resolver.resolve(create(memberIds))).toBeUndefined();
+      expect(warn.resolver.take('c1')!.part.subjects.map((subject) => subject.path)).toEqual(['leaderId']);
+    }
+  });
+
+  it('keeps a composite key with a list argument unsupported: no subject, block refuses', async () => {
+    const registry = teamTools();
+    Object.assign(registry.add_team_members!, {
+      inputEntities: [{ type: 'membership', args: ['teamId', 'userIds'] }], approvalSubject: { onUnavailable: 'block' },
+    });
+    const { resolver, backend } = resolverFor(userRoutes(), { registry });
+    expect((await resolver.resolve({ toolName: 'add_team_members', toolCallId: 'c1', input: { teamId: 't1', userIds: ['u2'] } }))?.deny)
+      .toMatchObject({ code: 'approval_subject_unavailable' });
+    expect(backend.calls).toHaveLength(0);
+  });
+
+  it('restores shielded ids element by element and shows them as the call carries them', async () => {
+    const shield = {
+      rehydrateArgsAsync: async (args: Record<string, unknown>, session: string) => (
+        session === 's1' ? JSON.parse(JSON.stringify(args).replaceAll('[USER_1]', 'u2').replaceAll('[USER_2]', 'u3')) : args),
+      anonymizeResult: async (value: unknown) => value,
+    } as unknown as PiiShield;
+    const { resolver, backend } = resolverFor(userRoutes(), { registry: teamTools({ recheck: 'exists' }), shield: { shield, sessionId: () => 's1' } });
+    expect(await resolver.resolve(create(['[USER_1]', '[USER_2]']))).toBeUndefined();
+    expect(backend.calls.map((call) => call.path)).toEqual(['/users/u1', '/users/u2', '/users/u3']);
+    expect(summary(resolver.take('c1')!.part.subjects as never)).toEqual([
+      ['leaderId', 'u1', 'Ann Admin'], ['memberIds', '[USER_1]', 'Bob Builder'], ['memberIds', '[USER_2]', 'Cy Coder'],
+    ]);
+    // A recheck restores the list the same way.
+    const again = resolverFor(userRoutes(), { registry: teamTools({ recheck: 'exists' }), shield: { shield, sessionId: () => 's1' } });
+    expect(await again.resolver.recheck({ toolName: 'create_team', input: create(['[USER_1]', '[USER_2]']).input, digestOf: () => '' })).toBeUndefined();
+    const gone = resolverFor(userRoutes({ u1: 'Ann Admin', u2: 'Bob Builder' }), {
+      registry: teamTools({ recheck: 'exists' }), shield: { shield, sessionId: () => 's1' },
+    });
+    expect(await gone.resolver.recheck({ toolName: 'create_team', input: create(['[USER_1]', '[USER_2]']).input, digestOf: () => '' }))
+      .toBe('approval_subject_gone');
+  });
+
+  it('binds the subjects of a list in the order of the bound input: recheck exists and unchanged', async () => {
+    const digestOf = (value: unknown) => JSON.stringify(value);
+    const names = { ...people };
+    const routes = Object.fromEntries(Object.keys(people).map((id) => [`GET /users/${id}`, () => (
+      names[id] === undefined ? failure(404) : ok({ user_id: id, displayName: names[id] }))]));
+    const { resolver } = resolverFor(routes, { registry: teamTools({ recheck: 'unchanged' }) });
+    await resolver.resolve(create(['u2', 'u3']));
+    const signed = digestOf(resolver.take('c1')!.canonical);
+    // The same call resolves to the same canonical subjects in a later request.
+    const fresh = resolverFor(routes, { registry: teamTools({ recheck: 'unchanged' }) }).resolver;
+    await fresh.resolve(create(['u2', 'u3']));
+    expect(digestOf(fresh.take('c1')!.canonical)).toBe(signed);
+    const recheck = (tool: Record<string, unknown>) => resolverFor(routes, { registry: teamTools(tool) }).resolver.recheck({
+      toolName: 'create_team', input: create(['u2', 'u3']).input, subjectDigest: signed, digestOf,
+    });
+    expect(await recheck({ recheck: 'unchanged' })).toBeUndefined();
+    names.u3 = 'Cy Renamed';
+    expect(await recheck({ recheck: 'unchanged' })).toBe('approval_subject_changed');
+    expect(await recheck({ recheck: 'exists' })).toBeUndefined();
+    delete names.u3;
+    expect(await recheck({ recheck: 'exists' })).toBe('approval_subject_gone');
   });
 });

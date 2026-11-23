@@ -260,8 +260,6 @@
   "MappingEntry": "Pre-Foundation root-barrel API (hand-written tool definitions, pipeline, PII); Foundation apps derive tools with glirastes tools refresh.",
   "MaterializedDeploymentRevisions": "Managed-mode sync client internals; glirastes connect and sync drive them.",
   "MemoryRuntimeStateStore": "Managed-mode sync client internals; glirastes connect and sync drive them.",
-  "Mention": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
-  "MentionConfig": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "MentionData": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "MentionSerializationConfig": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",
   "MessagePart": "Prop, part or helper type of the React chat; the skill teaches the component or hook it belongs to.",

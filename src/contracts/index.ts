@@ -203,6 +203,21 @@ export type {
 } from './ui-outcome.js';
 
 export {
+  canonicalMentionLabel,
+  isMentionMarkerId,
+  isMentionMarkerType,
+  MENTION_MARKER_MAX_LABEL_LENGTH,
+  parseMentionMarkers,
+  serializeMentionMarker,
+} from './mention-marker.js';
+export type {
+  CanonicalMentionLabelOptions,
+  MentionMarker,
+  ParsedMentionMarker,
+  SerializeMentionMarkerOptions,
+} from './mention-marker.js';
+
+export {
   isViewContextRoute,
   resolveViewContextPolicy,
   sanitizeViewContext,

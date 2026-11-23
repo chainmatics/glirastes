@@ -51,13 +51,24 @@ and `parent` are looked up. Adjust per tool with `approvalSubject`:
 
 ```ts
 approvalSubject: {
-  refs: ['playlist_id'],          // which inputEntities (argument paths; a composite key joined with ,). Default: target + parent; a `reference` only when named
+  refs: ['playlist_id'],          // which inputEntities (argument paths; a composite key joined with ,; a list of ids too). Default: target + parent; a `reference` only when named
   onUnavailable: 'block',         // default 'warn': a card with a warning; 'block': no card, the model gets approval_subject_unavailable
   onForbidden: 'warn',            // default 'deny': a 403 is refused like a 404; 'warn': a card "not checkable"
   recheck: 'exists',              // default 'none'; 'exists' | 'unchanged': check again before the approved call runs
   preview: { /* see below */ },
 }
 // approvalSubject: false turns the lookup off for this tool.
+```
+
+An argument that holds a list of ids is declared like a single id; each id
+in it is looked up (see *Lists of ids* below):
+
+```ts
+// teams.create: leader and members are references, so refs names them
+inputEntities: [{ type: 'user', args: 'leaderId', role: 'reference' }, { type: 'user', args: 'memberIds', role: 'reference' }],
+approvalSubject: { refs: ['leaderId', 'memberIds'] },
+// teams/[teamId]/members POST: the added users are the target (looked up by default)
+inputEntities: [{ type: 'team', args: 'teamId', role: 'parent' }, { type: 'user', args: 'userIds' }],
 ```
 
 **3. Where to declare** (highest first; a higher level replaces a lower one per field):
@@ -88,7 +99,7 @@ FastAPI (`examples/vue-fastapi/api/app/library.py`):
 
 | Code | Severity | When |
 | --- | --- | --- |
-| `approval-subject-invalid` | error, non-blocking (`--keep-going` writes every output; the declaration is dropped, the tool stays enabled) | A declaration fails its shape; a source that is not provably read-only (not GET/HEAD and no `lookupEffect: 'read'`) or asks for approval; a lookup type the source does not declare in `outputEntities`; a param that is no id field or no parameter of the source; a preview source that is not a read tool; `refs` that match no reference |
+| `approval-subject-invalid` | error, non-blocking (`--keep-going` writes every output; the declaration is dropped, the tool stays enabled) | A declaration fails its shape; a source that is not provably read-only (not GET/HEAD and no `lookupEffect: 'read'`) or asks for approval; a lookup type the source does not declare in `outputEntities`; a param that is no id field or no parameter of the source; a preview source that is not a read tool; `refs` that match no reference; a composite key one of whose arguments the input schema types as a list (not looked up) |
 | `approval-subject-field-denied` | warning | A preview field the source's output fields deny: the denial wins, the field is dropped |
 | `approval-subject-unbounded-list` | warning | A list lookup without params, without `const` and not `complete` |
 | `approval-subject-unused` | warning | A lookup no write tool references, a tools.json entry that names no tool |
@@ -179,6 +190,20 @@ and before the approval request is sent. For each looked-up reference:
   exist". A different id is `mismatch`, never named. The browser's history
   fallback, which matches a speaking key case-insensitively, is a display hint
   only: it never sets `check: 'found'` or `source: 'server'`.
+- **Lists of ids**: an argument that holds a list of ids (`memberIds:
+  ['u1', 'u2']`) names one record per distinct id. Each one is its own
+  subject, looked up, refused and shown exactly like a single id: a missing
+  one refuses the whole call (`approval_subject_not_found`), one that cannot
+  be checked is "not checkable" on its own. All of them keep the argument's
+  path (`memberIds`, never `memberIds[0]`), so the card shows one line
+  "User: Ann, Bob" and the history fallback of that path is replaced as a
+  whole. Their order is the order of the list, duplicates dropped. An empty
+  list names no record (nothing to check, never a refusal). A list with an
+  entry that is no id (an object, `null`, an empty text), with more ids
+  than a part holds (100 subjects per call), or a list inside a composite
+  key gets no server subject: it is never a passed check (`block` refuses,
+  `recheck` refuses), and with `warn` the card keeps the history fallback
+  for it.
 - **No metrics**: a lookup is no tool call. It records no tool-call metric,
   no `tool_contract_rejected` for a 400/422 of the read tool, and is never
   classified by `classifyToolFailure`.
@@ -199,7 +224,8 @@ and before the approval request is sent. For each looked-up reference:
 | Source not in the tool set, not for this role, revoked, asks for approval (`source_unavailable`) | card with warning | `block` | as above |
 | Composite key whose arguments cannot be mapped to the id fields by name (`source_unavailable`) | card with warning | `block` | as above |
 | Only case or whitespace differ from a record on the page (`mismatch`; also on a `complete` list) | card with warning, never named, never "does not exist" | `block`; `idCase: 'ignore-case'` makes it a match | as above |
-| A limit reached, the whole turn's time included (`limit`) | card with warning | `block` | as above |
+| A limit reached, the whole turn's time included (`limit`); each id of a list counts | card with warning | `block` | as above |
+| A list with a non-id entry or more than 100 ids, a list in a composite key (no server subject) | card from the history, without a server subject for it | `block` refuses; a `recheck` refuses the approved call | as above |
 
 The tool set of a request decides what is declared: a write tool that only
 has `inputEntities` is looked up when a read source of the type is in this
@@ -212,9 +238,10 @@ no reference, invalid `inputEntities`) the tool keeps its v2 ids,
 `onUnavailable: 'block'` refuses every call and a `recheck` refuses the
 approved call; an `approvalSubject` that does not validate counts as
 `block`. A planned reference the call carries no id for (absent, `null`, a
-list) is never a passed check: `block` refuses the call and a `recheck`
+list it cannot index) is never a passed check: `block` refuses the call and a `recheck`
 refuses the approved call; with `warn` the card asks without a server
-subject for it. `defineEndpointTool` and `endpointToolToTool` throw for `refs` that
+subject for it. A list of ids is not "no id": each id gets its own subject
+(see *Lists of ids* above). `defineEndpointTool` and `endpointToolToTool` throw for `refs` that
 match no reference. `glirastes tools refresh` reports an `approvalSubject`
 that does not validate (at any level, tools.json included) or names an
 unknown ref as the blocking error `approval-subject-unenforceable` and, with
@@ -242,7 +269,7 @@ call: one tool call and one error (repeated 404s end at
 | Option | Default | |
 | --- | --- | --- |
 | `maxLookupsPerTurn` | 32 | Lookups made per request; cached answers do not count |
-| `maxSubjectsPerCall` | 4 | Subjects of one call, a preview included; more are `limit` |
+| `maxSubjectsPerCall` | 4 | Subjects of one call, a preview included; each id of a list is one, in argument order then list order; more are `limit` (never looked up). A tool whose lists are longer raises it (at most 16) |
 | `lookupTimeoutMs` | 3000 | Per lookup; at most the managed `toolTimeoutMs` |
 | `maxLookupTimePerTurnMs` | 10 000 | All lookups of one request |
 
@@ -272,7 +299,9 @@ match the digest signed into the approval id (`approval_subject_changed`).
 With `onUnavailable: 'block'` a recheck that cannot check refuses it
 (`approval_subject_unavailable`); with `warn`, `exists` runs it, while
 `unchanged` compares every subject, so a record that was found at the
-approval and cannot be checked now counts as changed. Rechecks count against
+approval and cannot be checked now counts as changed. The subjects of a
+list are bound in the order of the approved input (which the approval id
+binds too), so the same call always gives the same digest. Rechecks count against
 the same limits; authorization, execution and the PII shield of one lookup
 share one `lookupTimeoutMs`.
 
@@ -280,7 +309,7 @@ share one `lookupTimeoutMs`.
 
 | # | Change |
 | --- | --- |
-| F1 | A persistent UI stream data part right before `tool-approval-request`: `{ type: 'data-approval-subjects', id: <toolCallId>, data: { v: 1, toolCallId, subjects: ServerApprovalSubject[], preview?: { check, reason?, fields: [{ key, label, value, format? }] } } }`. Subject: `{ type, role, id, ids, path, status: 'named' \| 'seen' \| 'ambiguous' \| 'unknown', check: 'found' \| 'unchecked', reason?, name?, fallbackField?, fallbackValue?, candidates?, idKind }`. It is for the browser and custom clients (`message.parts`) only; the server never sends it to the model (filtered explicitly before `convertToModelMessages`) and never reads it back. |
+| F1 | A persistent UI stream data part right before `tool-approval-request`: `{ type: 'data-approval-subjects', id: <toolCallId>, data: { v: 1, toolCallId, subjects: ServerApprovalSubject[], preview?: { check, reason?, fields: [{ key, label, value, format? }] } } }`. Subject: `{ type, role, id, ids, path, status: 'named' \| 'seen' \| 'ambiguous' \| 'unknown', check: 'found' \| 'unchecked', reason?, name?, fallbackField?, fallbackValue?, candidates?, idKind }`; each id of a list argument is a subject of its own with the argument's `path`; at most 100 subjects per part. It is for the browser and custom clients (`message.parts`) only; the server never sends it to the model (filtered explicitly before `convertToModelMessages`) and never reads it back. |
 | F2 | Approval id `glirastes-approval.v2.<issuedAtMs>.<expiresAtMs>.<nonce>.<subjectDigest>.<mac>`; `subjectDigest` is a 16-byte HMAC-SHA-256 of the canonical subjects (type, role, path, ids, status, name, fallback) under a key derived from the approval secret; the MAC covers it next to everything v1 covers, under the tag `v2`. Verify takes v1 and v2; for a declared tool a v1 id is refused (`approval_not_issued`). Single use and the store are unchanged. Preview values are display only and not in the digest. |
 | F3 | New tool errors for the model (the chat shows a fixed text, `output-error`): `approval_subject_not_found`, `approval_subject_invalid_id`, `approval_subject_unavailable` (only with `block`); approval denials `approval_subject_gone`, `approval_subject_changed`, `approval_subject_unavailable` (recheck). |
 | F4 | `ApprovalSubject` (React) gains optional `source`, `ids`, `fallbackValue`, `preview`, `check`, `reason`; `PendingApproval` gains `preview` and `previewCheck`. `PendingApproval.subjects` prefers the server's subjects; the history guess fills in only where the server sent nothing (and stays as the display of an unchecked subject). New labels `approvalSubjectUncheckedWarning`, `approvalSubjectsUncheckedWarning`, `approvalReferenceIdNote`, `approvalPreviewUncheckedNote` (English, German; `locales` overrides). |
@@ -308,7 +337,7 @@ literal values (no replacement patterns).
   declared safety option is never skipped; the model path still runs it
   with its checks. With `approvalSubjects: false` the app has turned the
   lookups off, and nothing is refused.
-- An argument that holds a list of ids gets no server subject.
+- A composite key with a list argument gets no server subject (`tools refresh` reports it).
 - Nothing goes to the Platform: manifest, policy and metric events are unchanged; declarations are field and tool names only.
 
 ## Upgrading
@@ -317,3 +346,4 @@ literal values (no replacement patterns).
 - **Several instances behind a load balancer: deploy the new version everywhere first, then declare.** An older instance refuses a `v2` id as `approval_not_issued` (its parser only accepts `v1`, so it never runs a v1 check on it); an approval issued by a new instance and answered on an old one is then simply refused, never run unchecked. The runtime container is single-instance.
 - Runtime container: the declarations are part of the immutable artifact, which carries the exact SDK version: **rebuild the artifact** (`glirastes tools refresh`, then the artifact build) after declaring.
 - Custom approval cards read `source`, `check`, `reason` and `preview` of `ApprovalSubject`.
+- Lists of ids: a part may hold up to 100 subjects. A browser on an older version drops a part with more than 20 and shows the history fallback for that call; nothing is approved unchecked by it.

@@ -118,6 +118,7 @@ export const deChatLocale: ChatLocale = {
   newChatLabel: 'Neuer Chat',
   noSessionsLabel: 'Noch keine Unterhaltungen',
   sessionsLoadingLabel: 'Wird geladen…',
+  markdownLoadingLabel: 'Nachricht wird geladen…',
   untitledSessionLabel: 'Ohne Titel',
   deleteSessionAriaLabel: 'Unterhaltung löschen',
   confirmDeleteSessionPrompt: 'Diese Unterhaltung löschen?',

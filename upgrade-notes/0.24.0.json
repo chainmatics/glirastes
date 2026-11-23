@@ -1,0 +1,201 @@
+{
+  "version": "0.24.0",
+  "notes": [
+    {
+      "id": "approval-subjects-id-lists",
+      "kind": "recommended",
+      "summary": "Server approval subjects now look up every id of an argument that holds a list (memberIds: ['u1', 'u2']): each id is named, refused when it does not exist, or not checkable on its own. Before, a list always fell back to the browser history and warned about unknown ids.",
+      "howTo": "Nothing to change for single ids. A write tool whose inputEntities name a list argument of a type with an entityLookup now gets server subjects for it: a list of a target or parent reference by default, a reference when approvalSubject.refs names it (refs: ['memberIds']). A missing id refuses the call (approval_subject_not_found); each id counts as one of maxSubjectsPerCall (default 4, at most 16), the rest are not checkable (limit), which onUnavailable: 'block' refuses: raise the limit for tools with longer lists. Subjects of a list share the argument's path, so the card shows one line per argument. A part holds up to 100 subjects (was 20); an older browser shows the history fallback for a larger one. tools refresh reports a composite key with a list argument (approval-subject-invalid); it is not looked up. See docs/approval-subjects.md, Lists of ids.",
+      "skill": "integrating-glirastes-nextjs",
+      "affectedWhen": {
+        "patterns": [
+          "\\bapprovalSubject\\s*:",
+          "x-glirastes-approval-subject",
+          "\\bentityLookup\\s*:"
+        ]
+      }
+    },
+    {
+      "id": "assistant-shell-slots",
+      "kind": "optional",
+      "summary": "Opt-in AssistantShell slots instead of CSS overrides: showModeMenu, renderModeMenu, historyPane as a function (open, drawer, close), historyTitle, classNames.history, session icons on the shell and SessionSwitcher, useSessionLock. Without them nothing changes.",
+      "howTo": "Nothing to do for the default. Replace CSS that hid [data-element=\"mode-picker\"] with showModeMenu={false} or renderModeMenu={({ modes, current, setMode, label, title, entries }) => …} (both turn off the built-in key handling). An own historyPane that must close the drawer below 900 px becomes historyPane={({ close, open, drawer }) => …}; close() moves focus to the composer (an own input composer carries data-glirastes-composer; this lookup applies to close() only), close('toggle') to the chats toggle. Render functions are rendered as components; pass a stable function and switch panes inside it. With an own pane, set labels.history, showHistory and hideHistory. historyTitle={false | node | fn} replaces [data-element=\"history-title\"]. icons={{ newChat, rename, delete }} on the shell or on SessionSwitcher replace the + and the rename and delete icons (DEFAULT_SESSION_SWITCHER_ICONS). Replace isSessionChangeBlocked ?? isLoading in own session controls with useSessionLock().locked (also false while a ChatWindow is hidden). See placing-the-assistant.md, Replacing shell parts.",
+      "skill": "building-glirastes-chat-ui#replacing-shell-parts",
+      "affectedWhen": {
+        "symbols": [
+          "AssistantShell",
+          "AssistantWorkspace",
+          "SessionSwitcher"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "showModeMenu",
+          "renderModeMenu",
+          "historyTitle",
+          "useSessionLock",
+          "historyPane\\s*=\\s*\\{\\s*(\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>",
+          "data-glirastes-composer",
+          "\\bicons\\s*=\\s*\\{[\\s\\S]{0,400}?\\b(newChat|rename|delete)\\s*:"
+        ]
+      },
+      "surface": [
+        "glirastes/react#AssistantHistoryPaneProps.*",
+        "glirastes/react#AssistantModeMenuEntry.*",
+        "glirastes/react#AssistantModeMenuRenderProps.*",
+        "glirastes/react#AssistantShellClassNames.history",
+        "glirastes/react#AssistantShellIcons.delete",
+        "glirastes/react#AssistantShellIcons.newChat",
+        "glirastes/react#AssistantShellIcons.rename",
+        "glirastes/react#AssistantShellProps.historyTitle",
+        "glirastes/react#AssistantShellProps.renderModeMenu",
+        "glirastes/react#AssistantShellProps.showModeMenu",
+        "glirastes/react#AssistantWorkspaceProps.historyTitle",
+        "glirastes/react#AssistantWorkspaceProps.renderModeMenu",
+        "glirastes/react#AssistantWorkspaceProps.showModeMenu",
+        "glirastes/react#DEFAULT_SESSION_SWITCHER_ICONS",
+        "glirastes/react#SessionLockState.*",
+        "glirastes/react#SessionSwitcherIcons.*",
+        "glirastes/react#SessionSwitcherProps.icons",
+        "glirastes/react#useSessionLock"
+      ]
+    },
+    {
+      "id": "budget-stop-continue",
+      "kind": "recommended",
+      "summary": "Visible change: the stop notice after a limit now says what was done and what is open, and the chat shows a Continue button (German Weitermachen) that continues the stopped turn with a fresh budget and never retries a write call attempted before the stop.",
+      "howTo": "Nothing to do with createAiChatHandler and useVercelAiChatTransport. Own budgetStopTexts or locales can set the new keys done, open, openUnanswered ({items}), continueHint (points to the button below) and continueTypedHint (only after the 3rd continuation); a UI without the button sets its own continueHint. The click sends glirastesContinuation: 'budget' in the chat request body: a backend that validates the body strictly must allow that field. The repeat guard covers the continuation and the approval and UI outcome requests after it; a typed follow-up is a new turn without it. Each continuation gets a fresh per-request budget, so time and cost of one question can reach 4x the limits; a managed policy has no switch for continuations yet. onFinish reports continuation: 'budget'; metrics report it as a normal turn.finished. A custom ChatTransport adds continueAfterBudgetStop() (resend the history with that body field) or the button is not shown; a custom MessageParts layout that drops children places the new continuation node. The German continueButton text is now Weitermachen (also on the truncation banner). A customStreamHandler gets no continuation (400). See docs/managed-runtime-sync.md, Continuing a stopped turn.",
+      "skill": "integrating-glirastes-nextjs",
+      "affectedWhen": {
+        "symbols": [
+          "createAiChatHandler",
+          "AiChatProvider",
+          "useVercelAiChatTransport"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "continueAfterBudgetStop",
+          "continueHint"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ChatContextValue.continueAfterBudgetStop",
+        "glirastes/react#ChatTransport.continueAfterBudgetStop",
+        "glirastes/react#MessagePartNodes.continuation",
+        "glirastes/react#MessageParts.continuation",
+        "glirastes/react#MessagePartsProps.continuation"
+      ]
+    },
+    {
+      "id": "default-step-budget-10",
+      "kind": "recommended",
+      "summary": "Behavior change: the default local budget allows 10 model steps (was 6) and 60,000 input tokens per turn (was 40,000), so typical read-plus-planning requests that need 7 steps finish. Tool calls (8), time and cost limits are unchanged.",
+      "howTo": "Nothing to do to get the new defaults. An app that relies on the old step or token limit (tests that expect a stop after 6 steps, cost estimates) sets them explicitly: createGlirastes({ localLimits: { maxModelSteps: 6, maxInputTokens: 40_000 } }); the runtime container sets limits.maxModelSteps and limits.maxInputTokens in its JSON configuration. The agent and policy revisions still cap the local values (the lowest wins). See docs/managed-runtime-sync.md, Budget denials.",
+      "skill": "setting-up-glirastes",
+      "affectedWhen": {
+        "symbols": [
+          "createGlirastes",
+          "DEFAULT_LOCAL_LIMITS",
+          "resolveLocalLimits"
+        ],
+        "patterns": [
+          "glirastes-runtime"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "maxModelSteps"
+        ]
+      }
+    },
+    {
+      "id": "ui-outcome-no-announcement",
+      "kind": "recommended",
+      "summary": "The fixed system note for UI action outcomes now also tells the model not to announce a UI action in text before calling it, so no interim sentence stays above a refused action. System prompts of those requests change once.",
+      "howTo": "Nothing to change. Prompt snapshot tests or evaluations that compare the full system prompt see one new sentence (UI_OUTCOME_SYSTEM_NOTE in glirastes/contracts). The note is sent only for requests using the outcome protocol; uiActionOutcomes: 'off' leaves it out together with the protocol.",
+      "skill": "building-glirastes-chat-ui#ui-action-outcomes",
+      "affectedWhen": {
+        "patterns": [
+          "\\bUI_OUTCOME_SYSTEM_NOTE\\b"
+        ]
+      }
+    },
+    {
+      "id": "voice-visible-failure",
+      "kind": "recommended",
+      "summary": "Voice input no longer fails silently: a failed recording shows a localized alert next to the mic button, a worklet that does not load is logged with its URL. The mic, stop and retry buttons show icons with localized aria-labels instead of the words mic, stop and retry.",
+      "howTo": "Tests or CSS that find the voice button by its text 'mic'/'stop'/'retry' now use its aria-label ('Start voice input', 'Stop recording', 'Transcribing…', 'Retry recording'; German in deChatLocale) or [data-component=\"voice-input-addon\"][data-state]. The alert is span[role=alert][data-element=\"voice-error\"] with voiceFailedText or voiceUnavailableText; the recording bar's buttons use voiceCancelAriaLabel and voiceStopAriaLabel. A custom SttProviderAdapter can declare acceptsWorkletUrl and read input.workletUrl in connect(); otherwise voice.workletUrl is ignored for it with a one-time console warning. AudioWorkletLoadError and SttSessionSnapshot.errorCode ('audio-worklet-unavailable') tell the worklet failure apart. VoiceInputButton takes adapter.",
+      "skill": "building-glirastes-chat-ui#speech-worklet",
+      "affectedWhen": {
+        "symbols": [
+          "VoiceInputAddon",
+          "VoiceInputButton",
+          "RecordedSttAdapter",
+          "DeepgramSttAdapter",
+          "useDeepgramTranscription",
+          "SttProviderAdapter"
+        ],
+        "patterns": [
+          "\\bvoice\\s*[:=]\\s*\\{\\{?[^{}]*\\benabled\\s*:\\s*true\\b"
+        ]
+      },
+      "surface": [
+        "glirastes/react#AUDIO_WORKLET_UNAVAILABLE",
+        "glirastes/stt#AUDIO_WORKLET_UNAVAILABLE",
+        "glirastes/react#AudioWorkletLoadError",
+        "glirastes/stt#AudioWorkletLoadError",
+        "glirastes/react#isAudioWorkletLoadError",
+        "glirastes/stt#isAudioWorkletLoadError",
+        "glirastes/react#ChatLocale.voiceCancelAriaLabel",
+        "locale#voiceCancelAriaLabel",
+        "glirastes/react#ChatLocale.voiceConnectingAriaLabel",
+        "locale#voiceConnectingAriaLabel",
+        "glirastes/react#ChatLocale.voiceFailedText",
+        "locale#voiceFailedText",
+        "glirastes/react#ChatLocale.voiceStartAriaLabel",
+        "locale#voiceStartAriaLabel",
+        "glirastes/react#ChatLocale.voiceStopAriaLabel",
+        "locale#voiceStopAriaLabel",
+        "glirastes/react#ChatLocale.voiceTranscribingAriaLabel",
+        "locale#voiceTranscribingAriaLabel",
+        "glirastes/react#ChatLocale.voiceUnavailableText",
+        "locale#voiceUnavailableText",
+        "*#SttProviderAdapter.acceptsWorkletUrl",
+        "*#SttSessionSnapshot.errorCode",
+        "glirastes/react#UseDeepgramTranscriptionReturn.errorCode",
+        "glirastes/react#UseSttOptions.workletUrl",
+        "glirastes/react#UseSttReturn.errorCode",
+        "glirastes/react#VoiceInputButtonProps.adapter",
+        "glirastes/stt#SttSessionControllerOptions.workletUrl"
+      ]
+    },
+    {
+      "id": "voice-worklet-required",
+      "kind": "breaking",
+      "summary": "Voice input needs the audio worklet file served at /audio-worklet-processor.js; without it every recording fails. Required for every app with voice input, RecordedSttAdapter included. New: glirastes stt worklet copies it, and glirastes doctor fails without it.",
+      "howTo": "Chain the copy step in front of your scripts: \"predev\": \"glirastes stt worklet && <existing predev>\" and the same for prebuild. It copies glirastes/react/audio-worklet-processor.js (new package export) into public/ (--out <dir> for another static folder) and leaves an identical copy alone. Re-running glirastes init adds it for Next.js, Vite and Create React App. Served at another path: set voice.workletUrl (it now also reaches an own RecordedSttAdapter or DeepgramSttAdapter passed as voice.adapter) or the adapter's workletUrl. A Vite app with its own root or publicDir passes --out <that folder>. The copy can be Git-ignored. yarn berry and pnpm may skip pre* scripts: when next dev or vite is started directly, run glirastes stt worklet once first. Check with glirastes doctor (check voice-worklet).",
+      "skill": "building-glirastes-chat-ui#speech-worklet",
+      "affectedWhen": {
+        "symbols": [
+          "VoiceInputAddon",
+          "VoiceInputButton",
+          "RecordedSttAdapter",
+          "DeepgramSttAdapter",
+          "useDeepgramTranscription"
+        ],
+        "patterns": [
+          "\\bvoice\\s*[:=]\\s*\\{\\{?[^{}]*\\benabled\\s*:\\s*true\\b"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "glirastes stt worklet",
+          "dist/react/audio-worklet-processor\\.js",
+          "glirastes/react/audio-worklet-processor\\.js",
+          "registerProcessor\\('audio-processor'"
+        ]
+      }
+    }
+  ]
+}
