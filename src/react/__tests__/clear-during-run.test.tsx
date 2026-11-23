@@ -7,18 +7,21 @@ import React, { StrictMode, useMemo } from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Chat, useChat } from '@ai-sdk/react';
+import { GLIRASTES_NAVIGATE_ACTION_ID, registerNavigationBridge, UiActionBus } from '../../browser/index.js';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import { MessageList } from '../components/message-list.js';
 import { useVercelAiChatTransport } from '../transports/vercel.js';
 import { useLangGraphChatTransport } from '../transports/langgraph.js';
-import type { AiChatProviderConfig, ChatMessage, ChatTransport, SessionConfig, TurnEndInfo, TurnOutcome } from '../types.js';
+import type { AiChatProviderConfig, ChatMessage, ChatTransport, MentionData, SessionConfig, TurnEndInfo, TurnOutcome } from '../types.js';
+import { defineChatCommand } from '../interactions/definitions.js';
 import { ctx, Host, Probe, StreamingChat } from './streaming-chat.js';
 import { carried, stubControlledFetch, textChunks, type ControlledRequest } from './controlled-fetch.js';
 
 let requests: ControlledRequest[];
+// A stream still delivers what it had in flight after an abort, so "not shown" is the provider's doing.
 beforeEach(() => {
-  ({ requests } = stubControlledFetch());
+  ({ requests } = stubControlledFetch({ deliverInFlightAfterAbort: true }));
 });
 afterEach(() => {
   for (const request of requests) request.close();
@@ -623,5 +626,187 @@ describe('an app-owned AI SDK Chat that outlives the provider', () => {
     await settle();
     // Without a store nothing empties the app's Chat once the provider is gone.
     expect(seen()).toContain('ANSWER LATE');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Review round 2: a continuation whose stream completes normally after the clear, held-message checks.
+// ---------------------------------------------------------------------------------------------------------------
+
+describe('a continuation request that completes normally after clear()', () => {
+  it('after an approval: no further request is sent and nothing shows', async () => {
+    render(<VercelHost />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('delete t1'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => {
+      requests[0]!.push({ type: 'start' });
+      requests[0]!.push({ type: 'start-step' });
+      requests[0]!.push({ type: 'tool-input-available', toolCallId: 'c1', toolName: 'tasks_delete', input: { id: 't1' } });
+      requests[0]!.push({ type: 'tool-approval-request', approvalId: 'ap-1', toolCallId: 'c1' });
+      requests[0]!.push({ type: 'finish-step' });
+      requests[0]!.push({ type: 'finish' });
+      requests[0]!.end();
+    });
+    await waitFor(() => expect(ctx.pendingApprovals).toHaveLength(1));
+    await act(async () => { await ctx.approve('ap-1'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    act(() => {
+      ctx.clear();
+      // The rest of the continuation was in flight: it ends the step and the stream closes normally.
+      requests[1]!.push({ type: 'start' });
+      requests[1]!.push({ type: 'text-start', id: 'late' });
+      requests[1]!.push({ type: 'text-delta', id: 'late', delta: 'LATE' });
+      requests[1]!.push({ type: 'text-end', id: 'late' });
+      requests[1]!.push({ type: 'finish-step' });
+      requests[1]!.push({ type: 'finish' });
+      requests[1]!.end();
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(requests).toHaveLength(2);
+    expect(ctx.messages).toEqual([]);
+  });
+
+  it('after a UI action outcome: no further request is sent and nothing shows', async () => {
+    const bus = new UiActionBus();
+    const stopBridge = registerNavigationBridge({ bus, push: async () => {} });
+    render(<VercelHost uiActionBus={bus} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('open the tasks'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => {
+      requests[0]!.push({ type: 'start' });
+      requests[0]!.push({ type: 'start-step' });
+      requests[0]!.push({ type: 'tool-input-available', toolCallId: 'c1', toolName: 'ui_navigate', input: {} });
+      requests[0]!.push({
+        type: 'tool-output-available', toolCallId: 'c1',
+        output: {
+          handedOff: true, message: 'Handed to the app.', awaitsOutcome: true,
+          uiAction: { type: 'glirastes.navigate', actionId: GLIRASTES_NAVIGATE_ACTION_ID, payload: { href: '/tasks' } },
+        },
+      });
+      requests[0]!.push({ type: 'finish-step' });
+      requests[0]!.push({ type: 'finish' });
+      requests[0]!.end();
+    });
+    // The outcome is written and the AI SDK sends the history again.
+    await waitFor(() => expect(requests).toHaveLength(2));
+    act(() => {
+      ctx.clear();
+      requests[1]!.push({ type: 'start' });
+      requests[1]!.push({ type: 'text-start', id: 'late' });
+      requests[1]!.push({ type: 'text-delta', id: 'late', delta: 'LATE' });
+      requests[1]!.push({ type: 'text-end', id: 'late' });
+      requests[1]!.push({ type: 'finish-step' });
+      requests[1]!.push({ type: 'finish' });
+      requests[1]!.end();
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(requests).toHaveLength(2);
+    expect(ctx.messages).toEqual([]);
+    stopBridge();
+  });
+
+  it('the app\'s onData gets no data part of the cleared request', async () => {
+    const parts: string[] = [];
+    function OnDataHost() {
+      const transport = useVercelAiChatTransport({ endpoint: '/api/chat', onData: (part) => { parts.push(part.type); } });
+      return <AiChatProvider transport={transport}><Probe /><MessageList /></AiChatProvider>;
+    }
+    render(<OnDataHost />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    act(() => {
+      ctx.clear();
+      requests[0]!.push({ type: 'data-late', data: { x: 1 } });
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(parts).toEqual([]);
+  });
+});
+
+describe('a held message passes the checks of a normal send', () => {
+  /** A custom transport chat cleared during its run; the window stays open until the test ends the run. */
+  async function clearedWindow(config: Partial<AiChatProviderConfig> = {}) {
+    const chat = new UnstoppableChat();
+    const view = render(<Host chat={chat} config={config} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); });
+    return { chat, view };
+  }
+  const file = { type: 'file' as const, mediaType: 'text/plain', url: 'data:text/plain;base64,aGk=', filename: 'a.txt' };
+
+  it('a direct command with files is refused (files-with-command), as without the window', async () => {
+    const ping = defineChatCommand({ id: 'tasks.ping', label: 'Ping', run: { kind: 'tool', tool: 'tasks.ping' } });
+    const pingMention: MentionData = { id: 'tasks.ping', type: 'command', label: 'Ping', prefix: '/', slug: 'ping' };
+    await clearedWindow({ attachments: true, chatInteractions: { commands: [ping] } });
+    let result: unknown;
+    await act(async () => { result = ctx.submitWithResult('/ping', { mentions: [pingMention], files: [file] }); });
+    expect(result).toEqual({ status: 'rejected', reason: 'files-with-command' });
+  });
+
+  it('files while attachments are off are refused (attachments-off)', async () => {
+    await clearedWindow();
+    let result: unknown;
+    await act(async () => { result = ctx.submitWithResult('with file', { files: [file] }); });
+    expect(result).toEqual({ status: 'rejected', reason: 'attachments-off' });
+  });
+
+  it('attachments turned off before it goes out: not sent with its files, refused (attachments-off)', async () => {
+    const { chat, view } = await clearedWindow({ attachments: true });
+    await act(async () => { expect(ctx.submitWithResult('with file', { files: [file] })).toEqual({ status: 'queued' }); });
+    view.rerender(<Host chat={chat} config={{}} />);
+    await act(async () => { chat.fail(); });
+    await settle();
+    expect(chat.sent).toEqual(['a question']);
+    expect(ctx.lastRejection?.reason).toBe('attachments-off');
+  });
+
+  it('a host switch in the render that closes the window: not sent into the newly opened chat, refused (session)', async () => {
+    const histories: Record<string, ChatMessage[]> = { A: [], B: [] };
+    const session = (activeId: string): SessionConfig => ({
+      activeId, load: async (id: string) => histories[id] ?? [], save: (id, messages) => { histories[id] = messages; },
+    });
+    const chat = new UnstoppableChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); ctx.submitWithResult('fresh'); });
+    await act(async () => {
+      view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+      chat.fail();
+    });
+    await waitFor(() => expect(ctx.activeSessionId).toBe('B'));
+    await settle();
+    expect(chat.sent).toEqual(['a question']);
+    expect(ctx.lastRejection?.reason).toBe('session');
+  });
+
+  it('a host switch during the window drops it and says so (session); a second clear() drops it without a refusal', async () => {
+    const histories: Record<string, ChatMessage[]> = { A: [], B: [] };
+    const session = (activeId: string): SessionConfig => ({
+      activeId, load: async (id: string) => histories[id] ?? [], save: (id, messages) => { histories[id] = messages; },
+    });
+    const chat = new UnstoppableChat();
+    const view = render(<Host chat={chat} config={{ session: session('A') }} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); ctx.submitWithResult('fresh'); });
+    await act(async () => { ctx.clear(); });
+    expect(ctx.lastRejection).toBeNull();
+    await act(async () => { ctx.submitWithResult('fresh again'); });
+    view.rerender(<Host chat={chat} config={{ session: session('B') }} />);
+    await waitFor(() => expect(ctx.activeSessionId).toBe('B'));
+    expect(ctx.lastRejection?.reason).toBe('session');
+    await act(async () => { chat.fail(); });
+    await settle();
+    expect(chat.sent).toEqual(['a question']);
   });
 });

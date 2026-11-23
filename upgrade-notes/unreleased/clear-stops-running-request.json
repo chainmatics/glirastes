@@ -1,8 +1,8 @@
 {
   "id": "clear-stops-running-request",
   "kind": "recommended",
-  "summary": "Behavior change: clear() (also the Clear button) while a request runs now stops that request; nothing of it is shown, stored or recorded, and the chat stays busy and empty until the transport reports the request's end. Before, the answer landed in the emptied chat.",
-  "howTo": "Nothing to do with useVercelAiChatTransport or the LangGraph transport (the request ends at once). A custom ChatTransport is now stopped (stop(), best effort: a throw, a rejection or a missing stop() is caught) when the chat is cleared during a run; until its status leaves submitted/streaming the chat stays busy and empty, then the provider calls setMessages([]). A transport whose request does not end on stop() keeps the chat busy until it ends (no timeout). A message sent in that window goes out into the emptied chat afterwards: without the queue the first is held and submitWithResult reports { status: 'queued' }, a further one is { status: 'rejected', reason: 'session' }. Code that called clear() and then send() relied on two requests running at once; it now gets one fresh request. Tests that expected the answer after clear() stop relying on it. A host that switches session.activeId during the window shows that chat's own history; late writes of the cleared request into a shared transport can still land there (left-chat case). See docs/concepts.md, Turn outcomes.",
+  "summary": "Behavior change: clear() while a request the provider has seen running now stops it; nothing of it is shown, stored or recorded, no continuation starts for it, and the chat stays busy and empty until the request ended. Before, the answer landed in the emptied chat.",
+  "howTo": "Nothing to do with useVercelAiChatTransport or the LangGraph transport (the request ends at once). A custom ChatTransport is now stopped (stop(), best effort: a throw, a rejection or a missing stop() is caught) when the chat is cleared during a run; until its status leaves submitted/streaming the chat stays busy and empty, then the provider calls setMessages([]). A custom transport that continues by itself (after approvals or UI outcomes) implements the new optional setAutomaticSendsPaused(paused) and starts nothing while paused; without it the transport decides. A transport whose request does not end on stop() keeps the chat busy until it ends (no timeout). A message sent in that window goes out into the emptied chat afterwards, with the checks of a normal send: without the queue the first is held and submitWithResult reports { status: 'queued' }, a further one is { status: 'rejected', reason: 'session' }; a held message dropped because the host opened another chat, attachments were turned off or it became a direct command sets lastRejection (session, attachments-off, files-with-command); a second clear() or an unmount drops it silently. A request started in the same tick as clear() (send(); clear()) is not stopped, as before. Code that called clear() and then send() relied on two requests running at once; it now gets one fresh request. Tests that expected the answer after clear() stop relying on it. See docs/concepts.md, Turn outcomes.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
     "symbols": [
@@ -12,5 +12,8 @@
     "patterns": [
       "\\bclear\\(\\)"
     ]
-  }
+  },
+  "surface": [
+    "glirastes/react#ChatTransport.setAutomaticSendsPaused"
+  ]
 }

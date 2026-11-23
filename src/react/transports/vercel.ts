@@ -136,6 +136,12 @@ export function useVercelAiChatTransport(
   const reportsUiOutcomes = () => uiActionOutcomesRef.current && reportingRef.current;
   const autoResumeRef = useRef(autoResumeOnApproval);
   autoResumeRef.current = autoResumeOnApproval;
+  // Set by the provider while a request cleared with clear() still ends: no request starts by itself and
+  // none of its data parts is handed on.
+  const pausedRef = useRef(false);
+  const setAutomaticSendsPaused = useCallback((paused: boolean) => {
+    pausedRef.current = paused;
+  }, []);
 
   const headersRef = useRef(userHeaders);
   headersRef.current = userHeaders;
@@ -193,13 +199,14 @@ export function useVercelAiChatTransport(
     transport,
     // With the outcome protocol: approvals answered and every UI outcome reported (see shouldContinueChat).
     sendAutomaticallyWhen: uiActionOutcomes
-      ? (options) => (reportsUiOutcomes()
+      ? (options) => (!pausedRef.current && (reportsUiOutcomes()
         ? shouldContinueChat(options, { approvals: autoResumeRef.current })
-        : autoResumeRef.current && lastAssistantMessageIsCompleteWithApprovalResponses(options))
+        : autoResumeRef.current && lastAssistantMessageIsCompleteWithApprovalResponses(options)))
       : autoResumeOnApproval
-        ? lastAssistantMessageIsCompleteWithApprovalResponses
+        ? (options) => !pausedRef.current && lastAssistantMessageIsCompleteWithApprovalResponses(options)
         : undefined,
     onData: (dataPart) => {
+      if (pausedRef.current) return;
       const part = dataPart as { type: string; data: unknown };
       if (part.type === MEMORY_NOTES_PART && memoryRef.current) {
         const notes = (part.data as { user?: unknown } | null)?.user;
@@ -245,10 +252,12 @@ export function useVercelAiChatTransport(
       addToolApprovalResponse,
       subscribeToData,
       setRequestLanguage,
+      setAutomaticSendsPaused,
       continueAfterBudgetStop,
       ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
     [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
-      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
+      setRequestLanguage, setAutomaticSendsPaused, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting,
+      continueAfterBudgetStop],
   );
 }

@@ -12,8 +12,9 @@ export interface ControlledRequest {
   /** Ends the stream as the server does (`[DONE]`, then close). */
   end(): void;
   /**
-   * Ends a stream that is still open the way a dropped connection does (an `AbortError`), so the AI SDK sends
-   * nothing after it; for the end of a test.
+   * Ends a stream that is still open with an `AbortError`, so the AI SDK takes its abort path and sends nothing
+   * after it; for the end of a test. (A really dropped connection fails with a `TypeError`, which the AI SDK
+   * reports as an error.)
    */
   close(): void;
   /** Streams a text answer: start, one step with `text`, finish, and ends the stream unless `open`. */
@@ -32,13 +33,16 @@ export const textChunks = (text: string, id = 't') => [
 export function stubControlledFetch(options: {
   /**
    * After an abort the stream still delivers what is pushed until the next macrotask, then fails with the
-   * `AbortError`: the chunks a real stream had in flight when the request was aborted.
+   * `AbortError`. It stands in for the chunks the AI SDK's stream pipeline had buffered or in flight when the
+   * request was aborted, not for how `fetch` itself behaves.
    */
   deliverInFlightAfterAbort?: boolean;
 } = {}) {
   const requests: ControlledRequest[] = [];
   const encoder = new TextEncoder();
   const fetchStub = vi.fn(async (_url: unknown, init?: RequestInit) => {
+    // As the real fetch: a signal aborted before the call rejects at once.
+    if (init?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     let open = true;
     const stream = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });

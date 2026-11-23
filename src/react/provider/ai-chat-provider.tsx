@@ -1175,7 +1175,9 @@ export function AiChatProvider({
   // A message sent during the window without the queue: sent into the emptied chat once the window closed.
   const [heldSend, setHeldSend] = useState<{
     message: string;
-    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] };
+    sendOptions: { mentions?: MentionData[]; files?: FilePart[] };
+    /** The chat it was sent in: it goes out only into that chat. */
+    sessionId: string;
   } | null>(null);
   const heldSendRef = useRef(heldSend);
   heldSendRef.current = heldSend;
@@ -1524,9 +1526,12 @@ export function AiChatProvider({
     // Held messages and a refused message belong to the chat that was left.
     setHeldMessages([]);
     setLastRejection(null);
-    // So does a message waiting for the end of a cleared request.
-    heldSendRef.current = null;
-    setHeldSend(null);
+    // So does a message waiting for the end of a cleared request: it is dropped, and the app is told.
+    if (heldSendRef.current) {
+      heldSendRef.current = null;
+      setHeldSend(null);
+      setLastRejection({ reason: 'session', at: Date.now() });
+    }
   }, [activeSessionId, resetUiActions]);
 
   // Load messages from session whenever the active session changes.
@@ -2076,12 +2081,10 @@ export function AiChatProvider({
     activeMentions,
   ]);
 
-  const dispatchSend = useCallback(async (
-    message: string,
-    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
+  const dispatchPrepared = useCallback(async (
+    prepared: PreparedSend,
     deliverOptions?: { keepComposer?: boolean },
   ): Promise<void> => {
-    const prepared = prepareSend(message, sendOptions);
     if (prepared.kind === 'needs-args') {
       setPendingCommand(prepared.request);
       return;
@@ -2092,12 +2095,28 @@ export function AiChatProvider({
       return;
     }
     await deliver(prepared.text, prepared.files, deliverOptions);
-  }, [prepareSend, deliver]);
+  }, [deliver]);
+
+  const dispatchSend = useCallback(async (
+    message: string,
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
+    deliverOptions?: { keepComposer?: boolean },
+  ): Promise<void> => dispatchPrepared(prepareSend(message, sendOptions), deliverOptions), [prepareSend, dispatchPrepared]);
+
+  // A message prepared later than it was taken (queued or held): never sent with files it would drop.
+  const preparedFilesRefusal = useCallback((prepared: PreparedSend, files: FilePart[] | undefined): ChatSubmitRejectionReason | null => {
+    if (!files || files.length === 0) return null;
+    // Edited into (or planned as) a direct command: a command would drop the files.
+    if (prepared.kind !== 'message') return 'files-with-command';
+    // Attachments were turned off since it was taken.
+    return attachmentOptions ? null : 'attachments-off';
+  }, [attachmentOptions]);
 
   // Decides synchronously whether the message is taken, so any composer can
   // keep the typed text when it is not.
   // Null when taken, else why not.
-  const sendDirect = useCallback((
+  // Why a message sent without the queue is not taken now, or null.
+  const sendRefusal = useCallback((
     message: string,
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
   ): ChatSubmitRejectionReason | null => {
@@ -2112,9 +2131,18 @@ export function AiChatProvider({
       const plan = interactionRegistry?.planMessage(message, sendOptions.mentions ?? activeMentions);
       if (plan?.status === 'send' || plan?.status === 'needs-args') return 'files-with-command';
     }
+    return null;
+  }, [sessionNotReady, pendingApprovalsMap, attachmentOptions, interactionRegistry, activeMentions]);
+
+  const sendDirect = useCallback((
+    message: string,
+    sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
+  ): ChatSubmitRejectionReason | null => {
+    const refused = sendRefusal(message, sendOptions);
+    if (refused) return refused;
     void dispatchSend(message, sendOptions);
     return null;
-  }, [sessionNotReady, pendingApprovalsMap, dispatchSend, attachmentOptions, interactionRegistry, activeMentions]);
+  }, [sendRefusal, dispatchSend]);
 
   // ---------------------------------------------------------------------------
   // Message queue (`queue.enabled`): what keeps a message from being sent now.
@@ -2152,9 +2180,15 @@ export function AiChatProvider({
   ): ChatSubmitOutcome => {
     if (!queueEnabled && discardingRunRef.current) {
       // The chat is being cleared: one message waits for the emptied chat, nothing reaches the transport now.
-      if (sessionNotReady || sessionMutationRef.current || heldSendRef.current) return { status: 'rejected', reason: 'session' };
-      if (sendOptions?.files?.length && !attachmentOptions) return { status: 'rejected', reason: 'attachments-off' };
-      const held = { message, sendOptions: { mentions: [...(sendOptions?.mentions ?? activeMentions)], ...(sendOptions?.files ? { files: sendOptions.files } : {}) } };
+      // It passes the checks of a direct send first.
+      const refused = sendRefusal(message, sendOptions);
+      if (refused) return { status: 'rejected', reason: refused };
+      if (heldSendRef.current) return { status: 'rejected', reason: 'session' };
+      const held = {
+        message,
+        sendOptions: { mentions: [...(sendOptions?.mentions ?? activeMentions)], ...(sendOptions?.files ? { files: sendOptions.files } : {}) },
+        sessionId: activeSessionIdRef.current,
+      };
       heldSendRef.current = held;
       setHeldSend(held);
       setActiveMentions([]);
@@ -2213,7 +2247,7 @@ export function AiChatProvider({
     resetComposer();
     return { status: 'queued' };
   }, [
-    queueEnabled, sendDirect, sessionNotReady, activeMentions, attachmentOptions, interactionRegistry,
+    queueEnabled, sendDirect, sendRefusal, sessionNotReady, activeMentions, attachmentOptions, interactionRegistry,
     queueStore, queueBusy, dispatchSend, queueConfig.maxSize, approvalWaiting, clarificationOpen, pendingCommand,
   ]);
 
@@ -2344,6 +2378,8 @@ export function AiChatProvider({
     if (running) {
       requestTurnRef.current = { sessionId: null, userMessageId: null };
       discardingRunRef.current = true;
+      // The transport starts nothing by itself for the cleared request (a continuation of a step it ends).
+      transportRef.current.setAutomaticSendsPaused?.(true);
       setDiscarding({ sessionId: activeSessionId });
     }
     // A message held for the emptied chat belonged to it too.
@@ -2386,6 +2422,7 @@ export function AiChatProvider({
     setPipelineState(null);
     setTruncation(null);
     discardingRunRef.current = false;
+    transportRef.current.setAutomaticSendsPaused?.(false);
     setDiscarding(null);
   }, [discarding, transportLoading, rawTransportError, setMessages]);
 
@@ -2394,13 +2431,31 @@ export function AiChatProvider({
     if (transportLoading && !discarding) setDiscardedError(null);
   }, [transportLoading, discarding]);
 
-  // A message held during the window goes out once the window closed and the chat is empty.
+  // A message held during the window goes out once the window closed and the chat is empty, with the checks a
+  // queued message passes when it goes out: only into the chat it was sent in, never with files it would drop.
   useEffect(() => {
-    if (discarding || !heldSend) return;
+    if (discarding || !heldSend || heldSendRef.current !== heldSend) return;
+    if (sessionNotReady || isSessionMutating) return;
     heldSendRef.current = null;
     setHeldSend(null);
-    void dispatchSend(heldSend.message, heldSend.sendOptions);
-  }, [discarding, heldSend, dispatchSend]);
+    if (heldSend.sessionId !== activeSessionIdRef.current) {
+      setLastRejection({ reason: 'session', at: Date.now() });
+      return;
+    }
+    let prepared: PreparedSend;
+    try {
+      prepared = prepareSend(heldSend.message, heldSend.sendOptions);
+    } catch {
+      console.warn('[glirastes] A held message could not be prepared');
+      return;
+    }
+    const refused = preparedFilesRefusal(prepared, heldSend.sendOptions.files);
+    if (refused) {
+      setLastRejection({ reason: refused, at: Date.now() });
+      return;
+    }
+    void dispatchPrepared(prepared);
+  }, [discarding, heldSend, sessionNotReady, isSessionMutating, prepareSend, preparedFilesRefusal, dispatchPrepared]);
 
   // ---------------------------------------------------------------------------
   // Multi-session actions
@@ -2773,9 +2828,8 @@ export function AiChatProvider({
       queueStore.commit(queued, true, 'paused');
       return;
     }
-    if (files && (prepared.kind !== 'message' || !attachmentOptions)) {
+    if (preparedFilesRefusal(prepared, files)) {
       // Attachments were turned off since it was queued, or it became a direct command: never sent with the files.
-      // Edited into a direct command after it was queued with files: a command would drop them.
       queueStore.priorityRef.current = null;
       queueStore.commit(queued, true, 'paused');
       return;
