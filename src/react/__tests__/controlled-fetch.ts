@@ -7,6 +7,8 @@ export interface ControlledRequest {
   aborted: boolean;
   /** Streams one UI message chunk (`{ type: 'text-delta', ... }`). Ignored once the request ended. */
   push(chunk: Record<string, unknown>): void;
+  /** Streams raw text as it is (an SSE event of another protocol, such as LangGraph's). */
+  pushRaw(text: string): void;
   /** Ends the stream as the server does (`[DONE]`, then close). */
   end(): void;
   /**
@@ -27,7 +29,13 @@ export const textChunks = (text: string, id = 't') => [
  * Stubs the global `fetch` with responses the test streams chunk by chunk, as the server's UI message stream
  * does. An aborted request ends its stream with an `AbortError`, as the browser's `fetch` does.
  */
-export function stubControlledFetch() {
+export function stubControlledFetch(options: {
+  /**
+   * After an abort the stream still delivers what is pushed until the next macrotask, then fails with the
+   * `AbortError`: the chunks a real stream had in flight when the request was aborted.
+   */
+  deliverInFlightAfterAbort?: boolean;
+} = {}) {
   const requests: ControlledRequest[] = [];
   const encoder = new TextEncoder();
   const fetchStub = vi.fn(async (_url: unknown, init?: RequestInit) => {
@@ -39,6 +47,9 @@ export function stubControlledFetch() {
       aborted: false,
       push(chunk) {
         if (open) controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+      },
+      pushRaw(text) {
+        if (open) controller.enqueue(encoder.encode(text));
       },
       end() {
         if (!open) return;
@@ -62,8 +73,13 @@ export function stubControlledFetch() {
     init?.signal?.addEventListener('abort', () => {
       request.aborted = true;
       if (!open) return;
-      open = false;
-      controller.error(new DOMException('The operation was aborted.', 'AbortError'));
+      const fail = () => {
+        if (!open) return;
+        open = false;
+        controller.error(new DOMException('The operation was aborted.', 'AbortError'));
+      };
+      if (options.deliverInFlightAfterAbort) setTimeout(fail, 0);
+      else fail();
     });
     requests.push(request);
     return new Response(stream, {
