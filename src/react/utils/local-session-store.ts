@@ -162,6 +162,10 @@ export async function clearLocalSessionStore(options: {
  *   <VercelAiChat endpoint="/api/chat" session={createLocalSessionStore({ storageKey: `myapp:${userId}` })} />
  *
  * Create it once per user (module scope or `useMemo`), not on every render.
+ *
+ * To make mention chips appear in a loaded chat, set the provider's
+ * `entityDeclarations`: the declarations the chat handler streams are
+ * transient and not stored with the messages.
  */
 export function createLocalSessionStore(options: LocalSessionStoreOptions): SessionConfig {
   const storage = options.storage === undefined ? browserStorage() : options.storage;

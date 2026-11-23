@@ -1,0 +1,25 @@
+{
+  "id": "markdown-loading-skeleton",
+  "kind": "recommended",
+  "summary": "While react-markdown loads and no turn runs, a text Markdown would render differently shows skeleton lines instead of its raw source; plain text, running turns, SSR and regular hydration stay as before. AiChatProvider loads react-markdown on mount; new preloadMarkdown(), markdown.preload.",
+  "howTo": "Nothing to do. The skeleton (div[data-element=\"markdown-skeleton\"][data-state=\"loading\"][aria-busy=\"true\"] in [data-component=\"markdown\"], up to 8 span[data-element=\"markdown-skeleton-line\"], wrapping width from the source, hidden label: locale key markdownLoadingLabel, optional, German ships) shows only on a client render inside AiChatProvider, while the chat is not submitted or streaming, for text with a Markdown-significant character (backslash ` * _ [ ] < > & | ~ # : @, line break, carriage return, tab, NUL, mention markers, leading whitespace or - + = 1., www.; all text with entity links on), until react-markdown has loaded. A bubble keeps what it showed first until Markdown renders. Raw as before: plain text, bubbles while a turn runs, text outside the provider, server HTML, regular hydration. Declared difference: whenever React builds the chat's messages on the client instead of hydrating them (after a hydration error, or for a Suspense boundary React renders on the client), such text shows the skeleton instead of the raw source. During an approval pause, bubbles mounting then get the skeleton while the paused turn's stay raw. While a skeleton shows, its DOM text is the label, not the source; the copy button copies the source, a text selection copies the label. Adjust with --cm-markdown-skeleton-color, -line-height, -gap, -radius, -padding, -max-width; the pulse is off under prefers-reduced-motion. react-markdown now downloads when AiChatProvider mounts, also for a closed floating chat and headless use, unless components.Markdown or components.MessageBubble is set (an own bubble on useMessageParts: call preloadMarkdown() yourself); markdown={{ preload: false }} turns it off. A missing react-markdown warns at mount. preloadMarkdown(): same promise every call, never rejects, safe on the server; once resolved, Markdown renders directly. Tests reading such a [data-component=\"markdown\"] text right after render see the label: wait, or await preloadMarkdown() first.",
+  "skill": "building-glirastes-chat-ui#pills-chat-about-this-and-chips-in-answers",
+  "affectedWhen": {
+    "imports": [
+      "glirastes/react",
+      "glirastes/embed"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "preloadMarkdown",
+      "markdown-skeleton"
+    ]
+  },
+  "surface": [
+    "glirastes/react#preloadMarkdown",
+    "glirastes/react#ChatLocale.markdownLoadingLabel",
+    "locale#markdownLoadingLabel",
+    "*#ChatMarkdownOptions.preload"
+  ]
+}

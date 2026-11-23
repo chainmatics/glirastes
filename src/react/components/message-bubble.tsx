@@ -1,7 +1,9 @@
-import { Fragment, Suspense, lazy, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, useContext, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
-import { useChatContext } from '../provider/chat-context.js';
+import { ChatContext, useChatContext } from '../provider/chat-context.js';
+import { markdownModuleForLazy } from '../markdown-module.js';
+import { loadingMarkdownSources } from '../utils/copy-message.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { useComposerContext } from '../provider/composer-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
@@ -49,28 +51,10 @@ import type {
 } from '../types.js';
 import { turnStartId } from '../utils/turn-outcomes.js';
 
-// Lazy-load react-markdown — keeps it out of the synchronous import graph so
-// server-only consumers don't pay for it, and gracefully degrades to raw text
-// when the optional peer dep isn't installed.
-type MarkdownModule = typeof import('react-markdown');
+// Lazy-load react-markdown over the shared import (`preloadMarkdown`).
 type ReactMarkdownOptions = import('react-markdown').Options;
 
-const ReactMarkdown = lazy<MarkdownModule['default']>(async () => {
-  try {
-    const mod = await import('react-markdown');
-    return { default: mod.default };
-  } catch {
-    if (typeof console !== 'undefined') {
-      console.warn(
-        '[MessageBubble] react-markdown is not installed — falling back to plain text. Install it with: npm install react-markdown',
-      );
-    }
-    const Fallback: MarkdownModule['default'] = (({ children }) => (
-      <>{typeof children === 'string' ? children : ''}</>
-    )) as MarkdownModule['default'];
-    return { default: Fallback };
-  }
-});
+const ReactMarkdown = lazy(markdownModuleForLazy);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -827,14 +811,168 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   const links = useChatEntityLinks();
   const { remarkPlugins } = useChatMarkdownOptions();
+  // Optional: rendered outside the provider (print, renderToStaticMarkup) it behaves as before.
+  const chat = useContext(ChatContext);
+  // Outside a provider both snapshots are `false`: no re-render after hydration, as before.
+  const client = useSyncExternalStore(subscribeNothing, chat ? onClient : onServer, onServer);
+  // Skeleton or raw text while react-markdown loads, decided on the first render
+  // and kept until Markdown renders; decided again only for a text that no
+  // longer continues the decided one (a bubble reused for another message).
+  // The server and the hydration render decide raw, as before.
+  const decide = (): FallbackChoice => ({
+    content,
+    skeleton: client && chat !== null && !chat.isLoading && needsMarkdown(content, links.enabled),
+  });
+  const [choice, setChoice] = useState(decide);
+  let skeleton = choice.skeleton;
+  if (chat && !content.startsWith(choice.content)) {
+    const next = decide();
+    skeleton = next.skeleton;
+    setChoice(next);
+  }
   return (
     <div className={className} data-component="markdown">
-      <Suspense fallback={<>{content}</>}>
+      <Suspense fallback={skeleton ? <MarkdownLoading content={content} label={chat?.locale.markdownLoadingLabel} /> : <>{content}</>}>
         <ReactMarkdown
           components={links.enabled ? links.markdownComponents : undefined}
           remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
         >{content}</ReactMarkdown>
       </Suspense>
+    </div>
+  );
+}
+
+interface FallbackChoice { content: string; skeleton: boolean }
+
+const subscribeNothing = () => () => {};
+const onClient = () => true;
+const onServer = () => false;
+
+/**
+ * Whether Markdown could show `content` differently from its raw text. One
+ * pass, no regex. Markdown-significant: a backslash or any of ` * _ [ ] < > &
+ * | ~ # : @, a line break, tab, carriage return or NUL, the zero-width mention
+ * marker characters (U+2060, U+2063, U+200B, U+200C), leading whitespace, a
+ * leading - + = or ordered-list number (`1.`, `1)`), and `www.` in any case
+ * (an autolink with remark-gfm). With entity links on, any text may become chips.
+ */
+function needsMarkdown(content: string, entityLinks: boolean): boolean {
+  if (entityLinks || content.length === 0) return true;
+  const first = content.charCodeAt(0);
+  if (first === 32 || first === 45 || first === 43 || first === 61) return true; // space - + =
+  let digits = 0;
+  let ws = 0;
+  for (let i = 0; i < content.length; i += 1) {
+    const code = content.charCodeAt(i);
+    if (MARKDOWN_SIGNIFICANT.has(code)) return true;
+    if (digits === i && code >= 48 && code <= 57) digits += 1;
+    else if (digits > 0 && digits === i && (code === 46 || code === 41)) return true; // 1. or 1)
+    // `www.` in any case: count w/W in a row, a dot after three or more.
+    if (code === 119 || code === 87) ws += 1;
+    else if (code === 46 && ws >= 3) return true;
+    else ws = 0;
+  }
+  return false;
+}
+
+const MARKDOWN_SIGNIFICANT = new Set(
+  [...'\\`*_[]<>&|~#:@\n\r\t\u0000\u2060\u2063\u200B\u200C'].map((char) => char.charCodeAt(0)),
+);
+
+const MAX_SKELETON_LINES = 8;
+/** Characters per skeleton line, also its widest size in `ch`. */
+const SKELETON_COLUMNS = 40;
+const SKELETON_SCAN_LIMIT = 2_000;
+
+/**
+ * Lines, width (in `ch`) and last-line width (percent) the rendered text will
+ * roughly take: one line per non-empty source line plus one per 40 characters,
+ * as wide as its longest line up to 40. A single pass over at most the first
+ * 2,000 characters, stopped at 8 lines.
+ */
+function estimateSkeleton(content: string): { lines: number; columns: number; lastWidth: number } {
+  let lines = 0;
+  let lineLength = 0;
+  let columns = 1;
+  const end = Math.min(content.length, SKELETON_SCAN_LIMIT);
+  for (let i = 0; i < end && lines < MAX_SKELETON_LINES; i += 1) {
+    if (content.charCodeAt(i) === 10) {
+      if (lineLength > 0) lines += 1;
+      lineLength = 0;
+      continue;
+    }
+    if (lineLength === SKELETON_COLUMNS) {
+      lines += 1;
+      lineLength = 0;
+    }
+    lineLength += 1;
+    if (lineLength > columns) columns = lineLength;
+  }
+  if (lineLength > 0 && lines < MAX_SKELETON_LINES) lines += 1;
+  const lastWidth = lines < MAX_SKELETON_LINES && lineLength > 0
+    ? Math.max(30, Math.round((lineLength / columns) * 100))
+    : 100;
+  return { lines: Math.max(1, lines), columns, lastWidth };
+}
+
+const VISUALLY_HIDDEN: CSSProperties = {
+  position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+  overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
+};
+
+const SPACER_COLUMNS = 5;
+const SPACER_STYLE: CSSProperties = { flex: 'none', inlineSize: `${SPACER_COLUMNS}ch`, blockSize: 0 };
+
+/**
+ * Empty wrapping boxes that give the skeleton its width from the source: as
+ * wide as `columns` characters where there is room (a bubble sized by its
+ * content), but they wrap, so the skeleton never widens a narrower container.
+ */
+function widthSpacers(columns: number): ReactNode[] {
+  return Array.from({ length: Math.ceil(columns / SPACER_COLUMNS) }, (_, index) => <span key={index} style={SPACER_STYLE} />);
+}
+
+/**
+ * Suspense fallback while react-markdown loads, for text outside a running
+ * turn: skeleton lines sized from the source. The geometry is inline (CSS
+ * variables) so it takes space without the SDK stylesheet too, also in a
+ * bubble sized by its content.
+ */
+function MarkdownLoading({ content, label }: { content: string; label?: string }) {
+  const { lines, columns, lastWidth } = estimateSkeleton(content);
+  return (
+    <div
+      data-element="markdown-skeleton"
+      data-state="loading"
+      aria-busy="true"
+      // The copy button copies the source, as before the skeleton (not kept in the DOM).
+      ref={(element) => { if (element) loadingMarkdownSources.set(element, content); }}
+      style={{
+        display: 'grid',
+        maxInlineSize: 'var(--cm-markdown-skeleton-max-width, 100%)',
+        rowGap: 'var(--cm-markdown-skeleton-gap, 0.625em)',
+        paddingBlock: 'var(--cm-markdown-skeleton-padding, 0.3125em)',
+      }}
+    >
+      <span style={VISUALLY_HIDDEN}>{label ?? 'Loading message…'}</span>
+      {Array.from({ length: lines }, (_, index) => (
+        <span
+          key={index}
+          aria-hidden="true"
+          data-element="markdown-skeleton-line"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            overflow: 'hidden',
+            width: index === lines - 1 ? `${lastWidth}%` : '100%',
+            height: 'var(--cm-markdown-skeleton-line-height, 0.875em)',
+            borderRadius: 'var(--cm-markdown-skeleton-radius, 0.25em)',
+            background: 'var(--cm-markdown-skeleton-color, rgba(127, 127, 127, 0.2))',
+          }}
+        >
+          {index === 0 ? widthSpacers(columns) : null}
+        </span>
+      ))}
     </div>
   );
 }

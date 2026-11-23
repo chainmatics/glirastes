@@ -69,6 +69,7 @@ describe('stylesheet motion', () => {
     expect(block).toContain('[data-component="typing-indicator"] [data-element="dot"]');
     expect(block).toContain('animation: none');
     expect(block).toContain('[data-component="confirm-dialog"]');
+    expect(block).toContain('[data-element="markdown-skeleton-line"]');
   });
 
   it('ships the same rule in the shadow-root styles of the embed', () => {
