@@ -25,7 +25,15 @@ import {
   type UiActionHandler,
 } from '../../../browser/index.js';
 import { UI_OUTCOME_MODEL_TEXTS } from '../../../contracts/ui-outcome.js';
-import type { AiChatProviderConfig, ChatMessage, ChatTransport, UiActionOutcomeEvent } from '../../types.js';
+import type {
+  AiChatProviderConfig,
+  ChatMessage,
+  ChatTransport,
+  SessionConfig,
+  TurnOutcome,
+  UiActionOutcomeEvent,
+} from '../../types.js';
+import { ctx, Probe } from '../../__tests__/streaming-chat.js';
 import { AiChatProvider } from '../ai-chat-provider.js';
 
 const cleanups: Array<() => void> = [];
@@ -235,11 +243,19 @@ describe('app-own navigation handlers on the bus', () => {
 type Status = ChatTransport['status'];
 type ToolOutput = { tool: string; toolCallId: string; output: Record<string, unknown> };
 const written: ToolOutput[] = [];
+let continuations = 0;
 let control: { set(messages: ChatMessage[], status?: Status): void; status(status: Status): void };
+let currentStatus: Status = 'ready';
 
-function Host({ config }: { config: AiChatProviderConfig }) {
+/**
+ * Like the bundled transport: writing an outcome puts it into the result and
+ * starts the continuation request at once (status `submitted`), except for a
+ * page load (`initiated`: the next page continues with `continueTurn`).
+ */
+function Host({ config }: { config: AiChatProviderConfig & { session?: SessionConfig } }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [status, setStatus] = useState<Status>('ready');
+  currentStatus = status;
   control = { set: (next, nextStatus) => { setMessages(next); if (nextStatus) setStatus(nextStatus); }, status: setStatus };
   const transport = useMemo<ChatTransport>(() => ({
     messages,
@@ -257,32 +273,53 @@ function Host({ config }: { config: AiChatProviderConfig }) {
           ? { ...part, output: value.output }
           : part)),
       }) as ChatMessage));
+      if ((value.output.outcome as { code?: string } | undefined)?.code !== 'initiated') {
+        continuations += 1;
+        setStatus('submitted');
+      }
     },
-    continueTurn: () => {},
+    continueTurn: () => { continuations += 1; setStatus('submitted'); },
     setUiOutcomeReporting: () => {},
   }), [messages, status]);
-  return <AiChatProvider transport={transport} {...config}>{null}</AiChatProvider>;
+  return <AiChatProvider transport={transport} {...config}><Probe /></AiChatProvider>;
 }
 
-const user = { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Open the tasks' }] } as ChatMessage;
-const assistant = (toolCallId: string) => ({
-  id: 'a1',
+const userMessage = (id: string, text = 'Open the tasks') => ({ id, role: 'user', parts: [{ type: 'text', text }] } as ChatMessage);
+const user = userMessage('u1');
+const uiMessage = (id: string, toolCallId: string, uiAction: unknown = navigate()) => ({
+  id,
   role: 'assistant',
   parts: [{ type: 'step-start' }, {
-    type: 'tool-ui_navigate', toolCallId, state: 'output-available', input: {}, output: handedOff(navigate()),
+    type: 'tool-ui_navigate', toolCallId, state: 'output-available', input: {}, output: handedOff(uiAction),
   }],
 } as unknown as ChatMessage);
+const assistant = (toolCallId: string) => uiMessage('a1', toolCallId);
+const textMessage = (id: string, text: string) => ({
+  id, role: 'assistant', parts: [{ type: 'step-start' }, { type: 'text', text }],
+} as unknown as ChatMessage);
+const settle = (ms = 30) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
 
-async function runTurn(register: (bus: UiActionBus) => () => void) {
+function mount(config: AiChatProviderConfig & { session?: SessionConfig } = {}) {
   written.length = 0;
+  continuations = 0;
   const bus = new UiActionBus();
   const outcomes: UiActionOutcomeEvent[] = [];
-  render(<Host config={{ uiActionBus: bus, onUiActionOutcome: (event) => { outcomes.push(event); } }} />);
-  cleanups.push(register(bus));
-  await act(async () => { control.set([user], 'submitted'); });
-  await act(async () => { control.set([user, assistant('c1')], 'streaming'); });
+  render(<Host config={{ uiActionBus: bus, onUiActionOutcome: (event) => { outcomes.push(event); }, ...config }} />);
+  return { bus, outcomes };
+}
+
+/** One request that ends with a step of UI results (the server's `awaitsOutcome` stop). */
+async function streamTurn(history: ChatMessage[], answer: ChatMessage) {
+  await act(async () => { control.set(history, 'submitted'); });
+  await act(async () => { control.set([...history, answer], 'streaming'); });
   await act(async () => { control.status('ready'); });
-  await waitFor(() => expect(written).toHaveLength(1));
+}
+
+async function runTurn(register: (bus: UiActionBus) => () => void, config: AiChatProviderConfig = {}) {
+  const { bus, outcomes } = mount(config);
+  cleanups.push(register(bus));
+  await streamTurn([user], assistant('c1'));
+  await waitFor(() => expect(written).toHaveLength(1), { timeout: 2_000 });
   return { outcome: written[0]!.output.outcome, outcomes };
 }
 
@@ -297,5 +334,172 @@ describe('AiChatProvider writes the navigation outcome the model reads', () => {
   it.fails('writes rejected-handler for an own navigation handler that returns false', async () => {
     const { outcome } = await runTurn((bus) => bus.subscribeById(GLIRASTES_NAVIGATE_ACTION_ID, declining(() => false)));
     expect(outcome).toEqual({ v: 1, code: 'rejected-handler' });
+  });
+});
+
+/**
+ * A push that asks the user (e.g. unsaved changes) and resolves with the
+ * answer: `true` navigated, `false` stayed. The user may take longer than
+ * the outcome timeout.
+ */
+function askingPush() {
+  const answers: Array<(navigated: boolean) => void> = [];
+  const navigatedTo: string[] = [];
+  const push = (href: string) => new Promise<boolean>((resolve) => {
+    answers.push((navigated) => { if (navigated) navigatedTo.push(href); resolve(navigated); });
+  });
+  return { push, answer: (navigated: boolean) => answers.shift()!(navigated), navigatedTo };
+}
+
+describe('the outcome timeout (default UI_ACTION_OUTCOME_TIMEOUT_MS = 10 000 ms)', () => {
+  it('is set per chat by the provider prop uiActionOutcomeTimeoutMs: a short limit writes "not confirmed"', async () => {
+    const dialog = askingPush();
+    const run = runTurn((bus) => registerNavigationBridge({ bus, push: dialog.push }), { uiActionOutcomeTimeoutMs: 40 });
+    const { outcome, outcomes } = await run;
+    expect(outcome).toEqual({ v: 1 });
+    expect(outcomes).toEqual([expect.objectContaining({ code: 'timeout' })]);
+  });
+
+  it('is set per chat by the provider prop uiActionOutcomeTimeoutMs: a long limit waits for the answer', async () => {
+    const dialog = askingPush();
+    const { bus } = mount({ uiActionOutcomeTimeoutMs: 5_000 });
+    cleanups.push(registerNavigationBridge({ bus, push: dialog.push }));
+    await streamTurn([user], assistant('c1'));
+    await settle(200); // longer than the short limit above
+    expect(written).toEqual([]);
+    expect(ctx.isLoading).toBe(true); // the composer stays locked while the chat waits
+    await act(async () => { dialog.answer(false); });
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0]!.output.outcome).toEqual({ v: 1, code: 'rejected-handler' });
+  });
+
+  it('is the timeoutMs option of runToolResultUiActions for an own chat', async () => {
+    const bus = new UiActionBus();
+    const dialog = askingPush();
+    cleanups.push(registerNavigationBridge({ bus, push: dialog.push }));
+    const short = await runToolResultUiActions(handedOff(navigate()), bus, { timeoutMs: 20 });
+    expect(short).toMatchObject({ code: 'timeout' });
+    const long = runToolResultUiActions(handedOff(navigate()), bus, { timeoutMs: 2_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    dialog.answer(true); // answers the first push (already timed out)
+    dialog.answer(true);
+    expect(await long).toMatchObject({ code: 'ok' });
+  });
+
+  it('has no option on the navigation bridge itself (per bridge or per action)', () => {
+    const bus = new UiActionBus();
+    // @ts-expect-error NavigationBridgeOptions has push, reloads and bus only
+    cleanups.push(registerNavigationBridge({ bus, push: () => undefined, timeoutMs: 60_000 }));
+  });
+});
+
+describe('a navigation that settles after the outcome timeout', () => {
+  it.each([true, false])('drops the late answer (%s): "not confirmed" is written once and the turn goes on', async (navigated) => {
+    const dialog = askingPush();
+    const { outcome, outcomes } = await runTurn(
+      (bus) => registerNavigationBridge({ bus, push: dialog.push }),
+      { uiActionOutcomeTimeoutMs: 40 },
+    );
+    expect(outcome).toEqual({ v: 1 });
+    // The continuation request starts at once: the model reads the "not confirmed" text.
+    expect(continuations).toBe(1);
+    expect(currentStatus).toBe('submitted');
+    expect(UI_OUTCOME_MODEL_TEXTS.unconfirmed).toMatch(/it will not be carried out later/);
+    await act(async () => { dialog.answer(navigated); });
+    await settle(60);
+    // Nothing more is written or reported; with `true` the router still navigates.
+    expect(written).toHaveLength(1);
+    expect(outcomes).toHaveLength(1);
+    expect(dialog.navigatedTo).toEqual(navigated ? ['/tasks'] : []);
+  });
+
+  // KNOWN DEFECT (a): the model was told the navigation "will not be carried out later", but
+  // the push already ran, and when the user confirms later the page changes anyway. The late
+  // result reaches the SDK (the push promise settles) and is dropped: not even the app's
+  // onUiActionOutcome hears of it.
+  it.fails('reports the late result of a push that navigated after the timeout', async () => {
+    const dialog = askingPush();
+    const { outcomes } = await runTurn(
+      (bus) => registerNavigationBridge({ bus, push: dialog.push }),
+      { uiActionOutcomeTimeoutMs: 40 },
+    );
+    await act(async () => { dialog.answer(true); });
+    await settle(60);
+    expect(dialog.navigatedTo).toEqual(['/tasks']);
+    expect(outcomes.map((event) => event.code)).toEqual(['timeout', 'ok']);
+  });
+});
+
+describe('a full page load that does not happen (the page stays after `initiated`)', () => {
+  /** Turn 1 asks for a page load; `location.assign` returns and the page stays (beforeunload "Stay"). */
+  async function stayAfterPageLoad(extra: AiChatProviderConfig & { session?: SessionConfig } = {}) {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign, href: 'https://app.example/inbox' });
+    const turnEnds: TurnOutcome[] = [];
+    const { bus, outcomes } = mount({ onTurnEnd: (outcome) => { turnEnds.push(outcome); }, ...extra });
+    cleanups.push(registerDocumentNavigation({ bus }));
+    const first = uiMessage('a1', 'c1', navigate('/reports'));
+    await streamTurn([user], first);
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/reports'));
+    await settle(60);
+    expect(written.map((entry) => (entry.output.outcome as { code?: string }).code)).toEqual(['initiated']);
+    expect(continuations).toBe(0); // the turn waits for a next page that never comes
+    return { bus, outcomes, turnEnds, first };
+  }
+
+  it('still accepts the next message and saves the history', async () => {
+    const saved: ChatMessage[][] = [];
+    const { first } = await stayAfterPageLoad({
+      session: { load: async () => [], save: (_id: string, messages: ChatMessage[]) => { saved.push(messages); } },
+    });
+    expect(ctx.canCompose).toBe(true);
+    const second = [user, first, userMessage('u2', 'Hello')];
+    await act(async () => { control.set(second, 'submitted'); });
+    await act(async () => { control.set([...second, textMessage('a2', 'Hi.')], 'streaming'); });
+    await act(async () => { control.status('ready'); });
+    await settle();
+    expect(saved.at(-1)?.map((message) => message.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
+  });
+
+  // KNOWN DEFECT (a): `pageLeavingRef` (ai-chat-provider.tsx) is set on `initiated` and never
+  // reset, so the runner skips every later UI action on this page: the handler never runs,
+  // no outcome is written, and the next turn waits for it forever.
+  it.fails('runs the UI action of the next turn', async () => {
+    const { bus, first } = await stayAfterPageLoad();
+    const highlight = vi.fn();
+    cleanups.push(registerAiClientAction('tasks.highlight', highlight, undefined, { bus }));
+    const second = [user, first, userMessage('u2', 'Highlight the task')];
+    await streamTurn(second, uiMessage('a2', 'c2', { type: 'glirastes.action', actionId: 'tasks.highlight', payload: {} }));
+    await settle(100);
+    expect(highlight).toHaveBeenCalledTimes(1);
+    expect(written.at(-1)).toMatchObject({ toolCallId: 'c2', output: { outcome: { v: 1, code: 'ok' } } });
+  });
+
+  // KNOWN DEFECT (a): the same flag holds every turn-end report on this page: neither the
+  // stayed turn nor any later, completed turn reaches onTurnEnd.
+  it.fails('reports the next, completed turn to onTurnEnd', async () => {
+    const { turnEnds, first } = await stayAfterPageLoad();
+    const second = [user, first, userMessage('u2', 'Hello')];
+    await act(async () => { control.set(second, 'submitted'); });
+    await act(async () => { control.set([...second, textMessage('a2', 'Hi.')], 'streaming'); });
+    await act(async () => { control.status('ready'); });
+    await settle();
+    expect(turnEnds.map((outcome) => outcome.userMessageId)).toContain('u2');
+  });
+
+  it('control: without the stayed page load the next turn reaches onTurnEnd and its UI action runs', async () => {
+    const turnEnds: TurnOutcome[] = [];
+    const { bus } = mount({ onTurnEnd: (outcome) => { turnEnds.push(outcome); } });
+    const highlight = vi.fn();
+    cleanups.push(registerAiClientAction('tasks.highlight', highlight, undefined, { bus }));
+    const history = [userMessage('u2', 'Hello')];
+    await act(async () => { control.set(history, 'submitted'); });
+    await act(async () => { control.set([...history, textMessage('a2', 'Hi.')], 'streaming'); });
+    await act(async () => { control.status('ready'); });
+    await settle();
+    expect(turnEnds.map((outcome) => outcome.userMessageId)).toEqual(['u2']);
+    const next = [...history, textMessage('a2', 'Hi.'), userMessage('u3', 'Highlight the task')];
+    await streamTurn(next, uiMessage('a3', 'c3', { type: 'glirastes.action', actionId: 'tasks.highlight', payload: {} }));
+    await waitFor(() => expect(highlight).toHaveBeenCalledTimes(1));
   });
 });
