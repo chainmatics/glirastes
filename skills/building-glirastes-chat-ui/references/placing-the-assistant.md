@@ -109,7 +109,7 @@ runs after a pick or a new chat. Texts come from the chat locale:
 
 Every part below is opt-in; an app that sets none of them gets the same DOM,
 behaviour and styles as before, apart from the focus fix after the column
-closes when the conversation has no editor or `textarea` (below).
+closes when the shell has no editor or `textarea` outside the column (below).
 
 - Layout menu (only with `'fullscreen'` among several `modes`):
   `showModeMenu={false}` drops the menu and its key handling (Enter, Space,
@@ -145,9 +145,10 @@ closes when the conversation has no editor or `textarea` (below).
   chats"); an app whose column shows something else (projects, folders) sets
   those labels too.
 - Focus after the column closes (a pick in the built-in list, `close()`): the
-  first editor (`contenteditable`) or `textarea` in the conversation gets
-  `focus()` as it always did, also a disabled one (then focus stays where it
-  was). Only when there is none: an element in the conversation marked
+  first editor (`contenteditable`) or `textarea` of the shell in DOM order,
+  header included but never one in the column, gets `focus()` as it always
+  did, also a disabled one (then focus stays where it was). Only when there is
+  none: an element in the conversation marked
   `data-glirastes-composer` (when it is a text input or focusable itself), else
   the first enabled, editable text input inside it, else the chats toggle;
   when nothing takes focus it stays where it is. Other inputs in the

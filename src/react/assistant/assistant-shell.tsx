@@ -594,20 +594,22 @@ export function AssistantShell({
   }, []);
   const pickedFromHistory = useCallback(() => closeDrawer('composer'), [closeDrawer]);
   const closeHistory = useCallback((focus: 'composer' | 'toggle' = 'composer') => closeDrawer(focus), [closeDrawer]);
-  // After the chat column closes. Where the shell always found an editor or textarea in the
-  // conversation, it focuses that exactly as before (no check, also when disabled). Only where it
+  // After the chat column closes. Where the shell always found an editor or textarea outside the
+  // column, it focuses that exactly as before (no check, also when disabled). Only where it
   // used to fall back to the first button of the shell (which sat in the column): an element marked
   // `data-glirastes-composer` or a text input inside it, else the chats toggle, else focus stays.
   const focusComposerAfterHistory = useCallback(() => {
-    const body = frameRef.current?.querySelector<HTMLElement>('[data-element="body"]');
-    const composer = body?.querySelector<HTMLElement>(BASE_COMPOSER);
+    // The whole shell in DOM order, as before, except the column that is being closed.
+    const composer = Array.from(shell.current?.querySelectorAll<HTMLElement>(BASE_COMPOSER) ?? [])
+      .find(element => !historyRef.current?.contains(element));
     if (composer) { composer.focus(); return; }
+    const body = frameRef.current?.querySelector<HTMLElement>('[data-element="body"]');
     for (const marked of Array.from(body?.querySelectorAll<HTMLElement>(COMPOSER_MARK) ?? [])) {
       if (marked.matches(TEXT_INPUT) || marked.tabIndex >= 0) { if (focusIfPossible(marked)) return; }
       if (focusIfPossible(marked.querySelector<HTMLElement>(TEXT_INPUT))) return;
     }
     focusHistoryToggle();
-  }, [focusHistoryToggle]);
+  }, [shell, focusHistoryToggle]);
   const sessionIcons = icons.newChat === undefined && icons.rename === undefined && icons.delete === undefined ? undefined
     : { newChat: icons.newChat, rename: icons.rename, delete: icons.delete };
   const paneSlot = !fullscreen || historyPane === false ? null

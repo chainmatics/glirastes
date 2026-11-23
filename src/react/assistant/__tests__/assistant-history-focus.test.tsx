@@ -118,6 +118,29 @@ describe('base behaviour after a pick, unchanged', () => {
   }
 });
 
+describe('editor search over the whole shell, as on base', () => {
+  it.each([false, true])('an editor in the header is focused as on base (narrow %s)', async narrowView => {
+    narrow = narrowView;
+    const view = await mount(<textarea aria-label="Draft" />, { props: { headerActions: <textarea aria-label="Header note" /> } });
+    await pick(view);
+    // Recorded on the base: the first editor or textarea of the shell in DOM order.
+    expect(active(view.root)).toMatchInlineSnapshot(`"textarea:Header note"`);
+  });
+
+  it.each([false, true])('an editor in the column is not focused after a pick (narrow %s)', async narrowView => {
+    narrow = narrowView;
+    const view = await mount(<textarea aria-label="Draft" />, {
+      props: { historyPane: ({ close }: { close(): void }) => <div><textarea aria-label="Pane note" /><button type="button" onClick={() => close()}>Pick project</button></div> },
+    });
+    if (narrowView) fireEvent.click(view.scope.getByRole('button', { name: 'Show chats' }));
+    await frame();
+    fireEvent.click(Array.from(view.container.querySelectorAll<HTMLElement>('[data-element="history"] button')).find(b => b.textContent === 'Pick project')!);
+    await frame();
+    await frame();
+    expect(active(view.root)).toBe('textarea:Draft');
+  });
+});
+
 describe('new: composers the base did not find', () => {
   const composers: Array<[string, ReactNode]> = [
     ['marked input', <input key="c" aria-label="Draft" data-glirastes-composer />],
