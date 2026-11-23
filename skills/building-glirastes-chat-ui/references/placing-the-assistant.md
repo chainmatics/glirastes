@@ -181,9 +181,17 @@ behaviour and styles as before.
   `[data-element="history-title"]` with a node, or a function with the same
   argument (e.g. a close button in the drawer); `false` drops it, `null` keeps
   the default. `classNames.history` sets a class on the column,
-  `classNames.historyBackdrop` on the drawer's backdrop.
+  `classNames.historyBackdrop` on the drawer's backdrop. The shipped
+  backdrop color comes from a rule of specificity (0,2,0)
+  (`[data-component="assistant-shell"] … [data-element="history-backdrop"]`),
+  so a single class (0,1,0) does not override it: use a selector of at least
+  (0,2,0) loaded after `styles.css` (e.g. `.my-backdrop.my-backdrop` or
+  `[data-element="history-backdrop"].my-backdrop`), or the provider's
+  `unstyled`. There is no CSS variable for it.
 - Column and drawer states, stable for app CSS and tests (on
-  `[data-element="history"]`, toggle `[data-action="history"]`):
+  `[data-element="history"]`; the toggle values apply to the built-in
+  toggle `[data-action="history"]`; an app `renderButton` sets the attributes
+  of its own button from `expanded` and `controls`):
   - wide column shown: no `data-drawer`, no `hidden`; toggle
     `aria-expanded="true"`;
   - wide column hidden by its toggle: `hidden` and `inert`; toggle
