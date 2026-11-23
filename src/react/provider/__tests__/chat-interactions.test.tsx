@@ -125,12 +125,11 @@ describe('chat interactions in AiChatProvider', () => {
     expect(added).toBe(false);
   });
 
-  it('shows a sent command by its label only', async () => {
+  it('shows a sent command by its label only', () => {
     const text = formatChatCommandMessage({ commandId: 'open.overview', tool: 'ui.navigate', args: { destination: '/overview' }, label: '/Open Overview' });
     const message: ChatMessage = { id: 'u1', role: 'user', parts: [{ type: 'text', text }] };
     const view = render(<AiChatProvider transport={transport([message])}><MessageBubble message={message} /></AiChatProvider>);
-    // The text renders once react-markdown has loaded (a skeleton before).
-    await waitFor(() => expect(view.container.textContent).toContain('/Open Overview'));
+    expect(view.container.textContent).toContain('/Open Overview');
     expect(view.container.innerHTML).not.toContain('glirastes:command');
   });
 });

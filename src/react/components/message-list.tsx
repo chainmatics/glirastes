@@ -1,6 +1,6 @@
 import { Fragment, useRef, useEffect, useCallback } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
-import { MessageBubble as DefaultMessageBubble, statusNotice } from './message-bubble.js';
+import { MarkdownMessageContext, MessageBubble as DefaultMessageBubble, statusNotice } from './message-bubble.js';
 import { TurnNotice as DefaultTurnNotice } from './activity-log.js';
 import { turnStartId } from '../utils/turn-outcomes.js';
 import type { MessageListProps } from '../types.js';
@@ -74,7 +74,9 @@ export function MessageList({ className }: MessageListProps) {
           : undefined;
         return (
           <Fragment key={message.id}>
-            <BubbleComponent message={message} {...(outcome ? { turnOutcome: outcome } : {})} />
+            <MarkdownMessageContext.Provider value={message.id}>
+              <BubbleComponent message={message} {...(outcome ? { turnOutcome: outcome } : {})} />
+            </MarkdownMessageContext.Provider>
             {standalone && (
               <TurnNoticeComponent text={standalone.text} status={standalone.status} placement="message" outcome={outcome!} />
             )}

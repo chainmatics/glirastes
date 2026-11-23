@@ -1,7 +1,8 @@
-import { Fragment, Suspense, lazy, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, Suspense, createContext, lazy, useContext, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
 import { markdownModuleForLazy } from '../markdown-module.js';
+import { loadingMarkdownSources } from '../utils/copy-message.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { useComposerContext } from '../provider/composer-context.js';
@@ -365,10 +366,6 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   const hasPlan = (planItems?.length ?? 0) >= 2;
   const turnActive = isLatestMessage && isLoading;
   // The answer streaming in and the question it answers keep the raw text while react-markdown loads.
-  const liveTurnText = isLoading && (isLatestMessage
-    || (message.role === 'user' && message.id === latestUserMessageId(messages ?? [])));
-  // Internal prop of the default Markdown only, and only then: the nodes keep their props otherwise.
-  const liveTurnProps = liveTurnText && MarkdownComponent === DefaultMarkdown ? { liveTurn: true } : undefined;
   const turnId = turnOutcomes && turnOutcomes.size > 0 ? turnStartId(messages ?? [message], message.id) : null;
   const turnOutcome: TurnOutcome | null = (turnId ? turnOutcomes?.get(turnId) : undefined) ?? null;
   // `noticeScope: 'every'` (default): an earlier turn shows its recorded outcome, the latest one too once its
@@ -473,7 +470,6 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         <MarkdownComponent
           key={`text-${i}`}
           content={text}
-          {...liveTurnProps}
         />
       );
     }
@@ -483,7 +479,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
       const { content, mentions } = markdownWithMentionMarkers(segments);
       return (
         <MentionMarkers key={`text-${i}`} mentions={mentions}>
-          <MarkdownComponent content={content} {...liveTurnProps} />
+          <MarkdownComponent content={content} />
         </MentionMarkers>
       );
     }
@@ -702,7 +698,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
         <>
           {textNodes}
           {/* Fallback summary if no text parts */}
-          {!hasTextContent && fallbackSummary && <MarkdownComponent content={fallbackSummary} {...liveTurnProps} />}
+          {!hasTextContent && fallbackSummary && <MarkdownComponent content={fallbackSummary} />}
         </>
       )
       : null,
@@ -808,21 +804,36 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
       data-component="message-bubble"
       data-role={message.role}
     >
-      {Arrange ? <Arrange message={message} parts={parts} turnOutcome={turnOutcome} {...nodes}>{ordered}</Arrange> : ordered}
+      <MarkdownMessageContext.Provider value={message.id}>
+        {Arrange ? <Arrange message={message} parts={parts} turnOutcome={turnOutcome} {...nodes}>{ordered}</Arrange> : ordered}
+      </MarkdownMessageContext.Provider>
     </div>
   );
 }
 
-function DefaultMarkdown({ content, className, liveTurn }: { content: string; className?: string; liveTurn?: boolean }) {
+function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   const links = useChatEntityLinks();
   const { remarkPlugins } = useChatMarkdownOptions();
-  // Text of the running turn keeps the raw fallback while react-markdown loads,
-  // as before, and keeps it once shown (no raw → skeleton when the turn stops or pauses).
-  const [keepsRaw, setKeepsRaw] = useState(liveTurn === true);
-  if (liveTurn && !keepsRaw) setKeepsRaw(true);
+  const messageId = useContext(MarkdownMessageContext);
+  const { messages, isLoading } = useChatContext();
+  // Raw text (as before) or skeleton while react-markdown loads, decided once per
+  // message and kept until Markdown renders; a new message id or a text that no
+  // longer continues the one decided for (a reused bubble) decides again.
+  const decide = (): FallbackChoice => ({
+    messageId,
+    content,
+    raw: (isLoading && messageId !== null && isRunningTurnMessage(messages, messageId)) || !needsMarkdown(content, links.enabled),
+  });
+  const [choice, setChoice] = useState(decide);
+  let raw = choice.raw;
+  if (choice.messageId !== messageId || !content.startsWith(choice.content)) {
+    const next = decide();
+    raw = next.raw;
+    setChoice(next);
+  }
   return (
     <div className={className} data-component="markdown">
-      <Suspense fallback={keepsRaw ? <>{content}</> : <MarkdownLoading content={content} />}>
+      <Suspense fallback={raw ? <>{content}</> : <MarkdownLoading content={content} />}>
         <ReactMarkdown
           components={links.enabled ? links.markdownComponents : undefined}
           remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
@@ -831,6 +842,44 @@ function DefaultMarkdown({ content, className, liveTurn }: { content: string; cl
     </div>
   );
 }
+
+interface FallbackChoice { messageId: string | null; content: string; raw: boolean }
+
+/** The id of the message a default Markdown renders in: set once around a bubble (MessageBubble, MessageList). */
+export const MarkdownMessageContext = createContext<string | null>(null);
+
+/** The answer streaming in or the question it answers. */
+function isRunningTurnMessage(messages: ReadonlyArray<ChatMessage>, id: string): boolean {
+  if (messages[messages.length - 1]?.id === id) return true;
+  return latestUserMessageId(messages) === id;
+}
+
+/**
+ * Whether Markdown could show `content` differently from its raw text. One
+ * pass, no regex. Markdown-significant: a backslash or any of ` * _ [ ] < > & | ~ # : @,
+ * a line break, tab or carriage return, the zero-width mention marker
+ * characters (U+2060, U+2063, U+200B, U+200C), leading whitespace, a leading
+ * - + = or ordered-list number (`1.`, `1)`), and `www.` (an autolink with
+ * remark-gfm). With entity links on, any text may become chips.
+ */
+function needsMarkdown(content: string, entityLinks: boolean): boolean {
+  if (entityLinks || content.length === 0) return true;
+  const first = content.charCodeAt(0);
+  if (first === 32 || first === 45 || first === 43 || first === 61) return true; // space - + =
+  let digits = 0;
+  for (let i = 0; i < content.length; i += 1) {
+    const code = content.charCodeAt(i);
+    if (MARKDOWN_SIGNIFICANT.has(code)) return true;
+    if (digits === i && code >= 48 && code <= 57) digits += 1;
+    else if (digits > 0 && digits === i && (code === 46 || code === 41)) return true; // 1. or 1)
+    if (code === 119 && content.startsWith('ww.', i + 1)) return true; // www.
+  }
+  return false;
+}
+
+const MARKDOWN_SIGNIFICANT = new Set(
+  [...'\\`*_[]<>&|~#:@\n\r\t\u2060\u2063\u200B\u200C'].map((char) => char.charCodeAt(0)),
+);
 
 const subscribeNothing = () => () => {};
 const onClient = () => true;
@@ -906,8 +955,8 @@ function MarkdownLoading({ content }: { content: string }) {
       data-element="markdown-skeleton"
       data-state="loading"
       aria-busy="true"
-      // The copy button copies this source, as before the skeleton.
-      data-markdown-source={content}
+      // The copy button copies the source, as before the skeleton (not kept in the DOM).
+      ref={(element) => { if (element) loadingMarkdownSources.set(element, content); }}
       style={{
         display: 'grid',
         maxInlineSize: 'var(--cm-markdown-skeleton-max-width, 100%)',
