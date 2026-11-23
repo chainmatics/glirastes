@@ -2447,6 +2447,11 @@ export function AiChatProvider({
       pausedTransportRef.current = null;
     };
   }, [discarding, setAutomaticSendsPaused]);
+  // A provider that unmounts in the same update as clear() never commits the window: its pause ends here.
+  useEffect(() => () => {
+    pausedTransportRef.current?.(false);
+    pausedTransportRef.current = null;
+  }, []);
 
   // The next request starts: a failure from then on is shown, also the same error object again.
   useEffect(() => {

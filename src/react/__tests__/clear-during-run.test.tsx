@@ -1003,3 +1003,104 @@ describe('the pause of automatic sends ends with the clearing window', () => {
     await everythingWorksOn(owned.transports[0]!);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// The pause ends also when the provider unmounts in the same update as clear(); clear() pauses at once.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The transport above the provider, wrapped to count the provider's pause calls (true +1, false -1). */
+const pauses = { count: 0 };
+let setOuter: (next: { show: boolean; key: string }) => void = () => {};
+function CountingParent({ strict = false }: { strict?: boolean }) {
+  const transport = useOwnedTransport();
+  owned.transports = [transport];
+  const counted = useMemo<ChatTransport>(() => ({
+    ...transport,
+    setAutomaticSendsPaused: (paused: boolean) => {
+      pauses.count += paused ? 1 : -1;
+      transport.setAutomaticSendsPaused!(paused);
+    },
+  }), [transport]);
+  const [outer, setState] = React.useState({ show: true, key: 'one' });
+  setOuter = setState;
+  const chat = outer.show ? <ChatOn transport={counted} providerKey={outer.key} /> : null;
+  return strict ? <StrictMode>{chat}</StrictMode> : chat;
+}
+
+describe('the pause when the provider unmounts in the same update as clear()', () => {
+  it.each([
+    ['clear() and unmount in one update', false, () => setOuter({ show: false, key: 'one' })],
+    ['clear() and a key change in one handler', false, () => setOuter({ show: true, key: 'two' })],
+    ['clear() and unmount in one update, under StrictMode', true, () => setOuter({ show: false, key: 'one' })],
+  ])('%s: the count ends at 0; a later provider gets its continuation and onData', async (_name, strict, change) => {
+    pauses.count = 0;
+    render(<CountingParent strict={strict} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    act(() => {
+      ctx.clear();
+      change();
+    });
+    await settle();
+    expect(pauses.count).toBe(0);
+    act(() => { setOuter({ show: true, key: 'three' }); });
+    await settle();
+    expect(pauses.count).toBe(0);
+    await everythingWorksOn(owned.transports[0]!);
+    expect(pauses.count).toBe(0);
+  });
+});
+
+describe('clear() pauses automatic sends at once', () => {
+  it('called from a timer while a continuation request then completes normally: no further request is sent', async () => {
+    pauses.count = 0;
+    render(<CountingParent />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('delete t1'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => {
+      requests[0]!.push({ type: 'start' });
+      requests[0]!.push({ type: 'start-step' });
+      requests[0]!.push({ type: 'tool-input-available', toolCallId: 'c1', toolName: 'tasks_delete', input: { id: 't1' } });
+      requests[0]!.push({ type: 'tool-approval-request', approvalId: 'ap-1', toolCallId: 'c1' });
+      requests[0]!.push({ type: 'finish-step' });
+      requests[0]!.push({ type: 'finish' });
+      requests[0]!.end();
+    });
+    await waitFor(() => expect(ctx.pendingApprovals).toHaveLength(1));
+    await act(async () => { await ctx.approve('ap-1'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    // Outside a React event and outside act: no render (and no effect) runs before clear() returns, so only a
+    // pause clear() sets itself holds from the first moment.
+    let pausedRightAfterClear = -1;
+    const previous = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          ctx.clear();
+          pausedRightAfterClear = pauses.count;
+          requests[1]!.push({ type: 'start' });
+          requests[1]!.push({ type: 'text-start', id: 'late' });
+          requests[1]!.push({ type: 'text-delta', id: 'late', delta: 'LATE' });
+          requests[1]!.push({ type: 'text-end', id: 'late' });
+          requests[1]!.push({ type: 'finish-step' });
+          requests[1]!.push({ type: 'finish' });
+          requests[1]!.end();
+          resolve();
+        }, 0);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } finally {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+    await settle();
+    expect(pausedRightAfterClear).toBe(1);
+    expect(requests).toHaveLength(2);
+    expect(ctx.messages).toEqual([]);
+    expect(pauses.count).toBe(0);
+  });
+});
