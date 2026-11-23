@@ -122,8 +122,10 @@ describe('canonicalMentionLabel: hostile labels', () => {
     expect(canonical).not.toMatch(/\p{Cs}/u);
   });
 
-  it('cuts at a lower maxLength, and never above 120', () => {
-    expect(canonicalMentionLabel('abcdefghij', { maxLength: 5 })).toBe('abcd…');
+  it('cuts at a lower maxLength, never below 8 and never above 120', () => {
+    expect(canonicalMentionLabel('abcdefghijkl', { maxLength: 10 })).toBe('abcdefghi…');
+    expect(canonicalMentionLabel('abcdefghij', { maxLength: 5 })).toBe('abcdefg…');
+    expect(canonicalMentionLabel('abcdefghij', { maxLength: 1 })).toBe('abcdefg…');
     expect(canonicalMentionLabel('x'.repeat(300), { maxLength: 500 })).toBe(`${'x'.repeat(119)}…`);
   });
 
@@ -131,19 +133,20 @@ describe('canonicalMentionLabel: hostile labels', () => {
     for (const maxLength of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(canonicalMentionLabel('x'.repeat(130), { maxLength })).toBe(`${'x'.repeat(119)}…`);
     }
-    expect(canonicalMentionLabel('abc', { maxLength: 1 })).toBe('…');
   });
 
   it('a label that would be a bare ellipsis falls back to the id', () => {
     expect(canonicalMentionLabel(`a${'\u0301'.repeat(130)}`, { id: '42' })).toBe('42');
-    expect(canonicalMentionLabel('abc', { maxLength: 1, id: '42' })).toBe('…');
+    expect(canonicalMentionLabel(`a${'\u0301'.repeat(130)}`, { id: `b${'\u0301'.repeat(130)}` })).toBe('…');
+    expect(canonicalMentionLabel('', { maxLength: 1, id: 'abc' })).toBe('abc');
+    expect(canonicalMentionLabel('', { id: `b${'\u0301'.repeat(130)}` })).toBe('…');
   });
 
   it('falls back to the canonical id when nothing visible is left', () => {
     expect(canonicalMentionLabel('   ', { id: '42' })).toBe('42');
     expect(canonicalMentionLabel('\u200b\u202e', { id: 'task-7' })).toBe('task-7');
     expect(canonicalMentionLabel('', { id: 'x'.repeat(200) })).toBe(`${'x'.repeat(119)}…`);
-    expect(canonicalMentionLabel('\u200b')).toBe('');
+    expect(canonicalMentionLabel('\u200b')).toBe('…');
   });
 
   it('a 10k-character hostile label is linear and bounded', () => {
@@ -208,6 +211,16 @@ describe('canonicalMentionLabel: format characters of ordinary names stay byte-i
     ['Arabic with ZWNJ', 'عبد\u200cالله'],
     ['Devanagari conjunct with ZWJ', 'क\u094d\u200dष'],
     ['Devanagari half form with ZWNJ', 'क\u094d\u200cष'],
+    ['Malayalam legacy chillu at word end', '\u0d2e\u0d4b\u0d39\u0d28\u0d4d\u200d'],
+    ['Malayalam legacy chillu before a space', '\u0d2e\u0d4b\u0d39\u0d28\u0d4d\u200d \u0d15'],
+    ['Thaana with ZWNJ', '\u0780\u200c\u0781'],
+    ['Meetei Mayek with ZWJ', '\uabc0\u200d\uabc1'],
+    ['Chakma with ZWJ', '\u{11103}\u200d\u{11104}'],
+    ['Tai Tham with ZWJ', '\u1a20\u200d\u1a21'],
+    ['Sundanese with ZWJ', '\u1b8a\u200d\u1b8b'],
+    ['Newa with ZWJ', '\u{11400}\u200d\u{11401}'],
+    ['Limbu with ZWJ', '\u1901\u200d\u1902'],
+    ['Kayah Li with ZWJ', '\ua90a\u200d\ua90b'],
   ])('%s', (_name, label) => {
     expect(canonicalMentionLabel(label)).toBe(label);
   });
@@ -228,6 +241,9 @@ describe('canonicalMentionLabel: hidden text in format characters is cleaned', (
     ['ZWNJ between emoji', '\u{1f468}\u200c\u{1f469}', '\u{1f468}\u{1f469}'],
     ['joiner chain between Arabic letters (invisible channel) bounded to one', '\u0645\u200c\u200d\u200d\u200c\u06cc\u200d\u200d\u062e', '\u0645\u200c\u06cc\u200d\u062e'],
     ['joiners between Latin letters', 'a\u200cb\u200dc', 'abc'],
+    ['ZWJ at word end after a Latin letter', 'ab\u200d c', 'ab c'],
+    ['Malayalam chillu ZWJ run keeps one', '\u0d28\u0d4d\u200d\u200d\u200c', '\u0d28\u0d4d\u200d'],
+    ['ZWJ at word end after a Devanagari virama (not a chillu)', '\u0915\u094d\u200d', '\u0915\u094d'],
     ['joiners between Greek, Cyrillic, Han, Kana and Hangul letters', '\u03b1\u200c\u03b2 \u0434\u200d\u0436 \u5c71\u200c\u7530 \u30a2\u200d\u30a4 \uac00\u200c\uac01', '\u03b1\u03b2 \u0434\u0436 \u5c71\u7530 \u30a2\u30a4 \uac00\uac01'],
     ['joiner between Arabic and Latin', '\u0645\u200cb', '\u0645b'],
     ['Mongolian FVS after a non-Mongolian letter', 'a\u180bb', 'ab'],
@@ -297,6 +313,28 @@ describe('canonicalMentionLabel: a cut never splits a joined sequence', () => {
   ])('%s', (_name, label, expected) => {
     expect(canonicalMentionLabel(label)).toBe(expected);
     expect(canonicalMentionLabel(expected)).toBe(expected);
+  });
+});
+
+describe('truncation without Intl.Segmenter', () => {
+  const withoutSegmenter = <T,>(run: () => T): T => {
+    const intl = Intl as unknown as { Segmenter?: unknown };
+    const original = intl.Segmenter;
+    intl.Segmenter = undefined;
+    try {
+      return run();
+    } finally {
+      intl.Segmenter = original;
+    }
+  };
+
+  it('never cuts after a virama (Indic conjuncts) or inside a joined emoji, flag or keycap', () => {
+    withoutSegmenter(() => {
+      expect(canonicalMentionLabel(`${'x'.repeat(117)}\u0915\u094d\u0937y`)).toBe(`${'x'.repeat(117)}…`);
+      expect(canonicalMentionLabel(`${'x'.repeat(117)}${FAMILY}`)).toBe(`${'x'.repeat(117)}…`);
+      expect(canonicalMentionLabel(`${'x'.repeat(118)}\u{1f1e9}\u{1f1ea}y`)).toBe(`${'x'.repeat(118)}…`);
+      expect(canonicalMentionLabel(`${'x'.repeat(118)}1\ufe0f\u20e3`)).toBe(`${'x'.repeat(118)}…`);
+    });
   });
 });
 
@@ -370,8 +408,30 @@ describe('serializeMentionMarker', () => {
   });
 
   it('honours maxLabelLength', () => {
-    expect(serializeMentionMarker({ type: 'task', id: '1', label: 'abcdefghij' }, { maxLabelLength: 5 }))
-      .toBe('{{mention:task:1:abcd…}}');
+    expect(serializeMentionMarker({ type: 'task', id: '1', label: 'abcdefghijkl' }, { maxLabelLength: 10 }))
+      .toBe('{{mention:task:1:abcdefghi…}}');
+  });
+
+  it('an empty label with a small maxLabelLength still gives a marker every reader parses', () => {
+    const marker = serializeMentionMarker({ type: 'u', id: 'abc', label: '' }, { maxLabelLength: 1 })!;
+    expect(marker).toBe('{{mention:u:abc:abc}}');
+    expect(parseMentionMarkers(marker)).toHaveLength(1);
+  });
+
+  it('every emitted marker round-trips (property: labels, ids, maxLabelLength)', () => {
+    const next = random(0x4d4c);
+    const ids = ['abc', 'AB 123', 'a<b', '{x', 'x', `b${'\u0301'.repeat(130)}`, '\u{1f600}', 'Ä-1'];
+    for (let run = 0; run < 3_000; run += 1) {
+      const label = randomLabel(next, run % 7 === 0 ? 300 : 30);
+      const id = ids[Math.floor(next() * ids.length)]!;
+      const maxLabelLength = Math.floor(next() * 140) - 10;
+      const marker = serializeMentionMarker({ type: 'user', id, label }, { maxLabelLength });
+      if (marker === undefined) continue;
+      const context = JSON.stringify({ label, id, maxLabelLength });
+      const parsed = parseMentionMarkers(`x ${marker} y`).map(plain);
+      expect(parsed, context).toHaveLength(1);
+      expect(parsed[0], context).toMatchObject({ type: 'user', id, canonical: true, span: { start: 2, end: 2 + marker.length } });
+    }
   });
 
   it('round-trips through the parser as canonical', () => {

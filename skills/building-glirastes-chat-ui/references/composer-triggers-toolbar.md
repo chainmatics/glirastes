@@ -90,7 +90,7 @@ default `'canonical'`): ordinary labels, ids and types are byte-identical
 (bidi, zero-width, soft hyphen, default ignorables, tag runs, private use)
 except the joiners, flag tags and selectors of ordinary names; NFC; edge
 whitespace trimmed, control runs one space; at most `maxLabelLength`
-(1-120, default 120) code points, cut at a grapheme boundary (`…`). A type
+(8-120, default 120) code points, cut at a grapheme boundary (`…`). A type
 or id with control, format, invisible, private-use or unassigned
 characters, `}`, `{{`, `<!`, `-->` or `--!>` gets no marker: the typed
 token stays and the model loses the id (console warning once per type).

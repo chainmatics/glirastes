@@ -523,12 +523,13 @@ export interface MentionSerializationConfig {
    * except those of ordinary names, NFC, trimmed, at most `maxLabelLength`
    * code points; ordinary labels are unchanged. A mention whose type or id
    * carries characters that can hide text keeps its typed token, without a
-   * marker. `raw`: the format of releases before, label, type and id as
-   * given (a label can then end the marker early or carry text the chat
-   * hides from the bubble but the model reads).
+   * marker. `raw`: label, type and id as given, without validation (a
+   * label can then end the marker early or carry text the chat hides from
+   * the bubble but the model reads); the one-pass replacement applies in
+   * both modes (each token occurrence once, no nested markers).
    */
   labels?: 'canonical' | 'raw';
-  /** Code points of a sent label with `labels: 'canonical'`; 1-120, default 120 (also for any other value). */
+  /** Code points of a sent label with `labels: 'canonical'`; 8-120 (1-7 means 8), default 120 (also for any other value). */
   maxLabelLength?: number;
 }
 

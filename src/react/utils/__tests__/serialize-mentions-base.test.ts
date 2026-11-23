@@ -18,10 +18,55 @@ const cases = JSON.parse(
 
 describe('serializeMentionsForSend sends ordinary input byte-identical to the release before', () => {
   it('has the recorded corpus', () => {
-    expect(cases.length).toBeGreaterThanOrEqual(80);
+    expect(cases.length).toBeGreaterThanOrEqual(93);
   });
 
   it.each(cases.map((entry) => [entry.name, entry] as const))('%s', (_name, entry) => {
     expect(serializeMentionsForSend(entry.text, entry.mentions, entry.options)).toBe(entry.expected);
+  });
+});
+
+interface OverlapCase extends BaseCase {
+  /** Whether base wrote no marker inside another one. */
+  baseWellFormed: boolean;
+}
+
+const overlapCases = JSON.parse(
+  readFileSync(new URL('./__fixtures__/serialize-mentions-overlap-base.json', import.meta.url), 'utf8'),
+) as OverlapCase[];
+
+const MARKER = /\{\{mention:([^:}]{1,200}):([^:}]{1,200}):([^}]{1,1000})\}\}/g;
+const wellFormed = (out: string) => {
+  const markers = [...out.matchAll(MARKER)];
+  return markers.length === out.split('{{mention:').length - 1 && markers.every((m) => !m[3]!.includes('{{'));
+};
+
+describe('tokens with whitespace, overlaps and repeats: as base, recorded from base code', () => {
+  it('a token with whitespace keeps every occurrence base replaced', () => {
+    expect(serializeMentionsForSend('#t @p @p @p', [
+      { id: '1', type: 'user', label: 'T', prefix: '#', slug: 't @p' },
+      { id: '2', type: 'user', label: 'P', prefix: '@', slug: 'p @p' },
+    ])).toBe('{{mention:user:1:T}} {{mention:user:2:P}}');
+  });
+
+  it('has the recorded fuzz corpus', () => {
+    expect(overlapCases.length).toBeGreaterThanOrEqual(600);
+  });
+
+  it('is byte-identical to base wherever base wrote no nested marker', () => {
+    const differences = overlapCases
+      .filter((entry) => entry.baseWellFormed)
+      .filter((entry) => serializeMentionsForSend(entry.text, entry.mentions, entry.options) !== entry.expected)
+      .map((entry) => entry.name);
+    expect(differences).toEqual([]);
+  });
+
+  it('writes no nested marker where base did (the declared single-pass change)', () => {
+    const nested = overlapCases.filter((entry) => !entry.baseWellFormed);
+    expect(nested.length).toBeGreaterThan(0);
+    for (const entry of nested) {
+      const sent = serializeMentionsForSend(entry.text, entry.mentions, entry.options);
+      expect(wellFormed(sent), entry.name).toBe(true);
+    }
   });
 });

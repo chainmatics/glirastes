@@ -1300,5 +1300,256 @@
       }
     ],
     "expected": "ask {{mention:user:1:AB}} now"
+  },
+  {
+    "name": "raw: ordinary labels",
+    "text": "See @acme and @bob",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme GmbH",
+        "slug": "acme",
+        "prefix": "@"
+      },
+      {
+        "id": "7",
+        "type": "user",
+        "label": "Bob",
+        "slug": "bob",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "labels": "raw"
+    },
+    "expected": "See {{mention:customer:42:Acme GmbH}} and {{mention:user:7:Bob}}"
+  },
+  {
+    "name": "raw: id with colon and type with capitals",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "tenant:42",
+        "type": "Customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "labels": "raw",
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: tenant:42)]--> {{mention:Customer:tenant:42:Acme}}"
+  },
+  {
+    "name": "token with whitespace and overlap",
+    "text": "#t @p @p @p",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "T",
+        "prefix": "#",
+        "slug": "t @p"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "P",
+        "prefix": "@",
+        "slug": "p @p"
+      }
+    ],
+    "expected": "{{mention:user:1:T}} {{mention:user:2:P}}"
+  },
+  {
+    "name": "self-overlapping token",
+    "text": "@p @p @p @p @p",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "P",
+        "slug": "p @p",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:P}} {{mention:user:1:P}} @p"
+  },
+  {
+    "name": "later mention inside an earlier token is not split",
+    "text": "@a b @b",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "AB",
+        "slug": "a b",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "B",
+        "slug": "b",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:AB}} {{mention:user:2:B}}"
+  },
+  {
+    "name": "different prefixes, same slug",
+    "text": "#x @x /x",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "tag",
+        "label": "X",
+        "slug": "x",
+        "prefix": "#"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "X",
+        "slug": "x",
+        "prefix": "@"
+      },
+      {
+        "id": "3",
+        "type": "command",
+        "label": "X",
+        "slug": "x",
+        "prefix": "/"
+      }
+    ],
+    "expected": "{{mention:tag:1:X}} {{mention:user:2:X}} {{mention:command:3:X}}"
+  },
+  {
+    "name": "unicode slug",
+    "text": "Hallo @müller-gmbh!",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "customer",
+        "label": "Müller GmbH",
+        "slug": "müller-gmbh",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Hallo @müller-gmbh!"
+  },
+  {
+    "name": "unicode slug with boundary",
+    "text": "Hallo @müller-gmbh und @müller-gmbh",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "customer",
+        "label": "Müller GmbH",
+        "slug": "müller-gmbh",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Hallo {{mention:customer:1:Müller GmbH}} und {{mention:customer:1:Müller GmbH}}"
+  },
+  {
+    "name": "tabs, newlines and NBSP around tokens",
+    "text": "@a\t@b\n@a @b",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "B",
+        "slug": "b",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:A}}\t{{mention:user:2:B}}\n{{mention:user:1:A}} {{mention:user:2:B}}"
+  },
+  {
+    "name": "many repeats of one mention",
+    "text": "@a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}}"
+  },
+  {
+    "name": "same entity under two tokens, listed in block twice",
+    "text": "@acme @acme-gmbh",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      },
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme-gmbh",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: 42), Acme (ID: 42)]--> {{mention:customer:42:Acme}} {{mention:customer:42:Acme}}"
+  },
+  {
+    "name": "mention order differs from text order",
+    "text": "@b then @a",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "B",
+        "slug": "b",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: A (ID: 1), B (ID: 2)]--> {{mention:user:2:B}} then {{mention:user:1:A}}"
+  },
+  {
+    "name": "label with 120 code points of emoji",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:customer:42:😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀}}"
   }
 ]

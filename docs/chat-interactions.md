@@ -231,7 +231,11 @@ by its own entries.
 
 Since the release after 0.23.0 the label is sent in its canonical form
 (`mentions: { serialize: { labels: 'canonical' } }`, the default), so the
-marker carries nothing the bubble hides from the user but the model reads:
+label carries nothing the chip hides from the user but the model reads.
+This is about the label, the part the chip shows: the type and id come
+from the app and are not shown in the chip, as before; a hostile one is
+refused (below). The exceptions for emoji, flags and joining scripts apply
+to labels only.
 
 | In the label | Sent as |
 | --- | --- |
@@ -239,12 +243,12 @@ marker carries nothing the bubble hides from the user but the model reads:
 | each run of control characters (also tab and line breaks), line and paragraph separators | one space |
 | whitespace at the start and end | trimmed; NBSP, U+202F, U+3000 and runs of spaces inside stay |
 | format characters and default ignorables: bidi controls (RLO …), zero-width space, word joiner, BOM, soft hyphen (a typesetting hint, invisible unless a line breaks there), U+034F, Hangul fillers, Khmer U+17B4/17B5, variation selectors, tag characters | removed, except below |
-| ZWJ / ZWNJ | kept once between two emoji (family and profession emoji, 🏳️‍🌈) or between two letters of a joining script (Arabic, Persian, Syriac, Devanagari and other Indic scripts, Sinhala, Khmer, Myanmar, Mongolian …); not between Latin, Greek, Cyrillic, Han, Kana or Hangul letters |
+| ZWJ / ZWNJ | kept once between two emoji (family and profession emoji, 🏳️‍🌈) or between two letters of a joining script (Arabic, Persian, Syriac, Thaana, Devanagari and other Indic scripts, Sinhala, Khmer, Myanmar, Mongolian, Meetei Mayek, Chakma, Tai Tham, Sundanese, Newa, Limbu, Kayah Li …), and the ZWJ of a legacy Malayalam chillu at word end (മോഹന്‍); not between Latin, Greek, Cyrillic, Han, Kana or Hangul letters |
 | tag characters | only the tags of the 🏴 England, Scotland and Wales flags; any other tag run is removed (a 🏴 with other tags stays a bare 🏴) |
 | variation selectors | one VS15/VS16 right after an emoji-capable character (❤️, ☺︎, ©️; after a digit, `#` or `*` only in a keycap such as 1️⃣), one IVS right after a Han ideograph (葛󠄀), one Mongolian FVS after a Mongolian letter |
 | private use (icon fonts), noncharacters, U+2800, lone surrogates | removed |
 | unassigned code points | kept (what is unassigned depends on the engine's Unicode version; removing it would remove new emoji in older browsers) |
-| more than `maxLabelLength` code points (1-120, default 120; anything else means the default) | at most the first 119 and `…`, cut at a grapheme boundary (`Intl.Segmenter`, else before joined sequences), never inside an emoji, flag, keycap, conjunct or Thai cluster; a bare `…` becomes the id |
+| more than `maxLabelLength` code points (8-120, default 120; 1-7 means 8, anything else the default) | at most the first 119 and `…`, cut at a grapheme boundary with `Intl.Segmenter`, never inside an emoji, flag, keycap, conjunct or Thai cluster; without `Intl.Segmenter` the cut avoids marks, joiners, viramas, flags and keycaps but can split other clusters such as Thai Sara Am; a bare `…` becomes the id, and the label is never empty |
 | nothing visible left | the id |
 
 The text is NFC. No NFKC: look-alikes such as `｛` stay, and they are
@@ -261,7 +265,10 @@ noncharacters, U+2800, lone surrogates, `}`, `{{`, `<!`, `-->` or `--!>`
 enters the text, and the context block does not list it. The chat warns
 once per type in the console (outside production), without the type, id or
 label. Spaces, single `<` `>` `{`, `/`, `@`, `+`, non-ASCII letters,
-capitals and `:` are fine, as before. Such a mention can come from the
+capitals and `:` are fine, as before. An id with the emoji or
+joining-script characters a label keeps is refused, and whether a code
+point is unassigned depends on the engine's Unicode version (an older
+browser refuses an id with a code point it does not know). Such a mention can come from the
 legacy `mentions` config (`search` / `resolve` results), completion items,
 `addActiveMention`, `RichMentionInput` `addMention` / `insertMention` /
 `setValue` with app-built mentions, and drafts or queued messages stored
@@ -274,12 +281,14 @@ handle it.
 Each token occurrence is replaced once, in one pass over the typed text:
 a label that contains another mention's token (`x @bob y`) no longer gets
 a second marker nested inside it. A token belongs to the first mention in
-the list with that token, as before. `labels: 'raw'` sends the format of
-releases before. Queued messages and restored drafts keep the structured
+the list with that token, as before. `labels: 'raw'` sends labels, types and ids as
+given, without validation; the one-pass replacement applies there too (no
+nested markers). Queued messages and restored drafts keep the structured
 mention and are serialized the same way when they are sent.
 `glirastes/contracts` exports the grammar for own parsers and server code:
 `canonicalMentionLabel`, `parseMentionMarkers` (`type`, `id`, `label`,
-`canonical` (computed on first read), `span`; the same matches as the
+`canonical`, `span`; `canonical` is a getter computed on first read, so
+`{ ...marker }` and `structuredClone` drop it: read it before copying; the same matches as the
 reader before, linear in the text), `serializeMentionMarker`,
 `isMentionMarkerType`, `isMentionMarkerId`.
 

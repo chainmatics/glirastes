@@ -212,28 +212,62 @@ function buildContextBlock(
 const refusedTypes = new Set<string>();
 const MAX_REFUSED_TYPES = 100;
 
+/** Development only, as `useAiMissingHandlerWarning`: bundlers replace `process.env.NODE_ENV`. */
+function isDevelopment(): boolean {
+  try {
+    return process.env.NODE_ENV === 'development';
+  } catch {
+    // No `process` global and no bundler replacement (a plain browser module).
+    return false;
+  }
+}
+
 // Static text only: the type, id and label are content or app data (see the sensitive-diagnostics test).
 function warnRefusedMention(type: string): void {
-  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') return;
+  if (!isDevelopment()) return;
   if (refusedTypes.has(type) || refusedTypes.size >= MAX_REFUSED_TYPES) return;
   refusedTypes.add(type);
   console.warn('[glirastes] A mention was sent without a {{mention:…}} marker: its type or id has characters that can hide text (control, format or invisible characters, }, {{, <!, -->). The model gets the typed text, not the id.');
 }
 
-/** Each `(^|\s)token(?=\s|$)` occurrence in `text`, left to right, without overlaps. */
-function tokenOccurrences(text: string, token: string): Array<{ start: number; end: number }> {
+/**
+ * Steps of the last `serializeMentionsForSend` call (token candidates looked
+ * at, text positions checked or claimed), for the linearity test. Internal.
+ */
+export const serializeWork = { steps: 0 };
+
+/**
+ * The occurrences base's `(^|\s)token(?=\s|$)` replacement of this token
+ * found, left to right: a candidate must not overlap a position an earlier
+ * mention claimed (`claimed`), and the next one starts after it. Claims the
+ * accepted occurrences. Steps: one per candidate and per position checked
+ * or claimed, so linear in the text for one token.
+ */
+function claimOccurrences(text: string, token: string, claimed: Uint8Array): Array<{ start: number; end: number }> {
   const found: Array<{ start: number; end: number }> = [];
   let from = 0;
   for (;;) {
     const start = text.indexOf(token, from);
     if (start < 0) return found;
+    serializeWork.steps += 1;
     const end = start + token.length;
-    if ((start === 0 || /\s/.test(text[start - 1]!)) && (end === text.length || /\s/.test(text[end]!))) {
-      found.push({ start, end });
-      from = end;
-    } else {
+    if ((start > 0 && !/\s/.test(text[start - 1]!)) || (end < text.length && !/\s/.test(text[end]!))) {
       from = start + 1;
+      continue;
     }
+    let free = true;
+    for (let i = start; i < end; i += 1) {
+      serializeWork.steps += 1;
+      if (claimed[i]) { free = false; break; }
+    }
+    if (!free) {
+      from = start + 1;
+      continue;
+    }
+    claimed.fill(1, start, end);
+    serializeWork.steps += end - start;
+    found.push({ start, end });
+    from = end;
   }
 }
 
@@ -278,7 +312,8 @@ export function serializeMentionsForSend(
   interface Claim { mention: SerializableMention; marker: string | undefined; start: number; end: number; order: number }
   const claimedTokens = new Set<string>();
   const taken: Claim[] = [];
-  const overlaps = (start: number, end: number) => taken.some((claim) => start < claim.end && claim.start < end);
+  const claimed = new Uint8Array(cleaned.length);
+  serializeWork.steps = 0;
 
   mentions.forEach((mention, order) => {
     const id = typeof mention.id === 'string' ? mention.id : '';
@@ -316,9 +351,9 @@ export function serializeMentionsForSend(
       prefix,
       toolReference: toolReferences.get(`${type}\u0000${id}`),
     };
-    for (const { start, end } of tokenOccurrences(cleaned, token)) {
-      // An earlier mention's occurrence wins, as when it replaced its token first.
-      if (!overlaps(start, end)) taken.push({ mention: serializable, marker, start, end, order });
+    // An earlier mention's occurrence wins, as when it replaced its token first.
+    for (const { start, end } of claimOccurrences(cleaned, token, claimed)) {
+      taken.push({ mention: serializable, marker, start, end, order });
     }
   });
 

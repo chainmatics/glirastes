@@ -1,7 +1,8 @@
 /**
  * The mention marker `{{mention:type:id:label}}` that a picked mention
  * becomes in a sent message, and its canonical profile: a canonical label
- * has nothing the chat bubble hides and the model still reads (no comment
+ * (the part the chip shows; type and id come from the app and are not
+ * shown, as before) has nothing the chat bubble hides and the model still reads (no comment
  * delimiters, no braces that end the marker, no control or format
  * characters), so what the model gets is what the chip shows. The grammar
  * is the one every SDK version reads; a canonical marker is a valid marker
@@ -17,7 +18,9 @@
  *          first ":" ({{mention:customer:tenant:42:Acme}} reads as type
  *          customer, id tenant, label "42:Acme"; the model still gets the
  *          whole text), and an id over 200 UTF-16 units is not read back
- * label  = 1-120 code points, the character policy below applied
+ * label  = 1-120 code points, never empty, the character policy below
+ *          applied (the exceptions for emoji, flags and joining scripts
+ *          are for labels only; an id with such characters is refused)
  * hostile = Cc (also tab and newline), Zl, Zp, lone surrogates, Cf,
  *          Default_Ignorable_Code_Point, private use, unassigned and
  *          noncharacters, U+2800, "}", "{{", "<!", "-->", "--!>"
@@ -30,7 +33,8 @@
  * | lone surrogates (Cs) | removed |
  * | Cf and Default_Ignorable_Code_Point (bidi controls, zero-width space, word joiner, BOM, soft hyphen, U+034F, Hangul fillers, Khmer U+17B4/17B5, tags, variation selectors …) | removed, except the rows below |
  * | ZWJ / ZWNJ run between two emoji (before: Extended_Pictographic, emoji modifier or VS16; after: Extended_Pictographic), run contains a ZWJ | one ZWJ |
- * | ZWJ / ZWNJ run between two letters or marks of a joining script (Script_Extensions Arabic, Syriac, N'Ko, Mandaic, Mongolian, Brahmic scripts such as Devanagari, Bengali, Tamil, Sinhala, Khmer, Myanmar, Tibetan …; not Latin, Greek, Cyrillic, Han, Kana, Hangul) | its first joiner |
+ * | ZWJ / ZWNJ run between two letters or marks of a joining script (Script_Extensions Arabic, Syriac, Thaana, N'Ko, Mandaic, Mongolian, Brahmic scripts such as Devanagari, Bengali, Tamil, Malayalam, Sinhala, Khmer, Myanmar, Tibetan, Meetei Mayek, Chakma, Tai Tham, Sundanese, Newa, Limbu, Kayah Li …; not Latin, Greek, Cyrillic, Han, Kana, Hangul) | its first joiner |
+ * | ZWJ / ZWNJ run after a Malayalam consonant and virama, not followed by a joining letter (legacy chillu at word end) | one ZWJ |
  * | any other ZWJ / ZWNJ (edges, next to a removed character, emoji and letter, other scripts) | removed |
  * | tag characters (U+E0000-E007F) | only the exact tags of 🏴 England, Scotland, Wales; all others removed, the 🏴 stays |
  * | VS15 / VS16 right after a character with the Emoji property (❤, ☺, ©); after 0-9 # * only before U+20E3 (keycap) | one kept |
@@ -43,7 +47,7 @@
  * | whitespace at the edges | trimmed; other whitespace (NBSP, U+202F, U+3000, runs of spaces) stays |
  * | `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (single `<` `>` stay) |
  * | nothing left | the canonical id |
- * | over 120 (or `maxLength`) code points | cut at a grapheme boundary (`Intl.Segmenter`; without it, before any joined emoji, flag, keycap, conjunct or combining sequence) to at most 119 and `…`; a bare `…` becomes the id |
+ * | over 120 (or `maxLength`) code points | cut at a grapheme boundary (`Intl.Segmenter`; without it, never before a mark, joiner or selector, after a joiner or virama, or inside a flag or keycap; other clusters such as Thai Sara Am can then be split) to at most 119 and `…`; a bare `…` becomes the id; never empty |
  *
  * No NFKC: look-alikes such as `｛` or fullwidth letters stay as they are.
  * They are visible to the user, so the chip still shows what the model reads.
@@ -93,8 +97,13 @@ const JOINING_LETTER = new RegExp(`^(?=[\\p{L}\\p{M}])[${[
   'Arab', 'Syrc', 'Nkoo', 'Mand', 'Mani', 'Phlp', 'Rohg', 'Sogd', 'Ougr', 'Chrs', 'Adlm', 'Mong', 'Phag',
   'Deva', 'Beng', 'Guru', 'Gujr', 'Orya', 'Taml', 'Telu', 'Knda', 'Mlym', 'Sinh', 'Khmr', 'Mymr', 'Tibt',
   'Gran', 'Shrd', 'Tirh', 'Kthi', 'Modi', 'Takr', 'Khoj', 'Sind', 'Mahj', 'Bali', 'Java',
+  'Mtei', 'Cakm', 'Lana', 'Sund', 'Newa', 'Limb', 'Kali', 'Thaa',
 ].map((script) => `\\p{scx=${script}}`).join('')}]$`, 'u');
 const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u;
+/** Viramas (and the Khmer coeng, Myanmar asat, Tibetan halanta) of the joining scripts. */
+const VIRAMA = /^[\u094D\u09CD\u0A4D\u0ACD\u0B4D\u0BCD\u0C4D\u0CCD\u0D4D\u0DCA\u0F84\u1039\u103A\u17D2\u1A60\u1B44\u1BAA\u1BAB\uA9C0\uAAF6\uABED\u{11046}\u{110B9}\u{11133}\u{111C0}\u{11235}\u{112EA}\u{1134D}\u{11442}\u{114C2}\u{115BF}\u{1163F}\u{116B6}\u{11839}]$/u;
+const MALAYALAM_VIRAMA = '\u0D4D';
+const MALAYALAM_LETTER = /^(?=\p{L})\p{scx=Mlym}$/u;
 /** Code points that belong to the one before them: a cut never falls in front of one. */
 const ATTACHED = /^[\p{M}\p{Emoji_Modifier}\u200C\u200D\u180B-\u180F\u{E0020}-\u{E007F}\u{E0100}-\u{E01EF}]$/u;
 const ZWJ = '\u200D';
@@ -121,15 +130,19 @@ export interface CanonicalMentionLabelOptions {
   /** Used (canonical) when nothing visible is left of the label. */
   id?: string;
   /**
-   * Code points kept, 1-120 (default 120); a longer label ends in `…`. A
-   * value that is not a positive integer means the default; above 120, 120.
+   * Code points kept, 8-120 (default 120); a longer label ends in `…`. A
+   * value that is not a positive integer means the default; 1-7 means 8;
+   * above 120, 120.
    */
   maxLength?: number;
 }
 
+/** The smallest `maxLength`: room for a short word and `…`, and never an empty label. */
+const MIN_LABEL_LENGTH = 8;
+
 function labelLength(value: number | undefined): number {
   if (value === undefined || !Number.isInteger(value) || value < 1) return MENTION_MARKER_MAX_LABEL_LENGTH;
-  return Math.min(MENTION_MARKER_MAX_LABEL_LENGTH, value);
+  return Math.min(MENTION_MARKER_MAX_LABEL_LENGTH, Math.max(MIN_LABEL_LENGTH, value));
 }
 
 const isEmojiBeforeJoiner = (cp: string) =>
@@ -182,6 +195,10 @@ function withoutHiddenChars(text: string): string {
       } else if (before !== undefined && JOINING_LETTER.test(before) && survives(next) && JOINING_LETTER.test(next)) {
         out += cp;
         kept = end - 1;
+      } else if (hasZwj && before === MALAYALAM_VIRAMA && i >= 2 && kept === i - 1 && MALAYALAM_LETTER.test(points[i - 2]!)) {
+        // Legacy Malayalam chillu: consonant, virama, ZWJ at the end of a word.
+        out += ZWJ;
+        kept = end - 1;
       }
       i = end;
       continue;
@@ -230,10 +247,16 @@ function visibleLabel(label: string): string {
   return cleanDisplayText(label).replace(DELIMITERS, (found) => DELIMITER_REPLACEMENTS[found]!);
 }
 
-/** Whether a cut in front of `points[k]` would split a sequence that belongs together. */
+/**
+ * Whether a cut in front of `points[k]` would split a sequence that belongs
+ * together (the fallback without `Intl.Segmenter`): before a mark, emoji
+ * modifier, joiner, tag or selector; after a joiner or a virama (Indic
+ * conjuncts); inside a regional-indicator pair. It does not know other
+ * clusters (Thai Sara Am, Hangul jamo sequences).
+ */
 function splitsSequence(points: string[], k: number): boolean {
   if (ATTACHED.test(points[k]!)) return true;
-  if (points[k - 1] === ZWJ || points[k - 1] === ZWNJ) return true;
+  if (points[k - 1] === ZWJ || points[k - 1] === ZWNJ || VIRAMA.test(points[k - 1]!)) return true;
   if (!REGIONAL_INDICATOR.test(points[k]!) || !REGIONAL_INDICATOR.test(points[k - 1]!)) return false;
   // Regional indicators pair up from the start of their run: an odd run before k ends mid-flag.
   let run = 0;
@@ -242,14 +265,19 @@ function splitsSequence(points: string[], k: number): boolean {
 }
 
 type GraphemeSegmenter = { segment(text: string): Iterable<{ segment: string }> };
-let graphemes: GraphemeSegmenter | null | undefined;
+type SegmenterConstructor = new (locale?: string, options?: { granularity: 'grapheme' }) => GraphemeSegmenter;
+let segmenterOf: SegmenterConstructor | undefined;
+let graphemes: GraphemeSegmenter | undefined;
 
+/** The grapheme segmenter of the current `Intl.Segmenter`, or `null` without one. */
 function graphemeSegmenter(): GraphemeSegmenter | null {
-  if (graphemes === undefined) {
-    const Segmenter = (Intl as unknown as { Segmenter?: new (locale?: string, options?: { granularity: 'grapheme' }) => GraphemeSegmenter }).Segmenter;
-    graphemes = typeof Segmenter === 'function' ? new Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  const Segmenter = (Intl as unknown as { Segmenter?: SegmenterConstructor }).Segmenter;
+  if (typeof Segmenter !== 'function') return null;
+  if (Segmenter !== segmenterOf) {
+    segmenterOf = Segmenter;
+    graphemes = new Segmenter(undefined, { granularity: 'grapheme' });
   }
-  return graphemes;
+  return graphemes!;
 }
 
 /**
@@ -296,7 +324,8 @@ export function canonicalMentionLabel(label: string, options?: CanonicalMentionL
   const max = labelLength(options?.maxLength);
   const fromId = () => (typeof options?.id === 'string' ? truncated(visibleLabel(options.id), max) : '');
   const visible = visibleLabel(typeof label === 'string' ? label : '');
-  if (!visible) return fromId();
+  // Never empty: a marker with an empty label is read by no reader.
+  if (!visible) return fromId() || '…';
   return truncated(visible, max) || fromId() || '…';
 }
 
@@ -333,7 +362,9 @@ export interface MentionMarker {
 export interface ParsedMentionMarker extends Readonly<MentionMarker> {
   /**
    * Type and id writable and the label already canonical: what a current
-   * writer sends. Computed when first read.
+   * writer sends. A getter, computed on first read (parsing costs nothing
+   * for readers that do not need it); `{ ...marker }` and `structuredClone`
+   * drop it, so read it before copying.
    */
   readonly canonical: boolean;
   /** UTF-16 offsets of the whole marker in the text, `end` exclusive. */
@@ -423,11 +454,12 @@ export interface SerializeMentionMarkerOptions {
   /**
    * `canonical` (default): the label in its canonical form; a mention whose
    * type or id carries characters that can hide text gets no marker. `raw`:
-   * label, type and id as given, the format of releases before (a label can
-   * then end the marker or carry text the chat hides).
+   * label, type and id as given, without validation, the format of
+   * releases before (a label can then end the marker or carry text the
+   * chat hides).
    */
   labels?: 'canonical' | 'raw';
-  /** Code points of a canonical label, 1-120 (default 120). */
+  /** Code points of a canonical label, 8-120 (default 120; 1-7 means 8, other values the default). */
   maxLabelLength?: number;
 }
 
