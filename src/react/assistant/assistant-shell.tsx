@@ -90,7 +90,7 @@ export interface AssistantShellClassNames {
   railExpand: string;
   resizeHandle: string;
   windowHandle: string;
-  /** The chat column in full screen (`[data-element="history"]`; as a drawer it also has `data-drawer="true"`). */
+  /** The chat column in full screen (`[data-element="history"]`). */
   history?: string;
   /** The backdrop behind the open drawer below 900 px (`[data-element="history-backdrop"]`). */
   historyBackdrop?: string;
@@ -703,14 +703,8 @@ export function AssistantShell({
   const modeMenuProps = useMemo<AssistantModeMenuRenderProps>(() => ({
     modes, current: ui.mode, setMode: ui.setMode, label: layoutLabel, title: layoutTitle, entries: modeEntries,
   }), [modes, ui.mode, ui.setMode, layoutLabel, layoutTitle, modeEntries]);
-  // Longhands, so React neither warns about `flex` next to `flexShrink` nor drops `flex-shrink: 0`
-  // when the sidebar stops filling the row. An app `style` with the `flex` shorthand keeps the
-  // shorthand as before: React only re-applies a key whose value changes, so longhands removed
-  // next to an unchanged app `flex` would wipe the app's grow and basis.
-  const appFlex = style?.flex !== undefined;
-  const fillRow: CSSProperties = appFlex ? { flex: '1 1 0%', minWidth: 0 } : { flexGrow: 1, flexBasis: '0%', minWidth: 0 };
   const placement: CSSProperties = sidebar
-    ? (fillsRow ? fillRow : { width: ui.collapsed ? railWidth : width })
+    ? (fillsRow ? { flex: '1 1 0%', minWidth: 0 } : { width: ui.collapsed ? railWidth : width })
     : fullscreen
       ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', maxWidth: 'none', maxHeight: 'none' }
       // Before the window is measured it opens bottom right, as it will afterwards.
@@ -728,7 +722,7 @@ export function AssistantShell({
       style={{
         ...chat?.themeVars, ...style,
         display: ui.open ? 'flex' : 'none', flexDirection: hasPane ? 'row' : 'column', maxWidth: '100vw',
-        ...(sidebar ? { position: 'relative', flexShrink: fillsRow && !appFlex ? 1 : 0, height: '100%', maxHeight: '100%' } : { position: 'fixed', maxHeight: '100dvh' }),
+        ...(sidebar ? { position: 'relative', flexShrink: 0, height: '100%', maxHeight: '100%' } : { position: 'fixed', maxHeight: '100dvh' }),
         ...placement,
       }}>
       {sidebar && !ui.collapsed && !fillsRow && <SidebarResizeHandle label={labels.resize} width={width} min={minWidth} max={available}
