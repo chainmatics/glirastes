@@ -112,8 +112,9 @@ export interface ChatTransport {
    * Called by the provider in `clear()`, before `stop()`, when it has seen a request running: that request is
    * discarded. The transport starts no request by itself at its end (no continuation after approvals or UI
    * outcomes) and hands none of its data parts on. One call, no counterpart: the mark ends inside the
-   * transport with that request (at its end, or when the next request starts). Idle, it does nothing; a
-   * second call for the same request changes nothing. The bundled Vercel transport implements it.
+   * transport when that request ends (at a normal end the AI SDK's question whether to send again is answered
+   * no; at an abort or an error when the request ends), or when the next request starts. Idle, it does nothing;
+   * a second call for the same request changes nothing. The bundled Vercel transport implements it.
    */
   discardActiveRun?(): void;
   /**

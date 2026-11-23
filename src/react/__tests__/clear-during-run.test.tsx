@@ -1182,7 +1182,7 @@ describe('clear() marks the request at once', () => {
 });
 
 describe('the discard mark ends with the cleared request', () => {
-  it('a cleared request that finished normally used the mark up: an approval answered afterwards without a new request continues', async () => {
+  it('a cleared request that finished normally: the AI SDK\'s question at its end is answered no and ends the mark, so an approval answered afterwards without a new request continues', async () => {
     render(<OuterParent />);
     await continuationRuns();
     act(() => {
@@ -1204,5 +1204,200 @@ describe('the discard mark ends with the cleared request', () => {
     });
     await act(async () => { await transport.addToolApprovalResponse({ id: 'ap-2', approved: true }); });
     await waitFor(() => expect(requests).toHaveLength(3));
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// The mark ends also when the discarded request ends by abort or error (the plain abort of fetch).
+// ---------------------------------------------------------------------------------------------------------------
+
+/** An approval answered through the transport outside a request: the AI SDK continues by itself. */
+async function idleApprovalContinues(transport: ChatTransport) {
+  const before = requests.length;
+  act(() => {
+    transport.setMessages([
+      { id: 'u9', role: 'user', parts: [{ type: 'text', text: 'delete' }] },
+      { id: 'a9', role: 'assistant', parts: [
+        { type: 'step-start' },
+        { type: 'tool-tasks_delete', toolCallId: 'c9', state: 'approval-requested', input: {}, approval: { id: 'ap-9' } },
+      ] },
+    ] as unknown as ChatMessage[]);
+  });
+  await act(async () => { await transport.addToolApprovalResponse({ id: 'ap-9', approved: true }); });
+  await waitFor(() => expect(requests).toHaveLength(before + 1));
+}
+
+describe('the discard mark ends when the discarded request ends, also by abort or error', () => {
+  it('plain abort: after the window closed, an approval answered outside a request continues', async () => {
+    ({ requests } = stubControlledFetch());
+    render(<OuterParent />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    await act(async () => { ctx.clear(); });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(requests[0]!.aborted).toBe(true);
+    expect(ctx.messages).toEqual([]);
+    await idleApprovalContinues(owned.transports[0]!);
+  });
+
+  it('error: the discarded request fails; afterwards an approval answered outside a request continues', async () => {
+    render(<OuterParent />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    act(() => {
+      ctx.clear();
+      requests[0]!.pushRaw('data: {"type":"error","errorText":"boom"}\n\n');
+      requests[0]!.end();
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(ctx.error).toBeNull();
+    await idleApprovalContinues(owned.transports[0]!);
+  });
+
+  it('a mark set while the last render still showed streaming but the request had ended does not block the next continuation', async () => {
+    ({ requests } = stubControlledFetch());
+    render(<OuterParent />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    const transport = owned.transports[0]!;
+    // The request ends; before React renders that, the rendered transport (status streaming) is asked to discard.
+    await act(async () => {
+      requests[0]!.push({ type: 'text-end', id: 't' });
+      requests[0]!.push({ type: 'finish-step' });
+      requests[0]!.push({ type: 'finish' });
+      requests[0]!.end();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      transport.discardActiveRun!();
+    });
+    await settle();
+    await idleApprovalContinues(transport);
+  });
+});
+
+describe('plain abort (fetch drops what it had): the main flows', () => {
+  beforeEach(() => {
+    ({ requests } = stubControlledFetch());
+  });
+
+  it('clear() during a stream: aborted, nothing shown or stored, the next request carries only itself', async () => {
+    const store = sessionStore();
+    render(<VercelHost session={store.session} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    await act(async () => { ctx.clear(); });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(requests[0]!.aborted).toBe(true);
+    expect(ctx.messages).toEqual([]);
+    expect(JSON.stringify(store.histories)).not.toContain('ANSWER');
+    await act(async () => { ctx.send('fresh'); });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(carried(requests[1]!)).toEqual(['user:fresh']);
+  });
+
+  it('clear() and a send in the same tick: held, then sent alone into the emptied chat', async () => {
+    const { store, turnEnds } = await vercelRunning();
+    let result: unknown;
+    await act(async () => { ctx.clear(); result = ctx.submitWithResult('fresh'); });
+    expect(result).toEqual({ status: 'queued' });
+    await freshTurnGoesOn(store, turnEnds);
+  });
+});
+
+describe('the provider\'s guards during the window', () => {
+  it('a programmatic continueTruncation() starts no request', async () => {
+    const chat = new UnstoppableChat();
+    render(<Host chat={chat} />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); });
+    await act(async () => { await ctx.continueTruncation(); });
+    expect(chat.sent).toEqual(['a question']);
+  });
+
+  it('a budget continuation starts no request while the cleared request still runs', async () => {
+    render(<VercelHost />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    for (const chunk of textChunks('ANSWER ')) requests[0]!.push(chunk);
+    await waitFor(() => expect(seen()).toContain('ANSWER'));
+    act(() => {
+      ctx.clear();
+      ctx.continueAfterBudgetStop?.();
+    });
+    await waitFor(() => expect(ctx.isLoading).toBe(false));
+    await settle();
+    expect(requests).toHaveLength(1);
+  });
+
+  it('a discardActiveRun() that throws: clear() still completes, stops the request and logs', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const chat = new StreamingChat();
+    function ThrowingHost() {
+      const [, force] = React.useReducer((count: number) => count + 1, 0);
+      React.useEffect(() => chat.subscribe(force), []);
+      const transport = { ...chat.transport, discardActiveRun: () => { throw new Error('nope'); } };
+      return <AiChatProvider transport={transport}><Probe /><MessageList /></AiChatProvider>;
+    }
+    render(<ThrowingHost />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    act(() => chat.stream([{ type: 'text', text: 'ANSWER' }]));
+    await act(async () => { ctx.clear(); });
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    await settle();
+    expect(ctx.messages).toEqual([]);
+    expect(ctx.isLoading).toBe(false);
+    expect(warn).toHaveBeenCalledWith('[glirastes] The transport could not discard the request');
+  });
+
+  it('a host switch to a chat whose history continues after a page load: the continuation waits until the window closed', async () => {
+    const toolCallId = `c-page-${Date.now()}`;
+    const B = [
+      { id: 'b-u1', role: 'user', parts: [{ type: 'text', text: 'open the tasks' }] },
+      { id: 'b-a1', role: 'assistant', parts: [{ type: 'step-start' }, {
+        type: 'tool-ui_navigate', toolCallId, state: 'output-available', input: {},
+        output: { handedOff: true, message: 'Handed to the app.', awaitsOutcome: true, uiAction: { type: 'glirastes.navigate' },
+          outcome: { v: 1, code: 'initiated', at: Date.now() } },
+      }] },
+    ] as unknown as ChatMessage[];
+    const histories: Record<string, ChatMessage[]> = { A: [], B };
+    const session = (activeId: string): SessionConfig => ({
+      activeId, load: async (id: string) => histories[id] ?? [], save: (id, messages) => { histories[id] = messages; },
+    });
+    const chat = new UnstoppableChat();
+    const continued = vi.fn(async () => {});
+    function PageLoadHost({ id }: { id: string }) {
+      const [, force] = React.useReducer((count: number) => count + 1, 0);
+      React.useEffect(() => chat.subscribe(force), []);
+      const transport = { ...chat.transport, addToolOutput: async () => {}, continueTurn: continued, setUiOutcomeReporting: () => {} };
+      return <AiChatProvider transport={transport} session={session(id)}><Probe /><MessageList /></AiChatProvider>;
+    }
+    const view = render(<PageLoadHost id="A" />);
+    await waitFor(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('a question'); });
+    await act(async () => { ctx.clear(); });
+    view.rerender(<PageLoadHost id="B" />);
+    await waitFor(() => expect(ctx.activeSessionId).toBe('B'));
+    await settle();
+    expect(continued).not.toHaveBeenCalled();
+    await act(async () => { chat.fail(); });
+    await settle();
+    expect(continued).toHaveBeenCalledTimes(1);
   });
 });

@@ -137,13 +137,20 @@ export function useVercelAiChatTransport(
   const autoResumeRef = useRef(autoResumeOnApproval);
   autoResumeRef.current = autoResumeOnApproval;
   // The running request was discarded by clear(): no request starts by itself at its end and none of its data
-  // parts is handed on. The mark ends here, without React: when the AI SDK asks at the end of that request
-  // whether to send again (once, only for a request that did not fail or abort), or when the next request starts.
+  // parts is handed on. The mark ends here, without React, with that request: the AI SDK ends every request with
+  // `onFinish` (normal end, abort or error) and, after a normal end, asks `sendAutomaticallyWhen` right after it
+  // in the same synchronous step. That ask is answered no and ends the mark; otherwise it ends in a microtask
+  // after `onFinish`. A new request also ends it.
   const discardedRef = useRef(false);
-  const statusRef = useRef<ChatTransport['status']>('ready');
+  // A request between `prepareSendMessagesRequest` and its `onFinish`.
+  const activeRef = useRef(false);
   const discardActiveRun = useCallback(() => {
-    if (statusRef.current !== 'submitted' && statusRef.current !== 'streaming') return;
+    if (!activeRef.current) return;
     discardedRef.current = true;
+  }, []);
+  const endOfRequest = useCallback(() => {
+    activeRef.current = false;
+    if (discardedRef.current) queueMicrotask(() => { if (!activeRef.current) discardedRef.current = false; });
   }, []);
   /** Asked by the AI SDK at the end of a request: a discarded request is answered no, once. */
   const unlessDiscarded = (decide: () => boolean | PromiseLike<boolean>) => {
@@ -184,6 +191,7 @@ export function useVercelAiChatTransport(
         prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => {
           // A new request: a mark of the one before it ends here.
           discardedRef.current = false;
+          activeRef.current = true;
           return {
             body: {
               ...body,
@@ -218,6 +226,7 @@ export function useVercelAiChatTransport(
       : autoResumeOnApproval
         ? (options) => unlessDiscarded(() => lastAssistantMessageIsCompleteWithApprovalResponses(options))
         : undefined,
+    onFinish: endOfRequest,
     onData: (dataPart) => {
       if (discardedRef.current) return;
       const part = dataPart as { type: string; data: unknown };
@@ -229,7 +238,6 @@ export function useVercelAiChatTransport(
       subscribersRef.current.forEach((fn) => fn(part));
     },
   });
-  statusRef.current = status;
 
   const send = useCallback(
     ({ text, files }: { text: string; files?: FilePart[] }) => {

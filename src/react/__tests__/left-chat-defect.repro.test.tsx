@@ -5,7 +5,7 @@
 // optional `transport.sessions` capability, so a left chat's request goes on in the background. Its pull requests
 // flip these to `it`: R1, R3 and R4 the transport pool and the provider policy (the fake transport then gets the
 // `sessions` capability), R5 the
-// `VercelAiChat` step (PR5). R2 (`clear()` during a run) is not here: it ships with its own fix (#171) as a
+// `VercelAiChat` step (PR5). R2 (`clear()` during a run) is not here: it ships with its own fix (the clear() pull request) as a
 // passing test (clear-during-run.test.tsx).
 // The patterns the fix must keep are pinned in left-chat-patterns.test.tsx.
 

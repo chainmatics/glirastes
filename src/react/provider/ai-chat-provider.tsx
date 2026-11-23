@@ -1616,6 +1616,8 @@ export function AiChatProvider({
   // the turn continues once, within a minute, as a model call only. Nothing
   // of it runs again (its results are marked as processed above).
   useEffect(() => {
+    // Not while a request cleared with clear() still ends: the continuation follows once the window closed.
+    if (discarding) return;
     if (loadedHistoryRef.current === null || loadedHistoryRef.current !== loadedSessionId) return;
     // The loaded messages reach the transport a render after the session id.
     if (loadedSessionId !== activeSessionId || rawMessages.length === 0) return;
@@ -1636,7 +1638,7 @@ export function AiChatProvider({
     void Promise.resolve(continueTurn.call(transportRef.current)).catch(() => {
       console.warn('[glirastes] The turn could not be continued after the page load');
     }).finally(() => untrack?.());
-  }, [rawMessages, loadedSessionId, activeSessionId, trackUiWork]);
+  }, [rawMessages, loadedSessionId, activeSessionId, trackUiWork, discarding]);
 
   // A stored history the app handed to the transport itself (not through `session.load`): its outcomes
   // are read and the key is taken out of the transport's copies (the app's objects stay), so no later

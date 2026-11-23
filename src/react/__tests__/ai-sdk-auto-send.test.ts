@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // CHARACTERISATION of the installed AI SDK `Chat`: when it asks `sendAutomaticallyWhen`. The Vercel transport's
 // mark for a request cleared with clear() relies on it: asked at most once at the end of a request (only when the
-// request did not fail), never while a request runs, and a new request always goes through
-// `prepareSendMessagesRequest`.
+// request did not fail or abort), right after `onFinish` in the same synchronous step, never while a request runs;
+// `onFinish` ends every request; a new request always goes through `prepareSendMessagesRequest`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Chat } from '@ai-sdk/react';
@@ -192,5 +192,66 @@ describe('the AI SDK asks sendAutomaticallyWhen', () => {
     await tick(50);
     expect(requests).toHaveLength(0);
     expect(asked).toEqual([]);
+  });
+});
+
+describe('onFinish and the ask, in order', () => {
+  /** Records `finish`, `ask`, and a microtask queued in onFinish, in the order they happen. */
+  function orderedChat() {
+    const order: string[] = [];
+    const chat: Chat<UIMessage> = new Chat<UIMessage>({
+      transport: new DefaultChatTransport({ api: '/api/chat' }),
+      onFinish: () => {
+        order.push('finish');
+        queueMicrotask(() => order.push('microtask'));
+      },
+      sendAutomaticallyWhen: () => { order.push('ask'); return false; },
+    });
+    return { chat, order };
+  }
+
+  it('a normal end: onFinish, then the ask in the same synchronous step, then the microtask', async () => {
+    const { chat, order } = orderedChat();
+    void chat.sendMessage({ text: 'hi' });
+    await until(() => requests.length === 1);
+    for (const chunk of textChunks('a')) requests[0]!.push(chunk);
+    endText(requests[0]!);
+    await until(() => chat.status === 'ready');
+    await tick();
+    expect(order).toEqual(['finish', 'ask', 'microtask']);
+  });
+
+  it('stop() after the stream ended (abort flag, normal end): the same order', async () => {
+    const { chat, order } = orderedChat();
+    void chat.sendMessage({ text: 'hi' });
+    await until(() => requests.length === 1);
+    for (const chunk of textChunks('a')) requests[0]!.push(chunk);
+    await until(() => chat.status === 'streaming');
+    endText(requests[0]!);
+    void chat.stop();
+    await until(() => chat.status === 'ready');
+    await tick();
+    expect(order).toEqual(['finish', 'ask', 'microtask']);
+  });
+
+  it('an abort or an error: onFinish, no ask', async () => {
+    const aborted = orderedChat();
+    void aborted.chat.sendMessage({ text: 'hi' });
+    await until(() => requests.length === 1);
+    for (const chunk of textChunks('a')) requests[0]!.push(chunk);
+    await until(() => aborted.chat.status === 'streaming');
+    void aborted.chat.stop();
+    await until(() => aborted.chat.status === 'ready');
+    await tick(50);
+    expect(aborted.order).toEqual(['finish', 'microtask']);
+
+    const failed = orderedChat();
+    void failed.chat.sendMessage({ text: 'hi' });
+    await until(() => requests.length === 2);
+    requests[1]!.pushRaw('data: {"type":"error","errorText":"boom"}\n\n');
+    requests[1]!.end();
+    await until(() => failed.chat.status === 'error');
+    await tick(50);
+    expect(failed.order).toEqual(['finish', 'microtask']);
   });
 });
