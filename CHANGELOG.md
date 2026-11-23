@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-11-23
+
 ### Added
 
 - `AssistantShell`: the backdrop color of the history drawer is the CSS variable `--cm-history-backdrop` (default `rgba(17, 24, 39, 0.3)`, unchanged). Set it on `:root` or the shell element, no selector of higher specificity needed.
@@ -1252,3 +1254,4 @@ No code changes — patch-level docs release.
 [0.23.0]: https://github.com/chainmatics/glirastes/compare/v0.22.0...v0.23.0
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
+[0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
