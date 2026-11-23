@@ -30,6 +30,7 @@
 import {
   APPROVAL_SUBJECTS_PART_TYPE,
   APPROVAL_SUBJECTS_PART_VERSION,
+  MAX_PART_SUBJECTS,
   fieldArgsOf,
   lookupEffectAllowed,
   sanitizeSubjectText,
@@ -420,6 +421,40 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
 
 function statusOf(result: unknown): number | undefined {
   return isRecordValue(result) && Number.isInteger(result.status) ? result.status as number : undefined;
+}
+
+/** The ids of one record a reference names: as the call carries them, and as the backend knows them (PII shield). */
+interface IdElement {
+  readonly ids: Array<string | number>;
+  readonly wanted: Array<string | number>;
+}
+
+/**
+ * The records a reference names in a call: one for an id (or a composite
+ * key), one per distinct id of a list argument, in the order of the input.
+ * The restored input (PII shield) is indexed the same way. Undefined when
+ * the call names none it can index: absent or `null`, a list with a non-id
+ * entry, or a list in a composite key (not supported). An empty list names none.
+ */
+function idElementsOf(args: ReadonlyArray<string>, input: unknown, restoredInput: unknown): IdElement[] | undefined {
+  const values = args.map((arg) => valueAt(input, arg));
+  if (values.every(isEntityIdValue)) {
+    const restored = args.map((arg) => valueAt(restoredInput, arg));
+    return [{ ids: values, wanted: restored.every(isEntityIdValue) ? restored : values }];
+  }
+  const list = values[0];
+  if (args.length !== 1 || !Array.isArray(list) || !list.every(isEntityIdValue)) return undefined;
+  const restored = valueAt(restoredInput, args[0]!);
+  const originals = Array.isArray(restored) && restored.length === list.length ? restored : undefined;
+  const seen = new Set<string>();
+  const elements: IdElement[] = [];
+  list.forEach((value, index) => {
+    if (seen.has(String(value))) return;
+    seen.add(String(value));
+    const original: unknown = originals?.[index];
+    elements.push({ ids: [value], wanted: [isEntityIdValue(original) ? original : value] });
+  });
+  return elements;
 }
 
 export interface ApprovalSubjectResolverOptions {
@@ -957,7 +992,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
   /** Looks up every planned subject of a call (parallel within the call) and its preview. */
   const subjectsOf = async (plan: ToolPlan, input: unknown, forDisplay: boolean, toolCallId: string | undefined): Promise<{
     outcomes: SubjectOutcome[];
-    /** Planned references the call carries no id value for (absent, null, a list): never a passed check. */
+    /** Planned references the call carries no indexable id value for (absent, null, see `idElementsOf`): never a passed check. */
     missing: number;
     preview?: ApprovalPreviewData;
   }> => {
@@ -970,37 +1005,37 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
     const shieldFailure = restoredInput === SHIELD_TIMEOUT ? 'timeout' : restoredInput === SHIELD_FAILED ? 'unavailable' : undefined;
     const backendInput = shieldFailure ? input : restoredInput;
     let slots = limits.maxSubjectsPerCall;
+    let room = MAX_PART_SUBJECTS;
     const tasks: Array<Promise<SubjectOutcome>> = [];
     for (const item of plan.items) {
       // In the order of the source entity's id fields (mapped by name), never by position alone.
-      const order = item.fieldArgs ?? item.args;
-      const values = order.map((arg) => valueAt(input, arg));
-      // An argument without an id value (absent, a list) has no subject.
-      if (!values.every(isEntityIdValue)) {
+      const elements = idElementsOf(item.fieldArgs ?? item.args, input, backendInput);
+      // Never a passed check: no id value, a list in a composite key or with a non-id entry, more ids than a part holds.
+      if (elements === undefined || elements.length > room) {
         missing += 1;
         continue;
       }
-      const ids = values as Array<string | number>;
-      if (slots <= 0) {
-        tasks.push(Promise.resolve(unchecked(item, ids, 'limit')));
-        continue;
+      room -= elements.length;
+      for (const { ids, wanted } of elements) {
+        if (slots <= 0) {
+          tasks.push(Promise.resolve(unchecked(item, ids, 'limit')));
+          continue;
+        }
+        slots -= 1;
+        if (shieldFailure) {
+          tasks.push(Promise.resolve(unchecked(item, ids, shieldFailure)));
+          continue;
+        }
+        const source = item.source;
+        const params = source ? paramsFor(source, wanted, plan.refs, backendInput) : undefined;
+        tasks.push(source === undefined || params === undefined
+          ? Promise.resolve(unchecked(item, ids, 'source_unavailable'))
+          : lookUp(source.name, source.tool, params, deadline, toolCallId).then(async (outcome) => {
+            const found = match(item, source, ids, outcome, plan, wanted);
+            // Only what reaches the browser is shielded (bounded like the lookup); a recheck compares the raw values.
+            return forDisplay ? present(found, item, ids, deadline) : found;
+          }));
       }
-      slots -= 1;
-      if (shieldFailure) {
-        tasks.push(Promise.resolve(unchecked(item, ids, shieldFailure)));
-        continue;
-      }
-      const restored = order.map((arg) => valueAt(backendInput, arg));
-      const wanted = restored.every(isEntityIdValue) ? restored as Array<string | number> : ids;
-      const source = item.source;
-      const params = source ? paramsFor(source, wanted, plan.refs, backendInput) : undefined;
-      tasks.push(source === undefined || params === undefined
-        ? Promise.resolve(unchecked(item, ids, 'source_unavailable'))
-        : lookUp(source.name, source.tool, params, deadline, toolCallId).then(async (outcome) => {
-          const found = match(item, source, ids, outcome, plan, wanted);
-          // Only what reaches the browser is shielded (bounded like the lookup); a recheck compares the raw values.
-          return forDisplay ? present(found, item, ids, deadline) : found;
-        }));
     }
     const previewTask = plan.preview
       ? (shieldFailure
@@ -1031,7 +1066,7 @@ export function createApprovalSubjectResolver(options: ApprovalSubjectResolverOp
       const denied = outcomes.find((outcome): outcome is Extract<SubjectOutcome, { kind: 'deny' }> => outcome.kind === 'deny');
       if (denied) return { deny: new ApprovalSubjectRefusedError(denied.code, denied.type) };
       const subjects = outcomes.map((outcome) => (outcome as Extract<SubjectOutcome, { kind: 'subject' }>));
-      // `block`: a planned reference the call names no checkable id for (absent, null, a list) is not checked either.
+      // `block`: a planned reference the call names no checkable id for (absent, null, an unindexable list) is not checked either.
       if (plan.onUnavailable === 'block' && missing > 0) {
         return { deny: new ApprovalSubjectRefusedError('approval_subject_unavailable', plan.items[0]?.ref.type ?? 'record') };
       }

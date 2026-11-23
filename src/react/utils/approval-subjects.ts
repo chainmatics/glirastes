@@ -68,7 +68,8 @@ export interface ApprovalSubjectOptions {
   /**
    * The tool's `inputEntities`: an argument (or the arguments of a composite
    * key) declared to name a record of a type gets one subject with that
-   * `type`, its `role`, `idKind` and `provenance`; its type picks the record
+   * `type`, its `role`, `idKind` and `provenance` (an argument that holds a
+   * list of ids one per distinct id, all under its path); its type picks the record
    * among colliding ids. Without it, every argument is judged by its key.
    */
   inputEntities?: ReadonlyArray<InputEntityRef>;
@@ -105,6 +106,19 @@ function argumentAt(args: Record<string, unknown>, path: string): unknown {
     current = current[key];
   }
   return current;
+}
+
+/**
+ * The id values of a declared reference, one set per record: the values of
+ * its arguments, or each distinct id of a single argument that holds a list
+ * (as the server looks them up). Undefined when they are no ids.
+ */
+function declaredIdSets(values: unknown[]): Array<Array<string | number>> | undefined {
+  if (values.every(isEntityIdValue)) return [values];
+  const list = values[0];
+  if (values.length !== 1 || !Array.isArray(list) || list.length === 0 || !list.every(isEntityIdValue)) return undefined;
+  const distinct = [...new Map(list.map((value) => [String(value), value] as const)).values()];
+  return distinct.map((value) => [value]);
 }
 
 function escapeRegex(value: string): string {
@@ -259,47 +273,50 @@ export function resolveApprovalSubjects(
     });
   }
 
-  // Declared arguments first: one subject per reference, typed; the walk below skips them.
+  // Declared arguments first: one subject per record a reference names (each id of a list), typed; the walk skips them.
   const declaredPaths = new Set<string>();
   const typeIdKinds = options.inputEntities?.length ? idKindsByType(options.declarations) : new Map<string, EntityIdKind>();
   if (isRecord(args)) {
     for (const ref of options.inputEntities ?? []) {
       if (subjects.length >= MAX_IDS) break;
       const paths = inputRefArgs(ref);
-      const values = paths.map((path) => argumentAt(args, path));
-      if (!values.every(isEntityIdValue)) continue;
+      const sets = declaredIdSets(paths.map((path) => argumentAt(args, path)));
+      if (!sets) continue;
       for (const path of paths) declaredPaths.add(path);
-      const id = entityIdText(values as Array<string | number>);
-      const lookup = entityLookupId(values as Array<string | number>);
-      const key = entityIdKey(lookup);
-      const sighting = key !== undefined ? sightings.get(key) : undefined;
-      const record = key !== undefined ? seenIds.get(key) : undefined;
-      // Only a record of the reference's own type tells its id kind; another type's record says nothing.
-      const ownTyped = record?.byType && Object.prototype.hasOwnProperty.call(record.byType, ref.type) ? record.byType[ref.type] : undefined;
-      const typedRecord = ownTyped ?? (record?.type === ref.type ? record : undefined);
-      const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? typedRecord?.idKind
-        ?? (sighting?.kindType === ref.type ? sighting.idKind : undefined)
-        ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });
-      const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, lookup, ref.type, true, id, idKind === 'opaque');
-      if (!subject) continue;
-      let provenance: ApprovalSubject['provenance'];
-      // Where the record of the reference's own type came from, not any record with this id.
-      const ofType = sighting?.kinds?.find((candidate) => candidate.type === ref.type);
-      if (subject.status !== 'unknown') {
-        provenance = ofType
-          ? (ofType.mentionedOnly && !(record?.byType && Object.prototype.hasOwnProperty.call(record.byType, ref.type)) ? 'mention' : 'tool-result')
-          : sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';
+      for (const values of sets) {
+        if (subjects.length >= MAX_IDS) break;
+        const id = entityIdText(values);
+        const lookup = entityLookupId(values);
+        const key = entityIdKey(lookup);
+        const sighting = key !== undefined ? sightings.get(key) : undefined;
+        const record = key !== undefined ? seenIds.get(key) : undefined;
+        // Only a record of the reference's own type tells its id kind; another type's record says nothing.
+        const ownTyped = record?.byType && Object.prototype.hasOwnProperty.call(record.byType, ref.type) ? record.byType[ref.type] : undefined;
+        const typedRecord = ownTyped ?? (record?.type === ref.type ? record : undefined);
+        const idKind = ref.idKind ?? typeIdKinds.get(ref.type) ?? typedRecord?.idKind
+          ?? (sighting?.kindType === ref.type ? sighting.idKind : undefined)
+          ?? entityIdKindOf({ id: paths.map((path) => path.split('.').at(-1)!) });
+        const subject = subjectFor(paths.join(','), humanize(ref.type) || undefined, lookup, ref.type, true, id, idKind === 'opaque');
+        if (!subject) continue;
+        let provenance: ApprovalSubject['provenance'];
+        // Where the record of the reference's own type came from, not any record with this id.
+        const ofType = sighting?.kinds?.find((candidate) => candidate.type === ref.type);
+        if (subject.status !== 'unknown') {
+          provenance = ofType
+            ? (ofType.mentionedOnly && !(record?.byType && Object.prototype.hasOwnProperty.call(record.byType, ref.type)) ? 'mention' : 'tool-result')
+            : sighting?.mentionedOnly && !record ? 'mention' : 'tool-result';
+        }
+        // A composite key's text (`a/b/c`) does not tell its parts apart: never counted as typed.
+        else if (paths.length === 1 && typedByUser(id, options.userTexts ?? [], idKind === 'speaking')) provenance = 'user-message';
+        subjects.push({
+          ...subject,
+          ...(provenance === 'user-message' ? { status: 'seen' as const } : {}),
+          type: ref.type,
+          role: ref.role ?? 'target',
+          idKind,
+          ...(provenance ? { provenance } : {}),
+        });
       }
-      // A composite key's text (`a/b/c`) does not tell its parts apart: never counted as typed.
-      else if (paths.length === 1 && typedByUser(id, options.userTexts ?? [], idKind === 'speaking')) provenance = 'user-message';
-      subjects.push({
-        ...subject,
-        ...(provenance === 'user-message' ? { status: 'seen' as const } : {}),
-        type: ref.type,
-        role: ref.role ?? 'target',
-        idKind,
-        ...(provenance ? { provenance } : {}),
-      });
     }
   }
 

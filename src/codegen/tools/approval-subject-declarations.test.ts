@@ -328,6 +328,45 @@ describe('resolving approval subjects', () => {
     expect(resolved.findings.find((finding) => finding.code === 'approval-subject-invalid')?.message).toContain('cannot be matched by name');
   });
 
+  describe('arguments that hold a list of ids', () => {
+    const getUser = getPlaylist({
+      stableKey: 'GET /users/{user_id}', definitionId: 'users.get', modelName: 'users_get', path: '/users/{user_id}',
+      params: { path: ['user_id'], query: [], body: [] },
+      outputEntities: [{ type: 'user', id: 'user_id', name: 'displayName', path: '' }],
+      declarations: { operation: operation({ entityLookup: { type: 'user', params: { user_id: 'user_id' } } }) },
+    });
+    const createTeam = (overrides: Partial<ApprovalResolutionTool>) => deletePlaylist({
+      stableKey: 'POST /teams', definitionId: 'teams.create', modelName: 'teams_create', method: 'POST', path: '/teams',
+      params: { path: [], query: [], body: ['name', 'leaderId', 'memberIds'] },
+      input: {
+        type: 'object',
+        properties: { name: { type: 'string' }, leaderId: { type: 'string' }, memberIds: { type: 'array', items: { type: 'string' } } },
+      },
+      ...overrides,
+    });
+
+    it('accepts a refs entry that names a list argument', () => {
+      const resolved = resolveApprovalSubjects({
+        tools: [getUser, createTeam({
+          inputEntities: [{ type: 'user', args: 'leaderId', role: 'reference' }, { type: 'user', args: 'memberIds', role: 'reference' }],
+          declarations: { code: code({ approvalSubject: { refs: ['leaderId', 'memberIds'] } }) },
+        })],
+      });
+      expect(codes(resolved.findings)).toEqual([]);
+      expect(resolved.byKey.get('POST /teams')?.approvalSubject).toEqual({ refs: ['leaderId', 'memberIds'] });
+    });
+
+    it('reports a composite key with a list argument: not looked up', () => {
+      const resolved = resolveApprovalSubjects({
+        tools: [getUser, createTeam({ inputEntities: [{ type: 'membership', args: ['leaderId', 'memberIds'] }] })],
+      });
+      const finding = resolved.findings.find((entry) => entry.code === 'approval-subject-invalid');
+      expect(finding?.subjectRef).toBe('POST /teams');
+      expect(finding?.message).toContain('memberIds');
+      expect(finding?.message).toContain('list');
+    });
+  });
+
   describe('previews', () => {
     const impact = {
       stableKey: 'POST /playlists/{playlist_id}/impact', definitionId: 'playlists.impact', modelName: 'playlists_impact', method: 'POST',
