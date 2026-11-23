@@ -33,6 +33,9 @@ const BLOCK_TAGS = new Set(['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLO
 /** The rendered text blocks of an answer: Markdown, and text with mention chips outside Markdown. */
 const BLOCKS = '[data-component="markdown"], [data-component="message-rich-text"]';
 
+/** Source text of a Markdown block still loading, by its skeleton element (set by the default Markdown). */
+export const loadingMarkdownSources = new WeakMap<Element, string>();
+
 function exportNode(node: Node, target: HTMLElement, doc: Document): void {
   if (node.nodeType === 3) {
     target.append(doc.createTextNode(node.textContent ?? ''));
@@ -48,6 +51,11 @@ function exportNode(node: Node, target: HTMLElement, doc: Document): void {
     return;
   }
   if (DROPPED.has(tag)) return;
+  // Markdown still loading: its source text, as the bubble showed before the skeleton.
+  if (element.getAttribute('data-element') === 'markdown-skeleton') {
+    target.append(doc.createTextNode(loadingMarkdownSources.get(element) ?? ''));
+    return;
+  }
   if (tag === 'INPUT') {
     if (element.getAttribute('type') === 'checkbox') {
       target.append(doc.createTextNode((element as HTMLInputElement).checked ? '☑ ' : '☐ '));

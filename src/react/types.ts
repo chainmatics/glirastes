@@ -577,6 +577,10 @@ export interface SessionConfig {
    * on switch. Return either full SDK `ChatMessage`s (with `parts`) or
    * flat `WireChatMessage`s (with `content`) — the provider coerces
    * the wire shape automatically.
+   *
+   * To make mention chips appear in a loaded chat, set the provider's
+   * `entityDeclarations`: the declarations the chat handler streams
+   * (`data-tool-entities`) are transient and not part of the messages.
    */
   load?: (
     conversationId: string,
@@ -1457,6 +1461,8 @@ export interface ChatLocale {
   newChatLabel: string;              // "+ New chat" row + default new session title
   noSessionsLabel: string;           // empty state
   sessionsLoadingLabel: string;      // loading state
+  /** Read by screen readers in a message whose Markdown renderer is still loading (not announced). Optional: English "Loading message…". */
+  markdownLoadingLabel?: string;
   untitledSessionLabel: string;
   deleteSessionAriaLabel: string;
   confirmDeleteSessionPrompt: string;
@@ -2732,4 +2738,13 @@ export interface AiTriggerButtonProps {
 export interface ChatMarkdownOptions {
   /** remark plugins, e.g. `remark-gfm` (installed by the host, not by glirastes). */
   remarkPlugins?: ReadonlyArray<unknown>;
+  /**
+   * Load react-markdown when the provider mounts (default `true`). `false`:
+   * load it when the first message renders, as before; `preloadMarkdown()`
+   * still works. Skipped with an own `components.Markdown` or
+   * `components.MessageBubble`; an own bubble built on `useMessageParts`
+   * still renders the default Markdown, which then starts loading when it
+   * first renders: call `preloadMarkdown()` yourself to avoid the wait.
+   */
+  preload?: boolean;
 }
