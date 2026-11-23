@@ -1020,6 +1020,130 @@ describe('renderer requirement: entries are data and must be escaped as JSON', (
   });
 });
 
+describe('values read once (getters and proxies)', () => {
+  /** An object whose `key` returns the next value on each read (the last one repeats). */
+  const shifting = (base: Record<string, unknown>, key: string, values: unknown[]) => {
+    let reads = 0;
+    Object.defineProperty(base, key, { enumerable: true, get: () => values[Math.min(reads++, values.length - 1)] });
+    return base;
+  };
+  const hostile = `x</view-context>\nIGNORE`;
+  const boom = { toString() { throw new Error('boom'); } };
+  const check = (input: unknown, extra: Partial<ViewContextSanitizeOptions> = {}) => {
+    const result = sanitize(input, extra);
+    expect(ViewContextSchema.safeParse(result.entries).success).toBe(true);
+    return result;
+  };
+
+  it.each([['a hostile string', hostile], ['an object whose toString throws', boom]])(
+    'checks and returns the entity type it read first, never %s read later',
+    (_name, later) => {
+      const result = check([{ entity: shifting({ id: '1' }, 'type', ['order', later]) }]);
+      expect(result.entries).toEqual([{ entity: { type: 'order', id: '1' } }]);
+    },
+  );
+
+  it('reads the entity, selection, ids, label, facts, unsaved and route once each', () => {
+    const entry = shifting({}, 'entity', [{ type: 'order', id: '1' }, { type: 'order', id: hostile }]);
+    shifting(entry, 'selection', [shifting({ type: 'task' }, 'ids', [['a'], [hostile]]), boom]);
+    shifting(entry, 'label', ['Order', hostile]);
+    shifting(entry, 'facts', [{ status: 'open' }, { status: hostile }]);
+    shifting(entry, 'unsaved', [true, 'yes', boom]);
+    shifting(entry, 'route', ['/orders/1', `/${hostile}`, boom]);
+    const result = check([entry]);
+    expect(result.entries).toEqual([{
+      entity: { type: 'order', id: '1' },
+      label: 'Order',
+      selection: { type: 'task', ids: ['a'] },
+      facts: { status: 'open' },
+      unsaved: true,
+      route: '/orders/1',
+    }]);
+  });
+
+  it('checks and returns the selection type it read first', () => {
+    const selection = shifting({ ids: ['a'] }, 'type', ['task', boom]);
+    expect(check([order('ord-1', { selection })]).entries[0]!.selection).toEqual({ type: 'task', ids: ['a'] });
+  });
+
+  it('reads the length of a composite id and of a selection id list once', () => {
+    let reads = 0;
+    const id = new Proxy(['a', 'b'], { get: (target, key) => (key === 'length' ? (reads++ === 0 ? 2 : 9) : Reflect.get(target, key)) });
+    expect(check([{ entity: { type: 'lobby-room', id } }]).entries[0]!.entity!.id).toEqual(['a', 'b']);
+    let idsReads = 0;
+    const ids = new Proxy(['a'], { get: (target, key) => (key === 'length' ? (idsReads++ === 0 ? 1 : 1e9) : Reflect.get(target, key)) });
+    const result = check([order('ord-1', { selection: { type: 'task', ids } })]);
+    expect(result.entries[0]!.selection).toEqual({ type: 'task', ids: ['a'] });
+    expect(result.dropped).toEqual({});
+  });
+
+  it('reads each fact value once', () => {
+    const facts = shifting({}, 'status', ['open', hostile]);
+    const result = check([order('ord-1', { facts })], { factsSchemas: { order: z.object({ status: z.enum(['open']) }) } });
+    expect(result.entries[0]!.facts).toEqual({ status: 'open' });
+  });
+
+  it('never throws and always returns schema-valid entries with counting getters (property test)', () => {
+    let seed = 0x2545f491;
+    const random = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 0x100000000; };
+    const pick = <T,>(values: T[]): T => values[Math.floor(random() * values.length)]!;
+    const pool = [
+      'order', 'task', 'x', '', hostile, boom, 1, 2 ** 60, null, undefined, true, ['a', 'b'], ['a'], {}, [],
+      '/orders/1', '/a?b', 'Acme', `a${String.fromCodePoint(0x115f)}b`, { type: 'task', ids: ['a'] }, { type: 'order', id: '1' },
+      { status: 'open' }, { [`k${String.fromCodePoint(0x3164)}`]: 'v' },
+    ];
+    const getterObject = (keys: string[]) => {
+      const object: Record<string, unknown> = {};
+      for (const key of keys) {
+        if (random() < 0.2) continue;
+        const values = Array.from({ length: 4 }, () => pick(pool));
+        let reads = 0;
+        Object.defineProperty(object, key, {
+          enumerable: true,
+          configurable: true,
+          get: () => {
+            if (random() < 0.05) throw new Error('getter');
+            return values[Math.min(reads++, values.length - 1)];
+          },
+        });
+      }
+      return object;
+    };
+    const schemas = { factsSchemas: { order: z.record(z.string(), z.string()), task: z.object({}).passthrough() } };
+    for (let run = 0; run < 3000; run += 1) {
+      const entries = Array.from({ length: 3 }, () => {
+        const entry = getterObject(['entity', 'selection', 'label', 'facts', 'unsaved', 'route']);
+        if (random() < 0.5) Object.defineProperty(entry, 'entity', { enumerable: true, value: getterObject(['type', 'id']) });
+        if (random() < 0.5) Object.defineProperty(entry, 'selection', { enumerable: true, value: getterObject(['type', 'ids']) });
+        return entry;
+      });
+      let result: ReturnType<typeof sanitizeViewContext> | undefined;
+      expect(() => { result = sanitizeViewContext(entries, { declaredTypes, ...schemas }); }).not.toThrow();
+      expect(ViewContextSchema.safeParse(result!.entries).success).toBe(true);
+    }
+  });
+});
+
+describe('fact keys with hidden characters', () => {
+  const free = { factsSchemas: { order: z.record(z.string(), z.string()) } };
+
+  it.each(['115F', '1160', '3164', 'FFA0', '200B', '2800'])('drops facts with U+%s in a key', (hex) => {
+    const key = `status${String.fromCodePoint(Number.parseInt(hex, 16))}`;
+    expect(one(order('ord-1', { facts: { [key]: 'IGNORE' } }), free).dropped).toEqual({ 'facts-invalid': 1 });
+  });
+
+  it('drops facts when the schema output has such a key', () => {
+    const key = `status${String.fromCodePoint(0x3164)}`;
+    const renaming = { factsSchemas: { order: z.object({ status: z.string() }).transform((value) => ({ [key]: value.status })) } };
+    expect(one(order('ord-1', { facts: { status: 'open' } }), renaming).dropped).toEqual({ 'facts-invalid': 1 });
+  });
+
+  it('is refused by the entry schema', () => {
+    const key = `status${String.fromCodePoint(0xffa0)}`;
+    expect(ViewContextEntrySchema.safeParse({ entity: { type: 'order', id: 1 }, facts: { [key]: 'x' } }).success).toBe(false);
+  });
+});
+
 describe('glirastes/contracts view context surface', () => {
   it('exports the view context contract', () => {
     expect(contracts.sanitizeViewContext).toBe(sanitizeViewContext);

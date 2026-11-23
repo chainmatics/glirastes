@@ -318,9 +318,10 @@ function idPart(value: unknown): string | number | undefined {
 /** A valid id exactly as given; undefined when invalid. */
 function entityId(value: unknown): ViewContextEntityId | undefined {
   if (!Array.isArray(value)) return idPart(value);
-  if (value.length < 2 || value.length > MAX_ENTITY_ID_PARTS) return undefined;
+  const length = value.length;
+  if (length < 2 || length > MAX_ENTITY_ID_PARTS) return undefined;
   const parts: Array<string | number> = [];
-  for (let index = 0; index < value.length; index += 1) {
+  for (let index = 0; index < length; index += 1) {
     const valid = idPart(value[index]);
     if (valid === undefined) return undefined;
     parts.push(valid);
@@ -398,7 +399,8 @@ function plainFacts(value: unknown, clean: boolean): FactsCheck {
       if (Object.getPrototypeOf(input) !== Array.prototype) throw new Stop('facts-invalid');
       grow(2);
       const list: ViewContextFactValue[] = [];
-      for (let index = 0; index < input.length; index += 1) {
+      const length = input.length;
+      for (let index = 0; index < length; index += 1) {
         if (!(index in input)) throw new Stop('facts-invalid');
         list.push(copy(input[index], depth + 1));
       }
@@ -409,7 +411,9 @@ function plainFacts(value: unknown, clean: boolean): FactsCheck {
     const object: Record<string, ViewContextFactValue> = {};
     for (const key in input) {
       if (!own(input, key)) continue;
-      if (FORBIDDEN_KEYS.has(key) || key.length > maxFactKeyLength || !FACT_KEY.test(key)) throw new Stop('facts-invalid');
+      if (FORBIDDEN_KEYS.has(key) || key.length > maxFactKeyLength || !FACT_KEY.test(key) || hasHiddenChar(key)) {
+        throw new Stop('facts-invalid');
+      }
       const child = input[key];
       if (child === undefined) continue;
       size += key.length + 3;
@@ -564,11 +568,14 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
   type Note = (reason: ViewContextDropReason, count?: number) => void;
 
   const readSelection = (value: unknown, note: Note): ViewContextSelection | undefined => {
-    if (!isPlainObject(value) || typeIssue(value.type) !== undefined || !Array.isArray(value.ids)) {
+    if (!isPlainObject(value)) { note('invalid-selection'); return undefined; }
+    // Each field is read once: a getter cannot pass the check and return something else.
+    const type = value.type;
+    const raw = value.ids;
+    if (typeIssue(type) !== undefined || !Array.isArray(raw)) {
       note('invalid-selection');
       return undefined;
     }
-    const raw = value.ids;
     const ids: ViewContextEntityId[] = [];
     const seen = new Set<string>();
     const { maxSelectionIds, maxScannedSelectionIds } = VIEW_CONTEXT_LIMITS;
@@ -584,7 +591,7 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
     }
     note('selection-id-over-limit', total - index);
     if (ids.length === 0) { note('invalid-selection'); return undefined; }
-    return { type: value.type as string, ids };
+    return { type: type as string, ids };
   };
 
   const readFacts = (type: string, value: unknown, note: Note): ViewContextFacts | undefined => {
@@ -614,34 +621,43 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
 
   const readEntry = (value: unknown, note: Note): ViewContextEntry | ViewContextDropReason => {
     if (!isPlainObject(value)) return 'invalid-entry';
-    let entity: ViewContextEntity | undefined;
+    // Each field is read exactly once into a local and only that local is checked
+    // and returned: a getter (a caller that is not JSON) cannot swap a value in.
     const rawEntity = value.entity;
+    const rawSelection = value.selection;
+    const rawLabel = value.label;
+    const rawFacts = value.facts;
+    const rawUnsaved = value.unsaved;
+    const rawRoute = value.route;
+    let entity: ViewContextEntity | undefined;
     if (rawEntity !== undefined) {
       if (!isPlainObject(rawEntity)) return 'invalid-entity';
-      const issue = typeIssue(rawEntity.type);
+      const entityType = rawEntity.type;
+      const rawId = rawEntity.id;
+      const issue = typeIssue(entityType);
       if (issue) return issue;
-      const id = entityId(rawEntity.id);
+      const id = entityId(rawId);
       if (id === undefined) return 'invalid-entity';
-      entity = { type: rawEntity.type as string, id };
+      entity = { type: entityType as string, id };
     }
-    const selection = value.selection !== undefined ? readSelection(value.selection, note) : undefined;
+    const selection = rawSelection !== undefined ? readSelection(rawSelection, note) : undefined;
     if (!entity && !selection) return 'no-entity-or-selection';
     const type = entity ? entity.type : selection!.type;
 
     let label: string | undefined;
-    if (value.label !== undefined) {
-      label = typeof value.label === 'string' ? canonicalViewContextLabel(value.label) : '';
+    if (rawLabel !== undefined) {
+      label = typeof rawLabel === 'string' ? canonicalViewContextLabel(rawLabel) : '';
       if (label === '') { label = undefined; note('invalid-label'); }
     }
-    const facts = value.facts !== undefined ? readFacts(type, value.facts, note) : undefined;
+    const facts = rawFacts !== undefined ? readFacts(type, rawFacts, note) : undefined;
     let unsaved: boolean | undefined;
-    if (value.unsaved !== undefined) {
-      if (typeof value.unsaved === 'boolean') unsaved = value.unsaved;
+    if (rawUnsaved !== undefined) {
+      if (typeof rawUnsaved === 'boolean') unsaved = rawUnsaved;
       else note('invalid-unsaved');
     }
     let route: string | undefined;
-    if (value.route !== undefined) {
-      if (isViewContextRoute(value.route)) route = value.route;
+    if (rawRoute !== undefined) {
+      if (isViewContextRoute(rawRoute)) route = rawRoute;
       else note('invalid-route');
     }
     return {
@@ -691,24 +707,26 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
     const note: Note = (reason, count = 1) => {
       if (count > 0) pending[reason] = (pending[reason] ?? 0) + count;
     };
-    let entry: ViewContextEntry | ViewContextDropReason;
+    // Everything about one entry runs inside the try: a throwing getter or proxy drops the entry, never the call.
     try {
-      entry = readEntry(input[index], note);
+      const entry = readEntry(input[index], note);
+      if (typeof entry === 'string') { drop(entry); continue; }
+      // A list view is one per selection type; it never collides with an entity.
+      const key = entry.entity
+        ? `entity\u0000${entry.entity.type}\u0000${idKey(entry.entity.id)}`
+        : `list\u0000${entry.selection.type}`;
+      if (seen.has(key)) { drop('duplicate'); continue; }
+      const comma = entries.length > 0 ? 1 : 0;
+      const kept = fitted(entry, VIEW_CONTEXT_LIMITS.maxTotalBytes - total - comma, note);
+      if (!kept) { drop('over-size'); continue; }
+      const size = utf8Length(JSON.stringify(kept)) + comma;
+      seen.add(key);
+      total += size;
+      entries.push(kept);
     } catch {
-      entry = 'invalid-entry';
+      drop('invalid-entry');
+      continue;
     }
-    if (typeof entry === 'string') { drop(entry); continue; }
-    // A list view is one per selection type; it never collides with an entity.
-    const key = entry.entity
-      ? `entity\u0000${entry.entity.type}\u0000${idKey(entry.entity.id)}`
-      : `list\u0000${entry.selection.type}`;
-    if (seen.has(key)) { drop('duplicate'); continue; }
-    const comma = entries.length > 0 ? 1 : 0;
-    const kept = fitted(entry, VIEW_CONTEXT_LIMITS.maxTotalBytes - total - comma, note);
-    if (!kept) { drop('over-size'); continue; }
-    seen.add(key);
-    total += utf8Length(JSON.stringify(kept)) + comma;
-    entries.push(kept);
     for (const [reason, count] of Object.entries(pending) as Array<[ViewContextDropReason, number]>) drop(reason, count);
   }
   drop('over-limit', length - index);
