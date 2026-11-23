@@ -193,6 +193,25 @@ export const ToolsConfigSchema = z.object({
     tools: z.record(z.string().min(1).max(200), z.unknown())
       .refine((tools) => Object.keys(tools).length <= 1_000, { message: 'At most 1000 tools' }).optional(),
   }).strict().optional(),
+  /**
+   * The chat's `@` mention sources. `policy`: `derived` (the default) offers
+   * every read endpoint the generator recognises as an entity search,
+   * `declared` only `sources` and reports the others as candidates.
+   * `sources` by entity type, in the order of the `@` menu groups: `{ tool,
+   * queryParam, labelField?, idField?, itemsPath?, descriptionField?,
+   * limitParam?, label?, aliases? }` (id, name and list default from the
+   * tool's identity declaration of that type). `ignore`: derived candidate
+   * types neither offered nor reported. `acknowledgedTypes`: types whose
+   * change to the declared identity type was reviewed. Entries are checked
+   * by the refresh (a finding, never a failure). Local only.
+   */
+  mentions: z.object({
+    policy: z.enum(['derived', 'declared']).optional(),
+    sources: z.record(z.string().min(1).max(64), z.unknown())
+      .refine((sources) => Object.keys(sources).length <= 50, { message: 'At most 50 mention sources' }).optional(),
+    ignore: z.array(z.string().min(1).max(64)).max(200).optional(),
+    acknowledgedTypes: z.array(z.string().min(1).max(64)).max(200).optional(),
+  }).strict().optional(),
   output: z.object({
     deniedFields: z.array(z.string()).max(MAX_OUTPUT_FIELDS)
       .refine((paths) => paths.every((path) => parseAnyDepthKey(path) !== undefined)
