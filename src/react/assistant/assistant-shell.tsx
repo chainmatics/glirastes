@@ -1,7 +1,7 @@
 'use client';
 
 import '../styles.css';
-import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChatContext } from '../provider/chat-context.js';
 import { formatShortcut, useChatShortcuts, type ChatShortcutMap } from '../hooks/use-chat-shortcuts.js';
 import { useFloatingPanel, type FloatingResizeEdge } from '../hooks/use-floating-panel.js';
@@ -42,6 +42,11 @@ export interface AssistantShellIcons {
   fullscreen?: ReactNode;
   /** Toggle of the chat column in full screen. */
   history?: ReactNode;
+  /** The "+" of new chat in the shell's own session switchers (header and chat column). `false` drops it. */
+  newChat?: ReactNode;
+  /** Rename and delete in the shell's own session switchers; empty values (`false`, `null`, `''`) keep the default icon. */
+  rename?: ReactNode;
+  delete?: ReactNode;
 }
 
 export interface AssistantShellLabels {
@@ -85,6 +90,43 @@ export interface AssistantShellClassNames {
   railExpand: string;
   resizeHandle: string;
   windowHandle: string;
+  /** The chat column in full screen (`[data-element="history"]`). */
+  history?: string;
+}
+
+/** One entry of the layout menu. */
+export interface AssistantModeMenuEntry {
+  label: string;
+  icon: ReactNode;
+}
+
+/** What `renderModeMenu` gets: what the built-in layout menu uses. */
+export interface AssistantModeMenuRenderProps {
+  /** The layouts of `modes`, in their order. */
+  modes: ReadonlyArray<AssistantLayoutMode>;
+  current: AssistantLayoutMode;
+  /** `useAssistantLayout().setMode`. */
+  setMode(mode: AssistantLayoutMode): void;
+  /** Name of the menu (`labels.layout`). */
+  label: string;
+  /** Tooltip of the trigger, with the layout shortcut where there is one. */
+  title: string;
+  /** Label and icon per layout (`labels.sidebar` / `icons.dock`, …). */
+  entries: Readonly<Record<AssistantLayoutMode, AssistantModeMenuEntry>>;
+}
+
+/** What a `historyPane` or `historyTitle` render function gets. */
+export interface AssistantHistoryPaneProps {
+  /** The column is shown: the open drawer below 900 px, otherwise the column not hidden by its toggle. */
+  open: boolean;
+  /** Below 900 px viewport width the column is a drawer over the conversation. */
+  drawer: boolean;
+  /**
+   * Closes the drawer, as a pick in the built-in chat list does, and moves
+   * focus to the composer (default) or back to the chats toggle. The wide
+   * column stays; focus still moves.
+   */
+  close(focus?: 'composer' | 'toggle'): void;
 }
 
 export const DEFAULT_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freeze({
@@ -216,12 +258,33 @@ export interface AssistantShellProps {
    */
   modes?: ReadonlyArray<AssistantLayoutMode>;
   /**
+   * The built-in layout menu shown when `modes` include full screen. Default
+   * true. `false` drops it together with its key handling; full screen stays
+   * a layout (shortcut, `setMode`), detach and dock do not come back.
+   */
+  showModeMenu?: boolean;
+  /**
+   * Draws the app's own layout control in place of the built-in menu, when
+   * `modes` include full screen and `showModeMenu` is not false. The
+   * built-in menu and its key handling are then not rendered. Rendered as a
+   * component: hooks are safe; its state resets when the menu goes away.
+   */
+  renderModeMenu?: (props: AssistantModeMenuRenderProps) => ReactNode;
+  /**
    * Left column in full screen. Default: the chat list (`SessionSwitcher
    * variant="list"`) when the chat keeps several, also for `null`; `false`
-   * shows none; any other node replaces it. 260 px wide; below 900 px viewport width a drawer
-   * opened from the header.
+   * shows none; any other node replaces it. A function gets `open`, `drawer`
+   * and `close()`, is rendered as a component (hooks are safe, state resets
+   * after leaving full screen) and always gives a column. 260 px wide; below 900 px
+   * viewport width a drawer opened from the header.
    */
-  historyPane?: ReactNode | false;
+  historyPane?: ReactNode | false | ((pane: AssistantHistoryPaneProps) => ReactNode);
+  /**
+   * Heading of the chat column. Default (also `null`): `labels.history` in
+   * `[data-element="history-title"]`; `false` shows none; a node or a
+   * function (same argument as `historyPane`) replaces the element.
+   */
+  historyTitle?: ReactNode | false | ((pane: AssistantHistoryPaneProps) => ReactNode);
 }
 
 const NARROW_SCREEN = '(max-width: 899.98px)';
@@ -274,6 +337,33 @@ function edgeStyle(edge: FloatingResizeEdge): CSSProperties {
   if (edge.includes('w')) style.left = -4;
   return style;
 }
+/**
+ * Renders an app's render-function slot as a component of its own, so hooks
+ * inside it belong to the slot, not to the shell. It runs while its part is
+ * rendered (the column: whenever the shell is in full screen, also hidden or
+ * as a closed drawer; the menu: while the layout menu is shown). Not keyed
+ * by the function: a new function each render keeps
+ * the state, and swapping in a different function with other hooks is not
+ * supported (switch inside one function or render components from it).
+ */
+function RenderSlot<P>({ render, props }: { render: (props: P) => ReactNode; props: P }) {
+  return <>{render(props)}</>;
+}
+
+/** The editor or textarea the shell has always looked for; disabled ones included, as before. */
+const BASE_COMPOSER = '[contenteditable="true"],[contenteditable=""],textarea';
+/** Marks an app's own composer (or the wrapper around its input) for focus after the chat column closes. */
+const COMPOSER_MARK = '[data-glirastes-composer]';
+/** Enabled, editable text inputs; buttons, checkboxes, files, images and the like are not a composer. */
+const TEXT_INPUT = 'input:not(:disabled):not([readonly]):not([aria-disabled="true"])'
+  + ':is(:not([type]), [type=""], [type="text"], [type="search"], [type="email"], [type="url"], [type="tel"], [type="number"], [type="password"])';
+/** Focuses the element and tells whether it took focus, also inside a shadow root. */
+function focusIfPossible(element: HTMLElement | null | undefined): boolean {
+  if (!element) return false;
+  element.focus();
+  return (element.getRootNode() as Document | ShadowRoot).activeElement === element;
+}
+
 const withShortcut = (label: string, combo: string | false) => combo ? `${label} (${formatShortcut(combo)})` : label;
 const cx = (...names: Array<string | false | undefined>) => names.filter(Boolean).join(' ') || undefined;
 
@@ -390,7 +480,10 @@ export function AssistantShell({
   minPageWidth = 0,
   railWidth = 44,
   modes: modesProp,
+  showModeMenu = true,
+  renderModeMenu,
   historyPane,
+  historyTitle,
 }: AssistantShellProps) {
   const ui = useAssistantLayout();
   const chat = useContext(ChatContext);
@@ -407,7 +500,8 @@ export function AssistantShell({
   const floating = ui.mode === 'floating';
   const fullscreen = ui.mode === 'fullscreen';
   const modeKey = modesOf(modesProp).join(',');
-  const modes = modeKey.split(',') as AssistantLayoutMode[];
+  const modes = useMemo(() => modeKey.split(',') as AssistantLayoutMode[], [modeKey]);
+  // Full screen among several layouts: the layout control is a menu (built-in, the app's own, or none).
   const layoutMenu = modes.includes('fullscreen') && modes.length > 1;
   const switchesDock = !layoutMenu && modes.includes('sidebar') && modes.includes('floating');
   const width = Math.min(ui.width, available);
@@ -493,19 +587,47 @@ export function AssistantShell({
     shell.current?.querySelector<HTMLElement>(`[aria-controls="${historyId}"], [data-action="history"]`)?.focus();
   }, [shell, historyId]);
   // Focus moves once the drawer is closed and the conversation is no longer inert.
-  const focusAfterHistory = useRef<'toggle' | 'composer' | null>(null);
+  // `'pane-composer'`: `close()` of an app's render-function column, which uses its own lookup.
+  const focusAfterHistory = useRef<'toggle' | 'composer' | 'pane-composer' | null>(null);
   const [, setFocusRequest] = useState(0);
-  const closeDrawer = useCallback((refocus: 'toggle' | 'composer') => {
+  const closeDrawer = useCallback((refocus: 'toggle' | 'composer' | 'pane-composer') => {
     focusAfterHistory.current = refocus;
     setDrawerOpen(false);
     setFocusRequest(n => n + 1);
   }, []);
   const pickedFromHistory = useCallback(() => closeDrawer('composer'), [closeDrawer]);
-  const pane = !fullscreen || historyPane === false ? null
-    : historyPane ?? (sessionsSupported ? <SessionSwitcher variant="list" onSelect={pickedFromHistory} /> : null);
-  const hasPane = pane !== null && pane !== undefined;
+  // A stale `close()` (the column is gone, e.g. full screen was left) does nothing.
+  const closeHistory = useCallback((focus: 'composer' | 'toggle' = 'composer') => {
+    if (historyRef.current?.isConnected) closeDrawer(focus === 'toggle' ? 'toggle' : 'pane-composer');
+  }, [closeDrawer]);
+  // Only after `close()` of an app's render-function column; the built-in list keeps `focusComposer`.
+  // The first editor or textarea of the shell outside the column gets a plain `focus()` (also when
+  // disabled); without one: an element marked `data-glirastes-composer` or a text input inside it,
+  // else the chats toggle, else focus stays.
+  const focusComposerAfterHistory = useCallback(() => {
+    const composer = Array.from(shell.current?.querySelectorAll<HTMLElement>(BASE_COMPOSER) ?? [])
+      .find(element => !historyRef.current?.contains(element));
+    if (composer) { composer.focus(); return; }
+    const body = frameRef.current?.querySelector<HTMLElement>('[data-element="body"]');
+    for (const marked of Array.from(body?.querySelectorAll<HTMLElement>(COMPOSER_MARK) ?? [])) {
+      if (marked.matches(TEXT_INPUT) || marked.tabIndex >= 0) { if (focusIfPossible(marked)) return; }
+      if (focusIfPossible(marked.querySelector<HTMLElement>(TEXT_INPUT))) return;
+    }
+    focusHistoryToggle();
+  }, [shell, focusHistoryToggle]);
+  const sessionIcons = icons.newChat === undefined && icons.rename === undefined && icons.delete === undefined ? undefined
+    : { newChat: icons.newChat, rename: icons.rename, delete: icons.delete };
+  const paneSlot = !fullscreen || historyPane === false ? null
+    : typeof historyPane === 'function' ? historyPane
+    : historyPane ?? (sessionsSupported ? <SessionSwitcher variant="list" onSelect={pickedFromHistory} icons={sessionIcons} /> : null);
+  const hasPane = paneSlot !== null && paneSlot !== undefined;
   const drawer = hasPane && narrowScreen;
   const historyShown = hasPane && (narrowScreen ? drawerOpen : !historyHidden);
+  const paneProps = useMemo<AssistantHistoryPaneProps>(() => ({ open: historyShown, drawer, close: closeHistory }), [historyShown, drawer, closeHistory]);
+  const pane = typeof paneSlot === 'function' ? <RenderSlot render={paneSlot} props={paneProps} /> : paneSlot;
+  const historyHeading = historyTitle === false ? null
+    : typeof historyTitle === 'function' ? <RenderSlot render={historyTitle} props={paneProps} />
+    : historyTitle ?? <div data-element="history-title" aria-hidden="true">{labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history}</div>;
   // Leaving full screen or growing past the breakpoint closes the drawer.
   useEffect(() => { if (!fullscreen || !narrowScreen) setDrawerOpen(false); }, [fullscreen, narrowScreen]);
   useEffect(() => {
@@ -528,6 +650,7 @@ export function AssistantShell({
     if (!target || drawerOpen) return;
     focusAfterHistory.current = null;
     if (target === 'toggle') focusHistoryToggle();
+    else if (target === 'pane-composer') focusComposerAfterHistory();
     else focusComposer();
   });
   const activeChatTitle = chat?.sessions?.find(session => session.id === chat.activeSessionId)?.title || chat?.locale?.newChatLabel || labels.title;
@@ -565,11 +688,19 @@ export function AssistantShell({
   const clear = onClear ?? chat?.clear;
   const fallbackLabels = DEFAULT_ASSISTANT_SHELL_LABELS;
   const layoutLabel = labels.layout ?? fallbackLabels.layout!;
-  const modeEntries: Record<AssistantLayoutMode, { label: string; icon: ReactNode }> = {
-    sidebar: { label: labels.sidebar ?? fallbackLabels.sidebar!, icon: icons.dock },
-    floating: { label: labels.floating ?? fallbackLabels.floating!, icon: icons.detach },
-    fullscreen: { label: labels.fullscreen ?? fallbackLabels.fullscreen!, icon: icons.fullscreen ?? DEFAULT_ASSISTANT_SHELL_ICONS.fullscreen },
-  };
+  const sidebarLabel = labels.sidebar ?? fallbackLabels.sidebar!;
+  const floatingLabel = labels.floating ?? fallbackLabels.floating!;
+  const fullscreenLabel = labels.fullscreen ?? fallbackLabels.fullscreen!;
+  const fullscreenIcon = icons.fullscreen ?? DEFAULT_ASSISTANT_SHELL_ICONS.fullscreen;
+  const modeEntries = useMemo<Readonly<Record<AssistantLayoutMode, AssistantModeMenuEntry>>>(() => ({
+    sidebar: { label: sidebarLabel, icon: icons.dock },
+    floating: { label: floatingLabel, icon: icons.detach },
+    fullscreen: { label: fullscreenLabel, icon: fullscreenIcon },
+  }), [sidebarLabel, floatingLabel, fullscreenLabel, icons.dock, icons.detach, fullscreenIcon]);
+  const layoutTitle = withShortcut(layoutLabel, shortcuts.toggleLayout);
+  const modeMenuProps = useMemo<AssistantModeMenuRenderProps>(() => ({
+    modes, current: ui.mode, setMode: ui.setMode, label: layoutLabel, title: layoutTitle, entries: modeEntries,
+  }), [modes, ui.mode, ui.setMode, layoutLabel, layoutTitle, modeEntries]);
   const placement: CSSProperties = sidebar
     ? (fillsRow ? { flex: '1 1 0%', minWidth: 0 } : { width: ui.collapsed ? railWidth : width })
     : fullscreen
@@ -608,6 +739,7 @@ export function AssistantShell({
         {button({ action: 'close', label: labels.close, title: labels.close, onClick: ui.closeChat, children: icons.close })}
       </div>}
       {hasPane && <div ref={historyRef} data-element="history" data-drawer={drawer || undefined} id={historyId} hidden={!historyShown} tabIndex={-1}
+        className={classNames.history}
         {...(drawer && drawerOpen ? { role: 'dialog', 'aria-modal': true, 'aria-label': labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history } : {})}
         style={{
           display: historyShown ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, minWidth: 0, overflowY: 'auto', boxSizing: 'border-box',
@@ -621,7 +753,7 @@ export function AssistantShell({
           event.preventDefault();
           closeDrawer('toggle');
         }}>
-        <div data-element="history-title" aria-hidden="true">{labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history}</div>
+        {historyHeading}
         {pane}
       </div>}
       {drawer && drawerOpen && <div data-element="history-backdrop" aria-hidden="true"
@@ -644,10 +776,11 @@ export function AssistantShell({
             ? <span data-element="title" title={activeChatTitle}>{activeChatTitle}</span>
             : sessionsSupported
             // A chat that keeps several conversations lists them where the title would be.
-            ? <SessionSwitcher fallbackTitle={labels.title} />
+            ? <SessionSwitcher fallbackTitle={labels.title} icons={sessionIcons} />
             : <span data-element="title">{labels.title}</span>)}
           {headerActions}
-          {layoutMenu && <AssistantModeMenu modes={modes} current={ui.mode} label={layoutLabel} entries={modeEntries} onPick={ui.setMode}
+          {layoutMenu && showModeMenu && renderModeMenu && <RenderSlot render={renderModeMenu} props={modeMenuProps} />}
+          {layoutMenu && showModeMenu && !renderModeMenu && <AssistantModeMenu modes={modes} current={ui.mode} label={layoutLabel} entries={modeEntries} onPick={ui.setMode}
             renderTrigger={({ expanded, controls, onClick }) => button({
               action: 'mode', label: `${layoutLabel}: ${modeEntries[ui.mode].label}`, title: withShortcut(layoutLabel, shortcuts.toggleLayout),
               expanded, controls, onClick, children: modeEntries[ui.mode].icon,
