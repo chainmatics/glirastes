@@ -83,9 +83,11 @@ export const VIEW_CONTEXT_LIMITS = Object.freeze({
   /** All kept entries as a JSON list, in UTF-8 bytes; a long selection is cut to fit before an entry is dropped. */
   maxTotalBytes: 2560,
   /**
-   * A count in `dropped` (and `droppedEntries`) saturates here: counts
-   * computed from a list's claimed length (a proxy may claim any) stay
-   * small safe integers.
+   * Every count in `dropped` and `droppedEntries` saturates here, so it
+   * stays a small safe integer whatever length a list has or claims (a
+   * proxy may claim any; plain JSON over 1,000,000 items, possible with a
+   * large body limit, saturates too). A saturated count is a lower bound:
+   * `droppedEntries + entries.length` then no longer equals the input length.
    */
   maxDropCount: 1_000_000,
 });
@@ -757,25 +759,47 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
 // Schemas of sanitized entries
 // ============================================================================
 
+/** A list in a stored view context longer than this is refused before it is copied (a kept one has at most 50 items). */
+const MAX_SCHEMA_LIST_LENGTH = 10_000;
+
+/**
+ * The first stage of a list schema: a copy of an array with an honest
+ * `length` (read once, `listLength`, at most 10,000), so the `z.array` after
+ * it reads a real array and never a length a proxy claims. Anything that is
+ * not an array is passed on unchanged, so `z.array` reports it as always.
+ */
+function honestList(maximum: number) {
+  return z.unknown().transform((value, ctx) => {
+    if (!Array.isArray(value)) return value;
+    const length = listLength(value);
+    if (length === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'Expected a list with a valid length', input: value });
+      return z.NEVER;
+    }
+    if (length > MAX_SCHEMA_LIST_LENGTH) {
+      ctx.addIssue({ code: 'too_big', origin: 'array', maximum, inclusive: true, input: value });
+      return z.NEVER;
+    }
+    return Array.from({ length }, (_, index) => value[index]);
+  });
+}
+
 const typeSchema = z.string().regex(ENTITY_TYPE_PATTERN);
 const idSchema = z.custom<ViewContextEntityId>((value) => entityId(value) !== undefined, { message: 'Expected an entity id' });
 const entitySchema = z.object({ type: typeSchema, id: idSchema }).strict();
 const selectionSchema = z.object({
   type: typeSchema,
-  // Not z.array: it would loop over whatever length a proxy claims. The length is checked once, first.
-  ids: z.custom<ReadonlyArray<ViewContextEntityId>>((value) => {
-    if (!Array.isArray(value)) return false;
-    const length = listLength(value);
-    if (length === undefined || length < 1 || length > VIEW_CONTEXT_LIMITS.maxSelectionIds) return false;
-    for (let index = 0; index < length; index += 1) if (entityId(value[index]) === undefined) return false;
-    return true;
-  }, { message: `Expected 1 to ${VIEW_CONTEXT_LIMITS.maxSelectionIds} entity ids` }),
+  ids: honestList(VIEW_CONTEXT_LIMITS.maxSelectionIds)
+    .pipe(z.array(idSchema).min(1).max(VIEW_CONTEXT_LIMITS.maxSelectionIds)),
 }).strict();
 const entryFields = {
   label: z.string().min(1).refine((label) => canonicalViewContextLabel(label) === label, 'Expected a canonical label').optional(),
   facts: z.custom<ViewContextFacts>((value) => {
-    const check = plainFacts(value, true);
-    return check.ok && !check.changed && JSON.stringify(check.value) === JSON.stringify(value);
+    // Read once: the copy is checked, never `value` again (no second walk, no `toJSON`).
+    const raw = plainFacts(value, false);
+    if (!raw.ok) return false;
+    const cleaned = plainFacts(raw.value, true);
+    return cleaned.ok && !cleaned.changed;
   }, { message: 'Expected bounded, cleaned plain JSON facts' }).optional(),
   unsaved: z.boolean().optional(),
   route: z.custom<string>(isViewContextRoute, { message: 'Expected a route path' }).optional(),
@@ -795,12 +819,10 @@ export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
   z.object({ entity: z.undefined().optional(), selection: selectionSchema, ...entryFields }).strict(),
 ]) as z.ZodType<ViewContextEntry>;
 
-/** A sanitized view context: at most 8 entries. */
-export const ViewContextSchema: z.ZodType<ViewContextEntry[]> = z.custom<ViewContextEntry[]>((value) => {
-  // Not z.array: it would loop over whatever length a proxy claims. The length is checked once, first.
-  if (!Array.isArray(value)) return false;
-  const length = listLength(value);
-  if (length === undefined || length > VIEW_CONTEXT_LIMITS.maxEntries) return false;
-  for (let index = 0; index < length; index += 1) if (!ViewContextEntrySchema.safeParse(value[index]).success) return false;
-  return true;
-}, { message: `Expected at most ${VIEW_CONTEXT_LIMITS.maxEntries} view context entries` });
+/**
+ * A sanitized view context: at most 8 entries. `z.array(ViewContextEntrySchema).max(8)`
+ * behind an honest-length copy (a list whose `length` is not a safe
+ * non-negative integer, or over 10,000, is refused before any loop).
+ */
+export const ViewContextSchema = honestList(VIEW_CONTEXT_LIMITS.maxEntries)
+  .pipe(z.array(ViewContextEntrySchema).max(VIEW_CONTEXT_LIMITS.maxEntries));

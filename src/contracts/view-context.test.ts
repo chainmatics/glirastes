@@ -1234,6 +1234,297 @@ describe('list lengths are checked numbers (proxies that lie about length)', () 
   });
 });
 
+describe('schemas behave as before for lists with an honest length (frozen from 5bf2fb55)', () => {
+  const entry = () => ({ entity: { type: 'order', id: 1 }, label: 'Acme', selection: { type: 'task', ids: ['a', 'b'] } });
+  const listCases: Array<[string, () => unknown]> = [
+    ['valid', () => [entry()]],
+    ['undefined', () => undefined],
+    ['null', () => null],
+    ['string', () => 'x'],
+    ['object', () => ({})],
+    ['empty list', () => []],
+    ['nine entries', () => Array.from({ length: 9 }, (_, i) => ({ entity: { type: 'order', id: i } }))],
+    ['broken entry at index 3', () => [entry(), entry(), entry(), { label: 'x' }]],
+    ['empty ids', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: [] } }]],
+    ['invalid id at index 1', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: ['a', '', 'c'] } }]],
+    ['extra keys', () => [{ ...entry(), extra: 1 }]],
+    ['other key order', () => [{ selection: { ids: ['a'], type: 'task' }, label: 'Acme', entity: { id: 1, type: 'order' } }]],
+    ['frozen list', () => Object.freeze([Object.freeze(entry())])],
+    ['hole in list', () => { const list: unknown[] = [entry()]; list[2] = entry(); return list; }],
+    ['ids not a list', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: 'a' } }]],
+    ['frozen ids', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: Object.freeze(['a']) } }]],
+    ['51 ids', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: Array.from({ length: 51 }, (_, i) => i) } }]],
+  ];
+  const run = (schema: any, input: unknown) => {
+    const result = schema.safeParse(input);
+    return result.success
+      ? { success: true, json: JSON.stringify(result.data), copy: result.data !== input }
+      : { success: false, issues: result.error.issues.map((issue: any) => ({ code: issue.code, path: issue.path })) };
+  };
+  const expected: Record<string, unknown> = {
+    "list: valid": {
+      "success": true,
+      "json": "[{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\",\"b\"]},\"label\":\"Acme\"}]",
+      "copy": true
+    },
+    "list: undefined": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_type",
+          "path": []
+        }
+      ]
+    },
+    "list: null": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_type",
+          "path": []
+        }
+      ]
+    },
+    "list: string": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_type",
+          "path": []
+        }
+      ]
+    },
+    "list: object": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_type",
+          "path": []
+        }
+      ]
+    },
+    "list: empty list": {
+      "success": true,
+      "json": "[]",
+      "copy": true
+    },
+    "list: nine entries": {
+      "success": false,
+      "issues": [
+        {
+          "code": "too_big",
+          "path": []
+        }
+      ]
+    },
+    "list: broken entry at index 3": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": [
+            3
+          ]
+        }
+      ]
+    },
+    "list: empty ids": {
+      "success": false,
+      "issues": [
+        {
+          "code": "too_small",
+          "path": [
+            0,
+            "selection",
+            "ids"
+          ]
+        }
+      ]
+    },
+    "list: invalid id at index 1": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": [
+            0
+          ]
+        }
+      ]
+    },
+    "list: extra keys": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": [
+            0
+          ]
+        }
+      ]
+    },
+    "list: other key order": {
+      "success": true,
+      "json": "[{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\"]},\"label\":\"Acme\"}]",
+      "copy": true
+    },
+    "list: frozen list": {
+      "success": true,
+      "json": "[{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\",\"b\"]},\"label\":\"Acme\"}]",
+      "copy": true
+    },
+    "list: hole in list": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": [
+            1
+          ]
+        }
+      ]
+    },
+    "list: ids not a list": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": [
+            0
+          ]
+        }
+      ]
+    },
+    "list: frozen ids": {
+      "success": true,
+      "json": "[{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\"]}}]",
+      "copy": true
+    },
+    "list: 51 ids": {
+      "success": false,
+      "issues": [
+        {
+          "code": "too_big",
+          "path": [
+            0,
+            "selection",
+            "ids"
+          ]
+        }
+      ]
+    },
+    "entry: valid": {
+      "success": true,
+      "json": "{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\",\"b\"]},\"label\":\"Acme\"}",
+      "copy": true
+    },
+    "entry: nine entries": {
+      "success": true,
+      "json": "{\"entity\":{\"type\":\"order\",\"id\":0}}",
+      "copy": true
+    },
+    "entry: broken entry at index 3": {
+      "success": true,
+      "json": "{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\",\"b\"]},\"label\":\"Acme\"}",
+      "copy": true
+    },
+    "entry: empty ids": {
+      "success": false,
+      "issues": [
+        {
+          "code": "too_small",
+          "path": [
+            "selection",
+            "ids"
+          ]
+        }
+      ]
+    },
+    "entry: invalid id at index 1": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": []
+        }
+      ]
+    },
+    "entry: extra keys": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": []
+        }
+      ]
+    },
+    "entry: other key order": {
+      "success": true,
+      "json": "{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\"]},\"label\":\"Acme\"}",
+      "copy": true
+    },
+    "entry: frozen list": {
+      "success": true,
+      "json": "{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\",\"b\"]},\"label\":\"Acme\"}",
+      "copy": true
+    },
+    "entry: hole in list": {
+      "success": true,
+      "json": "{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\",\"b\"]},\"label\":\"Acme\"}",
+      "copy": true
+    },
+    "entry: ids not a list": {
+      "success": false,
+      "issues": [
+        {
+          "code": "invalid_union",
+          "path": []
+        }
+      ]
+    },
+    "entry: frozen ids": {
+      "success": true,
+      "json": "{\"entity\":{\"type\":\"order\",\"id\":1},\"selection\":{\"type\":\"task\",\"ids\":[\"a\"]}}",
+      "copy": true
+    },
+    "entry: 51 ids": {
+      "success": false,
+      "issues": [
+        {
+          "code": "too_big",
+          "path": [
+            "selection",
+            "ids"
+          ]
+        }
+      ]
+    }
+  };
+
+  it('gives the same success, output (a copy, same key order) and issues (code, path)', () => {
+    const out: Record<string, unknown> = {};
+    for (const [name, make] of listCases) out[`list: ${name}`] = run(ViewContextSchema, make());
+    for (const [name, make] of listCases) {
+      const value = make();
+      if (Array.isArray(value) && value.length > 0) out[`entry: ${name}`] = run(ViewContextEntrySchema, value[0]);
+    }
+    expect(out).toEqual(expected);
+  });
+
+  it('reads schema facts once: a facts value is never serialized again', () => {
+    let reads = 0;
+    const list = new Proxy(['a'], { get: (target, key, receiver) => {
+      if (key === 'length') { reads += 1; return reads === 1 ? 1 : 1e7; }
+      return Reflect.get(target, key, receiver);
+    } });
+    expect(ViewContextEntrySchema.safeParse({ entity: { type: 'order', id: 1 }, facts: { list } }).success).toBe(true);
+    expect(reads).toBe(1);
+    const facts = { status: 'open' };
+    Object.defineProperty(facts, 'toJSON', { enumerable: false, value: () => { throw new Error('boom'); } });
+    expect(() => ViewContextEntrySchema.safeParse({ entity: { type: 'order', id: 1 }, facts })).not.toThrow();
+  });
+});
+
 describe('fact keys with hidden characters', () => {
   const free = { factsSchemas: { order: z.record(z.string(), z.string()) } };
 
