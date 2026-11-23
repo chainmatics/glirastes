@@ -82,6 +82,12 @@ export const VIEW_CONTEXT_LIMITS = Object.freeze({
   maxFactKeyLength: 64,
   /** All kept entries as a JSON list, in UTF-8 bytes; a long selection is cut to fit before an entry is dropped. */
   maxTotalBytes: 2560,
+  /**
+   * A count in `dropped` (and `droppedEntries`) saturates here: counts
+   * computed from a list's claimed length (a proxy may claim any) stay
+   * small safe integers.
+   */
+  maxDropCount: 1_000_000,
 });
 
 /** Which earlier messages keep their view context for the model. `none`: only the newest message's; `changes`: also earlier ones where it changed; `all`: every message's. */
@@ -309,6 +315,16 @@ export function isViewContextRoute(value: unknown): value is string {
   return value.split('/').every((segment) => segment !== '.' && segment !== '..');
 }
 
+/**
+ * The length of an input list as a checked primitive: a safe, non-negative
+ * integer read once, else undefined (the list is then invalid). A proxy that
+ * passes `Array.isArray` may claim any `length`; only this number is used.
+ */
+function listLength(list: ReadonlyArray<unknown>): number | undefined {
+  const length: unknown = list.length;
+  return typeof length === 'number' && Number.isSafeInteger(length) && length >= 0 ? length : undefined;
+}
+
 function idPart(value: unknown): string | number | undefined {
   if (!isEntityIdValue(value)) return undefined;
   if (typeof value === 'number') return value;
@@ -318,8 +334,8 @@ function idPart(value: unknown): string | number | undefined {
 /** A valid id exactly as given; undefined when invalid. */
 function entityId(value: unknown): ViewContextEntityId | undefined {
   if (!Array.isArray(value)) return idPart(value);
-  const length = value.length;
-  if (length < 2 || length > MAX_ENTITY_ID_PARTS) return undefined;
+  const length = listLength(value);
+  if (length === undefined || length < 2 || length > MAX_ENTITY_ID_PARTS) return undefined;
   const parts: Array<string | number> = [];
   for (let index = 0; index < length; index += 1) {
     const valid = idPart(value[index]);
@@ -399,7 +415,8 @@ function plainFacts(value: unknown, clean: boolean): FactsCheck {
       if (Object.getPrototypeOf(input) !== Array.prototype) throw new Stop('facts-invalid');
       grow(2);
       const list: ViewContextFactValue[] = [];
-      const length = input.length;
+      const length = listLength(input);
+      if (length === undefined) throw new Stop('facts-invalid');
       for (let index = 0; index < length; index += 1) {
         if (!(index in input)) throw new Stop('facts-invalid');
         list.push(copy(input[index], depth + 1));
@@ -531,8 +548,9 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
   let droppedEntries = 0;
   const drop = (reason: ViewContextDropReason, count = 1) => {
     if (count <= 0) return;
-    dropped[reason] = (dropped[reason] ?? 0) + count;
-    if (ENTRY_REASONS.has(reason)) droppedEntries += count;
+    const { maxDropCount } = VIEW_CONTEXT_LIMITS;
+    dropped[reason] = Math.min(maxDropCount, (dropped[reason] ?? 0) + count);
+    if (ENTRY_REASONS.has(reason)) droppedEntries = Math.min(maxDropCount, droppedEntries + count);
   };
   const done = (entries: ViewContextEntry[]): ViewContextSanitizeResult => ({ entries, dropped, droppedEntries });
 
@@ -540,8 +558,9 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
   let length: number;
   try {
     if (!Array.isArray(input)) throw new TypeError('not a list');
-    length = input.length;
-    if (!Number.isSafeInteger(length) || length < 0) throw new TypeError('not a list');
+    const checked = listLength(input);
+    if (checked === undefined) throw new TypeError('not a list');
+    length = checked;
   } catch {
     drop('not-a-list');
     return done([]);
@@ -579,7 +598,8 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
     const ids: ViewContextEntityId[] = [];
     const seen = new Set<string>();
     const { maxSelectionIds, maxScannedSelectionIds } = VIEW_CONTEXT_LIMITS;
-    const total = raw.length;
+    const total = listLength(raw);
+    if (total === undefined) { note('invalid-selection'); return undefined; }
     let index = 0;
     for (; index < total && index < maxScannedSelectionIds && ids.length < maxSelectionIds; index += 1) {
       const id = entityId(raw[index]);
@@ -705,7 +725,7 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
     // Field reasons count only once the entry is kept.
     const pending: DropCounts = {};
     const note: Note = (reason, count = 1) => {
-      if (count > 0) pending[reason] = (pending[reason] ?? 0) + count;
+      if (count > 0) pending[reason] = Math.min(VIEW_CONTEXT_LIMITS.maxDropCount, (pending[reason] ?? 0) + count);
     };
     // Everything about one entry runs inside the try: a throwing getter or proxy drops the entry, never the call.
     try {
@@ -742,7 +762,14 @@ const idSchema = z.custom<ViewContextEntityId>((value) => entityId(value) !== un
 const entitySchema = z.object({ type: typeSchema, id: idSchema }).strict();
 const selectionSchema = z.object({
   type: typeSchema,
-  ids: z.array(idSchema).min(1).max(VIEW_CONTEXT_LIMITS.maxSelectionIds),
+  // Not z.array: it would loop over whatever length a proxy claims. The length is checked once, first.
+  ids: z.custom<ReadonlyArray<ViewContextEntityId>>((value) => {
+    if (!Array.isArray(value)) return false;
+    const length = listLength(value);
+    if (length === undefined || length < 1 || length > VIEW_CONTEXT_LIMITS.maxSelectionIds) return false;
+    for (let index = 0; index < length; index += 1) if (entityId(value[index]) === undefined) return false;
+    return true;
+  }, { message: `Expected 1 to ${VIEW_CONTEXT_LIMITS.maxSelectionIds} entity ids` }),
 }).strict();
 const entryFields = {
   label: z.string().min(1).refine((label) => canonicalViewContextLabel(label) === label, 'Expected a canonical label').optional(),
@@ -769,4 +796,11 @@ export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
 ]) as z.ZodType<ViewContextEntry>;
 
 /** A sanitized view context: at most 8 entries. */
-export const ViewContextSchema = z.array(ViewContextEntrySchema).max(VIEW_CONTEXT_LIMITS.maxEntries);
+export const ViewContextSchema: z.ZodType<ViewContextEntry[]> = z.custom<ViewContextEntry[]>((value) => {
+  // Not z.array: it would loop over whatever length a proxy claims. The length is checked once, first.
+  if (!Array.isArray(value)) return false;
+  const length = listLength(value);
+  if (length === undefined || length > VIEW_CONTEXT_LIMITS.maxEntries) return false;
+  for (let index = 0; index < length; index += 1) if (!ViewContextEntrySchema.safeParse(value[index]).success) return false;
+  return true;
+}, { message: `Expected at most ${VIEW_CONTEXT_LIMITS.maxEntries} view context entries` });

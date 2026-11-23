@@ -1124,6 +1124,116 @@ describe('values read once (getters and proxies)', () => {
   });
 });
 
+describe('list lengths are checked numbers (proxies that lie about length)', () => {
+  /** A proxy around `array` (it passes Array.isArray) whose `length` is `length`. */
+  const lying = (array: unknown[], length: unknown) =>
+    new Proxy(array, { get: (target, key, receiver) => (key === 'length' ? length : Reflect.get(target, key, receiver)) });
+  const shiftingLength = (values: number[]) => {
+    let reads = 0;
+    return { [Symbol.toPrimitive]: () => values[Math.min(reads++, values.length - 1)] };
+  };
+  const options = { declaredTypes: ['order', 'task'] };
+  const safeCounts = (result: ReturnType<typeof sanitizeViewContext>) => {
+    for (const count of [...Object.values(result.dropped), result.droppedEntries]) {
+      expect(Number.isSafeInteger(count) && count! >= 0).toBe(true);
+    }
+    expect(ViewContextSchema.safeParse(result.entries).success).toBe(true);
+  };
+  const lies: Array<[string, () => unknown]> = [
+    ['NaN', () => Number.NaN],
+    ['Infinity', () => Number.POSITIVE_INFINITY],
+    ['-1', () => -1],
+    ['1.5', () => 1.5],
+    ['the string 2', () => '2'],
+    ['an object with Symbol.toPrimitive', () => shiftingLength([2, 2, 10])],
+    ['a BigInt', () => 2n],
+    ['2^53', () => 2 ** 53],
+  ];
+
+  it('reproduces: NaN entity id, NaN composite selection id, shifting composite length', () => {
+    const nanId = sanitizeViewContext([{ entity: { type: 'order', id: lying(['a', 'b'], Number.NaN) } }], options);
+    expect(nanId.entries).toEqual([]);
+    expect(nanId.dropped).toEqual({ 'invalid-entity': 1 });
+    const nanSelection = sanitizeViewContext([{ selection: { type: 'order', ids: [lying(['a', 'b'], Number.NaN)] } }], options);
+    expect(nanSelection.entries).toEqual([]);
+    expect(nanSelection.dropped).toEqual({ 'no-entity-or-selection': 1 });
+    const ten = Array.from({ length: 10 }, (_, index) => `p${index}`);
+    const shifted = sanitizeViewContext([{ entity: { type: 'order', id: lying(ten, shiftingLength([3, 3, 10])) } }], options);
+    expect(shifted.entries).toEqual([]);
+    expect(shifted.dropped).toEqual({ 'invalid-entity': 1 });
+    expect(ViewContextEntrySchema.safeParse({ entity: { type: 'order', id: lying(['a', 'b'], Number.NaN) } }).success).toBe(false);
+  });
+
+  it.each(lies)('treats a length of %s as invalid everywhere', (_name, length) => {
+    const entityId = sanitizeViewContext([{ entity: { type: 'order', id: lying(['a', 'b'], length()) } }], options);
+    expect(entityId.dropped).toEqual({ 'invalid-entity': 1 });
+    safeCounts(entityId);
+
+    const ids = sanitizeViewContext([order('ord-1', { selection: { type: 'task', ids: lying(['a', 'b'], length()) } })], options);
+    expect(ids.entries).toEqual([{ entity: { type: 'order', id: 'ord-1' } }]);
+    expect(ids.dropped).toEqual({ 'invalid-selection': 1 });
+    safeCounts(ids);
+
+    const composite = sanitizeViewContext([order('ord-1', { selection: { type: 'task', ids: ['x', lying(['a', 'b'], length())] } })], options);
+    expect(composite.entries[0]!.selection).toEqual({ type: 'task', ids: ['x'] });
+    expect(composite.dropped).toEqual({ 'selection-id-invalid': 1 });
+    safeCounts(composite);
+
+    const facts = sanitizeViewContext([order('ord-1', { facts: { list: lying(['a', 'b'], length()) } })],
+      { ...options, factsSchemas: { order: z.any() } });
+    expect(facts.entries).toEqual([{ entity: { type: 'order', id: 'ord-1' } }]);
+    expect(facts.dropped).toEqual({ 'facts-invalid': 1 });
+    safeCounts(facts);
+
+    const outer = sanitizeViewContext(lying([order('ord-1')], length()), options);
+    expect(outer).toEqual({ entries: [], dropped: { 'not-a-list': 1 }, droppedEntries: 1 });
+  });
+
+  it.each([...lies, ['1e9', () => 1e9] as [string, () => unknown]])('makes the entry schema refuse selection ids with a length of %s', (_name, length) => {
+    const entry = { entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: lying(['a'], length()) } };
+    expect(ViewContextEntrySchema.safeParse(entry).success).toBe(false);
+  });
+
+  it.each([...lies, ['1e9', () => 1e9] as [string, () => unknown]])('makes the list schema refuse a list with a length of %s', (_name, length) => {
+    expect(ViewContextSchema.safeParse(lying([{ entity: { type: 'order', id: 1 } }], length())).success).toBe(false);
+  });
+
+  it('keeps counts bounded when a list claims a huge valid length', () => {
+    const huge = 2 ** 53 - 1;
+    const ids = sanitizeViewContext([order('ord-1', { selection: { type: 'task', ids: lying(['a'], huge) } })], options);
+    expect(ids.entries[0]!.selection).toEqual({ type: 'task', ids: ['a'] });
+    expect(ids.dropped['selection-id-over-limit']).toBe(VIEW_CONTEXT_LIMITS.maxDropCount);
+    safeCounts(ids);
+    const outer = sanitizeViewContext(lying([order('ord-1')], huge), options);
+    expect(outer.entries).toHaveLength(1);
+    expect(outer.dropped['over-limit']).toBe(VIEW_CONTEXT_LIMITS.maxDropCount);
+    expect(outer.droppedEntries).toBe(VIEW_CONTEXT_LIMITS.maxDropCount);
+    safeCounts(outer);
+    const off = sanitizeViewContext(lying([], huge), { ...options, policy: false });
+    expect(off.dropped).toEqual({ disabled: VIEW_CONTEXT_LIMITS.maxDropCount });
+  });
+
+  it('never throws, and returns schema-valid entries and safe counts with lying lengths (property test)', () => {
+    let seed = 0x6b8b4567;
+    const random = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 0x100000000; };
+    const pick = <T,>(values: T[]): T => values[Math.floor(random() * values.length)]!;
+    const lengths = (): unknown => pick([...lies.map(([, make]) => make()), 0, 1, 2, 3, 5, 1e9, 2 ** 53 - 1]);
+    const list = (items: unknown[]) => (random() < 0.6 ? lying(items, lengths()) : items);
+    for (let run = 0; run < 3000; run += 1) {
+      const entries = Array.from({ length: 3 }, () => ({
+        entity: { type: pick(['order', 'task']), id: list(['a', 'b', 'c', 'd', 'e']) },
+        selection: { type: 'task', ids: list([list(['x', 'y']), 'z', list([1, 2, 3])]) },
+        facts: { list: list(['a', list(['b'])]) },
+      }));
+      let result: ReturnType<typeof sanitizeViewContext> | undefined;
+      expect(() => {
+        result = sanitizeViewContext(list(entries), { ...options, factsSchemas: { order: z.any(), task: z.any() } });
+      }).not.toThrow();
+      safeCounts(result!);
+    }
+  });
+});
+
 describe('fact keys with hidden characters', () => {
   const free = { factsSchemas: { order: z.record(z.string(), z.string()) } };
 
