@@ -183,6 +183,7 @@
     },
     "./react/styles.css": "./dist/react/styles.css",
     "./react/pills.css": "./dist/react/pills.css",
+    "./react/styles.layered.css": "./dist/react/styles.layered.css",
     "./react/audio-worklet-processor.js": "./dist/react/audio-worklet-processor.js",
     "./embed": {
       "types": "./dist/embed/index.d.ts",
@@ -322,7 +323,7 @@
     "SECURITY.md"
   ],
   "scripts": {
-    "build": "node scripts/generate-embed-styles.mjs --check && node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && cp src/react/pills.css dist/react/pills.css && cp src/react/pills.css dist/cjs/react/pills.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/ && cp src/codegen/tools/sources/fastapi-routes.py dist/codegen/tools/sources/",
+    "build": "node scripts/generate-embed-styles.mjs --check && node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && cp src/react/pills.css dist/react/pills.css && cp src/react/pills.css dist/cjs/react/pills.css && node scripts/generate-layered-styles.mjs && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/ && cp src/codegen/tools/sources/fastapi-routes.py dist/codegen/tools/sources/",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "vitest run",

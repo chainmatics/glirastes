@@ -48,6 +48,17 @@ describe('public foundation subpaths', () => {
     expect(source).toContain("registerProcessor('audio-processor'");
   });
 
+  it('exports the chat styles unlayered and, selectable, inside @layer glirastes', async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { exports: Record<string, unknown>; scripts: Record<string, string> };
+    expect(packageJson.exports['./react/styles.css']).toBe('./dist/react/styles.css');
+    expect(packageJson.exports['./react/styles.layered.css']).toBe('./dist/react/styles.layered.css');
+    // Written after the plain copy, from the same source.
+    const build = packageJson.scripts.build;
+    expect(build.indexOf('node scripts/generate-layered-styles.mjs')).toBeGreaterThan(build.indexOf('cp src/react/styles.css dist/react/styles.css'));
+  });
+
   it('ships local STT ESM only with an exactly pinned optional peer', async () => {
     const [packageJson, cjsConfig, serverSource, shims] = await Promise.all([
       readFile(new URL('../package.json', import.meta.url), 'utf8').then((text) => JSON.parse(text) as {
