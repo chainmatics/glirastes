@@ -426,7 +426,7 @@ describe('sanitizeViewContext: label', () => {
   it('reads only a bounded prefix of a huge hostile label', () => {
     const label = labelOf('<!--}}\u202e\u0000'.repeat(200_000))!;
     expect([...label]).toHaveLength(60);
-    expect(label).not.toMatch(/<!|-->|[{}\u202e\u0000]/);
+    expect(label).not.toMatch(/<!|--!?>|[{}\u202e\u0000]/);
   });
 
   it('keeps a label of exactly 60 code points', () => {
@@ -997,7 +997,7 @@ describe('renderer requirement: entries are data and must be escaped as JSON', (
   it('keeps delimiters in ids and fact strings, and neutralises them in labels', () => {
     expect(result.entries[0]!.entity!.id).toBe(hostile);
     expect(result.entries[0]!.facts!.note).toBe(hostile);
-    expect(result.entries[0]!.label).not.toMatch(/<!|-->|--!>|[{}]/);
+    expect(result.entries[0]!.label).not.toMatch(/<!|--!?>|[{}]/);
   });
 
   it('is unsafe as raw JSON', () => {
