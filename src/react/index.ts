@@ -32,6 +32,10 @@ export type {
   CompletionPermissionContext,
   CommandArgumentsFormProps,
   CompletionSearchRequest,
+  CompletionSelectKind,
+  CompletionSelectContext,
+  OpenCompletionOptions,
+  ChatTriggerDefinition,
   UiToolCommandSource,
   // Attachments
   ChatAttachment,
@@ -49,6 +53,7 @@ export type {
   ChatThemeOverride,
   ChatThemeColors,
   ChatLocale,
+  ChatMarkdownOptions,
   // Size
   ChatSize,
   ChatSizePreset,
@@ -58,6 +63,41 @@ export type {
   ToolLabelConfig,
   ToolResultDisplayMode,
   ToolResultDisplayConfig,
+  // Message layout
+  ActivityLogConfig,
+  MessageFooterConfig,
+  // Message queue
+  QueuedMessage,
+  ChatQueueConfig,
+  ChatQueueStorage,
+  ChatQueueChangeEvent,
+  ChatQueueChangeReason,
+  ChatQueuePauseTrigger,
+  ChatQueueState,
+  ChatQueueApi,
+  ChatQueueProps,
+  ChatSubmitResult,
+  ChatSubmitOutcome,
+  ChatSubmitRejection,
+  ChatSubmitRejectionReason,
+  ActivityLogDetails,
+  TurnNoticeProps,
+  TurnNoticeStatus,
+  TurnOutcome,
+  TurnOutcomeReason,
+  TurnOutcomeStatus,
+  TurnEndInfo,
+  OnTurnEnd,
+  MessagePartNodes,
+  MessageParts,
+  MessagePartsProps,
+  MessagePartEntry,
+  MessagePartKind,
+  ToolPartApproval,
+  ApprovalDecision,
+  ApprovalOutcome,
+  ApprovalEntryProps,
+  ApprovalDisplayConfig,
   VoiceInputConfig,
   VoicePushToTalkConfig,
   // Mention chips
@@ -70,6 +110,8 @@ export type {
   // Callbacks
   OnBeforeSend,
   OnToolResult,
+  OnUiActionOutcome,
+  UiActionOutcomeEvent,
   ApprovalDescriptionFn,
   ApprovalDescriptionContext,
   PipelineMessageTranslator,
@@ -79,6 +121,8 @@ export type {
   // Hook returns
   UseAiChatReturn,
   PendingApproval,
+  ApprovalSubject,
+  ApprovalPreviewItem,
   UseApprovalsReturn,
   UseMentionsReturn,
   UseSuggestionsReturn,
@@ -91,6 +135,14 @@ export type {
   UseChatComposerInputOptions,
   ChatComposerInput,
   ChatComposerInputControls,
+  ComposerConfig,
+  ComposerDraft,
+  ComposerDraftStorage,
+  ChatStarter,
+  ComposerPlusMenuConfig,
+  ComposerToolbarBuiltin,
+  ComposerToolbarItem,
+  ComposerToolbarProps,
   RichMentionInputHandle,
   RichMentionInputProps,
   RichMentionInputComponents,
@@ -155,9 +207,15 @@ export {
 } from './stt/recorded.js';
 export {
   DeepgramSttAdapter,
+  DEFAULT_AUDIO_WORKLET_URL,
   createDeepgramSegmentParser,
   type DeepgramSttAdapterOptions,
 } from './stt/deepgram.js';
+export {
+  AudioWorkletLoadError,
+  AUDIO_WORKLET_UNAVAILABLE,
+  isAudioWorkletLoadError,
+} from './stt/worklet-error.js';
 export { useDragResizePanel } from './hooks/use-drag-resize-panel.js';
 export type {
   UseDragResizePanelOptions,
@@ -215,6 +273,9 @@ export {
   DEFAULT_ASSISTANT_SHELL_LABELS,
   DE_ASSISTANT_SHELL_LABELS,
   type AssistantShellAction,
+  type AssistantHistoryPaneProps,
+  type AssistantModeMenuEntry,
+  type AssistantModeMenuRenderProps,
   type AssistantShellButtonProps,
   type AssistantShellClassNames,
   type AssistantShellIcons,
@@ -234,15 +295,22 @@ export { AssistantWorkspace, type AssistantWorkspaceProps } from './assistant/as
 export { AiChatPanel } from './components/ai-chat-panel.js';
 export { FloatingChatUI, type FloatingChatUIProps } from './components/floating-chat-ui.js';
 export { MessageList } from './components/message-list.js';
-export { MessageBubble } from './components/message-bubble.js';
+export { MessageBubble, useMessageParts } from './components/message-bubble.js';
+export { preloadMarkdown } from './markdown-module.js';
+export { useTurnOutcome, useTurnOutcomes } from './hooks/use-turn-outcome.js';
 export { ChatInput } from './components/chat-input.js';
+export { ChatQueue, useChatQueue } from './components/chat-queue.js';
 export { MentionInput } from './components/mention-input.js';
+export { ComposerHint, type ComposerHintProps } from './components/composer-hint.js';
+export { ChatStarters, type ChatStartersProps } from './components/chat-starters.js';
+export { ClarificationChips, type ClarificationChipsProps } from './components/clarification-chips.js';
 export { RichMentionInput } from './components/rich-mention-input.js';
 export { ChatWindow } from './components/chat-window.js';
 export { ApprovalCard } from './components/approval-card.js';
+export { ApprovalEntry, approvalOutcomeText } from './components/approval-entry.js';
 export { BulkApprovalCard } from './components/bulk-approval-card.js';
 export { PipelineTimeline } from './components/pipeline-timeline.js';
-export { ActivityLog, type ActivityLogProps } from './components/activity-log.js';
+export { ActivityLog, TurnNotice, type ActivityLogProps } from './components/activity-log.js';
 export { PlanChecklist, type PlanChecklistProps } from './components/plan-checklist.js';
 export { SuggestionChip } from './components/suggestion-chip.js';
 export { SuggestionBar } from './components/suggestion-bar.js';
@@ -250,7 +318,14 @@ export { MentionChip, MentionChipList } from './components/mention-chip.js';
 export { VoiceInputButton } from './components/voice-input-button.js';
 export { RecordingBar } from './components/recording-bar.js';
 export { AiTriggerButton } from './components/ai-trigger-button.js';
-export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
+export {
+  SessionSwitcher,
+  DEFAULT_SESSION_SWITCHER_ICONS,
+  useSessionLock,
+  type SessionLockState,
+  type SessionSwitcherIcons,
+  type SessionSwitcherProps,
+} from './components/session-switcher.js';
 export { ClarificationCard } from './components/clarification-card.js';
 export { AttachmentTray, AttachmentButton } from './components/attachments.js';
 
@@ -318,6 +393,8 @@ export {
 export {
   EntityLinkChip,
   EntityText,
+  MentionMarkers,
+  markdownWithMentionMarkers,
   useChatEntityLinks,
   type ChatEntityLinks,
 } from './entity-links/entity-links-react.js';
@@ -365,10 +442,19 @@ export {
   readLatestPlan,
   type ActivityStep,
   type ActivityStepStatus,
+  type ActivityDetailSource,
 } from './utils/activity.js';
+export { stepFailureText, type StepFailure, type StepFailureCode } from './utils/step-failure.js';
 export type { PlanItem, PlanItemStatus } from '../contracts/plan.js';
 export { sanitizeStoredMessages } from './utils/sanitize-stored-messages.js';
-export { createLocalSessionStore, type LocalSessionStoreOptions } from './utils/local-session-store.js';
+export { createLocalSessionStore, clearLocalSessionStore, type LocalSessionStoreOptions } from './utils/local-session-store.js';
+export {
+  createIndexedDbAttachmentStore,
+  createMemoryAttachmentStore,
+  type AttachmentBlobStore,
+  type StoredAttachment,
+} from './utils/attachment-blob-store.js';
+export { getChatAttachment, chatAttachmentFormData } from './utils/chat-attachment-registry.js';
 export {
   createLocalMemoryStore,
   type BrowserMemoryStore,

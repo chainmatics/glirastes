@@ -31,12 +31,32 @@ import {
   declaredMaxResultChars,
   declaredName,
   declaredRoles,
+  readOutputFieldExtensions,
   selectionExclusion,
   toolMarkerOf,
   type OpenapiSelection,
 } from '../openapi-selection.js';
 import { validateResolutionEntry, type ResolutionEntry } from '../resolutions.js';
 import type { SchemaProbeItem, SchemaProbeResult } from '../schema-probe.js';
+import { outputFieldLists, type DeclaredOutputFields } from '../output-fields.js';
+import { mergeDeclaredTexts, readDeclaredTexts, type DeclaredTexts } from '../declared-texts.js';
+import {
+  ENTITIES_EXTENSION,
+  entitySitesOf,
+  operationEntityDeclarations,
+  parameterEntityRef,
+  schemaEntityDeclarations,
+  type ObservedEntities,
+} from '../entity-declarations.js';
+import type { InputEntityRef } from '../../../contracts/entity-declaration.js';
+import {
+  APPROVAL_SUBJECT_EXTENSION,
+  approvalLevelOf,
+  ENTITY_LOOKUP_EXTENSION,
+  LOOKUP_EFFECT_EXTENSION,
+  OPENAPI_FIELD_NAMES,
+  type ObservedApprovalLevel,
+} from '../approval-subject-declarations.js';
 import type {
   ExcludedTool,
   JsonSchemaLike,
@@ -54,6 +74,14 @@ const COUNT_TIMEOUT_MS = 30_000;
 const DECLARED_EFFECTS: ReadonlyArray<string> = ['read', 'write', 'destructive', 'external', 'financial'];
 const READ_METHODS: ReadonlySet<EndpointMethod> = new Set(['GET', 'HEAD', 'DELETE']);
 const SUCCESS_STATUSES = ['200', '201', '202'];
+/** What the runtime returns for a success without a body: `{ success: true }`, nothing else. */
+const NO_CONTENT_OUTPUT: JsonSchemaLike = {
+  type: 'object',
+  description: 'No content: success means the action was executed; there is no result data.',
+  properties: { success: { const: true } },
+  required: ['success'],
+  additionalProperties: false,
+};
 
 export interface OpenapiSourceOptions {
   /** App-relative path of the exported OpenAPI 3.0 or 3.1 JSON document. */
@@ -96,6 +124,14 @@ interface OpenapiEntry {
   roles?: string[];
   /** `x-glirastes-max-result-chars`: the tool's result bound, above the handler's global value. */
   maxResultChars?: number;
+  /** `x-glirastes-output-*-fields`, checked against the response schema by `resolveEndpointContract`. */
+  outputFields?: DeclaredOutputFields;
+  /** `x-glirastes-title`, `-description`, `-synonyms`, `-examples`: texts in any language. */
+  texts?: DeclaredTexts['hints'];
+  /** Entity declarations of the operation and its response schemas (`x-glirastes-entit*`). */
+  entities?: ObservedEntities;
+  /** `x-glirastes-entity-lookup`, `-approval-subject`, `-lookup-effect` of the operation (also FastAPI `openapi_extra`). */
+  approval?: ObservedApprovalLevel;
 }
 
 interface OpenapiPiece {
@@ -145,6 +181,18 @@ function parametersOf(document: OpenapiDocument, entry: OpenapiOperationEntry): 
   return { list: [...merged.values()], problems };
 }
 
+/**
+ * The schema of a dereferenced parameter. The parameter's own `description`,
+ * written for this operation, wins over the schema's; without one the schema
+ * keeps its own. The schema is a copy made by `dereference`, and the
+ * description goes on a further copy, so no shared component changes.
+ */
+function parameterSchema(parameter: JsonObject): JsonSchemaLike {
+  const schema = isObject(parameter.schema) ? parameter.schema as JsonSchemaLike : {};
+  const description = typeof parameter.description === 'string' ? parameter.description.trim() : '';
+  return description ? { ...schema, description } : schema;
+}
+
 function jsonContent(document: OpenapiDocument, carrier: unknown): { schema?: JsonSchemaLike; problems: string[]; nonJson: boolean } {
   const resolved = dereference(document, carrier);
   const content = isObject(resolved.value) ? resolved.value.content : undefined;
@@ -155,14 +203,112 @@ function jsonContent(document: OpenapiDocument, carrier: unknown): { schema?: Js
   return { schema, problems: resolved.problems, nonJson: false };
 }
 
+/**
+ * A declared `204` next to success responses that all carry no `content`: the
+ * server answers without a body. A missing or unresolvable response counts as
+ * content, and a `200` without `content` alone is no declaration (it is what
+ * @nestjs/swagger writes for any undocumented handler).
+ */
+function declaresNoContent(document: OpenapiDocument, responses: JsonObject): boolean {
+  const successes = Object.keys(responses).filter((status) => /^2(\d\d|XX)$/.test(status));
+  if (!successes.includes('204')) return false;
+  return successes.every((status) => {
+    const resolved = dereference(document, responses[status]);
+    const content = isObject(resolved.value) ? resolved.value.content : undefined;
+    return resolved.problems.length === 0 && (content === undefined || (isObject(content) && Object.keys(content).length === 0));
+  });
+}
+
+/** A local `$ref` of the document, with the name of its component. */
+function refResolver(document: OpenapiDocument) {
+  return (ref: string): { schema: unknown; name: string } | undefined => {
+    if (!ref.startsWith('#/')) return undefined;
+    let value: unknown = document;
+    for (const raw of ref.slice(2).split('/')) {
+      const key = raw.replaceAll('~1', '/').replaceAll('~0', '~');
+      if (!isObject(value) || !(key in value)) return undefined;
+      value = value[key];
+    }
+    return { schema: value, name: ref.split('/').at(-1)!.replaceAll('~1', '/').replaceAll('~0', '~') };
+  };
+}
+
+/** The success response schema as written (its `$ref`s kept, so component names stay known). */
+function rawSuccessSchema(document: OpenapiDocument, operation: JsonObject): unknown {
+  const responses = isObject(operation.responses) ? operation.responses : {};
+  const resolveRef = refResolver(document);
+  for (const status of SUCCESS_STATUSES) {
+    let response: unknown = responses[status];
+    if (response === undefined) continue;
+    if (isObject(response) && typeof response.$ref === 'string') response = resolveRef(response.$ref)?.schema;
+    const content = isObject(response) ? response.content : undefined;
+    const json = isObject(content) ? content['application/json'] : undefined;
+    return isObject(json) ? json.schema : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The entity declarations of one operation: `x-glirastes-entities`, the
+ * `x-glirastes-entity` of its response schemas and the
+ * `x-glirastes-entity-ref` of its parameters and body properties.
+ */
+function readEntities(
+  document: OpenapiDocument,
+  operation: JsonObject,
+  parameters: ReadonlyArray<JsonObject>,
+  body: JsonSchemaLike | undefined,
+  stableKey: string,
+  where: string,
+): { entities?: ObservedEntities; findings: ToolFinding[] } {
+  const findings: ToolFinding[] = [];
+  const sites = entitySitesOf(rawSuccessSchema(document, operation), refResolver(document));
+  const schema = schemaEntityDeclarations(sites, stableKey, where);
+  findings.push(...schema.findings);
+  const declared = operationEntityDeclarations(operation[ENTITIES_EXTENSION], stableKey, where);
+  findings.push(...declared.findings);
+  const input: InputEntityRef[] = [];
+  for (const parameter of parameters) {
+    if (typeof parameter.name !== 'string' || (parameter.in !== 'path' && parameter.in !== 'query')) continue;
+    const read = parameterEntityRef(parameter.name, [parameter, parameter.schema], stableKey, where);
+    findings.push(...read.findings);
+    if (read.ref) input.push(read.ref);
+  }
+  const properties = body && isObject(body.properties) ? body.properties : {};
+  for (const [name, property] of Object.entries(properties)) {
+    const read = parameterEntityRef(name, [property], stableKey, where);
+    findings.push(...read.findings);
+    if (read.ref) input.push(read.ref);
+  }
+  const hasAny = schema.output.length > 0 || declared.output !== undefined || input.length > 0;
+  return {
+    findings,
+    ...(hasAny || sites.length > 0
+      ? {
+        entities: {
+          ...(declared.output || input.length > 0
+            ? { operation: { where, ...(declared.output ? { output: declared.output } : {}), ...(input.length > 0 ? { input } : {}) } }
+            : {}),
+          ...(schema.output.length > 0 ? { schema: { where, output: schema.output } } : {}),
+          ...(sites.length > 0 ? { sites } : {}),
+        },
+      }
+      : {}),
+  };
+}
+
 function successOutput(document: OpenapiDocument, operation: JsonObject): { schema?: JsonSchemaLike; problems: string[] } {
   const responses = isObject(operation.responses) ? operation.responses : {};
+  const noContent = (problems: string[]) => ({
+    ...(declaresNoContent(document, responses) ? { schema: structuredClone(NO_CONTENT_OUTPUT) } : {}),
+    problems,
+  });
   for (const status of SUCCESS_STATUSES) {
     if (responses[status] === undefined) continue;
     const { schema, problems } = jsonContent(document, responses[status]);
-    return { ...(schema ? { schema } : {}), problems };
+    return schema ? { schema, problems } : noContent(problems);
   }
-  return { problems: [] };
+  return noContent([]);
 }
 
 /** `security` of the operation, else of the document; every requirement must name a scheme. */
@@ -194,7 +340,7 @@ function readEntry(
   const queryProperties = new Map<string, JsonSchemaLike>();
   const queryRequired: string[] = [];
   for (const parameter of parameters.list) {
-    const schema = isObject(parameter.schema) ? parameter.schema as JsonSchemaLike : {};
+    const schema = parameterSchema(parameter);
     const name = parameter.name as string;
     if (parameter.in === 'path' && pathProperties.has(name)) pathProperties.set(name, schema);
     else if (parameter.in === 'query') {
@@ -247,6 +393,26 @@ function readEntry(
     findings.push(toolFinding('max-result-chars-invalid', 'warning', stableKey,
       `${where} declares an x-glirastes-max-result-chars that is not an integer from 1000 to 200000; the declaration is ignored and the handler's limit applies.`));
   }
+  const outputFields = readOutputFieldExtensions(operation.operation, where, stableKey);
+  findings.push(...outputFields.findings);
+  const texts = readDeclaredTexts({
+    title: operation.operation['x-glirastes-title'],
+    description: operation.operation['x-glirastes-description'],
+    synonyms: operation.operation['x-glirastes-synonyms'],
+    examples: operation.operation['x-glirastes-examples'],
+  });
+  for (const field of texts.invalid) {
+    findings.push(toolFinding('tool-texts-invalid', 'warning', stableKey,
+      `${where} declares an x-glirastes-${field} that is not one text or one text per language tag within the limits (or looks like a secret); it is ignored.`));
+  }
+  const entities = readEntities(document, operation.operation, parameters.list as JsonObject[], body.schema, stableKey, where);
+  findings.push(...entities.findings);
+  // Checked here, reported by the pipeline (never a finding of the tool itself, so it never disables it).
+  const approval = approvalLevelOf({
+    entityLookup: operation.operation[ENTITY_LOOKUP_EXTENSION],
+    approvalSubject: operation.operation[APPROVAL_SUBJECT_EXTENSION],
+    lookupEffect: operation.operation[LOOKUP_EFFECT_EXTENSION],
+  }, OPENAPI_FIELD_NAMES, where);
   const description = typeof operation.operation.description === 'string' && operation.operation.description.trim()
     ? operation.operation.description.trim()
     : typeof operation.operation.summary === 'string' && operation.operation.summary.trim()
@@ -272,6 +438,10 @@ function readEntry(
     ...(group && 'value' in group ? { group: group.value } : {}),
     ...(roles && 'value' in roles && roles.value.length > 0 ? { roles: roles.value } : {}),
     ...(maxResultChars && 'value' in maxResultChars ? { maxResultChars: maxResultChars.value } : {}),
+    ...(outputFields.declared ? { outputFields: outputFields.declared } : {}),
+    ...(Object.keys(texts.hints).length > 0 ? { texts: texts.hints } : {}),
+    ...(entities.entities ? { entities: entities.entities } : {}),
+    ...(approval ? { approval } : {}),
   };
 }
 
@@ -326,7 +496,12 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
   const { entry, resolved } = piece;
   const findings = [...entry.findings, ...resolved.findings];
   // Only this source reads x-glirastes-name, so only its names without a dot take their resource from the route.
-  const prose: ToolProseHints = { ...resolved.prose, ...(entry.group ? { module: entry.group } : {}), resourceFromRoute: true };
+  // The operation's own texts win per language over a contract's; the other languages stay.
+  const prose: ToolProseHints = {
+    ...mergeDeclaredTexts(resolved.prose, entry.texts),
+    ...(entry.group ? { module: entry.group } : {}),
+    resourceFromRoute: true,
+  };
   const bodyKeys = bodyKeysOf(entry.body);
   if (!entry.authEvidence) {
     findings.push(toolFinding('auth-evidence-missing', 'needs_attention', entry.stableKey,
@@ -365,6 +540,18 @@ function toObserved(piece: OpenapiPiece, definitionId: string, documentPath: str
     prose,
     ...(entry.roles ? { codeRoles: [...entry.roles] } : {}),
     ...(entry.maxResultChars !== undefined ? { maxResultChars: entry.maxResultChars } : {}),
+    ...outputFieldLists(resolved),
+    ...(entry.entities || resolved.codeEntities
+      ? { entities: { ...entry.entities, ...(resolved.codeEntities ? { code: resolved.codeEntities } : {}) } }
+      : {}),
+    ...(entry.approval || resolved.codeApproval
+      ? {
+        approvalDeclarations: {
+          ...(resolved.codeApproval ? { code: resolved.codeApproval } : {}),
+          ...(entry.approval ? { operation: entry.approval } : {}),
+        },
+      }
+      : {}),
   };
 }
 
@@ -513,9 +700,11 @@ async function observeOpenapiEndpoints(ctx: ToolSourceContext, options: OpenapiS
         },
         ...(entry.output ? { inferredOutput: entry.output } : {}),
         probes,
+        ...(ctx.config.output?.deniedFields ? { appDeniedFields: ctx.config.output.deniedFields } : {}),
         openapi: entry.input,
         ...(resolution ? { resolution } : {}),
         ...(previousContract ? { previousContract } : {}),
+        ...(entry.outputFields ? { outputFields: entry.outputFields } : {}),
       });
     } catch (error) {
       // Only a schema of this operation that Ajv cannot compile is the

@@ -1,15 +1,17 @@
+import { isGermanTextLocale } from './budget-stop-notice.js';
+
 /**
  * A model can end a turn with nothing the chat shows: no text (or only
  * whitespace), reasoning only, no tool call. Without a guard the user sees an
  * empty bubble while the turn counts as completed.
  */
-const FALLBACK_TEXT = {
+export const SILENT_TURN_FALLBACK_TEXTS = {
   de: 'Darauf habe ich gerade keine Antwort erzeugt. Bitte formuliere die Anfrage noch einmal, gern etwas genauer.',
   en: 'I did not produce an answer to that. Please send the request again, ideally with a bit more detail.',
 } as const;
 
 export function silentTurnFallbackText(locale?: string): string {
-  return locale?.toLowerCase().startsWith('de') ? FALLBACK_TEXT.de : FALLBACK_TEXT.en;
+  return isGermanTextLocale(locale) ? SILENT_TURN_FALLBACK_TEXTS.de : SILENT_TURN_FALLBACK_TEXTS.en;
 }
 
 /** True when no step produced visible text or a tool call. */

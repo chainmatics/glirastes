@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseRuntimeConfig } from "./config.js";
+import { parseRuntimeConfig, requestLocaleOf } from "./config.js";
 import { credentialHeaders, resolveBackendPrincipal } from "./identity.js";
 const raw = () => ({
   schemaVersion: 1,
@@ -54,6 +54,69 @@ describe("runtime service trust configuration", () => {
       const c = { ...raw(), application: { ...raw().application, resultHandles: value } };
       expect(() => parseRuntimeConfig(c)).toThrow();
     }
+  });
+  it("defaults the limits to the embedded local limits", () => {
+    expect(parseRuntimeConfig(raw()).limits).toMatchObject({
+      maxModelSteps: 10, maxToolCalls: 8, totalTimeoutMs: 60_000, maxInputTokens: 60_000,
+      maxOutputTokens: 4000, maxEstimatedCostUsd: 0.5,
+    });
+    expect(parseRuntimeConfig({ ...raw(), limits: {} }).limits).toMatchObject({ maxModelSteps: 10, maxInputTokens: 60_000 });
+  });
+  it("accepts limits.approvalLookups strictly (or false) and leaves it unset by default", () => {
+    expect(parseRuntimeConfig(raw()).limits.approvalLookups).toBeUndefined();
+    const withLookups = (value: unknown) => ({ ...raw(), limits: { approvalLookups: value } });
+    expect(parseRuntimeConfig(withLookups(false)).limits.approvalLookups).toBe(false);
+    expect(parseRuntimeConfig(withLookups({ maxLookupsPerTurn: 10, lookupTimeoutMs: 500 })).limits.approvalLookups)
+      .toEqual({ maxLookupsPerTurn: 10, lookupTimeoutMs: 500 });
+    // The signed budget's own limit keeps its default and meaning.
+    expect(parseRuntimeConfig(withLookups({ maxLookupsPerTurn: 10 })).limits.maxToolCalls).toBe(8);
+    for (const value of [true, { maxLookupsPerTurn: 0 }, { maxLookupsPerTurn: 1.5 }, { other: 1 }]) {
+      expect(() => parseRuntimeConfig(withLookups(value))).toThrow();
+    }
+  });
+  it("accepts the chat languages and leaves them unset by default", () => {
+    expect(parseRuntimeConfig(raw()).chat).toBeUndefined();
+    const chat = { locale: "de-DE", requestLocaleHeader: "accept-language", locales: { pl: { silentTurn: "Nie udało się.", streamError: "Żądanie nie powiodło się", invalidToolInput: "Nieprawidłowe dane" } } };
+    expect(parseRuntimeConfig({ ...raw(), chat }).chat).toEqual(chat);
+    for (const wrong of [{ locale: "de_DE" }, { requestLocaleHeader: "X-App Language" }, { locales: { de_DE: {} } }, { theme: "dark" }]) {
+      expect(() => parseRuntimeConfig({ ...raw(), chat: wrong })).toThrow();
+    }
+  });
+  it("accepts the outcome protocol mode of UI actions and nothing else", () => {
+    for (const uiActionOutcomes of ["confirm", "report-only", "off"]) {
+      expect(parseRuntimeConfig({ ...raw(), chat: { uiActionOutcomes } }).chat).toEqual({ uiActionOutcomes });
+    }
+    for (const wrong of ["always", true, { confirm: true }]) {
+      expect(() => parseRuntimeConfig({ ...raw(), chat: { uiActionOutcomes: wrong } })).toThrow();
+    }
+  });
+  it("accepts chat.history with the two history defaults' way back, strictly", () => {
+    for (const history of [
+      { toolTurnCounting: "all-turns" },
+      { toolTurnCounting: "tool-turns" },
+      { seenObjects: false },
+      { seenObjects: true },
+      { toolTurnCounting: "all-turns", seenObjects: false },
+      {},
+    ]) {
+      expect(parseRuntimeConfig({ ...raw(), chat: { history } }).chat).toEqual({ history });
+    }
+    for (const wrong of [
+      { toolTurnCounting: "every-turn" },
+      { seenObjects: "off" },
+      { seenObjects: { maxEntries: 5 } },
+      { maxTokens: 8000 },
+      false,
+    ]) {
+      expect(() => parseRuntimeConfig({ ...raw(), chat: { history: wrong } })).toThrow();
+    }
+  });
+  it("reads the turn language from the configured header", () => {
+    const request = (headers: Record<string, string>) => new Request("https://app.test/glirastes/chat", { headers });
+    expect(requestLocaleOf(request({ "accept-language": "pl-PL,pl;q=0.9,en;q=0.8" }), "accept-language")).toBe("pl-PL");
+    expect(requestLocaleOf(request({ "x-app-language": "de" }), "x-app-language")).toBe("de");
+    expect(requestLocaleOf(request({ "x-app-language": "<script>" }), "x-app-language")).toBeUndefined();
+    expect(requestLocaleOf(request({}), "x-app-language")).toBeUndefined();
   });
   it("rejects unsafe identity targets and unknown settings", () => {
     const c = raw();

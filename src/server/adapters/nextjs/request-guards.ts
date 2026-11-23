@@ -6,11 +6,12 @@ import {
   parseDataUrl,
   sniffMediaType,
 } from '../../../contracts/attachments.js';
+import { DEFAULT_MAX_BODY_BYTES } from '../../body-limit.js';
 import { publicOrigins } from './context-helpers.js';
 import type { ChatAttachmentsConfig } from './types.js';
 
 /** Default cap on the request body of the chat handler: 1 MB. */
-export const DEFAULT_MAX_BODY_BYTES = 1_000_000;
+export { DEFAULT_MAX_BODY_BYTES };
 /** Default body cap once `attachments.enabled` is set: 50 MB. */
 export const DEFAULT_ATTACHMENT_MAX_BODY_BYTES = 50_000_000;
 

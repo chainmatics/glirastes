@@ -18,6 +18,7 @@ import {
   type InstalledHostRecord,
   type InstalledSkillsManifest,
 } from './installed-skills-manifest.js';
+import { ensureBaseline } from './upgrade/baseline.js';
 import { selectionOfInstalledSkills } from './installer-parts.js';
 
 /** `GLIRASTES_SKILLS_AUTO_UPDATE=0` keeps `tools refresh` and `tools check` away from the installed skills. */
@@ -210,7 +211,9 @@ export async function planSkillsUpdate(options: SkillsUpdateOptions): Promise<Sk
 }
 
 /** Apply a plan: replace, add and remove unedited skills, then write the manifest. Never prompts. */
-export async function applySkillsUpdate(rootDir: string, plan: SkillsUpdatePlan): Promise<void> {
+/** Returns warnings; a problem with the upgrade baseline never keeps the manifest from moving on. */
+export async function applySkillsUpdate(rootDir: string, plan: SkillsUpdatePlan): Promise<string[]> {
+  const warnings: string[] = [];
   for (const change of plan.changes as PlannedOp[]) {
     if (change.kind !== 'add') await removeAtomic(change.dest);
     if (change.kind === 'remove') continue;
@@ -218,7 +221,17 @@ export async function applySkillsUpdate(rootDir: string, plan: SkillsUpdatePlan)
     if (change.mode === 'symlink') await symlink(change.source!, change.dest, 'dir');
     else await copyDirRecursive(change.source!, change.dest);
   }
+  // The first auto-update of an app that never had a baseline: what it last
+  // reviewed is what the skills were installed for, before the manifest moves on.
+  if (plan.fromVersion) {
+    try {
+      await ensureBaseline(resolve(rootDir), plan.fromVersion);
+    } catch (error) {
+      warnings.push(`glirastes upgrade: ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
+    }
+  }
   if (plan.manifestChanged) await writeInstalledSkillsManifest(resolve(rootDir), plan.next);
+  return warnings;
 }
 
 function plural(count: number, one: string, many: string): string {

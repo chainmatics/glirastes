@@ -7,8 +7,18 @@ import { z } from 'zod';
 import { ToolPresentationSchema, type ToolPresentation } from '../../contracts/index.js';
 import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
+import {
+  entityDeclarationIssue,
+  inputEntityRefIssue,
+  type InputEntityRef,
+  type OutputEntityDeclaration,
+} from '../../contracts/entity-declaration.js';
 import { isValidMaxResultChars } from '../../runtime/result-limit.js';
+import { normalizeOutputFields } from '../../server/core/output-fields.js';
 import { sha256Digest, sortKeysDeep } from './canonical.js';
+import { CODE_FIELD_NAMES, FAIL_CLOSED_SUBJECT, readApprovalDeclarations, type ApprovalDeclarations } from './approval-subject-declarations.js';
+import { readDeclaredTexts, type DeclaredTextField, type DeclaredTexts } from './declared-texts.js';
+import { LocalizedPresentationSchema, type LocalizedPresentation } from './semantics.js';
 import type { JsonSchemaLike } from './types.js';
 
 export interface SchemaProbeItem {
@@ -28,7 +38,13 @@ export interface ProbedSchema {
 }
 
 /** Contract metadata fields that were declared but are unusable, so they read as `null`. */
-export type InvalidContractField = 'effect' | 'presentation' | 'maxResultChars';
+export type InvalidContractField =
+  | 'effect' | 'presentation' | 'maxResultChars' | 'outputAllowedFields' | 'outputDeniedFields' | 'outputDefaultFields'
+  | DeclaredTextField
+  | 'outputEntities' | 'inputEntities';
+
+/** The output field declarations of a contract entry. */
+const OUTPUT_FIELD_NAMES = ['outputAllowedFields', 'outputDeniedFields', 'outputDefaultFields'] as const;
 
 export interface ProbedContractEntry {
   ok: true;
@@ -41,14 +57,46 @@ export interface ProbedContractEntry {
   module: string | null;
   usageHints: string[] | null;
   presentation: ToolPresentation | null;
+  /** `presentation` given per language tag instead of one locale. */
+  presentations?: LocalizedPresentation;
+  /**
+   * Texts in any language the entry declares (`title`, `synonyms`,
+   * `examples`, a `description` per language). Not part of `moduleDigest`:
+   * they describe the tool for people and the search, not the contract.
+   */
+  texts?: DeclaredTexts['hints'];
   /**
    * `maxResultChars` of the entry, when it is an integer from 1,000 to
    * 200,000. Not part of `moduleDigest`: it bounds results, not the contract.
    */
   maxResultChars?: number;
   /**
+   * `outputAllowedFields`, `outputDeniedFields` and `outputDefaultFields` of
+   * the entry, when valid (normalized: de-duplicated, sorted). Not part of
+   * `moduleDigest`: they shape results; the reduced output schema is part of
+   * the contract itself.
+   */
+  outputAllowedFields?: string[];
+  outputDeniedFields?: string[];
+  outputDefaultFields?: string[];
+  /**
+   * `outputEntities` and `inputEntities` of the entry, when every entry is a
+   * valid declaration (field names and types only). Not part of
+   * `moduleDigest`: they name the identity of results, not the contract.
+   */
+  outputEntities?: OutputEntityDeclaration[];
+  inputEntities?: InputEntityRef[];
+  /**
+   * `entityLookup`, `approvalSubject` and `lookupEffect` of the entry: the
+   * valid ones, and the issues of the others in words without their values
+   * (reported by the pipeline as `approval-subject-invalid`, which never
+   * disables the tool). Not part of `moduleDigest`.
+   */
+  approval?: ApprovalDeclarations & { issues?: string[] };
+  /**
    * Set only when the entry declares an `effect` outside the known set, a
-   * `presentation` that fails its schema or a `maxResultChars` out of range;
+   * `presentation` that fails its schema, a `maxResultChars` out of range or
+   * an output field list that is not a list of valid field paths;
    * names the fields, never their values, so a typo can be told apart from an
    * absent field.
    */
@@ -70,8 +118,17 @@ export interface ProbeFailure {
 
 export type SchemaProbeResult = ProbedSchema | ProbedContractEntry | ProbeFailure;
 
+export interface SchemaProbeOptions {
+  /**
+   * Absolute path of the tsconfig whose path aliases the probed modules use
+   * (the one of the source's program), or null for none. Omitted: the app
+   * root's tsconfig.json, when there is one.
+   */
+  tsconfig?: string | null;
+}
+
 export interface SchemaProbe {
-  probe(root: string, items: ReadonlyArray<SchemaProbeItem>): Promise<SchemaProbeResult[]>;
+  probe(root: string, items: ReadonlyArray<SchemaProbeItem>, options?: SchemaProbeOptions): Promise<SchemaProbeResult[]>;
 }
 
 export const PROBE_TIMEOUT_MS = 10_000;
@@ -98,7 +155,16 @@ const WireEntry = z.object({
   module: z.string().nullable(),
   usageHints: z.array(z.string()).nullable(),
   presentation: z.record(z.string(), z.unknown()).nullable(),
+  texts: z.record(z.string(), z.unknown()).nullable().optional(),
   maxResultChars: z.union([z.number(), z.literal('invalid')]).nullable().optional(),
+  outputAllowedFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
+  outputDeniedFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
+  outputDefaultFields: z.union([z.array(z.string()), z.literal('invalid')]).nullable().optional(),
+  outputEntities: z.union([z.array(z.unknown()), z.literal('invalid')]).nullable().optional(),
+  inputEntities: z.union([z.array(z.unknown()), z.literal('invalid')]).nullable().optional(),
+  entityLookup: z.union([z.object({ value: z.unknown() }).strict(), z.literal('invalid')]).nullable().optional(),
+  approvalSubject: z.union([z.object({ value: z.unknown() }).strict(), z.literal('invalid')]).nullable().optional(),
+  lookupEffect: z.union([z.object({ value: z.unknown() }).strict(), z.literal('invalid')]).nullable().optional(),
 });
 const WireFailure = z.object({
   ok: z.literal(false),
@@ -157,6 +223,17 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
   const output = wire.output ? toSchema(wire.output) : null;
   if (output && !output.ok) return output;
   const presentation = wire.presentation ? ToolPresentationSchema.safeParse(wire.presentation) : undefined;
+  // A presentation per language is no presentation of the single-locale schema; read it on its own.
+  const presentations = wire.presentation && !presentation?.success
+    ? LocalizedPresentationSchema.safeParse(wire.presentation)
+    : undefined;
+  const rawTexts = wire.texts ?? {};
+  const texts = readDeclaredTexts({
+    ...(rawTexts.title !== undefined ? { title: rawTexts.title } : {}),
+    ...(rawTexts.description !== undefined ? { description: rawTexts.description ?? 'invalid' } : {}),
+    ...(rawTexts.synonyms !== undefined ? { synonyms: rawTexts.synonyms } : {}),
+    ...(rawTexts.examples !== undefined ? { examples: rawTexts.examples } : {}),
+  });
   const metadata = {
     description: wire.description?.trim() ? wire.description.trim().slice(0, 1_000) : null,
     effect: wire.effect && DECLARED_EFFECTS.includes(wire.effect) ? wire.effect as DeclaredEffect : null,
@@ -170,10 +247,52 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
   if (carriesSecret(metadata)) return CONTENT_REJECTED;
   const invalidFields: InvalidContractField[] = [];
   if (wire.effect !== null && metadata.effect === null) invalidFields.push('effect');
-  if (presentation && !presentation.success) invalidFields.push('presentation');
+  if (presentation && !presentation.success && !presentations?.success) invalidFields.push('presentation');
+  for (const field of texts.invalid) invalidFields.push(field);
   const declaredLimit = wire.maxResultChars ?? null;
   const maxResultChars = isValidMaxResultChars(declaredLimit) ? declaredLimit : undefined;
   if (declaredLimit !== null && maxResultChars === undefined) invalidFields.push('maxResultChars');
+  const outputFields: Partial<Record<(typeof OUTPUT_FIELD_NAMES)[number], string[]>> = {};
+  for (const name of OUTPUT_FIELD_NAMES) {
+    const declared = wire[name] ?? null;
+    if (declared === null) continue;
+    const paths = declared === 'invalid' ? undefined : normalizeOutputFields(declared, name);
+    if (paths) outputFields[name] = paths;
+    else invalidFields.push(name);
+  }
+  const entities: { outputEntities?: OutputEntityDeclaration[]; inputEntities?: InputEntityRef[] } = {};
+  for (const [name, issueOf] of [
+    ['outputEntities', (item: unknown) => entityDeclarationIssue(item, { output: true })],
+    ['inputEntities', inputEntityRefIssue],
+  ] as const) {
+    const declared = wire[name] ?? null;
+    if (declared === null) continue;
+    if (declared !== 'invalid' && declared.every((item) => issueOf(item) === undefined)) {
+      (entities as Record<string, unknown>)[name] = declared;
+    } else {
+      invalidFields.push(name);
+    }
+  }
+  // Field paths are written to tool-contracts.json: a secret-looking one rejects the entry like any metadata.
+  if (carriesSecret(outputFields) || carriesSecret(entities)) return CONTENT_REJECTED;
+  // Approval subjects: only valid declarations go on (a secret-looking one is an issue), never an invalid value.
+  const approvalIssues: string[] = [];
+  const approvalRaw: Record<string, unknown> = {};
+  for (const name of ['entityLookup', 'approvalSubject', 'lookupEffect'] as const) {
+    const declared = wire[name] ?? null;
+    if (declared === null) continue;
+    if (declared === 'invalid') approvalIssues.push(`${name} that is not a JSON value of at most 64 KiB`);
+    else approvalRaw[name] = declared.value;
+  }
+  const approvalRead = readApprovalDeclarations(approvalRaw, CODE_FIELD_NAMES);
+  approvalIssues.push(...approvalRead.issues);
+  // An approvalSubject the probe could not carry (a function, a cycle, too large) is never dropped: it fails closed.
+  if (wire.approvalSubject === 'invalid') {
+    (approvalRead.declarations as { approvalSubject?: unknown }).approvalSubject = FAIL_CLOSED_SUBJECT;
+  }
+  const approval = Object.keys(approvalRead.declarations).length > 0 || approvalIssues.length > 0
+    ? { ...approvalRead.declarations, ...(approvalIssues.length > 0 ? { issues: approvalIssues } : {}) }
+    : undefined;
   return {
     ok: true,
     kind: 'contract-entry',
@@ -181,6 +300,11 @@ function toEntry(wire: z.infer<typeof WireEntry>): ProbedContractEntry | ProbeFa
     output,
     ...metadata,
     ...(maxResultChars !== undefined ? { maxResultChars } : {}),
+    ...outputFields,
+    ...(presentations?.success && !carriesSecret(presentations.data) ? { presentations: presentations.data } : {}),
+    ...(Object.keys(texts.hints).length > 0 ? { texts: texts.hints } : {}),
+    ...entities,
+    ...(approval ? { approval } : {}),
     ...(invalidFields.length > 0 ? { invalidFields } : {}),
     moduleDigest: sha256Digest(JSON.stringify(sortKeysDeep({
       input: input.digest,
@@ -194,6 +318,7 @@ function runChunk(
   root: string,
   items: ReadonlyArray<SchemaProbeItem>,
   timeoutMs: number,
+  options: SchemaProbeOptions,
 ): Promise<SchemaProbeResult[]> {
   return new Promise((resolveResults) => {
     let settled = false;
@@ -251,7 +376,12 @@ function runChunk(
     });
     const requestStream = child.stdin as Writable;
     requestStream.on('error', () => failAll('probe-failed'));
-    requestStream.end(JSON.stringify({ appRoot: root, items, ...sdkLocations() }));
+    requestStream.end(JSON.stringify({
+      appRoot: root,
+      ...(options.tsconfig !== undefined ? { tsconfigPath: options.tsconfig } : {}),
+      items,
+      ...sdkLocations(),
+    }));
   });
 }
 
@@ -265,11 +395,11 @@ export function createSchemaProbe(options: { timeoutMs?: number; chunkSize?: num
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
   const chunkSize = Math.max(1, options.chunkSize ?? CHUNK_SIZE);
   return {
-    async probe(root, items) {
+    async probe(root, items, probeOptions = {}) {
       const results: SchemaProbeResult[] = [];
       for (let index = 0; index < items.length; index += chunkSize) {
         const chunk = items.slice(index, index + chunkSize);
-        const chunkResults = await runChunk(root, chunk, timeoutMs);
+        const chunkResults = await runChunk(root, chunk, timeoutMs, probeOptions);
         const wholeChunkFailed = chunk.length > 1 && chunkResults.every((result) => (
           !result.ok && (result.reason === 'timeout' || result.reason === 'probe-failed')
         ));
@@ -277,7 +407,7 @@ export function createSchemaProbe(options: { timeoutMs?: number; chunkSize?: num
           results.push(...chunkResults);
           continue;
         }
-        for (const item of chunk) results.push(...await runChunk(root, [item], timeoutMs));
+        for (const item of chunk) results.push(...await runChunk(root, [item], timeoutMs, probeOptions));
       }
       return results;
     },

@@ -5,6 +5,7 @@ import {
   type ChatInteractionsData,
   type ChatLocaleCode,
 } from '../contracts/chat-interactions.js';
+import { isLanguageTag } from '../contracts/localized-text.js';
 import { AiChatPanel } from '../react/components/ai-chat-panel.js';
 import {
   defineChatCommand,
@@ -16,7 +17,7 @@ import type { ChatInteractionsConfig } from '../react/interactions/registry.js';
 import { AiChatProvider } from '../react/provider/ai-chat-provider.js';
 import { useChatContext } from '../react/provider/chat-context.js';
 import { VercelAiChat } from '../react/transports/vercel/vercel-ai-chat.js';
-import type { AiChatProviderConfig, ChatThemePreset, ChatTransport } from '../react/types.js';
+import type { AiChatProviderConfig, ChatThemePreset, ChatTransport, UiActionOutcomeEvent } from '../react/types.js';
 import { CHAT_STYLES } from './chat-styles.generated.js';
 import { embedThemeCss, isChatThemePreset } from './theme.js';
 
@@ -26,6 +27,13 @@ export interface GlirastesChatEventMap {
   'glirastes-chat:ready': Record<string, never>;
   'glirastes-chat:status': { state: 'idle' | 'busy' | 'error' };
   'glirastes-chat:tool-result': { toolName: string; result: unknown };
+  /** Outcome of the generated UI actions of one tool result; no payload. */
+  'glirastes-chat:ui-action': {
+    toolName: string;
+    toolCallId: string;
+    code: UiActionOutcomeEvent['code'];
+    actionIds: string[];
+  };
   'glirastes-chat:error': { message: string };
 }
 
@@ -34,7 +42,7 @@ export type GlirastesChatEventName = keyof GlirastesChatEventMap;
 /** JS-only settings that do not fit attributes. Theme comes from the attribute. */
 export interface GlirastesChatElementConfig
   extends Omit<AiChatProviderConfig, 'theme' | 'themeScope'> {
-  headers?: Record<string, string> | (() => Record<string, string>);
+  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
   bodyExtras?: Record<string, unknown> | (() => Record<string, unknown>);
 }
 
@@ -94,7 +102,7 @@ function EmbeddedChat({
   emit: Emit;
   onSendReady: (api: EmbedApi | null) => void;
 }) {
-  const { headers, bodyExtras, onToolResult, ...providerConfig } = config;
+  const { headers, bodyExtras, onToolResult, onUiActionOutcome, ...providerConfig } = config;
   const shared = {
     ...providerConfig,
     // Colours come from the shadow-root CSS (`themeScope: 'inherit'` skips the
@@ -104,6 +112,18 @@ function EmbeddedChat({
     onToolResult: (toolName: string, result: unknown) => {
       onToolResult?.(toolName, result);
       emit('glirastes-chat:tool-result', { toolName, result });
+    },
+    onUiActionOutcome: (event: UiActionOutcomeEvent) => {
+      try {
+        onUiActionOutcome?.(event);
+      } finally {
+        emit('glirastes-chat:ui-action', {
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          code: event.code,
+          actionIds: event.actions.flatMap((action) => (action.actionId ? [action.actionId] : [])),
+        });
+      }
     },
   };
   const body = (
@@ -139,7 +159,7 @@ const BaseElement = (typeof HTMLElement === 'undefined'
  * `defineEntity(definition)`, `defineCommand(definition)`,
  * `mentionEntity(type, id)`.
  * Events (bubbling, composed): `glirastes-chat:ready`, `:status`,
- * `:tool-result`, `:error`. Styling: `--glirastes-chat-*` CSS variables.
+ * `:tool-result`, `:ui-action`, `:error`. Styling: `--glirastes-chat-*` CSS variables.
  * Removing the element unmounts React and releases the microphone.
  */
 export class GlirastesChatElement extends BaseElement {
@@ -158,6 +178,9 @@ export class GlirastesChatElement extends BaseElement {
   #interactions: ChatInteractionsData | undefined;
   #interactionsFromProperty = false;
   #interactionsLoad: AbortController | null = null;
+  // The nearest `lang` the last render used; a page (or a region of it) may set or change it later.
+  #renderedLang: string | null = null;
+  #langObserver: MutationObserver | null = null;
 
   readonly #emit: Emit = (name, detail) => {
     this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
@@ -234,6 +257,12 @@ export class GlirastesChatElement extends BaseElement {
       this.#style = style;
       this.#root = createRoot(mount);
     }
+    if (!this.#langObserver && typeof MutationObserver !== 'undefined') {
+      this.#langObserver = new MutationObserver(() => {
+        if (this.#nearestLang() !== this.#renderedLang) this.#render();
+      });
+      this.#langObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'], subtree: true });
+    }
     this.#render();
   }
 
@@ -243,6 +272,8 @@ export class GlirastesChatElement extends BaseElement {
     queueMicrotask(() => {
       if (!this.#pendingUnmount || this.isConnected) return;
       this.#pendingUnmount = false;
+      this.#langObserver?.disconnect();
+      this.#langObserver = null;
       const root = this.#root;
       this.#root = null;
       this.#style = null;
@@ -258,9 +289,15 @@ export class GlirastesChatElement extends BaseElement {
     this.#render();
   }
 
+  /** The nearest `lang` attribute, trimmed, `_` as `-`; empty without one. */
+  #nearestLang(): string {
+    return (this.closest('[lang]')?.getAttribute('lang') ?? '').trim().replace(/_/g, '-');
+  }
+
+  /** The nearest `lang` as a BCP-47 tag (`pl-PL`); English without one. Texts fall back per `chatText`. */
   #locale(): ChatLocaleCode {
-    const lang = this.closest('[lang]')?.getAttribute('lang') ?? '';
-    return lang.toLowerCase().startsWith('de') ? 'de' : 'en';
+    const lang = this.#nearestLang();
+    return isLanguageTag(lang) ? lang : 'en';
   }
 
   /** `interactions` attribute: GET the data from its URL, or from the endpoint when empty. */
@@ -319,7 +356,13 @@ export class GlirastesChatElement extends BaseElement {
     const placeholder = this.getAttribute('placeholder');
     const voiceLanguage = this.getAttribute('voice-language');
     const chatInteractions = this.#chatInteractions();
+    // The nearest `lang` is the UI language of this element (a region of the page may have its own);
+    // `languageSource: 'server'` keeps the order before 0.18.0, so it is not stated then.
+    const nearestLang = this.#nearestLang();
+    this.#renderedLang = nearestLang;
+    const statesLanguage = isLanguageTag(nearestLang) && this.#config.languageSource !== 'server';
     const config: GlirastesChatElementConfig = {
+      ...(statesLanguage ? { language: nearestLang } : {}),
       ...this.#config,
       ...(chatInteractions ? { chatInteractions } : {}),
       ...(placeholder

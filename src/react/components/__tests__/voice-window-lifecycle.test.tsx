@@ -3,14 +3,26 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SttProviderAdapter as SttAdapter } from '../../stt/controller.js';
 
-const boundary = vi.hoisted(() => ({ connect: vi.fn() }));
-vi.mock('../../stt/deepgram.js', () => ({ DeepgramSttAdapter: class { connect = boundary.connect; } }));
+const boundary = vi.hoisted(() => ({ connect: vi.fn(), options: vi.fn() }));
+vi.mock('../../stt/deepgram.js', () => ({
+  DeepgramSttAdapter: class {
+    constructor(options: unknown) { boundary.options(options); }
+    connect = boundary.connect;
+  },
+}));
 import { ChatWindow } from '../chat-window.js';
 import { VoiceInputAddon } from '../voice-input-addon.js';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); boundary.connect.mockReset(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); boundary.connect.mockReset(); boundary.options.mockClear(); });
 
 describe('built-in voice in a retained window', () => {
+  it('voice.workletUrl reaches the adapter', () => {
+    render(<ChatWindow open keepMounted>
+      <VoiceInputAddon disabled={false} language="en" workletUrl="/static/pcm.js" onTranscript={vi.fn()} />
+    </ChatWindow>);
+    expect(boundary.options).toHaveBeenCalledWith(expect.objectContaining({ workletUrl: '/static/pcm.js' }));
+  });
+
   it('reports a failed hidden finalization without an unhandled rejection', async () => {
     const stopTrack = vi.fn();
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
@@ -23,7 +35,7 @@ describe('built-in voice in a retained window', () => {
       <VoiceInputAddon disabled={false} language="en" onTranscript={received} onError={error} />
     </ChatWindow>;
     const { rerender } = render(view(true));
-    fireEvent.click(screen.getByRole('button', { name: 'mic' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
     await waitFor(() => expect(document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state')).toBe('recording'));
     rerender(view(false));
     await waitFor(() => expect(error).toHaveBeenCalledWith('fixture-finalize-failed'));
@@ -50,11 +62,11 @@ describe('built-in voice in a retained window', () => {
       <VoiceInputAddon disabled={false} language="en" onTranscript={received} />
     </ChatWindow>;
     const { rerender } = render(view(true));
-    fireEvent.click(screen.getByRole('button', { name: 'mic' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
     await waitFor(() => expect(document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state')).toBe('recording'));
     // Stop and hiding can race; only one final draft insertion is allowed.
-    fireEvent.click(screen.getByRole('button', { name: 'stop' }));
-    fireEvent.click(screen.getByRole('button', { name: 'stop' }));
+    fireEvent.click((document.querySelector('[data-component="voice-input-addon"][data-state="recording"]') as HTMLElement));
+    fireEvent.click((document.querySelector('[data-component="voice-input-addon"][data-state="recording"]') as HTMLElement));
     rerender(view(action !== 'close', action === 'collapse'));
     await act(async () => { release(); });
     await waitFor(() => expect(stopTrack).toHaveBeenCalled());
@@ -76,7 +88,7 @@ describe('built-in voice in a retained window', () => {
       <VoiceInputAddon disabled={false} language="en" onTranscript={received} />
     </ChatWindow>;
     const { rerender } = render(view(false));
-    fireEvent.click(screen.getByRole('button', { name: 'mic' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
     await waitFor(() => expect(document.querySelector('[data-component="voice-input-addon"]')?.getAttribute('data-state')).toBe('recording'));
     rerender(view(true));
     await waitFor(() => expect(stopTrack).toHaveBeenCalled());

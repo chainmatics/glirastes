@@ -72,6 +72,14 @@ describe('glirastes <command> --help', () => {
     }
   });
 
+  it('prints the stt pull usage for glirastes stt --help', async () => {
+    const stdout = captureStdout();
+    await runCli(['stt', '--help']);
+    expect(stdout()).toContain('glirastes stt pull [--dir <path>] [--mirror <url>] [--json]');
+    expect(stdout()).not.toContain('glirastes tools');
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it.each(['scan', 'setup', 'connect', 'sync', 'doctor', 'install', 'validate', 'build', 'tools'])(
     'prints only the %s usage for --help',
     async (command) => {

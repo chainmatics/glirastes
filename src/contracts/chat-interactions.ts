@@ -11,10 +11,12 @@ import {
   CHAT_COMMAND_TOOL_PATTERN,
   serializeChatCommandArgs,
 } from './chat-command.js';
+import { isLanguageTag, MAX_TEXT_LANGUAGES, resolveLocalizedText } from './localized-text.js';
 
-export type ChatLocaleCode = 'de' | 'en';
-/** One text, or one per language; `en` is the fallback. */
-export type ChatText = string | { readonly de?: string; readonly en?: string };
+/** A BCP-47 language tag; `de` and `en` have built-in texts. */
+export type ChatLocaleCode = 'de' | 'en' | (string & {});
+/** One text, or one per BCP-47 language tag; see `chatText` for the fallback. */
+export type ChatText = string | { readonly de?: string; readonly en?: string; readonly [language: string]: string | undefined };
 
 export interface ChatInteractionArg {
   /** Argument name, a dotted path for nested values (`params.taskId`). */
@@ -153,11 +155,15 @@ export function isChatArgumentPath(name: unknown): name is string {
     && segments.every((segment) => ARG_SEGMENT.test(segment) && !FORBIDDEN_SEGMENTS.has(segment));
 }
 
-/** The text in `locale`, falling back to English, then German. */
+/**
+ * The text in `locale` (`pl-PL` finds `pl`), falling back to English, then
+ * to the first language in code-unit order (German for a `{ de, en }` text).
+ */
 export function chatText(text: ChatText | undefined, locale: ChatLocaleCode = 'en'): string {
   if (text === undefined) return '';
   if (typeof text === 'string') return text;
-  return text[locale] ?? text.en ?? text.de ?? '';
+  const present = Object.fromEntries(Object.entries(text).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  return resolveLocalizedText(present, locale) ?? '';
 }
 
 type Issues = string[];
@@ -182,15 +188,20 @@ function boundedString(value: unknown, max: number, path: string, issues: Issues
 
 function text(value: unknown, max: number, path: string, issues: Issues): ChatText | undefined {
   if (typeof value === 'string') return boundedString(value, max, path, issues);
-  if (!isRecord(value)) return fail(issues, path, 'a string or { de, en }');
-  checkKeys(value, ['de', 'en'], path, issues);
-  const result: { de?: string; en?: string } = {};
-  for (const language of ['de', 'en'] as const) {
+  if (!isRecord(value)) return fail(issues, path, 'a string or one text per language ({ de, en, pl, … })');
+  const result: Record<string, string> = {};
+  const languages = Object.keys(value);
+  if (languages.length > MAX_TEXT_LANGUAGES) return fail(issues, path, `at most ${MAX_TEXT_LANGUAGES} languages`);
+  for (const language of languages) {
+    if (!isLanguageTag(language)) {
+      issues.push(`${path}.${language.length <= 35 && /^[\w-]+$/.test(language) ? language : '<key>'}: not a BCP-47 language tag`);
+      continue;
+    }
     if (value[language] === undefined) continue;
     const entry = boundedString(value[language], max, `${path}.${language}`, issues);
     if (entry !== undefined) result[language] = entry;
   }
-  if (result.de === undefined && result.en === undefined) return fail(issues, path, 'needs de or en');
+  if (Object.keys(result).length === 0) return fail(issues, path, 'needs at least one language');
   return result;
 }
 

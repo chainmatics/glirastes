@@ -38,6 +38,8 @@ material questions that the code and earlier decisions cannot answer.
   current with the SDK and keeps edited ones; commit
   `.glirastes/installed-skills.json` with the skill folders. The developer
   opts out with `GLIRASTES_SKILLS_AUTO_UPDATE=0` or `--no-skills`.
+- After a `glirastes` version bump, review what changed with the skill
+  `upgrading-glirastes` (`glirastes upgrade report`) before further changes.
 - No unsigned fallback, silent Managed downgrade or approval bypass. No push,
   merge, package publication or deployment without explicit authority.
 

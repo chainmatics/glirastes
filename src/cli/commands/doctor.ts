@@ -11,6 +11,7 @@ import {
 } from './setup-plan.js';
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import { inspectSkillsStaleness, skillsAutoUpdateDisabled } from './skills-auto-update.js';
+import { inspectVoiceWorklet } from './voice-worklet-check.js';
 export { formatDoctorReport } from './doctor-presentation.js';
 import {
   OBSOLETE_CONNECTION_VARIABLES,
@@ -149,6 +150,26 @@ async function agentSkillsCheck(rootDir: string, env: NodeJS.ProcessEnv): Promis
   }
 }
 
+/** Only for apps that use voice input: without the served worklet every recording fails. */
+async function voiceWorkletCheck(rootDir: string): Promise<DoctorCheck | null> {
+  let inspection: Awaited<ReturnType<typeof inspectVoiceWorklet>>;
+  try {
+    inspection = await inspectVoiceWorklet(rootDir);
+  } catch {
+    // An unreadable tree is reported by the project check.
+    return null;
+  }
+  if (!inspection.voice) return null;
+  if (inspection.status === 'pass') return check('voice-worklet', 'pass', 'E-SETUP-108');
+  if (inspection.status === 'copy-pending') {
+    return check('voice-worklet', 'warn', 'E-SETUP-108', 'run-audio-worklet-copy');
+  }
+  if (inspection.status === 'unverifiable') {
+    return check('voice-worklet', 'warn', 'E-SETUP-108', 'verify-audio-worklet-url');
+  }
+  return check('voice-worklet', 'fail', 'E-SETUP-034', 'provide-audio-worklet');
+}
+
 export async function createDoctorReport(
   options: CreateDoctorReportOptions,
 ): Promise<DoctorReport> {
@@ -165,6 +186,7 @@ export async function createDoctorReport(
     : hasConnectionDescriptor ? 'connected' : 'standalone';
   const checks: DoctorCheck[] = [];
   const skillsCheck = await agentSkillsCheck(rootDir, options.env ?? process.env);
+  const voiceCheck = await voiceWorkletCheck(rootDir);
   let profile: Awaited<ReturnType<typeof detectSetupProfile>>;
   try {
     profile = await detectSetupProfile({ rootDir, managed: options.managed });
@@ -178,6 +200,7 @@ export async function createDoctorReport(
         ? error.remediation
         : 'repair-local-project-profile',
     ));
+    if (voiceCheck) checks.push(voiceCheck);
     if (skillsCheck) checks.push(skillsCheck);
     return finish(mode, 0, checks);
   }
@@ -185,7 +208,9 @@ export async function createDoctorReport(
   checks.push(profile.framework
     ? check('framework', 'pass', 'E-SETUP-101')
     : check('framework', 'warn', 'E-SETUP-102', 'declare-supported-framework'));
-  checks.push(profile.authProviders.length > 0
+  // A declared server-verified principal covers an own sign-in integration
+  // (a guard without a known package): nothing is left to review here.
+  checks.push(profile.authProviders.length > 0 || profile.principal === 'server-verified'
     ? check('auth-provider', 'pass', 'E-SCOPE-100')
     : check('auth-provider', 'warn', 'E-SCOPE-101', 'review-host-auth-integration'));
   checks.push(profile.principal === 'server-verified'
@@ -387,6 +412,7 @@ export async function createDoctorReport(
     ? check('runtime-mode', 'pass', 'E-SETUP-106')
     : check('runtime-mode', 'fail', 'E-SETUP-009', 'align-explicit-runtime-mode'));
 
+  if (voiceCheck) checks.push(voiceCheck);
   if (skillsCheck) checks.push(skillsCheck);
   return finish(mode, profile.toolCount, checks);
 }

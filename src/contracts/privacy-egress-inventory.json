@@ -292,6 +292,21 @@
       "kind": "network",
       "decision": "content-free",
       "reason": "Control-plane sync: content-free technical metadata out, signed revisions and keys in."
+    },
+    {
+      "file": "src/cli/commands/stt/pull.ts",
+      "symbol": "fetch",
+      "kind": "network",
+      "decision": "exception",
+      "count": 3,
+      "reason": "Explicit CLI installation downloads pinned model assets (GET only, size and SHA256 verified). No recording, transcript, prompt or runtime inference data is sent; a server transcription never invokes this installer."
+    },
+    {
+      "file": "src/server/stt-local/sherpa.ts",
+      "symbol": "<computed>",
+      "kind": "dynamic_import",
+      "decision": "exception",
+      "reason": "Loads the fixed optional native sherpa-onnx-node package for consumer-local inference. No remote model provider, download or cloud fallback; the importer override is consumer server code."
     }
   ]
 }

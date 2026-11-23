@@ -1,3 +1,4 @@
+import type { EntityDeclarationsByTool } from '../../contracts/entity-declaration.js';
 import { createContext, useContext } from 'react';
 import type { CSSProperties } from 'react';
 import type {
@@ -12,6 +13,9 @@ import type {
   SuggestionsConfig,
   TruncationInfo,
   ToolResultDisplayConfig,
+  ActivityLogConfig,
+  ApprovalDescriptionFn,
+  ApprovalDisplayConfig,
   ToolLabelConfig,
   VoiceInputConfig,
   PipelineStepReport,
@@ -20,13 +24,19 @@ import type {
   StepSummaryFormatter,
   SessionSummary,
   FilePart,
+  ChatQueueState,
+  ChatSubmitResult,
+  ChatSubmitOutcome,
+  ChatSubmitRejection,
+  TurnOutcome,
 } from '../types.js';
 import type { CompletionSearch } from '../completions/completion-search.js';
 import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
 import type { ChatInteractionRegistry, PendingChatCommand } from '../interactions/registry.js';
 import type { ToolResultRendererRegistry } from '../tool-renderers/registry.js';
 
-type MentionTrigger = '@' | '/' | null;
+/** The trigger char of the legacy `mentions` search (`@` or `/`); null when none is active. */
+type MentionTrigger = string | null;
 
 export interface ChatContextValue {
   // Config
@@ -39,6 +49,14 @@ export interface ChatContextValue {
    * `chat-window`, `ai-trigger-button`) to apply the `theme` prop.
    */
   themeVars: CSSProperties;
+  /**
+   * Declared identity of the tools by model-facing name: the provider's
+   * `entityDeclarations` merged over what the server sent. Undefined when
+   * nothing is declared.
+   */
+  entityDeclarations?: EntityDeclarationsByTool;
+  /** The chat's language (the turn's, else the page's): dates and looked-up labels on approval cards. */
+  language?: string;
   /**
    * Optional hint for themes that require special CSS treatment (e.g.
    * `liquid-glass` needs `backdrop-filter`). Apply as
@@ -53,6 +71,8 @@ export interface ChatContextValue {
   suggestions: SuggestionsConfig;
   toolLabels: ToolLabelConfig;
   toolResults: ToolResultDisplayConfig;
+  /** Resolved `activityLog` options of the provider. */
+  activityLog: Required<ActivityLogConfig>;
   /** Custom result components; absent when none are configured. */
   toolRendererRegistry?: ToolResultRendererRegistry;
   /** Resolved attachment limits; null while attachments are off. */
@@ -73,12 +93,64 @@ export interface ChatContextValue {
    * attachments are off); the composer should then keep text and files.
    */
   send: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => boolean;
+  /**
+   * `send` that tells what happened: `'sent'`, `'queued'` (only with
+   * `queue.enabled`) or `'rejected'`. `send` returns true for the first two.
+   */
+  submit: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => ChatSubmitResult;
+  /**
+   * `submit` that also says why a message was refused:
+   * `{ status: 'rejected', reason }` (`ChatSubmitRejectionReason`), else
+   * `{ status: 'sent' | 'queued' }`.
+   */
+  submitWithResult: (message: string, options?: { mentions?: MentionData[]; files?: FilePart[] }) => ChatSubmitOutcome;
+  /**
+   * The latest refused `send`/`submit` (also from the built-in composers):
+   * reason and time, no content. Null until one is refused, and again after
+   * the next accepted (sent or queued) `send`/`submit`; sending queued
+   * messages does not touch it. A refusal re-renders the context once.
+   */
+  lastRejection: ChatSubmitRejection | null;
+  /**
+   * Whether a composer takes input now. Without the queue false while
+   * `isLoading`; with `queue.enabled` false only while the conversation
+   * loads or changes (a message sent meanwhile is queued).
+   */
+  canCompose: boolean;
+  /** The message queue (`queue` option); `enabled` false and no items without it. */
+  queue: ChatQueueState;
+  /**
+   * Sends a queued message next (`queue.sendNowBehavior`). False when it is
+   * unknown or an approval is open with `sendNowDuringApproval: 'refuse'`.
+   */
+  sendNow: (id: string) => boolean;
+  removeQueued: (id: string) => boolean;
+  /** Replaces the text of a queued message; false for an empty text or an unknown id. */
+  editQueued: (id: string, text: string) => boolean;
+  /**
+   * Opens a queued message for editing (one at a time): the queue holds when
+   * it reaches it, so neither it nor a later one is sent past the open edit.
+   * `editQueued` for that id, `cancelEdit` or removing it ends the edit.
+   */
+  beginEdit: (id: string) => boolean;
+  cancelEdit: () => void;
+  clearQueue: () => void;
+  /** Lets a paused queue send again. */
+  resumeQueue: () => void;
+  /** Holds the queue until `resumeQueue()`. */
+  pauseQueue: () => void;
   stop: () => void;
   clear: () => void;
   loadMore: () => void;
   hasMore: boolean;
   pipelineSteps: PipelineStepReport[];
   pipelineState: PipelineState | null;
+  /**
+   * How each turn ended, keyed by the user message that started it (`useTurnOutcome`). The provider
+   * always sets it (empty when nothing was recorded); the SDK's own readers also accept a hand-built
+   * context without it.
+   */
+  turnOutcomes: ReadonlyMap<string, TurnOutcome>;
 
   // Approvals
   pendingApprovals: PendingApproval[];
@@ -90,12 +162,31 @@ export interface ChatContextValue {
   approve: (id: string) => void;
   reject: (id: string) => void;
   isProcessingApproval: boolean;
-  approvalDescription: (toolName: string, approvalId: string, args: unknown) => PendingApproval;
+  /**
+   * Whether the chat will still send an answered approval by itself: the
+   * user approved it in this chat, no request started since, and the chat
+   * continues automatically. Between the answer and that request the entry
+   * keeps showing the call as running.
+   */
+  isApprovalResendPending?: (approvalId: string) => boolean;
+  approvalDescription: ApprovalDescriptionFn;
+  /** `approvalSubjects` of the provider (default true). */
+  approvalSubjects?: boolean;
+  /** `approvalDisplay` of the provider with its defaults. */
+  approvalDisplay?: Required<ApprovalDisplayConfig>;
 
   // Truncation
   truncation: TruncationInfo | null;
   continueTruncation: () => void;
   dismissTruncation: () => void;
+  /**
+   * Continues the latest turn after the server stopped it at a limit
+   * ("Continue" under the stop notice): sends the history again with
+   * `glirastesContinuation: 'budget'`; the server runs only the open steps
+   * with a fresh budget and never repeats a write call. Absent when the
+   * transport cannot (`ChatTransport.continueAfterBudgetStop`).
+   */
+  continueAfterBudgetStop?: () => void;
 
   // Mentions
   mentionQuery: string;

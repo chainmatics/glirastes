@@ -19,7 +19,9 @@ import { effectivePrivacyPolicyDigest, privacyPolicyDigest } from '../sync/priva
  * Only ids, digests and the default entry are read here, never a secret.
  */
 export interface GlirastesPrivacyOptions {
-  shield: Pick<StrictPiiShield, 'profile'>;
+  shield?: Pick<StrictPiiShield, 'profile'>;
+  /** Explicitly wait for authenticated Platform policy bootstrap, even before its first signed block. */
+  managed?: boolean;
   providers?: Pick<ProviderRegistry, 'bindings' | 'defaultEntryId'>;
   /** The local policy; it may only tighten a signed block (see `ChatPrivacyConfig.policy`). */
   local?: LocalPrivacyPolicy;
@@ -36,10 +38,11 @@ export function effectivePrivacyPolicyFor(
   pinned: PinnedPrivacyPolicy | undefined,
   privacy: GlirastesPrivacyOptions,
 ): EffectivePrivacyPolicy | null {
+  if (!isProtectedPolicy(pinned?.privacy) && privacy.local?.required !== true) return null;
   const providers = privacy.providers;
   return mergePrivacyPolicy(
     pinned?.privacy ?? null,
-    { required: true, ...privacy.local },
+    privacy.local ?? {},
     { bindings: providers?.bindings() ?? {}, ...(providers ? { defaultEntryId: providers.defaultEntryId } : {}) },
   );
 }
@@ -71,8 +74,8 @@ export function privacyRuntimeStatus(
   if (pinned && revocations.some((revocation) => revocation.policyRevisionIds.includes(pinned.revisionId))) {
     return { ...base, state: 'refused', effectivePolicyDigest: null, localRestrictions: [], reasons: ['policy_revoked'] };
   }
-  if (!privacy) {
-    return isProtectedPolicy(block)
+  if (!privacy?.shield || privacy.shield.profile !== 'protected-text/v1') {
+    return isProtectedPolicy(block) || privacy?.local?.required === true
       ? { ...base, state: 'refused', effectivePolicyDigest: null, localRestrictions: [], reasons: ['store_missing'] }
       : { ...base, state: 'off', effectivePolicyDigest: null, localRestrictions: [], reasons: [] };
   }
@@ -110,7 +113,7 @@ export function assertPrivacyTurn(input: {
   /** Managed runtime: whether a durable state store holds the accepted state. */
   acceptedStateDurable?: boolean;
 }): void {
-  if (input.privacy && input.awaitingPolicy) throw new PrivacyError('privacy_policy_unavailable');
+  if ((input.privacy?.managed === true || input.privacy?.local?.required === true) && input.awaitingPolicy) throw new PrivacyError('privacy_policy_unavailable');
   const status = privacyRuntimeStatus(input.pinned, input.privacy, input.revocations, input.acceptedStateDurable);
   if (status.reasons.includes('policy_revoked')) throw new PrivacyError('privacy_policy_revoked');
   if (status.state === 'refused') throw new PrivacyError('privacy_not_configured');

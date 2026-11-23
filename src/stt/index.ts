@@ -14,9 +14,15 @@ export {
 } from '../react/stt/recorded.js';
 export {
   DeepgramSttAdapter,
+  DEFAULT_AUDIO_WORKLET_URL,
   createDeepgramSegmentParser,
   type DeepgramSttAdapterOptions,
 } from '../react/stt/deepgram.js';
+export {
+  AudioWorkletLoadError,
+  AUDIO_WORKLET_UNAVAILABLE,
+  isAudioWorkletLoadError,
+} from '../react/stt/worklet-error.js';
 export {
   applySttSegment,
   createSttTranscript,

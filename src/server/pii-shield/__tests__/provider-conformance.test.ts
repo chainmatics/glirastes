@@ -297,6 +297,7 @@ describe('provider switch through the chat handler', () => {
 
   function config(registry: ReturnType<typeof setup>['registry'], selection: string | undefined, tenantId = 'tenant-a'): ChatPrivacyConfig {
     return {
+      policy: { required: true },
       shield: memoryShield(),
       scope: (_req, chat) => ({ ...testScope(), tenantId, conversationId: chat.conversationId ?? 'x' }),
       knownIdentities: () => [{ id: CANARY.colleagueId, name: CANARY.colleague, email: CANARY.colleagueEmail }],
@@ -416,13 +417,14 @@ describe('signed provider approval through the chat handler (K1, request capture
         }),
       },
       privacy: {
-        shield: memoryShield(),
+        policy: { required: true },
+      shield: memoryShield(),
         scope: (_req, chat) => ({ ...testScope(), conversationId: chat.conversationId ?? 'x' }),
         knownIdentities: () => [{ id: CANARY.colleagueId, name: CANARY.colleague, email: CANARY.colleagueEmail }],
         providers: { registry, selection: () => selection },
         // The tenant rule would allow originals; only the effective policy may.
         attachments: () => ({ app: 'allow-original', tenant: 'allow-original' }),
-        ...(extra.policy ? { policy: extra.policy } : {}),
+        ...(extra.policy ? { policy: { required: true, ...extra.policy } } : {}),
       },
     });
   }

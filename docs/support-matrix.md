@@ -38,7 +38,7 @@ browser test, CI corpus or pilot acceptance.
 | --- | --- | --- | --- |
 | Chat UI | React components | `glirastes/embed` registers `<glirastes-chat>` in a browser frontend | Verify the framework's custom-element integration; React and AI SDK dependencies are still required internally |
 | API tools | Next.js route handlers; NestJS controllers with supported schemas | Any backend exporting a committed OpenAPI 3.0.x or 3.1.x JSON document, using the `openapi` source (3.0 `nullable` and boolean `exclusiveMinimum`/`exclusiveMaximum` are normalized to their 3.1 form on load); `selection: "opt-in"` with `x-glirastes-tool`/`-name`/`-group`/`-roles` selects and names operations in the export ([table](tool-policy.md#openapi-source-selection-and-x-glirastes--extensions)) | No generic source-code scanner; YAML and Swagger 2.0 are not read; export freshness is the app's responsibility (FastAPI additionally checks route counts); multipart and other non-JSON bodies and other unsupported operations remain gaps. Accepting a 3.0 export is not a tested NestJS + `@nestjs/swagger` stack |
-| Chat runtime | Next.js handler integration | Adapt a Node server with `glirastes/server/http`, or run the configured runtime service beside a non-Node application | One service per app/environment in V1; a per-instance sidecar is a separate deployment choice, not required |
+| Chat runtime | Next.js handler integration | Adapt a Node server with `glirastes/server/http` (Web `Request`/`Response`) or `glirastes/server/node` (`createNodeHandler` for `node:http`-style servers), or run the configured runtime service beside a non-Node application | `glirastes/server/node` is integration-tested on `node:http` and Express 5; Fastify (`reply.hijack()`) and NestJS on Express are documented recipes without a test here ([node servers](node-servers.md)). One service per app/environment in V1 for the container; several embedded instances need a shared `approvalStore` ([chat-route-security](chat-route-security.md#running-more-than-one-instance)); a per-instance sidecar is a separate deployment choice, not required |
 | Client actions | Registrations in supported JS/TS files and Vue script blocks; a literal `{ route }` makes an action page-bound (the chat opens the route first) | Put `registerAiClientAction` registrations in ordinary JS/TS modules imported by the app | Arbitrary framework templates and `.svelte` files are not scanned; `route` must be a static path |
 | Navigation | `next-pages`, supported `react-router` route objects, `vue-router` records | `registerNavigationBridge` connects execution to the app's router | The bridge does not discover pages; an unknown router has no automatic navigation inventory |
 | Filters | Supported page/router sources and URL-filter declarations | Literal `defineQueryFilters` declarations in scanned modules plus a navigation bridge | Verify paths against the app; without a supported router source there is no route-inventory cross-check |
@@ -74,11 +74,20 @@ non-Node APIs. `tests/runtime-container-e2e.mjs` is the PHP acceptance harness
 not establish full Rust/Java framework support or replace the complete-stack
 criteria above. One active runtime per application/environment; no HA claim.
 
-Version 0.14.0 is published on npm and as the public Linux amd64 image
-`ghcr.io/chainmatics/glirastes-runtime:0.14.0`. The
-[acceptance record](acceptance/2026-11-15-runtime-container-v1.md) links the release
+Version 0.23.0 is published on npm and as the public Linux amd64 image
+`ghcr.io/chainmatics/glirastes-runtime:0.23.0`. The
+[acceptance record](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/2026-11-15-runtime-container-v1.md) of 0.14.0 links the release
 gates and the separate embedded Get It Done production smoke test. Publication
 and a successful embedded pilot do not certify a customer's container deployment.
+
+## Experimental
+
+Shipped, tested in CI, without a stability promise: options, defaults and the
+pinned peer version may change in a minor release, with an upgrade note.
+
+| Feature | Platforms | Evidence | Limits |
+| --- | --- | --- | --- |
+| Local STT (`glirastes/server/stt-local`) | linux-x64 (glibc 2.32+), linux-arm64, darwin-arm64; musl/Alpine refused | `.github/workflows/stt-local-addon.yml` (release gate: packed tarball, addon, worker restart), `.github/workflows/stt-local-smoke.yml` (real model, German fixture, > 20 s clip; weekly, not a gate) | `sherpa-onnx-node` pinned to 2.0.1; one worker per process, queue 4; ~2 GB memory; Next.js needs `serverExternalPackages`; see [local STT](local-stt.md) |
 
 ## Browser frontend references
 

@@ -1,8 +1,29 @@
+import {
+  entityDeclarationIssue,
+  inputEntityRefIssue,
+  MAX_TOOL_ENTITIES,
+  type InputEntityRef,
+  type OutputEntityDeclaration,
+} from '../../contracts/entity-declaration.js';
+import {
+  approvalSubjectIssue,
+  entityLookupIssue,
+  MAX_ENTITY_LOOKUPS,
+  type ApprovalSubjectOption,
+  type EntityLookup,
+} from '../../contracts/approval-subject.js';
 import { z } from 'zod';
 import { isSafeAppHref } from '../../browser/navigation.js';
 import { MAX_MAX_RESULT_CHARS, MIN_MAX_RESULT_CHARS } from '../../runtime/result-limit.js';
+import {
+  isValidOutputFields,
+  MAX_OUTPUT_FIELD_CHARS,
+  MAX_OUTPUT_FIELDS,
+  type OutputFieldsName,
+} from '../../server/core/output-fields.js';
 import { ToolRiskClassSchema } from '../../contracts/index.js';
 import { TOOL_POLICY_RULES_VERSION } from '../../contracts/tool-policy.js';
+import { LANGUAGE_TAG_PATTERN, MAX_TEXT_LANGUAGES } from '../../contracts/localized-text.js';
 import { ExecutionGenerationStateSchema } from '../inventory-generation.js';
 import type { ToolContract, ToolContractsEntry } from './types.js';
 
@@ -121,10 +142,43 @@ export const McpToolNamesFileSchema = z.object({
   }
 });
 
-const ToolTitleSchema = z.object({
-  de: z.string().min(1).max(200).optional(),
-  en: z.string().min(1).max(200).optional(),
-}).strict();
+/** Declared output fields: valid field paths (local only, never sent to the Platform). */
+const outputFieldsSchema = (name: OutputFieldsName) => z.array(z.string().min(1).max(MAX_OUTPUT_FIELD_CHARS))
+  .max(MAX_OUTPUT_FIELDS)
+  .refine((paths) => isValidOutputFields(paths, name), { message: 'Not a list of output field paths' });
+
+/** Entity declarations (field names and types only; local, never sent to the Platform). */
+const OutputEntitiesSchema = z.array(z.unknown()).max(MAX_TOOL_ENTITIES)
+  .refine((list) => list.every((entry) => entityDeclarationIssue(entry, { output: true }) === undefined), { message: 'Not a list of entity declarations' })
+  .transform((list) => list as OutputEntityDeclaration[]);
+const InputEntitiesSchema = z.array(z.unknown()).max(MAX_TOOL_ENTITIES)
+  .refine((list) => list.every((entry) => inputEntityRefIssue(entry) === undefined), { message: 'Not a list of entity references' })
+  .transform((list) => list as InputEntityRef[]);
+
+/** Approval-subject declarations (field, type and tool names only; local, never sent to the Platform). */
+const EntityLookupsSchema = z.array(z.unknown()).min(1).max(MAX_ENTITY_LOOKUPS)
+  .refine((list) => list.every((entry) => entityLookupIssue(entry) === undefined)
+    && new Set(list.map((entry) => (entry as EntityLookup).type)).size === list.length, { message: 'Not a list of entity lookups' })
+  .transform((list) => list as EntityLookup[]);
+const ApprovalSubjectSchema = z.unknown()
+  .refine((value) => value !== undefined && approvalSubjectIssue(value) === undefined, { message: 'Not an approval subject declaration' })
+  .transform((value) => value as ApprovalSubjectOption);
+
+const ToolTitleSchema = z.record(z.string().regex(LANGUAGE_TAG_PATTERN).max(35), z.string().min(1).max(200))
+  .refine((title) => Object.keys(title).length <= MAX_TEXT_LANGUAGES, { message: `At most ${MAX_TEXT_LANGUAGES} languages` });
+
+/**
+ * The labels of a tool per language for the chat (tools.json `languages`):
+ * local only, written to tool-contracts.json and the generated module, never
+ * part of the setup artifact the Platform receives.
+ */
+const ToolLabelsSchema = z.record(z.string().regex(LANGUAGE_TAG_PATTERN).max(35), z.object({
+  singular: z.string().min(1).max(200),
+  plural: z.string().min(1).max(200),
+  approval: z.string().min(1).max(500),
+}).strict()).refine((labels) => Object.keys(labels).length >= 1 && Object.keys(labels).length <= MAX_TEXT_LANGUAGES, {
+  message: `One to ${MAX_TEXT_LANGUAGES} languages`,
+});
 
 export const ToolContractsFileSchema = z.object({
   schemaVersion: z.literal(1),
@@ -137,8 +191,17 @@ export const ToolContractsFileSchema = z.object({
     defaults: ToolPolicyDefaultsSchema,
     search: ToolSearchFactsSchema.optional(),
     title: ToolTitleSchema.optional(),
+    labels: ToolLabelsSchema.optional(),
     mcp: z.array(McpToolNameSchema).min(1).max(10).optional(),
     maxResultChars: z.number().int().min(MIN_MAX_RESULT_CHARS).max(MAX_MAX_RESULT_CHARS).optional(),
+    outputAllowedFields: outputFieldsSchema('outputAllowedFields').optional(),
+    outputDeniedFields: outputFieldsSchema('outputDeniedFields').optional(),
+    outputDefaultFields: outputFieldsSchema('outputDefaultFields').optional(),
+    outputEntities: OutputEntitiesSchema.optional(),
+    inputEntities: InputEntitiesSchema.optional(),
+    entityLookup: EntityLookupsSchema.optional(),
+    approvalSubject: ApprovalSubjectSchema.optional(),
+    lookupEffect: z.literal('read').optional(),
   }).strict()).max(5_000),
 }).strict();
 

@@ -12,7 +12,7 @@ import type {
   ToolSource,
   ToolSourceObservation,
 } from '../types.js';
-import { scanAppSources } from './app-files.js';
+import { defaultSourceDir, scanAppSources } from './app-files.js';
 import { navigationBridgeMissing, scanForNavigationBridge } from './next-pages.js';
 import { enumeratePages, pathExclusion, type PageEntry, type PageTreeOptions } from './page-tree.js';
 import { componentDeclaration, enumerateRouteConfigPages, type RouterKind } from './route-config.js';
@@ -37,6 +37,8 @@ export interface UrlFilterSourceOptions extends PageTreeOptions {
   srcDir?: string;
   /** Which page list the filters attach to: the Next.js page tree (default) or react-router routes. */
   pages?: 'next' | RouterKind;
+  /** The tsconfig of the pages and filter definitions; the nearest one from the scanned folder by default. */
+  tsconfig?: string;
 }
 
 export type FilterDomain =
@@ -646,14 +648,19 @@ function filterProse(locale: string, view: View, keys: ReadonlyArray<FilterKey>)
   const listed = keys.map((key) => describeKey(key, german)).join(', ');
   const params = view.params.map((name) => `params.${name}`).join(', ');
   const label = (text: string) => (text.length <= 200 ? text : `${text.slice(0, 199)}…`);
+  const same = (text: string) => ({ singular: label(text), plural: label(text), approval: label(text) });
+  // Both languages for tools.json languages; `presentation` stays the one of the app's locale.
+  const presentations = { de: same(`${view.path} filtern`), en: same(`Filter ${view.path}`) };
   return german
     ? {
       contractDescription: `Zeigt die Seite ${view.path} mit URL-Filtern: ${listed}.${params ? ` Braucht ${params}.` : ''}`,
-      presentation: { locale, singular: label(`${view.path} filtern`), plural: label(`${view.path} filtern`), approval: label(`${view.path} filtern`) },
+      presentation: { locale, ...presentations.de },
+      presentations,
     }
     : {
       contractDescription: `Show the ${view.path} page with URL filters: ${listed}.${params ? ` Needs ${params}.` : ''}`,
-      presentation: { locale, singular: label(`Filter ${view.path}`), plural: label(`Filter ${view.path}`), approval: label(`Filter ${view.path}`) },
+      presentation: { locale, ...presentations.en },
+      presentations,
     };
 }
 
@@ -731,6 +738,8 @@ async function observeFilters(
       ...tree.pages.map((page) => programFileName(join(root, page.file))),
       ...defined.files.map((file) => file.absolute),
     ],
+    searchFrom: options.srcDir ?? options.appDir ?? defaultSourceDir(root),
+    ...(options.tsconfig ? { tsconfig: options.tsconfig } : {}),
   });
   const reader = new FilterReader(app);
   const views = new Map<string, View>();

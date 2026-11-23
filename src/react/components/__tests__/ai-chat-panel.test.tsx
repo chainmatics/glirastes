@@ -160,6 +160,13 @@ describe('AiChatPanel composition', () => {
       .toBeTruthy();
   });
 
+  it('placement message hides the suggestion bar, also with staticChips', () => {
+    chatContext.current.suggestions = { placement: 'message', staticChips: ['Aufgaben prüfen'] };
+    render(<AiChatPanel />);
+    expect(screen.queryByRole('button', { name: 'Aufgaben prüfen' })).toBeNull();
+    expect(document.querySelector('[data-component="suggestion-bar"]')).toBeNull();
+  });
+
   it('renders only the bounded error copy, never the raw error message', () => {
     chatContext.current.error = new Error('raw provider payload');
 

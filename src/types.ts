@@ -1,4 +1,50 @@
 import { z } from 'zod';
+import { assertOutputFields } from './server/core/output-fields.js';
+import { isUuidLike } from './contracts/entity-identity.js';
+import {
+  assertToolEntities,
+  type InputEntityRef,
+  type OutputEntityDeclaration,
+} from './contracts/entity-declaration.js';
+import {
+  assertApprovalSubjectDeclarations,
+  type ApprovalSubjectOption,
+  type EntityLookup,
+  type LookupEffect,
+} from './contracts/approval-subject.js';
+
+export {
+  APPROVAL_SUBJECTS_PART_TYPE,
+  type ApprovalPreviewData,
+  type ApprovalPreviewDeclaration,
+  type ApprovalPreviewField,
+  type ApprovalPreviewFormat,
+  type ApprovalPreviewValue,
+  type ApprovalSubjectDeclaration,
+  type ApprovalSubjectForbidden,
+  type ApprovalSubjectOption,
+  type ApprovalSubjectRecheck,
+  type ApprovalSubjectsPartData,
+  type ApprovalSubjectUnavailable,
+  type ApprovalSubjectUncheckedReason,
+  type EntityLookup,
+  type EntityLookupConst,
+  type EntityLookupParam,
+  type EntityLookupResult,
+  type LookupEffect,
+  type ServerApprovalSubject,
+} from './contracts/approval-subject.js';
+
+export {
+  defineEntity,
+  type EntityDeclaration,
+  type EntityDeclarationsByTool,
+  type EntityIdKind,
+  type InputEntityRef,
+  type InputEntityRole,
+  type OutputEntityDeclaration,
+  type ToolEntityDeclarations,
+} from './contracts/entity-declaration.js';
 
 // ============================================================================
 // Host schema boundary
@@ -116,6 +162,98 @@ export interface Tool {
    */
   maxResultChars?: number;
 
+  /**
+   * Upper bound of what a successful result shows the model and the browser:
+   * field paths in the `read_result` grammar without an index
+   * (`data[].name`, `data[].owner`, `meta`); a path includes everything
+   * below it. Everything else is removed before the PII shield, the result
+   * store, the overview and the size limit see the result, so for the model
+   * a field that is not listed does not exist. `success` and `uiAction` are
+   * never removed (`uiAction` is built from the full answer); a failure
+   * (`success: false`) is not a record of the declared shape and stays as
+   * it is. A result that is not a record travels under `data`. Absent:
+   * everything is allowed. At most 200 paths of at most 200 characters; an
+   * invalid value throws in `defineTool` and `endpointToolToTool`.
+   * OpenAPI: `x-glirastes-output-allowed-fields`.
+   */
+  outputAllowedFields?: string[];
+
+  /**
+   * Fields a successful result never shows the model and the browser (same
+   * grammar): each path removes that field and everything below it, at any
+   * depth and through arrays (`data[].variants[].fileUrl`). Part of the same
+   * upper bound as `outputAllowedFields`, applied at the same place: the
+   * result is the allowed fields (or all, when not declared) minus these;
+   * a denied field wins over an allowed parent and over the default view.
+   * Use it to hide a few fields while new ones stay visible; use
+   * `outputAllowedFields` when new fields must stay hidden until listed.
+   * Invalid: throws like `outputAllowedFields`. OpenAPI:
+   * `x-glirastes-output-denied-fields`.
+   */
+  outputDeniedFields?: string[];
+
+  /**
+   * The fields the first answer shows (same grammar), also when the whole
+   * result would fit the limit. When anything is left out, the result is
+   * kept as a result handle and the answer carries a `_result` marker that
+   * lists the rest in `omitted` for `read_result`; without a result store
+   * the rest cannot be read and a `_truncated` marker says so. Applied after
+   * the upper bound (only allowed, not denied fields can be shown). OpenAPI:
+   * `x-glirastes-output-default-fields`.
+   */
+  outputDefaultFields?: string[];
+
+  /**
+   * The records a successful result holds and how they are identified:
+   * id field (or fields of a composite key), name, fallback, type and id
+   * kind, at a result path (`playlists[]`, `data[].owner`; default: the
+   * entries of the largest array). Used by the result overview, history
+   * compaction, `read_result`, `hideIds`, the approval card and entity
+   * links instead of guessing from field names. Field names only; never
+   * sent to the Platform. See `defineEntity`. OpenAPI: `x-glirastes-entities`
+   * (operation) or `x-glirastes-entity` (response schema).
+   */
+  outputEntities?: OutputEntityDeclaration[];
+
+  /**
+   * The arguments that name a record (`{ type: 'playlist', args: 'playlist_id' }`),
+   * for the approval card. OpenAPI: `x-glirastes-entity-ref` on a parameter.
+   */
+  inputEntities?: InputEntityRef[];
+
+  /**
+   * The entity types this read tool can look up for an approval card, and
+   * how its parameters are filled (`{ type: 'playlist', params: { playlist_id:
+   * 'playlist_id' } }`). The tool must declare the entity in `outputEntities`.
+   * OpenAPI: `x-glirastes-entity-lookup`. See docs/approval-subjects.md.
+   */
+  entityLookup?: EntityLookup | EntityLookup[];
+
+  /**
+   * For a write tool: which of its `inputEntities` the server looks up
+   * before the approval card, a preview, and the failure behaviour; `false`
+   * turns the lookup off. OpenAPI: `x-glirastes-approval-subject`.
+   */
+  approvalSubject?: ApprovalSubjectOption;
+
+  /**
+   * `read`: a lookup or preview call through this tool changes nothing (a
+   * POST dry-run). Only read for lookups and previews: the tool keeps its
+   * own risk class and approval when the model calls it. GET and HEAD need
+   * no declaration. OpenAPI: `x-glirastes-lookup-effect`.
+   */
+  lookupEffect?: LookupEffect;
+
+  /**
+   * Set on UI tools (`uiToolToTool`, the generated UI tools): a successful
+   * result with a `uiAction` only hands the action to the browser, so a
+   * client that sends the outcome flag gets `{ handedOff: true, message,
+   * uiAction }`, every other the 0.17.3 shape with `success: true` (see
+   * `uiToolResultShape`). `outcome: 'confirm'` lets the browser report what
+   * became of the tool's own (non-`glirastes.*`) actions too.
+   */
+  uiTool?: { outcome?: 'confirm' };
+
   /** The actual implementation */
   execute: (input: unknown, context: ToolContext) => Promise<unknown>;
 }
@@ -131,6 +269,22 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
   method?: string;
   /** Upper bound of the serialized result in characters; see `Tool.maxResultChars`. */
   maxResultChars?: number;
+  /** Fields a successful result may show at all; see `Tool.outputAllowedFields`. */
+  outputAllowedFields?: string[];
+  /** Fields a successful result never shows; see `Tool.outputDeniedFields`. */
+  outputDeniedFields?: string[];
+  /** Fields the first answer shows; see `Tool.outputDefaultFields`. */
+  outputDefaultFields?: string[];
+  /** Records the result holds; see `Tool.outputEntities`. */
+  outputEntities?: OutputEntityDeclaration[];
+  /** Arguments that name a record; see `Tool.inputEntities`. */
+  inputEntities?: InputEntityRef[];
+  /** Entity types this read tool looks up for approval cards; see `Tool.entityLookup`. */
+  entityLookup?: EntityLookup | EntityLookup[];
+  /** Server lookup of the approval subjects; see `Tool.approvalSubject`. */
+  approvalSubject?: ApprovalSubjectOption;
+  /** A lookup or preview through this tool changes nothing; see `Tool.lookupEffect`. */
+  lookupEffect?: LookupEffect;
   /** @deprecated Use Glirastes approval flows via `lancer.approvals` instead. Kept for backward compatibility. */
   needsApproval?:
     | boolean
@@ -140,6 +294,11 @@ export function defineTool<TInput extends SchemaLike, TOutput>(tool: {
       ) => boolean | Promise<boolean>);
   execute: (input: InferSchema<TInput>, context: ToolContext) => Promise<TOutput>;
 }): Tool {
+  assertOutputFields(tool.outputAllowedFields, `defineTool(${tool.id})`, 'outputAllowedFields');
+  assertOutputFields(tool.outputDeniedFields, `defineTool(${tool.id})`, 'outputDeniedFields');
+  assertOutputFields(tool.outputDefaultFields, `defineTool(${tool.id})`, 'outputDefaultFields');
+  assertToolEntities(tool, `defineTool(${tool.id})`);
+  assertApprovalSubjectDeclarations(tool, `defineTool(${tool.id})`);
   return tool as Tool;
 }
 
@@ -198,12 +357,7 @@ export function createUiActionSchema(
         const entity = data.type.split('-')[0];
         const idKey = `${entity}Id`;
         const id = data[idKey];
-        return (
-          typeof id === 'string' &&
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            id,
-          )
-        );
+        return typeof id === 'string' && isUuidLike(id);
       },
       { message: 'Entity action must include valid {entity}Id (UUID)' },
     );
@@ -346,6 +500,34 @@ export interface AiEndpointToolDefinition<
    */
   maxResultChars?: number;
   /**
+   * Fields a successful result may show the model and the browser at all;
+   * see `Tool.outputAllowedFields`. Paths address the result as the model
+   * sees it: a list or scalar response travels under `data`
+   * (`data[].name`). The `Returns:` description of `outputSchema` is reduced
+   * to them. OpenAPI: `x-glirastes-output-allowed-fields`.
+   */
+  outputAllowedFields?: string[];
+  /**
+   * Fields a successful result never shows; see `Tool.outputDeniedFields`.
+   * OpenAPI: `x-glirastes-output-denied-fields`.
+   */
+  outputDeniedFields?: string[];
+  /**
+   * Fields the first answer shows; see `Tool.outputDefaultFields`. OpenAPI:
+   * `x-glirastes-output-default-fields`.
+   */
+  outputDefaultFields?: string[];
+  /** Records the result holds; see `Tool.outputEntities`. OpenAPI: `x-glirastes-entities`, `x-glirastes-entity`. */
+  outputEntities?: OutputEntityDeclaration[];
+  /** Arguments that name a record; see `Tool.inputEntities`. OpenAPI: `x-glirastes-entity-ref`. */
+  inputEntities?: InputEntityRef[];
+  /** Entity types this read tool looks up for approval cards; see `Tool.entityLookup`. OpenAPI: `x-glirastes-entity-lookup`. */
+  entityLookup?: EntityLookup | EntityLookup[];
+  /** Server lookup of the approval subjects; see `Tool.approvalSubject`. OpenAPI: `x-glirastes-approval-subject`. */
+  approvalSubject?: ApprovalSubjectOption;
+  /** A lookup or preview through this tool changes nothing; see `Tool.lookupEffect`. OpenAPI: `x-glirastes-lookup-effect`. */
+  lookupEffect?: LookupEffect;
+  /**
    * Static uiAction template with $variable placeholders.
    * Use for simple cases where action is always the same.
    * Pass an array for compound actions (e.g., toast + refresh).
@@ -365,6 +547,8 @@ export function defineEndpointTool<
 >(
   definition: AiEndpointToolDefinition<TInput, TOutput>,
 ): AiEndpointToolDefinition<TInput, TOutput> {
+  // An approval-subject declaration that cannot hold (refs without a reference, lookupEffect on a write) throws here already.
+  assertApprovalSubjectDeclarations(definition, `defineEndpointTool(${definition.id})`);
   return definition;
 }
 
@@ -407,6 +591,14 @@ export interface AiUiToolDefinition<
    * Pass an array for compound actions (e.g., toast + refresh).
    */
   uiPattern?: UiPattern | UiPattern[];
+  /**
+   * Opt-in to the outcome protocol of UI actions. With `'confirm'` the chat
+   * runs this tool's actions through the UI action bus (register them with
+   * `useAiClientActionByType`), reports what became of them, and the model
+   * answers only after that report. Without it the actions stay with the
+   * app's `onToolResult`, as before, and nothing is reported.
+   */
+  outcome?: 'confirm';
 }
 
 export function defineUiTool<

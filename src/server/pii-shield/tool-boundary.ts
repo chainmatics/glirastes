@@ -1,3 +1,4 @@
+import { preparePrivacyConversion } from '../core/privacy-conversion.js';
 import { isResultReader, unsupportedPrivateResultRead } from '../core/result-reader.js';
 import { randomUUID } from 'node:crypto';
 import type { DurableRuntimeStore } from '../../runtime/postgres-store.js';
@@ -83,7 +84,7 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
   const environmentId = options.environmentId ?? boundary.session.scope.environment;
   const wrapped: Record<string, unknown> = {};
   for (const [name, raw] of Object.entries(tools)) {
-    const tool = raw as ExecutableTool;
+    const tool = (typeof raw === 'object' && raw !== null ? preparePrivacyConversion(raw) : raw) as ExecutableTool;
     if (typeof tool !== 'object' || tool === null || typeof tool.execute !== 'function') {
       wrapped[name] = raw;
       continue;

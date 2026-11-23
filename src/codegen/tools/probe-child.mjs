@@ -49,12 +49,28 @@ function jsonObject(value) {
   }
 }
 
+/** Texts in any language (contract.ts title, synonyms, examples, a description per language); null when none is declared. */
+function declaredTexts(entry) {
+  const texts = {};
+  for (const field of ['title', 'synonyms', 'examples']) {
+    if (entry[field] === undefined) continue;
+    try {
+      texts[field] = JSON.parse(JSON.stringify(entry[field]) ?? 'null');
+    } catch {
+      texts[field] = null;
+    }
+  }
+  if (entry.description !== null && typeof entry.description === 'object') texts.description = jsonObject(entry.description);
+  return Object.keys(texts).length > 0 ? texts : null;
+}
+
 async function main() {
   const request = await readRequest();
   register(new URL('./probe-loader.mjs', import.meta.url), {
     data: {
       typescriptUrl: request.typescriptUrl,
       appRoot: request.appRoot,
+      tsconfigPath: request.tsconfigPath,
       sdkSourceRoot: request.sdkSourceRoot,
     },
   });
@@ -102,6 +118,37 @@ async function main() {
     };
   };
 
+  // Only an absent field is undeclared: null is an invalid declaration (fail closed), as in OpenAPI and defineTool.
+  const fieldList = (value) => {
+    if (value === undefined) return null;
+    return Array.isArray(value) && value.length <= 200
+      && value.every((path) => typeof path === 'string' && path.length <= 200)
+      ? [...value]
+      : 'invalid';
+  };
+
+  const entityList = (value) => {
+    if (value === undefined) return null;
+    if (!Array.isArray(value) || value.length > 20) return 'invalid';
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return 'invalid';
+    }
+  };
+
+  // A declared JSON value goes on (wrapped, so any value is told apart from the marker); anything else is invalid.
+  const jsonDeclaration = (value) => {
+    if (value === undefined) return null;
+    try {
+      const text = JSON.stringify(value);
+      if (text === undefined || text.length > 64 * 1024) return 'invalid';
+      return { value: JSON.parse(text) };
+    } catch {
+      return 'invalid';
+    }
+  };
+
   const describeEntry = async (entry) => {
     if (entry === null || typeof entry !== 'object') return { ok: false, reason: 'invalid-entry' };
     const input = await describeSchema(entry.input, 'input');
@@ -123,12 +170,24 @@ async function main() {
       presentation: entry.presentation !== null && typeof entry.presentation === 'object'
         ? jsonObject(entry.presentation)
         : null,
+      texts: declaredTexts(entry),
       // A finite number goes on to the range check; any other declared value is invalid.
       maxResultChars: entry.maxResultChars === undefined || entry.maxResultChars === null
         ? null
         : typeof entry.maxResultChars === 'number' && Number.isFinite(entry.maxResultChars)
           ? entry.maxResultChars
           : 'invalid',
+      // A list of at most 200 strings goes on to the path check; any other declared value (null too) is invalid.
+      outputAllowedFields: fieldList(entry.outputAllowedFields),
+      outputDeniedFields: fieldList(entry.outputDeniedFields),
+      outputDefaultFields: fieldList(entry.outputDefaultFields),
+      // Checked in the parent; only a list of at most 20 JSON values goes on, anything else declared is invalid.
+      outputEntities: entityList(entry.outputEntities),
+      inputEntities: entityList(entry.inputEntities),
+      // Approval subjects: checked in the parent.
+      entityLookup: jsonDeclaration(entry.entityLookup),
+      approvalSubject: jsonDeclaration(entry.approvalSubject),
+      lookupEffect: jsonDeclaration(entry.lookupEffect),
     };
   };
 

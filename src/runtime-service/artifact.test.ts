@@ -10,6 +10,9 @@ import {
 import { createContractBindings } from "../runtime/contract-bindings.js";
 import { ToolContractsFileSchema } from "../codegen/tools/files.js";
 import { buildRuntimeArtifact, loadRuntimeArtifact } from "./artifact.js";
+import { runToolsPipeline } from "../codegen/tools/pipeline.js";
+import { createRegistryToolDiscovery } from "../runtime/tool-discovery.js";
+import { defaultIntentRouterFor } from "../server/adapters/nextjs/default-intent-routing.js";
 
 const response = {
   "200": {
@@ -32,12 +35,13 @@ function doc(operation: Record<string, unknown> = {}) {
     },
   });
 }
-async function fixture(operation: Record<string, unknown> = {}) {
+async function fixture(operation: Record<string, unknown> = {}, config: Record<string, unknown> = {}) {
   return createAppFixture(
     { "api/openapi.json": doc(operation) },
     {
       toolsConfig: {
         sources: [{ kind: "openapi", document: "api/openapi.json" }],
+        ...config,
       },
     },
   );
@@ -45,6 +49,26 @@ async function fixture(operation: Record<string, unknown> = {}) {
 afterEach(removeAppFixtures);
 
 describe("runtime container artifact", () => {
+  it("carries the tool labels per language locally and leaves the setup artifact one presentation", async () => {
+    const app = await fixture(
+      { "x-glirastes-title": { de: "Aufgaben zeigen", pl: "Pokaż zadania" } },
+      { languages: ["en", "de", "pl"] },
+    );
+    await buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const name = Object.keys(loaded.toolTexts ?? {})[0]!;
+    expect(loaded.toolTexts?.[name]?.labels?.pl?.approval).toBe("Pokaż zadania");
+    expect(JSON.stringify(loaded.setupArtifact)).not.toContain("Pokaż zadania");
+    // Without languages: the template languages (en, de) by default, none with `languages: []`.
+    const plain = await fixture();
+    await buildRuntimeArtifact({ projectRoot: plain.root, outputDirectory: plain.path("artifact") });
+    const texts = (await loadRuntimeArtifact(plain.path("artifact"))).toolTexts ?? {};
+    expect(Object.values(texts).map((entry) => Object.keys(entry.labels ?? {}))).toEqual([["de", "en"]]);
+    const single = await fixture(undefined, { languages: [] });
+    await buildRuntimeArtifact({ projectRoot: single.root, outputDirectory: single.path("artifact") });
+    expect((await loadRuntimeArtifact(single.path("artifact"))).toolTexts).toBeUndefined();
+  }, 60_000);
+
   it("rejects required bodies that can be empty because the caller omits an empty object", async () => {
     const app = await fixture();
     const spec = JSON.parse(await app.read("api/openapi.json"));
@@ -92,6 +116,209 @@ describe("runtime container artifact", () => {
     ).not.toHaveProperty("code");
   });
 
+  it("carries and applies the x-glirastes-output-* fields through tool-contracts.json, the generated module and the container", async () => {
+    const declared = {
+      "x-glirastes-output-allowed-fields": ["data"],
+      "x-glirastes-output-denied-fields": ["**.fileUrl"],
+      "x-glirastes-output-default-fields": ["data[].title"],
+    };
+    const app = await fixture(declared);
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const written = ToolContractsFileSchema.parse(
+      JSON.parse(await app.read(".glirastes/tool-contracts.json")),
+    );
+    expect(written.tools[0]).toMatchObject({
+      outputAllowedFields: ["data"],
+      outputDeniedFields: ["**.fileUrl"],
+      outputDefaultFields: ["data[].title"],
+    });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    expect(payload.contracts.tools[0].outputDeniedFields).toEqual(["**.fileUrl"]);
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain('        outputAllowedFields: [\n          "data"\n        ],\n');
+    expect(module).toContain('        outputDeniedFields: [\n          "**.fileUrl"\n        ],\n');
+    expect(module).toContain('        outputDefaultFields: [\n          "data[].title"\n        ],\n');
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    expect(createContractBindings(loaded).disabled).toEqual([]);
+    const [binding] = loaded.createToolBindings();
+    expect(binding!.tool).toMatchObject({
+      outputAllowedFields: ["data"],
+      outputDeniedFields: ["**.fileUrl"],
+      outputDefaultFields: ["data[].title"],
+    });
+    // The container applies them: the bound tool reduces the backend answer.
+    const result = await binding!.tool.execute({}, {
+      currentDate: "2026-11-17", locale: "en-US",
+      callEndpoint: async () => ({ ok: true, status: 200, data: [{ title: "T", fileUrl: "https://s3.example/x?sig=SIG" }] }),
+    } as never);
+    const { toolToAiTool } = await import("../server/core/index.js");
+    const shown = await toolToAiTool(
+      { ...binding!.tool, execute: async () => result },
+      { currentDate: "2026-11-17", locale: "en-US" } as never,
+    ).execute({});
+    expect(JSON.stringify(shown)).not.toContain("SIG");
+    expect(shown).toMatchObject({ data: [{ title: "T" }] });
+
+    // Without the extensions nothing is written: existing outputs stay byte-identical.
+    const plain = await fixture();
+    await buildRuntimeArtifact({
+      projectRoot: plain.root,
+      outputDirectory: plain.path("artifact"),
+    });
+    expect(await plain.read(".glirastes/tool-contracts.json")).not.toContain("outputAllowedFields");
+    const plainLoaded = await loadRuntimeArtifact(plain.path("artifact"));
+    expect(plainLoaded.createToolBindings()[0]!.tool).not.toHaveProperty("outputAllowedFields");
+  });
+
+  it("carries declared entities through tool-contracts.json, the generated module and the container", async () => {
+    const app = await fixture({
+      "x-glirastes-entities": [{ type: "task", id: "task_id", name: "title", path: "data[]" }],
+      parameters: [{
+        in: "query", name: "owner_id", schema: { type: "integer", "x-glirastes-entity-ref": { type: "user", role: "reference" } },
+      }],
+    });
+    await buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+    const written = ToolContractsFileSchema.parse(JSON.parse(await app.read(".glirastes/tool-contracts.json")));
+    expect(written.tools[0]).toMatchObject({
+      outputEntities: [{ type: "task", id: "task_id", name: "title", path: "data[]" }],
+      inputEntities: [{ type: "user", role: "reference", args: "owner_id" }],
+    });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain("        outputEntities: [\n");
+    expect(module).toContain("        inputEntities: [\n");
+    // Field names stay local: never in the setup artifact the Platform gets.
+    expect(JSON.stringify(payload.setupArtifact)).not.toContain("task_id");
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    expect(loaded.createToolBindings()[0]!.tool).toMatchObject({
+      outputEntities: [{ type: "task", id: "task_id", name: "title", path: "data[]" }],
+      inputEntities: [{ type: "user", role: "reference", args: "owner_id" }],
+    });
+    const plain = await fixture();
+    await buildRuntimeArtifact({ projectRoot: plain.root, outputDirectory: plain.path("artifact") });
+    expect(await plain.read(".glirastes/tool-contracts.json")).not.toContain("Entities");
+  });
+
+  it("carries approval subjects through tool-contracts.json, the generated module and the container; an invalid one blocks nothing", async () => {
+    const ok = (properties: Record<string, unknown>) => ({
+      "200": { description: "ok", content: { "application/json": { schema: { type: "object", properties } } } },
+    });
+    const idParam = (extra: Record<string, unknown> = {}) => ({
+      in: "path", name: "playlist_id", required: true, schema: { type: "integer", ...extra },
+    });
+    const playlist = { playlist_id: { type: "integer" }, title: { type: "string" } };
+    const document = (impact: Record<string, unknown>) => JSON.stringify({
+      openapi: "3.1.0",
+      security: [{ session: [] }],
+      paths: {
+        "/api/playlists/{playlist_id}": {
+          get: {
+            description: "Show a playlist",
+            parameters: [idParam()],
+            "x-glirastes-entities": [{ type: "playlist", id: "playlist_id", name: "title", path: "" }],
+            "x-glirastes-entity-lookup": { type: "playlist", params: { playlist_id: "playlist_id" } },
+            responses: ok(playlist),
+          },
+          delete: {
+            description: "Delete a playlist",
+            parameters: [idParam({ "x-glirastes-entity-ref": { type: "playlist" } })],
+            responses: ok(playlist),
+          },
+        },
+        "/api/playlists/{playlist_id}/impact": {
+          post: {
+            description: "Impact of deleting a playlist",
+            "x-glirastes-name": "playlists.impact",
+            parameters: [idParam()],
+            ...impact,
+            responses: ok({ impact: { type: "object", properties: { devices: { type: "array", items: { type: "string" } } } } }),
+          },
+        },
+      },
+    });
+    const approvalSubjects = {
+      tools: {
+        playlists_delete: {
+          preview: {
+            tool: "playlists.impact",
+            params: { playlist_id: "playlist_id" },
+            fields: [{ path: "impact.devices", label: { en: "Affected devices" }, format: "count" }],
+          },
+          recheck: "exists",
+        },
+      },
+    };
+    const build = async (impact: Record<string, unknown>, keepGoing = false) => {
+      const app = await createAppFixture({ "api/openapi.json": document(impact) }, {
+        toolsConfig: { sources: [{ kind: "openapi", document: "api/openapi.json" }], approvalSubjects },
+      });
+      if (keepGoing) await runToolsPipeline({ root: app.root, mode: "write", keepGoing: true });
+      else await buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+      const written = ToolContractsFileSchema.parse(JSON.parse(await app.read(".glirastes/tool-contracts.json")));
+      const byKey = new Map(written.tools.map((tool) => [tool.stableKey, tool] as const));
+      return { app, byKey };
+    };
+
+    const { app, byKey } = await build({ "x-glirastes-lookup-effect": "read" });
+    const deleteKey = "DELETE /api/playlists/:playlist_id";
+    expect(byKey.get(deleteKey)?.definitionId).toBe("playlists.delete");
+    expect(byKey.get("GET /api/playlists/:playlist_id")?.entityLookup).toEqual([{ type: "playlist", params: { playlist_id: "playlist_id" } }]);
+    expect(byKey.get("POST /api/playlists/:playlist_id/impact")?.lookupEffect).toBe("read");
+    expect(byKey.get(deleteKey)?.approvalSubject).toEqual(approvalSubjects.tools.playlists_delete);
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    const module = renderGeneratedModule({ modulePath: "generated.ts", artifact: payload.setupArtifact, contracts: payload.contracts.tools });
+    expect(module).toContain("        entityLookup: [\n");
+    expect(module).toContain("        approvalSubject: {\n");
+    expect(module).toContain('        lookupEffect: "read",\n');
+    // Local only: never in the setup artifact the Platform gets.
+    expect(JSON.stringify(payload.setupArtifact)).not.toContain("entityLookup");
+    expect(JSON.stringify(payload.setupArtifact)).not.toContain("Affected devices");
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const tools = new Map(loaded.createToolBindings().map((binding) => [binding.definitionId, binding.tool] as const));
+    expect(tools.get("playlists.get")).toMatchObject({ entityLookup: [{ type: "playlist", params: { playlist_id: "playlist_id" } }] });
+    expect(tools.get("playlists.impact")).toMatchObject({ lookupEffect: "read" });
+    expect(tools.get("playlists.delete")).toMatchObject({ approvalSubject: { recheck: "exists", preview: { tool: "playlists.impact" } } });
+
+    // The same POST without lookupEffect: a non-blocking error (like entity-id-conflict). Under keepGoing every
+    // output is written, the preview dropped and every tool enabled; a strict build stops on the error.
+    const invalid = await build({}, true);
+    expect(invalid.byKey.get(deleteKey)?.approvalSubject).toEqual({ recheck: "exists" });
+    expect(invalid.byKey.get("POST /api/playlists/:playlist_id/impact")).not.toHaveProperty("lookupEffect");
+    expect(invalid.byKey.get("GET /api/playlists/:playlist_id")?.entityLookup).toHaveLength(1);
+    const inventory = JSON.parse(await invalid.app.read(".glirastes/setup-artifact.json"));
+    expect(inventory.tools.map((tool: { enabled: boolean }) => tool.enabled)).toEqual([true, true, true]);
+    await expect(buildRuntimeArtifact({ projectRoot: invalid.app.root, outputDirectory: invalid.app.path("artifact") }))
+      .rejects.toThrow(/errors/);
+  }, 60_000);
+
+  it("refuses to build a container artifact for a tool with an invalid upper bound (fail closed)", async () => {
+    for (const extension of ["x-glirastes-output-allowed-fields", "x-glirastes-output-denied-fields"]) {
+      const app = await fixture({ [extension]: ["data[0]"] });
+      await expect(
+        buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") }),
+      ).rejects.toThrow(/output-(allowed|denied)-fields-invalid/);
+    }
+  });
+
+  it("refuses an artifact whose tool-contracts.json declares the any-depth form outside outputDeniedFields", async () => {
+    const app = await fixture({ "x-glirastes-output-allowed-fields": ["data"] });
+    await buildRuntimeArtifact({ projectRoot: app.root, outputDirectory: app.path("artifact") });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    payload.contracts.tools[0].outputAllowedFields = ["**.fileUrl"];
+    expect(() => ToolContractsFileSchema.parse(payload.contracts)).toThrow();
+  });
+
   it("carries x-glirastes-max-result-chars through tool-contracts.json, the generated module and the container", async () => {
     const app = await fixture({ "x-glirastes-max-result-chars": 40_000 });
     await buildRuntimeArtifact({
@@ -123,6 +350,85 @@ describe("runtime container artifact", () => {
     expect(await plain.read(".glirastes/tool-contracts.json")).not.toContain("maxResultChars");
     const plainLoaded = await loadRuntimeArtifact(plain.path("artifact"));
     expect(plainLoaded.createToolBindings()[0]!.tool).not.toHaveProperty("maxResultChars");
+  });
+
+  it("carries a query parameter description into tool-contracts.json, the generated module and the container", async () => {
+    const app = await fixture({
+      parameters: [
+        {
+          name: "limit",
+          in: "query",
+          required: false,
+          description: "Omit to get all tasks",
+          schema: { type: "integer" },
+        },
+      ],
+    });
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const limit = { type: "integer", description: "Omit to get all tasks" };
+    const written = ToolContractsFileSchema.parse(
+      JSON.parse(await app.read(".glirastes/tool-contracts.json")),
+    );
+    expect(written.tools[0]!.contract!.input).toMatchObject({
+      properties: { limit },
+    });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain("Omit to get all tasks");
+    const [binding] = (
+      await loadRuntimeArtifact(app.path("artifact"))
+    ).createToolBindings();
+    expect(
+      (binding!.inputSchema as { jsonSchema?: unknown }).jsonSchema,
+    ).toMatchObject({ properties: { limit } });
+  });
+
+  it("types a 204-only operation as no content, and the runtime result for a 204 matches it", async () => {
+    const app = await fixture();
+    const spec = JSON.parse(await app.read("api/openapi.json"));
+    spec.paths["/api/devices/{id}"] = {
+      delete: {
+        description: "Delete device",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: { "204": { description: "Deleted" } },
+      },
+    };
+    await app.write("api/openapi.json", JSON.stringify(spec));
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const report = JSON.parse(await app.read(".glirastes/tool-report.json"));
+    expect(JSON.stringify(report)).not.toContain("output-contract-opaque");
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const binding = loaded
+      .createToolBindings()
+      .find((candidate) => "method" in candidate && candidate.method === "DELETE")!;
+    expect(
+      (binding.outputSchema as { jsonSchema?: unknown }).jsonSchema,
+    ).toMatchObject({ required: ["success"], additionalProperties: false });
+    // A 204 has no body: the HTTP caller reads it as `undefined`.
+    const result = await binding.tool.execute(
+      { id: "d1" },
+      {
+        currentDate: new Date(0),
+        locale: "en-US",
+        callEndpoint: async () => ({ ok: true, status: 204, data: undefined }),
+      } as never,
+    );
+    // What the model receives is the JSON of the result.
+    const received = JSON.parse(JSON.stringify(result));
+    expect(received).toEqual({ success: true });
+    expect(binding.outputSchema.safeParse(received).success).toBe(true);
   });
 
   it("has the same tool bindings and schemas as the existing generated module", async () => {
@@ -219,6 +525,66 @@ describe("runtime container artifact", () => {
         body: { title: "test" },
       }),
     );
+  });
+
+  it("lets the example sentences of tool-semantics.json reach find_tools and the start set, in the container and the generated module", async () => {
+    const app = await fixture();
+    const examples = [
+      "Zeig mir meine Erledigungen",
+      "Welche Erledigungen sind offen?",
+      "Erledigungen von heute anzeigen",
+    ];
+    await app.write(
+      ".glirastes/tool-semantics.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        tools: [
+          {
+            stableKey: "GET /api/tasks",
+            synonyms: { de: ["Aufgabenliste"] },
+            examples: { de: examples },
+          },
+        ],
+      }),
+    );
+    await buildRuntimeArtifact({
+      projectRoot: app.root,
+      outputDirectory: app.path("artifact"),
+    });
+    const payload = JSON.parse(await app.read("artifact/runtime.json"));
+    const loaded = await loadRuntimeArtifact(app.path("artifact"));
+    const [binding] = loaded.createToolBindings();
+    // The model-facing name the container materializes next to each binding.
+    const name = (binding as unknown as { modelName: string }).modelName;
+    expect(name).toBe("tasks_list");
+    // The container: the loaded semantics carry the examples.
+    expect(loaded.toolSearchSemantics?.[name]).toEqual({
+      synonyms: ["Aufgabenliste"],
+      examples: [...examples].sort(),
+    });
+    // The embedded app: the generated module carries the same map.
+    const module = renderGeneratedModule({
+      modulePath: "generated.ts",
+      artifact: payload.setupArtifact,
+      contracts: payload.contracts.tools,
+    });
+    expect(module).toContain(
+      `export const toolSearchSemantics = ${JSON.stringify({ [name]: { examples: [...examples].sort(), synonyms: ["Aufgabenliste"] } }, null, 2)} as const;`,
+    );
+    const registry = { [name]: binding!.tool };
+    const query = "Erledigungen";
+    const discovery = createRegistryToolDiscovery({
+      turnId: "t",
+      registry,
+      semantics: loaded.toolSearchSemantics,
+    });
+    expect(discovery.search(query).map((result) => result.name)).toEqual([name]);
+    expect(
+      defaultIntentRouterFor({
+        registry,
+        semantics: loaded.toolSearchSemantics,
+      }).route({ text: query }).toolNames,
+    ).toContain(name);
   });
 
   it("rejects payload tampering and incompatible SDK versions", async () => {

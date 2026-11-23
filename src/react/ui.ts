@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import {
   registerAiClientAction,
+  type ClientActionEffect,
   type ClientActionHandler,
   type PayloadContract,
 } from '../browser/client-actions.js';
@@ -33,7 +34,16 @@ export interface AiClientActionOptions {
    * chat opens this route first and runs the action once it is registered.
    */
   route?: string;
+  /**
+   * What the handler does, read as a literal by `glirastes tools refresh`
+   * (`read`, `write`, `destructive`, `external` or `financial`). It replaces
+   * the guess behind `ui-action-write-unproven` and can only raise the
+   * tool's risk: `write` makes the chat ask before it runs the action.
+   */
+  effect?: ClientActionEffect;
 }
+
+export type { ClientActionEffect } from '../browser/client-actions.js';
 
 export interface AiClientActionEventDetail {
   actionId: string;
@@ -190,15 +200,21 @@ export function useAiClientAction<T = Record<string, unknown>>(
 /**
  * Executes the generated `ui.navigate` and `ui.filter.<view>` tools with the
  * app's router, e.g. `useGlirastesNavigationBridge({ push: router.push })`
- * with Next.js `useRouter()`. Always the latest `push` is used.
+ * with Next.js `useRouter()`. Always the latest `push` and `reloads` are used.
  */
 export function useGlirastesNavigationBridge(options: NavigationBridgeOptions): void {
   const pushRef = useRef(options.push);
   pushRef.current = options.push;
   const bus = options.bus;
+  const reloadsRef = useRef(options.reloads);
+  reloadsRef.current = options.reloads;
   useEffect(
     () => registerNavigationBridge({
       push: (href) => pushRef.current(href),
+      reloads: (href) => {
+        const reloads = reloadsRef.current;
+        return typeof reloads === 'function' ? reloads(href) : reloads === true;
+      },
       ...(bus ? { bus } : {}),
     }),
     [bus],

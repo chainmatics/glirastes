@@ -38,7 +38,6 @@ type CommandName =
   | 'coverage'
   | 'scaffold'
   | 'test'
-  | 'check-upgrade'
   | 'sync'
   | 'scan';
 
@@ -69,7 +68,6 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
     'coverage',
     'scaffold',
     'test',
-    'check-upgrade',
     'sync',
     'scan',
   ];
@@ -91,7 +89,6 @@ function parseCommand(args: string[]): { command: CommandName; rest: string[] } 
         `  coverage              Check AI tool coverage\n` +
         `  scaffold              Scaffold ai-tool.ts from route.ts\n` +
         `  test                  Scaffold AI behavior test file\n` +
-        `  check-upgrade         Analyze upgrade gaps from release notes (--from-version)\n` +
         `  scan                  Scan Next.js routes [--output] [--sync] [--execution-inventory]\n` +
         `  sync                  Sync tool schemas to Glirastes platform\n`,
     );
@@ -578,13 +575,6 @@ export async function runCli(args: string[]): Promise<void> {
     const dryRun = hasFlag(rest, '--dry-run');
 
     await scaffoldTestFile({ rootDir, outputPath, force, dryRun });
-    return;
-  }
-
-  if (command === 'check-upgrade') {
-    const { checkUpgrade } = await import('./commands/check-upgrade.js');
-    const fromVersion = getFlagValue(rest, '--from-version');
-    await checkUpgrade({ rootDir, fromVersion });
     return;
   }
 

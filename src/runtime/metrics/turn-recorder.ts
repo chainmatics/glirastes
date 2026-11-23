@@ -1,11 +1,14 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import {
   RUNTIME_METRIC_LABEL_PATTERN,
   RUNTIME_METRIC_MAX_COUNT,
   RUNTIME_METRIC_MAX_TOOLS,
   TechnicalRuntimeEventV2Schema,
   ToolContractRejectedEventSchema,
+  TurnContinuedEventSchema,
   type RuntimeMetricEvent,
+  type TurnContinuation,
+  type TurnContinuedEvent,
   type RuntimeTurnCost,
   type RuntimeTurnErrorCode,
   type RuntimeTurnStatus,
@@ -64,7 +67,7 @@ export interface TurnMetricsRecorder {
    * Builds the turn's event and hands it to the sink exactly once. Returns
    * the event, or undefined when the turn was already finished. Never throws.
    */
-  finish(outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | undefined;
+  finish(outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | TurnContinuedEvent | undefined;
   /**
    * An endpoint refused a call its tool schema accepted (spec 4.7). Hands a
    * content-free `tool_contract_rejected` event to the sink right away and
@@ -80,8 +83,41 @@ export interface TurnMetricsRecorderOptions {
   snapshot?: TurnSnapshot;
   /** Turn start (request start), in the clock of `now`. */
   startedAtMs: number;
+  /**
+   * Set when the request continues a turn (no new user message): the
+   * request is reported as `turn.continued` instead of `turn.finished`.
+   */
+  continuation?: TurnContinuation;
+  /**
+   * Required with `continuation`: the turn's id (the handler's id of the
+   * last user message, chosen by the client) and a key that never leaves the
+   * consumer. The event carries only `turnId` = the first 128 bits (hex) of
+   * HMAC-SHA-256 over app, environment and turn id under that key, never
+   * the id itself. Without it (or with an empty key) no `turn.continued`
+   * event is built. Instances that share the key give every continuation of
+   * a turn the same value, also after a restart.
+   */
+  continuedTurn?: { readonly turnId: string; readonly secret: string };
   now?: () => number;
   createEventId?: () => string;
+}
+
+/**
+ * The opaque `turnId` of a continuation: domain-separated subkey of the
+ * consumer's key, then HMAC over app, environment and the client's turn id,
+ * truncated to 128 bits. Undefined for an empty key or turn id.
+ */
+function opaqueTurnId(
+  identity: RuntimeMetricsIdentity,
+  turn: { readonly turnId: string; readonly secret: string } | undefined,
+): string | undefined {
+  if (!turn || typeof turn.secret !== 'string' || turn.secret === ''
+    || typeof turn.turnId !== 'string' || turn.turnId === '') return undefined;
+  const subkey = createHmac('sha256', turn.secret).update('glirastes-metrics-turn-id-v1').digest();
+  return createHmac('sha256', subkey)
+    .update(JSON.stringify([identity.appId, identity.environmentId, turn.turnId]))
+    .digest('hex')
+    .slice(0, 32);
 }
 
 function bounded(value: number, max: number): number {
@@ -139,17 +175,16 @@ export function createTurnMetricsRecorder(
     .slice(0, RUNTIME_METRIC_MAX_TOOLS)
     .sort((left, right) => left.toolId.localeCompare(right.toolId));
 
-  const build = (outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | undefined => {
+  const build = (outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | TurnContinuedEvent | undefined => {
     const endedAtMs = now();
     const totalMs = bounded(endedAtMs - options.startedAtMs, MAX_DURATION_MS);
     const firstTokenMs = firstChunkAtMs === undefined
       ? null
       : Math.min(totalMs, bounded(firstChunkAtMs - options.startedAtMs, MAX_DURATION_MS));
     const calls = Math.min(MAX_CALLS, toolCallCount);
-    const parsed = TechnicalRuntimeEventV2Schema.safeParse({
+    const fields = {
       schemaVersion: 2,
       eventId: createEventId(),
-      eventType: 'turn.finished',
       occurredAt: new Date(endedAtMs).toISOString(),
       appId: options.sink.identity.appId,
       environmentId: options.sink.identity.environmentId,
@@ -166,7 +201,16 @@ export function createTurnMetricsRecorder(
       toolCallCount: calls,
       toolErrorCount: Math.min(calls, toolErrorCount),
       tools: listedTools(),
-    });
+    };
+    if (options.continuation) {
+      const turnId = opaqueTurnId(options.sink.identity, options.continuedTurn);
+      if (!turnId) return undefined;
+      const continued = TurnContinuedEventSchema.safeParse({
+        ...fields, eventType: 'turn.continued', continuation: options.continuation, turnId,
+      });
+      return continued.success ? continued.data : undefined;
+    }
+    const parsed = TechnicalRuntimeEventV2Schema.safeParse({ ...fields, eventType: 'turn.finished' });
     return parsed.success ? parsed.data : undefined;
   };
 

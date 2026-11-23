@@ -1,0 +1,25 @@
+{
+  "version": "0.16.0",
+  "notes": [
+    {
+      "id": "chat-memory",
+      "kind": "optional",
+      "summary": "createAiChatHandler takes memory: a running chat summary past an auto-compact threshold, user notes and shared workspace notes, with the built-in tools memory_remember and memory_forget.",
+      "howTo": "Set memory on createAiChatHandler with memory.scope(request) from the verified session and a MemoryStore for user or shared notes (createInMemoryMemoryStore for tests; check a real store with verifyMemoryStore). With memory set, the history is bounded by the auto-compact threshold instead of maxContextMessages and history.maxTurns. The skill setting-up-glirastes-memory carries the SQL schema and store templates.",
+      "skill": "setting-up-glirastes-memory",
+      "affectedWhen": {
+        "symbols": [
+          "createAiChatHandler"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "MemoryStore",
+          "createInMemoryMemoryStore",
+          "verifyMemoryStore",
+          "createLocalMemoryStore"
+        ]
+      }
+    }
+  ]
+}

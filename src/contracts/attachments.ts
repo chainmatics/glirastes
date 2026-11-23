@@ -20,9 +20,38 @@ export function isOmittedAttachmentUrl(url: unknown): boolean {
   return url === '';
 }
 
+/** Stable id the chat gives each attached file, so the model can name it later. */
+export const CHAT_ATTACHMENT_ID_PATTERN = /^att_[A-Za-z0-9_-]{16,64}$/;
+
+export function isChatAttachmentId(value: unknown): value is string {
+  return typeof value === 'string' && CHAT_ATTACHMENT_ID_PATTERN.test(value);
+}
+
+export function createChatAttachmentId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `att_${uuid.replaceAll('-', '')}`;
+  let random = '';
+  for (let index = 0; index < 32; index++) random += Math.floor(Math.random() * 36).toString(36);
+  return `att_${random}`;
+}
+
+/** The attachment id a file part carries in its provider metadata, if it is valid. */
+export function attachmentIdOf(part: unknown): string | undefined {
+  if (typeof part !== 'object' || part === null) return undefined;
+  const metadata = (part as { providerMetadata?: { glirastes?: { attachmentId?: unknown } } }).providerMetadata;
+  const id = metadata?.glirastes?.attachmentId;
+  return isChatAttachmentId(id) ? id : undefined;
+}
+
+// C0/C1 controls, line/paragraph separators, bidi controls, brackets.
+const UNSAFE_NAME_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069[\]]/g;
+const MAX_NAME_LENGTH = 120;
+
 /** Text that stands in for a file part once its data is no longer sent. */
-export function attachmentPlaceholderText(filename?: string): string {
-  return `[attachment: ${filename && filename.trim() ? filename.trim() : 'file'}]`;
+export function attachmentPlaceholderText(filename?: string, id?: string): string {
+  const cleaned = (filename ?? '').replace(UNSAFE_NAME_CHARS, '').trim();
+  const name = cleaned.length > MAX_NAME_LENGTH ? `${cleaned.slice(0, MAX_NAME_LENGTH).trimEnd()}…` : cleaned || 'file';
+  return isChatAttachmentId(id) ? `[attachment ${id}: ${name}]` : `[attachment: ${name}]`;
 }
 
 const startsWith = (bytes: Uint8Array, signature: ReadonlyArray<number>, offset = 0) =>

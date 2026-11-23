@@ -68,9 +68,10 @@ export interface ChatPrivacyConfig {
   onBlocked?: (code: string) => void;
   /**
    * The local privacy policy. It may only tighten a signed Platform block.
-   * `required` defaults to true: configuring privacy protects every turn,
-   * also without a Platform block. `required: false` leaves the decision to
-   * the signed policy of the turn (no block or `off`: unprotected). Its
+   * `required` defaults to false. Only explicit `required: true` activates
+   * self-managed pseudonymization without a signed protected policy.
+   * Missing/false leaves the signed policy in charge (no block or `off`:
+   * ordinary unprotected operation). Its
    * screenshot, provider and OpenRouter fields narrow a signed block.
    * Without a signed block they apply as merged: screenshots are blocked
    * unless `screenshots.mode` is `allow-original`, `providerEntryIds`

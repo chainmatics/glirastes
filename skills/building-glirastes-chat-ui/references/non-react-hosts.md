@@ -100,6 +100,17 @@ required APIs. The configured V1 service does not add those routes automatically
   are not automatically a supported route inventory.
 - **Vue/plain JS:** the same detached-element/config/append ordering applies;
   dispose when the view is removed and remount on identity changes.
+- **Layout without React slots:** `config.activityLog` (`expandWhileRunning`,
+  `runningProgress`, `noticePlacement: 'message'`, `details`, `grouping`,
+  `noticeScope: 'latest'` to show the stop notice on the latest turn only,
+  `hiddenTools` for UI-only tools), `config.messageFooter` (copy, sources,
+  duration, stop per answer), `config.suggestions.placement: 'message'`
+  (follow-ups under the latest answer),
+  `config.approvalDisplay` (`decided: 'entry'`, `open: 'inline'`; leave `decided` off if the host draws its own entry for decided approvals, both would show),
+  `config.queue` (message queue, `docs/chat-queue.md`),
+  `config.entityLinks.mentionMarkers` and the `data-*` hooks of
+  the shadow root cover what `components.TurnNotice`/`MessageParts` do in
+  React; the shadow-root styles carry the same `prefers-reduced-motion` rules.
 
 The matching SDK repository contains `examples/frontend-frameworks`. These
 examples illustrate integration; a generic browser wrapper does not establish
@@ -116,7 +127,16 @@ could not be performed. Use literal registrations in supported JS/TS sources so
 ordinary scanned module; never fake a tool inventory.
 
 A navigation bridge maps execution to the app router; it does not discover
-pages. Only supported explicit route sources can supply that inventory. Keep
+pages. Return `false` from `push` when the navigation did not happen;
+vue-router resolves a failure, so pass `async (href) => !(await
+router.push(href))`. Without client-side routing call
+`registerDocumentNavigation()` (`location.assign`, outcome `initiated`). The
+element emits `glirastes-chat:ui-action` with `{ toolName, toolCallId, code,
+actionIds }` for every outcome and reports it to the model (outcome protocol).
+On a server-rendered page the element remounts per page: give it a `session`
+(storage) so the turn continues once on the new page; without one the chat
+starts empty there. A strict proxy must allow the body field
+`glirastesUiOutcomes`. Only supported explicit route sources can supply that inventory. Keep
 manual verification of filter paths where automatic route cross-checking is
 unavailable. Neither UI visibility nor a client action can grant backend access.
 

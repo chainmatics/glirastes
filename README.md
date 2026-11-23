@@ -49,8 +49,8 @@ Choose the backend host and browser UI independently:
 The public image needs no registry login and no customer-written Node server:
 
 ```sh
-docker pull ghcr.io/chainmatics/glirastes-runtime:0.14.0
-docker run --rm ghcr.io/chainmatics/glirastes-runtime:0.14.0 --help
+docker pull ghcr.io/chainmatics/glirastes-runtime:0.23.0
+docker run --rm ghcr.io/chainmatics/glirastes-runtime:0.23.0 --help
 ```
 
 Run **one active service per app/environment**, independently of backend replica
@@ -59,10 +59,10 @@ V1 uses PostgreSQL for approval consumption and an overlap guard; it does not
 provide HA. Keep the user's cookie/bearer token and all backend permissions.
 
 Start with the [runtime guide](docs/runtime-container.md),
-[image and artifact commands](containers/runtime/README.md), and the
-[PHP example with Docker Compose](examples/php-runtime/README.md).
+[image and artifact commands](https://github.com/chainmatics/glirastes/blob/v0.23.0/containers/runtime/README.md), and the
+[PHP example with Docker Compose](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/README.md).
 Pin the image digest and use its exact SDK version for artifacts and browser code.
-Angular, SvelteKit and Nuxt have [tested browser examples](examples/frontend-frameworks/README.md).
+Angular, SvelteKit and Nuxt have [tested browser examples](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/frontend-frameworks/README.md).
 Those tests cover frontend integration; Rust/Java remain generic HTTP/OpenAPI
 paths, and unknown routers have no automatic page discovery. See the
 [support matrix](docs/support-matrix.md) for the evidence at each layer.
@@ -97,6 +97,47 @@ replaced; `--dry-run --json` previews without writing anything.
 npm install glirastes @ai-sdk/openai @ai-sdk/react react-markdown
 ```
 
+The SDK depends on `zod` 4 (`^4.0.0`): an app on zod 4 shares its copy, an
+app on zod 3 gets a second zod 4 copy for the SDK. App schemas keep working
+either way because the SDK reads schemas by shape; the cost is disk and bundle
+size, and the zod 4 contract schemas the SDK exports cannot be nested inside
+zod 3 schemas. `pg` (`>=8.11 <9`) is used only by the `glirastes-runtime`
+binary, so any pg 8.11+ in the app is shared.
+
+Upgrading from 0.19.0 or older with an existing bun lockfile: the lockfile keeps a
+nested `glirastes/pg` (the old range was `^8.23.1`), because bun keeps such entries
+while they satisfy the new range. `bun install --force` and `bun update glirastes`
+do not remove it. With a text `bun.lock`, run
+`bun remove glirastes && bun add glirastes@<version>`, or delete the
+`"glirastes/pg"` line and run `bun install`. With a binary `bun.lockb`, remove and
+add was not enough in our tests (bun 1.4.3); convert first with
+`bun install --save-text-lockfile` (it replaces `bun.lockb` with `bun.lock`), then
+remove and add, or run `bun update pg` (raises the app's own pg range).
+
+A nested `glirastes/zod` has a different cause and comes back on every remove and
+add, in both lockfile formats: bun resolves the SDK's `^4.0.0` to the newest zod
+already in the lockfile, not to the app's top-level copy. So when another
+dependency needs a newer zod than the app's locked one (app 4.3.6, a package with
+`4.4.3` or `^4.4.3`), the SDK gets that newer copy. Fixes, verified for both formats:
+
+- Raise the app's own zod to that version: `bun add zod@^4.4.3`. One copy for
+  the app, the SDK and that package.
+- `bun update zod`: the app moves to the newest zod in its range (and its range in
+  `package.json` with it); the SDK shares it, a package that pins an older exact
+  zod keeps its own copy.
+- `"overrides": { "zod": "4.4.3" }` in the app's `package.json`: one copy, but it
+  also replaces the zod of packages that declare zod 3.
+- Text `bun.lock` only: delete the `"glirastes/zod"` line and run `bun install`;
+  the next `bun add glirastes@…` brings it back.
+- Delete the lockfile and run `bun install`: works, but re-resolves every
+  dependency to the newest version in its range.
+
+`bun add zod@latest` and converting to `bun.lock` alone do not remove it. Check with `bun pm ls --all | grep -E 'zod@|pg@'`: bun leaves the old nested
+folder in `node_modules`, so delete `node_modules` and run `bun install` before
+looking there. Two zod 4 copies work: the SDK reads schemas by shape, and zod 4
+shares its metadata registry and `instanceof` checks across copies; the cost is
+disk and client bundle size.
+
 **2. Initialize.** Run it inside your Codex or Claude Code session, or from a
 terminal with `--agent codex|claude`:
 
@@ -105,7 +146,8 @@ npx --no-install glirastes init
 ```
 
 `init` writes `.glirastes/tools.json`, `.glirastes/prompt-bundle.json`, the
-`predev` / `prebuild` scripts (`glirastes tools refresh`) and a short hint in
+`predev` / `prebuild` scripts (`glirastes tools refresh`, plus the voice
+worklet copy `glirastes stt worklet` for Next.js, Vite and Create React App) and a short hint in
 `AGENTS.md` / `CLAUDE.md`, installs the [agent skills](#agent-skills) and hands
 the integration to your coding agent. Existing files are never replaced.
 
@@ -226,6 +268,7 @@ glirastes tools refresh           # derive tools (--watch next to `next dev`)
 glirastes tools status            # what the chat can do
 glirastes tools check             # verify committed outputs, no model, no network
 glirastes tools eval              # every example sentence finds its tool
+glirastes upgrade report          # what changed since you last reviewed the SDK (then: upgrade ack)
 ```
 
 **Policy.** Reads run directly, writes ask first, deletes and anything
@@ -309,6 +352,8 @@ two jobs:
 - A per-message work log of tool calls and an optional plan checklist.
 - Opt-in image and PDF attachments (paperclip, paste, drop;
   [docs/chat-attachments.md](docs/chat-attachments.md)).
+- Opt-in message queue: send while a turn runs or an approval waits, the
+  message goes once the chat is idle ([docs/chat-queue.md](docs/chat-queue.md)).
 - `unstyled` to bring your own CSS; `deChatLocale` for German texts.
 - Push-to-talk speech input through one STT controller (`voice` config,
   `glirastes/stt` adapters, `createRecordingTranscriptionHandler` for a
@@ -318,6 +363,31 @@ two jobs:
   bridge in `glirastes/browser`.
 
 See the skill [`building-glirastes-chat-ui`](skills/building-glirastes-chat-ui/SKILL.md).
+
+### Voice input needs the audio worklet
+
+Every recording loads `/audio-worklet-processor.js` (package export
+`glirastes/react/audio-worklet-processor.js`); without it voice input fails
+with an error next to the mic button and a `console.error` naming the URL.
+`glirastes init` sets this up for Next.js, Vite and Create React App. In an
+existing app, chain the copy step in front of your scripts:
+
+```json
+"scripts": {
+  "predev": "glirastes stt worklet && glirastes tools refresh --keep-going",
+  "prebuild": "glirastes stt worklet && glirastes tools refresh"
+}
+```
+
+- `glirastes stt worklet` copies the file into `public/`. A Vite app with its
+  own `root` or `publicDir` passes that folder: `glirastes stt worklet --out
+  web/static`. Served at another path, set `voice.workletUrl`.
+- yarn berry and pnpm may skip `pre*` scripts; when you start `next dev` or
+  `vite` directly, run `glirastes stt worklet` once first.
+- The copy is a build output: `public/audio-worklet-processor.js` can be
+  Git-ignored (`glirastes init` adds it to an existing `.gitignore`).
+- `glirastes doctor` checks the file at the configured or default URL when the
+  app uses voice input.
 
 ## Standalone and Connected
 
@@ -381,6 +451,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes/server/nextjs` | Next.js handlers: `createAiChatHandler`, `createChatInteractionsHandler`, `createRecordingTranscriptionHandler` (alias `glirastes/adapter/nextjs`) |
 | `glirastes/server/testing` | Test helpers for tool setups without model calls (ESM only) |
 | `glirastes/react` | Chat UI, provider, hooks, client actions, navigation bridge, STT |
+| `glirastes/react/audio-worklet-processor.js` | Audio worklet file voice input loads (serve it at `/audio-worklet-processor.js`) |
 | `glirastes/react/vercel` | AI SDK transport and `VercelAiChat` |
 | `glirastes/react/styles.css` | Shipped chat styles |
 | `glirastes/stt` | Provider-neutral STT controller and adapters |
@@ -422,13 +493,13 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 
 ## Agent skills
 
-The package ships nine skills in [`skills/`](skills/README.md) for your
+The package ships ten skills in [`skills/`](skills/README.md) for your
 existing coding agent (Codex, Claude Code, Gemini): `setting-up-glirastes`,
 `setting-up-glirastes-memory`,
 `integrating-glirastes-nextjs`, `integrating-glirastes-web`,
 `maintaining-glirastes-tools`, `describing-glirastes-tools`,
-`building-glirastes-chat-ui`, `curating-glirastes-chat-interactions` and
-`migrating-to-glirastes`. `glirastes init`
+`building-glirastes-chat-ui`, `curating-glirastes-chat-interactions`,
+`migrating-to-glirastes` and `upgrading-glirastes`. `glirastes init`
 installs them; `glirastes install --host codex --with-setup-skills` installs
 them without starting setup. After an SDK upgrade, `glirastes tools refresh`
 replaces the unedited copies, adds new skills and keeps edited ones, and
@@ -452,19 +523,21 @@ installed SDK version. The versioned source guides remain available below.
 
 - [Support matrix](docs/support-matrix.md)
 - [Runtime container architecture and operations](docs/runtime-container.md)
-- [Public image and artifact build commands](containers/runtime/README.md)
-- [PHP backend and Docker Compose example](examples/php-runtime/README.md)
-- [Angular, SvelteKit and Nuxt browser examples](examples/frontend-frameworks/README.md)
-- [Runtime V1 acceptance and release evidence](docs/acceptance/2026-11-15-runtime-container-v1.md)
+- [Public image and artifact build commands](https://github.com/chainmatics/glirastes/blob/v0.23.0/containers/runtime/README.md)
+- [PHP backend and Docker Compose example](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/README.md)
+- [Angular, SvelteKit and Nuxt browser examples](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/frontend-frameworks/README.md)
+- [Runtime V1 acceptance and release evidence](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/2026-11-15-runtime-container-v1.md)
 - [Tool policy](docs/tool-policy.md)
 - [Chat route security](docs/chat-route-security.md)
 - [Chat interactions (`@` and `/`)](docs/chat-interactions.md)
 - [Chat attachments](docs/chat-attachments.md)
+- [Chat message queue](docs/chat-queue.md)
 - [Managed runtime sync](docs/managed-runtime-sync.md)
 - [Runtime persistence](docs/runtime-persistence.md)
-- [0.5.0 acceptance](docs/acceptance/0.5.0-acceptance.md)
+- [0.5.0 acceptance](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/0.5.0-acceptance.md)
+- [Second acceptance app (Vue + FastAPI), run per release](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/second-app-vue-fastapi.md)
 - [Agent skills](skills/README.md)
-- Examples: [`examples/`](examples/)
+- Examples: [`examples/`](https://github.com/chainmatics/glirastes/tree/v0.23.0/examples)
 
 ## Upgrading from 0.4
 
@@ -486,7 +559,7 @@ Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 A configured customer-hosted runtime container can run this SDK next to an
 existing HTTP API without customer Node server code. See
 [Runtime container V1](docs/runtime-container.md) and the
-[PHP reference](examples/php-runtime/README.md). It uses generated OpenAPI tools,
+[PHP reference](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/README.md). It uses generated OpenAPI tools,
 backend-verified user credentials, persistent approvals and one active service
 per app/environment. Image publication and customer deployment are separate
 release steps; V1 does not provide HA or native backend SDKs.

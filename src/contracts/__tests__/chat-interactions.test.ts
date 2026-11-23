@@ -59,6 +59,22 @@ describe('chat interaction data', () => {
     expect(chatText(undefined)).toBe('');
   });
 
+  it('carries any BCP-47 language and falls back to English, then the first language', () => {
+    const label = { de: 'Übersicht öffnen', en: 'Open overview', pl: 'Otwórz przegląd' };
+    expect(chatText(label, 'pl-PL')).toBe('Otwórz przegląd');
+    expect(chatText(label, 'fr')).toBe('Open overview');
+    expect(chatText({ de: 'Übersicht öffnen' }, 'pl')).toBe('Übersicht öffnen');
+    const parsed = parseChatInteractions({
+      ...data,
+      commands: [{ id: 'open.overview', label, run: { kind: 'prompt', prompt: { pl: 'Pokaż przegląd' } } }],
+    });
+    expect(parsed.commands[0]?.label).toEqual(label);
+    expect(() => parseChatInteractions({
+      ...data,
+      commands: [{ id: 'open.overview', label: { de_DE: 'x' }, run: { kind: 'prompt', prompt: 'x' } }],
+    })).toThrow(ChatInteractionsError);
+  });
+
   it.each([
     ['a prototype path', '__proto__.polluted', false],
     ['a constructor segment', 'params.constructor', false],

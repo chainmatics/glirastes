@@ -138,6 +138,7 @@ function setup(options: {
   };
   const scope = testScope({ conversationId: 'chat-1' });
   const privacy: ChatPrivacyConfig = {
+    policy: { required: true },
     shield: memoryShield({ store }),
     scope: (_req, chat) => ({ ...scope, conversationId: chat.conversationId }),
     // Only the signed-in user: the colleague is known from a tool result only.

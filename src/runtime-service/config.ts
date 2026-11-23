@@ -5,6 +5,11 @@ import {
   MAX_MAX_RESULT_CHARS,
   MIN_MAX_RESULT_CHARS,
 } from "../runtime/result-limit.js";
+import {
+  isLanguageTag,
+  LANGUAGE_TAG_PATTERN,
+  preferredLanguage,
+} from "../contracts/localized-text.js";
 
 const origin = z.string().refine((value) => {
   try {
@@ -25,6 +30,7 @@ const path = z.string().regex(/^\/(?!\/)[A-Za-z0-9/_-]*$/);
 const file = z
   .string()
   .refine(isAbsolute, "Secret and artifact paths must be absolute");
+const languageTag = z.string().max(35).regex(LANGUAGE_TAG_PATTERN);
 const token = z
   .string()
   .regex(/^[A-Za-z0-9_-]+$/)
@@ -106,6 +112,30 @@ export const RuntimeConfigSchema = z
     approvals: z
       .object({ secretFile: file, connectionStringFile: file })
       .strict(),
+    // Languages of the chat (all optional): `locale` is the default, `requestLocaleHeader` a header that names
+    // the turn's language (`accept-language` is parsed; any other header holds one tag), `locales` the
+    // runtime's own texts per language (keys of createAiChatHandler `locales`). Absent: English, as before.
+    chat: z
+      .object({
+        locale: languageTag.optional(),
+        requestLocaleHeader: z.string().regex(/^[a-z0-9-]{1,64}$/).optional(),
+        locales: z
+          .record(languageTag, z.record(z.string().max(100), z.string().min(1).max(1_000)))
+          .optional(),
+        // Outcome protocol of UI actions (createAiChatHandler uiActionOutcomes); `confirm` when absent.
+        uiActionOutcomes: z.enum(["confirm", "report-only", "off"]).optional(),
+        // How earlier turns reach the model (createAiChatHandler history). Absent: the SDK defaults
+        // (`tool-turns`, seen-objects memo on); `all-turns` and `seenObjects: false` are the way back.
+        history: z
+          .object({
+            toolTurnCounting: z.enum(["all-turns", "tool-turns"]).optional(),
+            seenObjects: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     platform: z
       .discriminatedUnion("enabled", [
         z.object({ enabled: z.literal(false) }).strict(),
@@ -122,18 +152,37 @@ export const RuntimeConfigSchema = z
       .default({ enabled: false }),
     limits: z
       .object({
-        maxModelSteps: z.number().int().min(1).max(50).default(6),
+        maxModelSteps: z.number().int().min(1).max(50).default(10),
         maxToolCalls: z.number().int().min(1).max(100).default(8),
         totalTimeoutMs: z.number().int().min(1000).max(300_000).default(60_000),
-        maxInputTokens: z.number().int().min(1).max(200_000).default(40_000),
+        maxInputTokens: z.number().int().min(1).max(200_000).default(60_000),
         maxOutputTokens: z.number().int().min(1).max(32_000).default(4000),
         maxEstimatedCostUsd: z.number().positive().max(100).default(0.5),
+        /**
+         * Local limits of the server lookups behind approval cards
+         * (docs/approval-subjects.md), or false to turn them off. They never
+         * count against maxToolCalls (calls made by the model).
+         */
+        approvalLookups: z
+          .union([
+            z.literal(false),
+            z
+              .object({
+                maxLookupsPerTurn: z.number().int().min(1).max(256),
+                maxSubjectsPerCall: z.number().int().min(1).max(16),
+                lookupTimeoutMs: z.number().int().min(100).max(60_000),
+                maxLookupTimePerTurnMs: z.number().int().min(100).max(300_000),
+              })
+              .partial()
+              .strict(),
+          ])
+          .optional(),
       })
       .default({
-        maxModelSteps: 6,
+        maxModelSteps: 10,
         maxToolCalls: 8,
         totalTimeoutMs: 60_000,
-        maxInputTokens: 40_000,
+        maxInputTokens: 60_000,
         maxOutputTokens: 4000,
         maxEstimatedCostUsd: 0.5,
       }),
@@ -162,4 +211,12 @@ export async function readSecret(filename: string): Promise<string> {
   const result = (await readFile(filename, "utf8")).trim();
   if (!result || result.length > 16384) throw new Error("Invalid secret file");
   return result;
+}
+
+/** The turn language a request names in the configured header; `accept-language` is read by preference. */
+export function requestLocaleOf(request: Request, header: string): string | undefined {
+  const value = request.headers.get(header);
+  if (header === "accept-language") return preferredLanguage(value);
+  const tag = value?.trim();
+  return tag && isLanguageTag(tag) ? tag : undefined;
 }

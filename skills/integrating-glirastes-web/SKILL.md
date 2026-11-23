@@ -37,6 +37,17 @@ replace the generator with a hand-written tool list.
 | vue-router routes of `createRouter({ routes: [...] })` | yes | `vue-router` |
 | JSX `<Route>` trees, YAML or Swagger 2.0 exports, `<script>` blocks in another language than ts or js | not yet | report as an open gap |
 
+Every source that reads TypeScript (`next-app`, `nest`, `react-router`,
+`vue-router`, `url-filters`, `react-actions`) resolves imports and path
+aliases with the nearest `tsconfig.json` from its scanned folder (`srcDir`,
+`apiDir` for `next-app`) up to the folder of `.glirastes/` (never above;
+`extends`, `baseUrl` and `paths` as TypeScript reads them; a solution config
+with `references` leads to the referenced project that contains the scanned
+files; no tsconfig: TypeScript defaults). In a monorepo set `srcDir` to the
+app's folder, or name the file with `"tsconfig": "apps/web/tsconfig.app.json"`
+on the source. A client action whose payload contract cannot be imported is
+reported as `ui-action-import-unresolved` with the import and the tsconfig.
+
 If two NestJS controllers declare the same method and path, `glirastes tools refresh` reports one `route-declared-twice` error naming both files, gives that route no enabled tool and still generates every other tool; remove one declaration, or exclude the route with `glirastes tools policy exclude`.
 
 Two reference apps in the SDK show the sources together:
@@ -66,6 +77,10 @@ contracts; it is not proof that its whole stack is officially supported.
    [container reference](references/runtime-container.md). The service is one
    active instance per app/environment; a true sidecar requires a local-only
    dependency or coupled lifecycle, not merely a different backend language.
+   `node:http`-style servers (Express, Fastify, NestJS on Express) use
+   `createNodeHandler` from `glirastes/server/node`; see
+   [node servers](references/node-servers.md). Reuse a server that runs more
+   than one instance only with a shared `approvalStore`.
 4. **Frontend capabilities:** use a supported page/router source where available.
    `registerNavigationBridge` executes navigation (the `GLIRASTES_NAVIGATE_ACTION_ID`
    results, only targets `isSafeAppHref` accepts); it does not discover pages
@@ -114,6 +129,19 @@ the module and `x-glirastes-roles` the roles any of which may call the tool
 and ignored. A larger result reaches the model as an overview with a
 turn-scoped handle that the built-in `read_result` reads from (no second
 backend call); renderers only see the overview's fields.
+Three field lists (paths like `data[].name`, `meta`; no index) shape what a
+result shows: `x-glirastes-output-allowed-fields` (only these, ever; new fields
+stay hidden), `x-glirastes-output-denied-fields` (never these; `**.fileUrl`
+removes the key at any depth, the way to hide signed URLs) and
+`x-glirastes-output-default-fields` (the first answer; the rest via
+`read_result`). The first two are an upper bound applied before PII sealing,
+handles, overview and the size limit, on every channel (model and browser);
+`uiAction` (built from the full answer, seen by the model in the same turn)
+is reduced only by `**.key`; a failure body is withheld under an allow-list or
+when not JSON, else reduced. Error texts are not filtered. Matching is exact
+and case-sensitive. NestJS: `@ApiExtension(name, [...])`.
+An invalid allow- or deny-list disables the tool (`output-allowed-fields-invalid`,
+`output-denied-fields-invalid`); see `docs/concepts.md`.
 `x-glirastes-tool: false` keeps an operation out in either mode. Existing
 exclusions win over the marker and are reported as `opt-in-excluded`. Policy
 entries stay keyed on `METHOD /path` and survive a rename; tool-semantics.json
@@ -207,7 +235,9 @@ is in the package's `docs/tool-policy.md`.
    import { defineQueryFilters, registerAiClientAction, registerNavigationBridge } from 'glirastes/browser';
    import { z } from 'zod';
 
-   registerNavigationBridge({ push: (href) => router.push(href) });
+   // vue-router resolves a failed navigation: `false` reports it as not done.
+   // Without client-side routing: registerDocumentNavigation() instead.
+   registerNavigationBridge({ push: async (href) => !(await router.push(href)) });
    export const taskFilters = defineQueryFilters({
      path: '/tasks',
      filters: { status: ['open', 'done'] },
@@ -223,7 +253,28 @@ is in the package's `docs/tool-policy.md`.
    page to register the action, then runs it. Do not relay a window event
    from a global registration to a listener on one page
    (`ui-action-indirect`). A handler returns `false` when it could not do its
-   work; the dispatch then fails instead of being reported as done.
+   work; the dispatch then fails in the browser. The chat classifies each
+   outcome (`ok`, `rejected-contract`, `rejected-handler`, `unavailable`,
+   `failed`, `initiated`, `timeout`) for `onUiActionOutcome` and the
+   `glirastes-chat:ui-action` event, writes it into the tool result and the
+   model answers after it (a second request; the package's
+   `docs/ui-action-outcomes.md`). A strict body check in front of the chat
+   endpoint must allow `glirastesUiOutcomes`. UI results are
+   `{ handedOff: true, … }` without `success` for clients that send it, the
+   0.17.3 `{ success: true, … }` for all others.
+
+   Export the zod payload contract from a module that imports only zod and
+   pass that export: the generated tool then takes formats, descriptions,
+   enums and bounds from it (input side), so `z.string().uuid()` is checked
+   on the server and the model corrects a name into an id in the same turn.
+   An inline or unimportable contract is typed from TypeScript as before
+   (`ui-action-contract-unprobed`, warning).
+
+   Declare the handler's effect (`ClientActionEffect`) in the same options as a literal:
+   `{ effect: 'write' }` when it changes data (the chat asks first),
+   `'destructive'` when it deletes, `'read'` when it only shows or selects.
+   The declaration replaces the generator's guess (`ui-action-write-unproven`)
+   and can only raise the risk.
 
    Literal ids and literal filter definitions only: the generator reads them
    from code, in `.ts` modules and in the `<script lang="ts">` or
@@ -237,7 +288,7 @@ is in the package's `docs/tool-policy.md`.
    `defineGlirastesChatElement()` from `glirastes/embed` registers
    `<glirastes-chat endpoint="/api/chat">`. It renders in a Shadow DOM,
    themes through `--glirastes-chat-*` CSS variables, emits
-   `glirastes-chat:ready`, `:status`, `:tool-result` and `:error`, and frees
+   `glirastes-chat:ready`, `:status`, `:tool-result`, `:ui-action` and `:error`, and frees
    the microphone when removed. The page needs `react`, `react-dom`,
    `@ai-sdk/react` and `ai` installed. JS-only settings (`headers`,
    `bodyExtras`, the provider fields) go on the element's `config` property

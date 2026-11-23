@@ -54,6 +54,7 @@ async function nativeApp() {
   /** What the chat does with a tool result: hand its generated UI action to the page-wide bus. */
   const run = async (name: string, input: unknown) => {
     const result = await turn.execute(name, input);
+    // Outside a chat request (no outcome flag) a UI tool result has the shape every browser runs.
     expect(result).toMatchObject({ success: true });
     await act(async () => { await dispatchToolResultUiActions(result); });
   };
@@ -85,9 +86,14 @@ describe('native UI through generated tools and the app bridge', () => {
     await native.run('ui_tasks_highlight', { title: 'Write tests' });
     await waitFor(() => expect(screen.getByText('Write tests').getAttribute('aria-current')).toBe('true'));
     await expect(native.turn.execute('ui_tasks_highlight', { id: '2' })).rejects.toThrow('Input does not match');
+    // The generated tool carries the exported Zod contract's bounds (`min(1)`), so the server rejects first.
+    await expect(native.turn.execute('ui_tasks_highlight', { title: '' })).rejects.toThrow('Input does not match');
     // The page's own Zod contract stays the last word on what its handler accepts.
-    const empty = await native.turn.execute('ui_tasks_highlight', { title: '' });
-    await expect(dispatchToolResultUiActions(empty)).rejects.toThrow('Invalid payload for UI action tasks.highlight');
+    const forged = {
+      success: true,
+      uiAction: { type: 'glirastes.action', actionId: 'tasks.highlight', payload: { title: '' } },
+    };
+    await expect(dispatchToolResultUiActions(forged)).rejects.toThrow('Invalid payload for UI action tasks.highlight');
     expect(screen.getByText('Write tests').getAttribute('aria-current')).toBe('true');
   }, 120_000);
 

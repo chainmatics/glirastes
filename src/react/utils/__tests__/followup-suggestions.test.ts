@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractTrailingFollowupSuggestions } from '../followup-suggestions.js';
+import { extractTrailingFollowupSuggestions, readMessageFollowups } from '../followup-suggestions.js';
 
 describe('extractTrailingFollowupSuggestions', () => {
   it('extracts a trailing German Markdown suggestion list', () => {
@@ -55,5 +55,49 @@ describe('extractTrailingFollowupSuggestions', () => {
       text,
       suggestions: [],
     });
+  });
+});
+
+describe('readMessageFollowups', () => {
+  const followups = (list: unknown[]) => ({
+    type: 'tool-suggest_followups', toolCallId: 'f1', state: 'output-available', output: { followups: list },
+  });
+  const trailing = { type: 'text', text: 'Done.\n\nSuggestions:\n- X\n- Y' };
+
+  it('structured follow-ups win over a trailing list', () => {
+    expect(readMessageFollowups({ role: 'assistant', parts: [trailing, followups(['A', 'B'])] }, 3)).toEqual(['A', 'B']);
+  });
+
+  it('duplicates show once and do not count twice', () => {
+    expect(readMessageFollowups({ role: 'assistant', parts: [followups(['A', ' A ', 'B', 'A', 'C'])] }, 3)).toEqual(['A', 'B', 'C']);
+    expect(readMessageFollowups({ role: 'assistant', parts: [{ type: 'text', text: 'Done.\n\nSuggestions:\n- X\n- X\n- Y' }] }, 3)).toEqual(['X', 'Y']);
+  });
+
+  it('the last structured call with entries wins', () => {
+    expect(readMessageFollowups({
+      role: 'assistant', parts: [followups(['A']), followups(['B']), followups([])],
+    }, 3)).toEqual(['B']);
+  });
+
+  it('the trailing list is the fallback', () => {
+    expect(readMessageFollowups({ role: 'assistant', parts: [trailing] }, 3)).toEqual(['X', 'Y']);
+  });
+
+  it('count limits', () => {
+    expect(readMessageFollowups({ role: 'assistant', parts: [followups(['A', 'B', 'C', 'D'])] }, 2)).toEqual(['A', 'B']);
+  });
+
+  it('a user message has none', () => {
+    expect(readMessageFollowups({ role: 'user', parts: [trailing, followups(['A'])] }, 3)).toEqual([]);
+  });
+
+  it('blank entries are dropped', () => {
+    expect(readMessageFollowups({ role: 'assistant', parts: [followups(['', '  ', 7, 'A'])] }, 3)).toEqual(['A']);
+  });
+
+  it('an unfinished call is not read', () => {
+    expect(readMessageFollowups({
+      role: 'assistant', parts: [{ ...followups(['A']), state: 'input-available' }],
+    }, 3)).toEqual([]);
   });
 });

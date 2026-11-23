@@ -13,6 +13,11 @@ import {
 export interface UseSttOptions {
   adapter: SttProviderAdapter;
   language: string;
+  /**
+   * URL of the audio worklet file, passed to `adapter.connect()`. An adapter
+   * that does not declare `acceptsWorkletUrl` ignores it (warned once).
+   */
+  workletUrl?: string;
   onInterimTranscript?: (text: string) => void;
   onError?: (error: string) => void;
 }
@@ -27,11 +32,28 @@ export interface UseSttReturn extends SttSessionSnapshot {
   retry: () => Promise<void>;
 }
 
+let warnedIgnoredWorkletUrl = false;
+
+/** One console warning per page when an adapter cannot take the chat's worklet URL. */
+function warnIgnoredWorkletUrl(adapter: SttProviderAdapter, workletUrl: string | undefined): void {
+  if (warnedIgnoredWorkletUrl || !workletUrl || adapter.acceptsWorkletUrl === true) return;
+  warnedIgnoredWorkletUrl = true;
+  const workletPath = workletUrl.split(/[?#]/)[0];
+  console.warn(
+    `[glirastes] voice.workletUrl ("${workletPath}") is ignored: the speech adapter passed as voice.adapter does not declare acceptsWorkletUrl. Pass the URL to the adapter's constructor instead, e.g. new RecordedSttAdapter({ workletUrl }) or new DeepgramSttAdapter({ workletUrl }).`,
+  );
+}
+
 export function useStt(options: UseSttOptions): UseSttReturn {
   const controller = useMemo(() => new SttSessionController({
     adapter: options.adapter,
     language: options.language,
-  }), [options.adapter, options.language]);
+    ...(options.workletUrl !== undefined ? { workletUrl: options.workletUrl } : {}),
+  }), [options.adapter, options.language, options.workletUrl]);
+
+  useEffect(() => {
+    warnIgnoredWorkletUrl(options.adapter, options.workletUrl);
+  }, [options.adapter, options.workletUrl]);
 
   const snapshot = useSyncExternalStore(
     (listener) => controller.subscribe(listener),

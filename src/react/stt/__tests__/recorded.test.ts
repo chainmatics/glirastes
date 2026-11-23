@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RecordedSttAdapter, encodeWav } from '../recorded.js';
 
+const createPcmPipeline = vi.hoisted(() => vi.fn(async (
+  _stream: MediaStream,
+  _onAudio: (audio: ArrayBuffer) => void,
+  _options?: { workletUrl?: string },
+) => async () => {}));
+vi.mock('../deepgram.js', () => ({ createPcmPipeline }));
+
 function setup(options: {
   response?: () => Response | Promise<Response>;
   maxSeconds?: number;
@@ -95,5 +102,17 @@ describe('RecordedSttAdapter', () => {
     expect(wav.getUint32(4, true)).toBe(40);
     expect(wav.getUint16(34, true)).toBe(16);
     expect(wav.getInt16(46, true)).toBe(-1);
+  });
+
+  it('RecordedSttAdapter forwards workletUrl to the default capture', async () => {
+    const stream = {} as MediaStream;
+    const connection = await new RecordedSttAdapter({ workletUrl: '/static/pcm.js' }).connect({
+      stream,
+      language: 'de',
+      signal: new AbortController().signal,
+      events: { onSegment: vi.fn(), onError: vi.fn(), onClosed: vi.fn() },
+    });
+    expect(createPcmPipeline).toHaveBeenCalledWith(stream, expect.any(Function), { workletUrl: '/static/pcm.js' });
+    await connection.cancel();
   });
 });

@@ -1,5 +1,13 @@
 import { GLIRASTES_NAVIGATE_ACTION_ID, isSafeAppHref } from './navigation.js';
 import { getDefaultUiActionBus, type UiAction, type UiActionBus } from './ui-action-bus.js';
+import {
+  isUiActionRejectedError,
+  isUiActionUnavailableError,
+  UiActionRejectedError,
+  UiActionUnavailableError,
+  wasUiActionInitiated,
+  type UiOutcomeCode,
+} from './ui-action-signals.js';
 
 /** Any schema with `safeParse`, e.g. a Zod object; it types and validates the payload. */
 export interface PayloadContract<T> {
@@ -11,6 +19,13 @@ export interface PayloadContract<T> {
 /** A client action handler; returning `false` reports that the action was not carried out. */
 export type ClientActionHandler<T> = (payload: T) => void | boolean | Promise<void | boolean>;
 
+/**
+ * What a client action does, in the words of an endpoint contract's
+ * `effect`: `read` (shows or selects), `write` (changes data), `destructive`,
+ * `external` or `financial`. Declared, it replaces the generator's guess.
+ */
+export type ClientActionEffect = 'read' | 'write' | 'destructive' | 'external' | 'financial';
+
 export interface ClientActionOptions {
   bus?: UiActionBus;
   /**
@@ -19,6 +34,15 @@ export interface ClientActionOptions {
    * is elsewhere the chat opens this page first and runs the action there.
    */
   route?: string;
+  /**
+   * What the handler does, read as a literal by `glirastes tools refresh`
+   * and ignored at runtime. It replaces the guess behind
+   * `ui-action-write-unproven` and can only raise the tool's risk: `write`
+   * makes the chat ask before it runs the action (like a handler that
+   * provably writes), `destructive`, `external` and `financial` always ask;
+   * `read` never lowers a handler that provably writes.
+   */
+  effect?: ClientActionEffect;
 }
 
 /** Default wait for a page-bound client action to register after navigating to its route. */
@@ -43,10 +67,12 @@ export function registerAiClientAction<T = Record<string, unknown>>(
     let data = payload as T;
     if (contract) {
       const parsed = contract.safeParse(payload);
-      if (!parsed.success) throw new Error(`Invalid payload for UI action ${actionId}`);
+      if (!parsed.success) throw new UiActionRejectedError('contract', `Invalid payload for UI action ${actionId}`);
       data = parsed.data;
     }
-    if (await handler(data) === false) throw new Error(`UI action ${actionId} was not executed`);
+    if (await handler(data) === false) {
+      throw new UiActionRejectedError('handler', `UI action ${actionId} was not executed`);
+    }
   });
 }
 
@@ -89,20 +115,25 @@ async function dispatchRoutedAction(
     await bus.dispatch(action);
     return;
   }
-  if (!isSafeAppHref(action.route)) throw new Error(`UI action ${action.actionId} has an unsafe route`);
+  if (!isSafeAppHref(action.route)) {
+    throw new UiActionRejectedError('contract', `UI action ${action.actionId} has an unsafe route`);
+  }
   await bus.dispatch({
     type: 'glirastes.navigate',
     actionId: GLIRASTES_NAVIGATE_ACTION_ID,
     payload: { href: action.route },
   });
   if (!await waitForHandler(bus, action.actionId, timeoutMs)) {
-    throw new Error(`UI action ${action.actionId} was not registered on ${action.route} within ${timeoutMs} ms`);
+    throw new UiActionUnavailableError(
+      `UI action ${action.actionId} was not registered on ${action.route} within ${timeoutMs} ms`,
+    );
   }
   await bus.dispatch(action);
 }
 
 /**
- * Hands the UI actions of a successful tool result to the bus. Only actions
+ * Hands the UI actions of a handed-off (`handedOff: true`) or successful
+ * tool result to the bus. Only actions
  * of generated Glirastes tools (`glirastes.*`) are dispatched; app-specific
  * uiActions stay with the app's own result handler. A client action with a
  * `route` whose handler is not registered opens that route first and runs
@@ -113,7 +144,7 @@ export async function dispatchToolResultUiActions(
   bus: UiActionBus = getDefaultUiActionBus(),
   options: DispatchToolResultOptions = {},
 ): Promise<number> {
-  if (!isRecord(result) || result.success !== true) return 0;
+  if (!handsOffUiActions(result)) return 0;
   const actions = Array.isArray(result.uiAction) ? result.uiAction : [result.uiAction];
   let dispatched = 0;
   for (const action of actions) {
@@ -130,4 +161,169 @@ export async function dispatchToolResultUiActions(
     dispatched += 1;
   }
   return dispatched;
+}
+
+/** Default time a dispatched UI action may take before the chat stops waiting for it. */
+export const UI_ACTION_OUTCOME_TIMEOUT_MS = 10_000;
+
+/**
+ * What became of the UI actions of one tool result: an outcome code, or
+ * `timeout` (a handler did not settle in time) or `unconfirmed` (a bus of
+ * an older SDK copy that cannot tell whether a handler ran).
+ */
+export type UiActionRunCode = UiOutcomeCode | 'timeout' | 'unconfirmed';
+
+export interface UiActionRunResult {
+  code: UiActionRunCode;
+  /** Actions that were handed to a handler without failing. */
+  dispatched: number;
+  durationMs: number;
+  /** The error a refusing or failing handler threw. */
+  error?: unknown;
+}
+
+export interface RunToolResultUiActionsOptions extends DispatchToolResultOptions {
+  /**
+   * How long the handlers may take, default 10 000 ms. A page-bound client
+   * action gets `routeTimeoutMs` on top for its page to register it.
+   */
+  timeoutMs?: number;
+  /**
+   * Stops the run before its next action (and before a page-bound action
+   * that waited for its page); the outcome is then `unconfirmed`.
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * Whether a tool result handed its UI actions to the browser: the hand-off
+ * shape (`handedOff: true`, from 0.18) or a successful result (`success: true`).
+ */
+export function handsOffUiActions(result: unknown): result is Record<string, unknown> {
+  return isRecord(result) && (result.handedOff === true || result.success === true);
+}
+
+/**
+ * The UI actions the chat runs for a tool result, in order: its Glirastes
+ * actions (`glirastes.*`), and every action of a result the server marked for
+ * the outcome protocol (`awaitsOutcome`), which a UI tool that opted in
+ * (`defineUiTool({ outcome: 'confirm' })`) has for its own action types.
+ */
+export function toolResultUiActions(result: unknown): UiAction[] {
+  if (!handsOffUiActions(result)) return [];
+  const all = typeof result.awaitsOutcome === 'boolean';
+  const actions = Array.isArray(result.uiAction) ? result.uiAction : [result.uiAction];
+  return actions.filter((action): action is UiAction => (
+    isRecord(action) && typeof action.type === 'string' && (all || action.type.startsWith('glirastes.'))
+  ));
+}
+
+function isRoutedAction(action: UiAction): action is UiAction & { actionId: string; route: string } {
+  return action.type === 'glirastes.action' && typeof action.actionId === 'string' && typeof action.route === 'string';
+}
+
+type StepCode = 'ok' | 'unconfirmed' | 'unavailable' | 'initiated';
+
+/** Outcome of a dispatch that did not throw: a bus of an older SDK copy resolves `undefined`. */
+function dispatchCode(count: unknown, action: UiAction): StepCode {
+  // A reloading bridge marks the action on any bus, also one that does not count handlers.
+  if (wasUiActionInitiated(action)) return 'initiated';
+  if (typeof count !== 'number') return 'unconfirmed';
+  return count === 0 ? 'unavailable' : 'ok';
+}
+
+async function runAction(
+  bus: UiActionBus,
+  action: UiAction,
+  routeTimeoutMs: number,
+  cancelled: () => boolean,
+): Promise<StepCode | 'cancelled'> {
+  if (isRoutedAction(action) && hasHandler(bus, action.actionId) === false) {
+    if (!isSafeAppHref(action.route)) {
+      throw new UiActionRejectedError('contract', `UI action ${action.actionId} has an unsafe route`);
+    }
+    const navigation: UiAction = {
+      type: 'glirastes.navigate',
+      actionId: GLIRASTES_NAVIGATE_ACTION_ID,
+      payload: { href: action.route },
+    };
+    const navigated = dispatchCode(await bus.dispatch(navigation), navigation);
+    if (navigated === 'unavailable') return 'unavailable';
+    // A full page load ends this page before the action could run here.
+    if (navigated === 'initiated') return 'initiated';
+    if (!await waitForHandler(bus, action.actionId, routeTimeoutMs)) return 'unavailable';
+    if (cancelled()) return 'cancelled';
+  }
+  return dispatchCode(await bus.dispatch(action), action);
+}
+
+function failureCode(error: unknown): UiActionRunCode {
+  if (isUiActionRejectedError(error)) return error.reason === 'contract' ? 'rejected-contract' : 'rejected-handler';
+  if (isUiActionUnavailableError(error)) return 'unavailable';
+  return 'failed';
+}
+
+/**
+ * Runs the Glirastes UI actions of a tool result like
+ * `dispatchToolResultUiActions`, one after another, and classifies what
+ * happened instead of throwing: `ok` every handler resolved;
+ * `rejected-contract` / `rejected-handler` a contract check failed or a
+ * handler returned `false`; `failed` a handler threw; `unavailable` nothing
+ * on the page handles an action (no navigation bridge, a page-bound action
+ * that never registered); `initiated` a reloading navigation started;
+ * `timeout` a handler did not settle within `timeoutMs`. The first action
+ * that does not succeed stops the rest. Resolves `null` when the result has
+ * no Glirastes UI action.
+ */
+export async function runToolResultUiActions(
+  result: unknown,
+  bus: UiActionBus = getDefaultUiActionBus(),
+  options: RunToolResultUiActionsOptions = {},
+): Promise<UiActionRunResult | null> {
+  const actions = toolResultUiActions(result);
+  if (actions.length === 0) return null;
+  const started = Date.now();
+  const routeTimeoutMs = options.routeTimeoutMs ?? CLIENT_ACTION_ROUTE_TIMEOUT_MS;
+  const budgetMs = (options.timeoutMs ?? UI_ACTION_OUTCOME_TIMEOUT_MS)
+    + (actions.some(isRoutedAction) ? routeTimeoutMs : 0);
+  let timedOut = false;
+  let dispatched = 0;
+
+  const run = async (): Promise<Pick<UiActionRunResult, 'code' | 'error'>> => {
+    let unconfirmed = false;
+    const stopped = () => timedOut || options.signal?.aborted === true;
+    for (const action of actions) {
+      if (timedOut) break;
+      if (stopped()) return { code: 'unconfirmed' };
+      let step: StepCode | 'cancelled';
+      try {
+        step = await runAction(bus, action, routeTimeoutMs, stopped);
+      } catch (error) {
+        return { code: failureCode(error), error };
+      }
+      if (step === 'cancelled') {
+        if (timedOut) break;
+        return { code: 'unconfirmed' };
+      }
+      if (step === 'unavailable') return { code: 'unavailable' };
+      dispatched += 1;
+      if (step === 'initiated') return { code: 'initiated' };
+      if (step === 'unconfirmed') unconfirmed = true;
+    }
+    return { code: unconfirmed ? 'unconfirmed' : 'ok' };
+  };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<Pick<UiActionRunResult, 'code'>>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      resolve({ code: 'timeout' });
+    }, budgetMs);
+  });
+  try {
+    const outcome = await Promise.race([run(), timeout]);
+    return { ...outcome, dispatched, durationMs: Date.now() - started };
+  } finally {
+    clearTimeout(timer);
+  }
 }

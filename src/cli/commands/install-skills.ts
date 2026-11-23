@@ -4,6 +4,9 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve, relative, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { colors, header, separator } from '../../codegen/format.js';
+import { SDK_VERSION } from '../../runtime/sdk-version.js';
+import { updateAgentHint } from './init-scaffold.js';
+import { ensureBaseline } from './upgrade/baseline.js';
 import {
   classifyInstalledSkill,
   hashSkillDirectory,
@@ -240,6 +243,9 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
   let overwritten = 0;
   let manifest = await readInstalledSkillsManifest(rootDir);
   const sdkVersion = await readSdkVersion();
+  // A reinstall keeps what the app last reviewed: its baseline starts at the version already installed.
+  const baselineVersion = manifest?.sdkVersion ?? SDK_VERSION;
+  let manifestWritten = false;
 
   for (const host of hosts) {
     const hostTargets = HOST_SKILL_TARGETS[host];
@@ -340,6 +346,26 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<void> {
         skills: recorded,
       }, sdkVersion);
       await writeInstalledSkillsManifest(rootDir, manifest);
+      manifestWritten = true;
+    }
+  }
+
+  // Once, after every host: a corrupt baseline must not abort the other hosts.
+  if (manifestWritten && !opts.global) {
+    try {
+      await ensureBaseline(rootDir, baselineVersion);
+    } catch (error) {
+      console.error(`glirastes upgrade: ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
+    }
+  }
+
+  // An explicit install, not every refresh, brings the Glirastes block in AGENTS.md / CLAUDE.md up to date.
+  if (!opts.dryRun && !opts.global) {
+    try {
+      const changed = await updateAgentHint(rootDir);
+      if (changed.length > 0) log(`  ${dim('Agent:')}   updated the Glirastes block in ${changed.join(', ')}`);
+    } catch (error) {
+      console.error(`glirastes install: the agent instructions were not updated: ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
     }
   }
 

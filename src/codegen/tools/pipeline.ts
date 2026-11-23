@@ -1,4 +1,6 @@
 import { providerBindingDigest } from '../../sync/privacy-digest.js';
+import { resolveToolEntities } from './entity-declarations.js';
+import { resolveApprovalSubjects } from './approval-subject-declarations.js';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
@@ -43,6 +45,7 @@ import {
   type ToolReportTool,
 } from './artifact.js';
 import { compareCodeUnits } from './canonical.js';
+import { MAX_TEXT_LANGUAGES } from '../../contracts/localized-text.js';
 import {
   generatedModulePath,
   loadToolsConfig,
@@ -56,7 +59,14 @@ import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.j
 import { readPromptBundle, readToolInputs, type PromptBundleInput } from './inputs.js';
 import { checkMcpNames } from './mcp-names.js';
 import type { ToolsMode } from './mode.js';
-import { lookupSemantics, resolveToolProse, type DescriptionOrigin } from './prose.js';
+import {
+  declaredLabelLanguages,
+  lookupSemantics,
+  resolveToolProse,
+  TEMPLATE_LABEL_LANGUAGES,
+  type DescriptionOrigin,
+  type ToolSemantics,
+} from './prose.js';
 import { resolutionOrigin } from './resolutions.js';
 import { createSchemaProbe, type SchemaProbe } from './schema-probe.js';
 import {
@@ -67,6 +77,7 @@ import {
   validateSemanticsEntry,
   type SemanticsCheck,
   type SemanticsFacts,
+  type ToolSemanticsEntry,
 } from './semantics.js';
 import { createNestEndpointSource } from './sources/nest-endpoints.js';
 import { createOpenapiEndpointSource } from './sources/openapi-endpoints.js';
@@ -175,9 +186,15 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
   return sources.map((source) => {
     switch (source.kind) {
       case 'next-app':
-        return createNextEndpointSource(source.apiDir ? { apiDir: source.apiDir } : {});
+        return createNextEndpointSource({
+          ...(source.apiDir ? { apiDir: source.apiDir } : {}),
+          ...(source.tsconfig ? { tsconfig: source.tsconfig } : {}),
+        });
       case 'nest':
-        return createNestEndpointSource(source.srcDir ? { srcDir: source.srcDir } : {});
+        return createNestEndpointSource({
+          ...(source.srcDir ? { srcDir: source.srcDir } : {}),
+          ...(source.tsconfig ? { tsconfig: source.tsconfig } : {}),
+        });
       case 'openapi':
         return createOpenapiEndpointSource({
           ...(source.document ? { document: source.document } : {}),
@@ -187,14 +204,18 @@ export function createConfiguredSources(config: ToolsConfig): ToolSource[] {
       case 'next-pages':
         return createNextPagesSource(source);
       case 'react-router':
-        return createReactRouterSource(source.srcDir ? { srcDir: source.srcDir } : {});
+        return createReactRouterSource(source);
       case 'vue-router':
-        return createVueRouterSource(source.srcDir ? { srcDir: source.srcDir } : {});
+        return createVueRouterSource(source);
       case 'url-filters':
         return createUrlFilterSource({
           ...(pages && pages.kind === 'next-pages' ? pages : {}),
           ...(routes && (routes.kind === 'react-router' || routes.kind === 'vue-router')
-            ? { pages: routes.kind, ...(routes.srcDir ? { srcDir: routes.srcDir } : {}) }
+            ? {
+              pages: routes.kind,
+              ...(routes.srcDir ? { srcDir: routes.srcDir } : {}),
+              ...(routes.tsconfig ? { tsconfig: routes.tsconfig } : {}),
+            }
             : {}),
           ...source,
         });
@@ -218,6 +239,24 @@ function emptyChanges(): ToolsPipelineResult['changes'] {
   return { added: [], changed: [], removed: [], unchanged: [] };
 }
 
+/**
+ * An app-wide pattern (`output.deniedFields` of tools.json) whose key no
+ * endpoint tool's declared output schema names: probably misspelt. One
+ * warning per pattern, on tools.json; a pattern one tool lacks is no finding.
+ */
+function unmatchedAppDeniedFindings(patterns: ReadonlyArray<string>, tools: ReadonlyArray<ObservedTool>): ToolFinding[] {
+  const endpoints = tools.filter((tool) => tool.execution.executionKind === 'endpoint');
+  return patterns.filter((path) => !endpoints.some((tool) => tool.appDeniedHits?.includes(path))).map((path) => {
+    const key = path.slice(3).toLowerCase();
+    const near = [...new Set(endpoints.flatMap((tool) => tool.appDeniedNearKeys ?? []))]
+      .filter((candidate) => candidate.toLowerCase() === key).sort(compareCodeUnits);
+    return toolFinding('output-denied-key-unmatched', 'warning', TOOLS_PATHS.config,
+      `${TOOLS_PATHS.config} output.deniedFields has ${path}, whose key is not found in the declared response schema of any tool`
+      + (near.length > 0 ? ` (the schemas have ${near.join(', ')}; names match exactly, case included)` : '')
+      + '; if the field only occurs in undeclared parts, ignore this. A misspelt pattern excludes nothing.');
+  });
+}
+
 function isError(finding: ToolFinding): boolean {
   return finding.severity === 'error';
 }
@@ -227,7 +266,7 @@ function isError(finding: ToolFinding): boolean {
  * every other tool be generated and written: the one affected route has no
  * enabled tool, nothing else depends on it.
  */
-const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice']);
+const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice', 'entity-id-conflict', 'approval-subject-invalid']);
 
 function isBlocking(finding: ToolFinding): boolean {
   return isError(finding) && !NON_BLOCKING_ERROR_CODES.has(finding.code);
@@ -258,6 +297,40 @@ function localPolicyOrigin(
   }
   if (local?.requiresApproval === true) reported.requiresApproval = 'local-policy';
   return reported;
+}
+
+/**
+ * tool-semantics.json entries no tool used: their stableKey or name matches no
+ * tool, so their title, usage hints, synonyms, examples and presentation are
+ * dropped. An entry for an excluded operation is not reported. Names the key,
+ * never the entry's text; for a stableKey the name the operation had before,
+ * when a current tool holds that name.
+ */
+function orphanedSemanticsFindings(
+  semantics: ToolSemantics,
+  used: ReadonlySet<ToolSemanticsEntry>,
+  excluded: ReadonlyMap<string, ExcludedTool>,
+  previous: PreviousToolState['state'],
+  executions: ReadonlyArray<{ stableKey: string; definitionId: string }>,
+): ToolFinding[] {
+  const earlierName = new Map([...previous?.tombstones ?? [], ...previous?.inventory.executions ?? []]
+    .map((entry) => [entry.stableKey, entry.definitionId] as const));
+  const keyByName = new Map(executions.map((execution) => [execution.definitionId, execution.stableKey] as const));
+  const findings: ToolFinding[] = [];
+  for (const entry of new Set([...semantics.byStableKey.values(), ...semantics.byName.values()])) {
+    if (used.has(entry) || (entry.stableKey !== undefined && excluded.has(entry.stableKey))) continue;
+    if (entry.stableKey !== undefined) {
+      const name = earlierName.get(entry.stableKey);
+      const now = name === undefined ? undefined : keyByName.get(name);
+      findings.push(toolFinding('semantics-entry-orphaned', 'warning', entry.stableKey,
+        `The tool-semantics.json entry with stableKey "${entry.stableKey}" matches no tool, so its texts are not used.`
+        + (now ? ` The tool named ${name} is now "${now}".` : '')));
+    } else {
+      findings.push(toolFinding('semantics-entry-orphaned', 'warning', `${TOOLS_PATHS.semantics}#${entry.name!}`,
+        `The tool-semantics.json entry with name "${entry.name!}" matches no tool, so its texts are not used.`));
+    }
+  }
+  return findings;
 }
 
 function policyWarningMessage(code: string, field: string | undefined): string {
@@ -558,7 +631,46 @@ async function generate(
   const artifactTools: ArtifactToolInput[] = [];
   const contractEntries: ToolContractsEntry[] = [];
   const reportTools: ToolReportTool[] = [];
-  const languages = requiredLanguages(config.locale);
+  const languages = requiredLanguages(config.locale, config.languages);
+  // Labels per language: tools.json `languages`; without it every language a tool's texts are declared in plus the
+  // template languages (en, de); `languages: []` keeps one label in `locale` (the output before 0.18.0).
+  const derivedLabels = config.languages === undefined
+    ? defaultLabelLanguages(inventory.executions.map((execution) => ({
+      hints: observedByKey.get(execution.stableKey)?.prose,
+      entry: lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId),
+    })))
+    : undefined;
+  const labelLanguages = config.languages !== undefined
+    ? (config.languages.length > 0 ? config.languages : undefined)
+    : derivedLabels!.languages;
+  if (derivedLabels && derivedLabels.dropped.length > 0) {
+    findings.push(toolFinding('label-languages-limited', 'warning', `${TOOLS_PATHS.config}#languages`,
+      `The tools declare texts in more than ${MAX_TEXT_LANGUAGES} languages; labels are generated for en, de and the first others in code-unit order, not for: `
+      + `${derivedLabels.dropped.slice(0, 10).join(', ')}${derivedLabels.dropped.length > 10 ? `, and ${derivedLabels.dropped.length - 10} more` : ''}.`));
+  }
+  const usedSemantics = new Set<ToolSemanticsEntry>();
+  const missingLabels = new Map<string, string[]>();
+
+  // Declared identity of the endpoint tools: levels, precedence and tools.json `identity` (field names only).
+  const entityResolution = resolveToolEntities({
+    tools: inventory.executions.flatMap((execution) => {
+      const tool = observedByKey.get(execution.stableKey);
+      if (!tool || execution.executionKind !== 'endpoint') return [];
+      return [{
+        stableKey: execution.stableKey,
+        definitionId: execution.definitionId,
+        modelName: modelFacingToolName(execution.definitionId),
+        method: execution.method,
+        path: execution.path,
+        ...(tool.contract ? { params: tool.contract.params } : {}),
+        ...(tool.entities ? { entities: tool.entities } : {}),
+        ...(tool.outputAllowedFields ? { outputAllowedFields: tool.outputAllowedFields } : {}),
+        ...(tool.outputDeniedFields ? { outputDeniedFields: tool.outputDeniedFields } : {}),
+      }];
+    }),
+    ...(config.identity ? { identity: config.identity } : {}),
+  });
+  findings.push(...entityResolution.findings);
 
   for (const execution of inventory.executions) {
     const tool = observedByKey.get(execution.stableKey);
@@ -614,6 +726,7 @@ async function generate(
     }
     findings.push(...tool.findings);
     const semanticsEntry = lookupSemantics(inputs.semantics, execution.stableKey, execution.definitionId);
+    if (semanticsEntry) usedSemantics.add(semanticsEntry);
     const semantics: SemanticsCheck = semanticsEntry
       ? validateSemanticsEntry(semanticsEntry, {
         stableKey: execution.stableKey,
@@ -635,6 +748,7 @@ async function generate(
       ...(execution.executionKind === 'endpoint' ? { method: execution.method, path: execution.path } : {}),
       operationGroup: defaults.operationGroup,
       locale: config.locale,
+      ...(labelLanguages ? { languages: labelLanguages } : {}),
       ...(tool.evidence.jsDoc ? { jsDoc: tool.evidence.jsDoc } : {}),
       ...(tool.prose ? { hints: tool.prose } : {}),
       semantics: inputs.semantics,
@@ -657,8 +771,14 @@ async function generate(
         schemaSource: schemaQuality,
       },
     });
-    const search = semanticsSearch(semantics.entry);
-    const title = semanticsTitle(semantics.entry);
+    // Only the languages the app named are reported; the derived ones fall back to English silently.
+    for (const language of config.languages?.length ? prose.missingLabelLanguages ?? [] : []) {
+      const list = missingLabels.get(language) ?? [];
+      list.push(execution.definitionId);
+      missingLabels.set(language, list);
+    }
+    const search = semanticsSearch(semantics.entry, tool.prose);
+    const title = semanticsTitle(semantics.entry, tool.prose?.title, languages, tool.prose?.contractTitle);
     const mcp = execution.executionKind === 'endpoint' ? inputs.mcpNames?.get(execution.stableKey) : undefined;
     contractEntries.push({
       toolId: execution.toolId,
@@ -676,7 +796,12 @@ async function generate(
         }
         : {}),
       ...(title ? { title } : {}),
+      ...(prose.labels ? { labels: prose.labels } : {}),
       ...(tool.maxResultChars !== undefined ? { maxResultChars: tool.maxResultChars } : {}),
+      ...(tool.outputAllowedFields ? { outputAllowedFields: tool.outputAllowedFields } : {}),
+      ...(tool.outputDeniedFields ? { outputDeniedFields: tool.outputDeniedFields } : {}),
+      ...(tool.outputDefaultFields ? { outputDefaultFields: tool.outputDefaultFields } : {}),
+      ...entityResolution.byKey.get(execution.stableKey),
     });
     const requiresApproval = confirmationFloor(effective.riskClass, effective.requiresApproval);
     toolViews.push({
@@ -722,6 +847,36 @@ async function generate(
       },
     });
   }
+  // Server-side approval subjects: after the identity (it needs the resolved entities) and the effective approval.
+  const viewByKey = new Map(toolViews.map((view) => [view.stableKey, view] as const));
+  const approvalResolution = resolveApprovalSubjects({
+    tools: inventory.executions.flatMap((execution) => {
+      const tool = observedByKey.get(execution.stableKey);
+      if (!tool || execution.executionKind !== 'endpoint') return [];
+      const entities = entityResolution.byKey.get(execution.stableKey);
+      return [{
+        stableKey: execution.stableKey,
+        definitionId: execution.definitionId,
+        modelName: modelFacingToolName(execution.definitionId),
+        method: execution.method,
+        path: execution.path,
+        requiresApproval: viewByKey.get(execution.stableKey)?.requiresApproval ?? true,
+        ...(tool.contract ? { params: tool.contract.params, input: tool.contract.input } : {}),
+        ...(tool.approvalDeclarations ? { declarations: tool.approvalDeclarations } : {}),
+        ...(entities?.outputEntities ? { outputEntities: entities.outputEntities } : {}),
+        ...(entities?.inputEntities ? { inputEntities: entities.inputEntities } : {}),
+        ...(tool.outputAllowedFields ? { outputAllowedFields: tool.outputAllowedFields } : {}),
+        ...(tool.outputDeniedFields ? { outputDeniedFields: tool.outputDeniedFields } : {}),
+      }];
+    }),
+    ...(config.identity?.lookups ? { lookups: config.identity.lookups } : {}),
+    ...(config.approvalSubjects ? { approvalSubjects: config.approvalSubjects } : {}),
+  });
+  findings.push(...approvalResolution.findings);
+  for (const entry of contractEntries) {
+    const declared = approvalResolution.byKey.get(entry.stableKey);
+    if (declared) Object.assign(entry, declared);
+  }
   // An entry for an excluded route never applies either: say why (roadmap, P05).
   const excludedByKey = new Map(excluded.map((entry) => [entry.stableKey, entry] as const));
   const orphaned = (key: string, section: string) => {
@@ -733,6 +888,13 @@ async function generate(
   };
   for (const key of Object.keys(inputs.policy.tools ?? {})) orphaned(key, 'tools');
   for (const key of Object.keys(inputs.policy.acceptedRisk ?? {})) orphaned(key, 'acceptedRisk');
+  findings.push(...orphanedSemanticsFindings(inputs.semantics, usedSemantics, excludedByKey, previous.state, inventory.executions));
+  for (const [language, names] of [...missingLabels].sort(([left], [right]) => compareCodeUnits(left, right))) {
+    const shown = [...names].sort(compareCodeUnits);
+    findings.push(toolFinding('label-translation-missing', 'warning', `${TOOLS_PATHS.config}#languages.${language}`,
+      `${shown.length} tool${shown.length === 1 ? ' has' : 's have'} no label in ${language} and show${shown.length === 1 ? 's' : ''} the fallback language: `
+      + `${shown.slice(0, 5).join(', ')}${shown.length > 5 ? `, and ${shown.length - 5} more` : ''}.`));
+  }
   for (const key of inputs.mcpNames?.keys() ?? []) {
     if (observedByKey.get(key)?.execution.executionKind === 'endpoint') continue;
     findings.push(toolFinding('mcp-tool-names-invalid', 'warning', key,
@@ -753,6 +915,7 @@ async function generate(
       if (mcpNames.fallback.has(entry.stableKey)) delete entry.mcp;
     }
   }
+  findings.push(...unmatchedAppDeniedFindings(config.output?.deniedFields ?? [], [...observedByKey.values()]));
   for (const view of toolViews) {
     view.findings = sortFindings(findings.filter((finding) => finding.subjectRef === view.stableKey));
   }
@@ -957,4 +1120,26 @@ export async function runToolsPipelineWith(
 /** Derives the app's tools from code: write, frozen (check) or integrity (deploy) mode. */
 export async function runToolsPipeline(options: ToolsPipelineOptions): Promise<ToolsPipelineResult> {
   return runToolsPipelineWith(options, {});
+}
+
+/**
+ * The label languages of an app without tools.json `languages`: the template
+ * languages and every language a tool's presentation or title is declared
+ * in, each once (case-insensitive), in code-unit order. At most
+ * `MAX_TEXT_LANGUAGES`: en and de always, then the others in code-unit
+ * order; the rest is `dropped` (reported, the app can name its languages).
+ */
+function defaultLabelLanguages(
+  tools: ReadonlyArray<{ hints: Parameters<typeof declaredLabelLanguages>[0]; entry: Parameters<typeof declaredLabelLanguages>[1] }>,
+): { languages: string[]; dropped: string[] } {
+  const byLower = new Map<string, string>(TEMPLATE_LABEL_LANGUAGES.map((tag) => [tag, tag]));
+  for (const tag of tools.flatMap((tool) => declaredLabelLanguages(tool.hints, tool.entry))) {
+    if (!byLower.has(tag.toLowerCase())) byLower.set(tag.toLowerCase(), tag);
+  }
+  const others = [...byLower.values()].slice(TEMPLATE_LABEL_LANGUAGES.length).sort(compareCodeUnits);
+  const room = MAX_TEXT_LANGUAGES - TEMPLATE_LABEL_LANGUAGES.length;
+  return {
+    languages: [...TEMPLATE_LABEL_LANGUAGES, ...others.slice(0, room)].sort(compareCodeUnits),
+    dropped: others.slice(room),
+  };
 }

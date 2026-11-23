@@ -1,0 +1,406 @@
+{
+  "version": "0.21.0",
+  "notes": [
+    {
+      "id": "activity-failure-texts-localized",
+      "kind": "recommended",
+      "summary": "Visible change for German chats: the failure details the SDK writes itself (tool not permitted, turn limits, endpoint errors, memory tools) show in German. New optional ChatLocale keys activityFailure… and ActivityStep.failures.",
+      "howTo": "Check tests or CSS that assert the English failure texts in a German chat. An app whose own locale words the activity log keeps English failure texts unless it states language, sets the activityFailure… keys or spreads deChatLocale. A custom activity log can render ActivityStep.failures with stepFailureText(failures, locale, language).",
+      "skill": "building-glirastes-chat-ui#message-layout",
+      "affectedWhen": {
+        "imports": [
+          "glirastes/react",
+          "glirastes/embed"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "\\bactivityFailure[A-Z]\\w*\\s*:",
+          "\\bstepFailureText\\b"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ActivityStep.failures",
+        "glirastes/react#StepFailure.*",
+        "glirastes/react#StepFailureCode",
+        "glirastes/react#stepFailureText",
+        "glirastes/react#ChatLocale.activityFailureGeneric",
+        "glirastes/react#ChatLocale.activityFailureInvalidInput",
+        "glirastes/react#ChatLocale.activityFailureToolUnavailable",
+        "glirastes/react#ChatLocale.activityFailureNotPermitted",
+        "glirastes/react#ChatLocale.activityFailureIdentityMissing",
+        "glirastes/react#ChatLocale.activityFailureAccountRefused",
+        "glirastes/react#ChatLocale.activityFailureToolDisabled",
+        "glirastes/react#ChatLocale.activityFailureRefused",
+        "glirastes/react#ChatLocale.activityFailureLimitReached",
+        "glirastes/react#ChatLocale.activityFailureLimitToolCalls",
+        "glirastes/react#ChatLocale.activityFailureLimitModelSteps",
+        "glirastes/react#ChatLocale.activityFailureLimitTime",
+        "glirastes/react#ChatLocale.activityFailureLimitInputTokens",
+        "glirastes/react#ChatLocale.activityFailureLimitOutputTokens",
+        "glirastes/react#ChatLocale.activityFailureLimitCost",
+        "glirastes/react#ChatLocale.activityFailureLimitRepeatedCalls",
+        "glirastes/react#ChatLocale.activityFailureLimitConsecutiveErrors",
+        "glirastes/react#ChatLocale.activityFailureRecordNotFound",
+        "glirastes/react#ChatLocale.activityFailureRecordInvalidId",
+        "glirastes/react#ChatLocale.activityFailureRecordUnchecked",
+        "glirastes/react#ChatLocale.activityFailureEndpointFailed",
+        "glirastes/react#ChatLocale.activityFailureEndpointPathNotRelative",
+        "glirastes/react#ChatLocale.activityFailureEndpointPathNotAllowed",
+        "glirastes/react#ChatLocale.activityFailureEndpointTimeout",
+        "glirastes/react#ChatLocale.activityFailureEndpointResponseTooLarge",
+        "glirastes/react#ChatLocale.activityFailureMemoryKindUnavailable",
+        "glirastes/react#ChatLocale.activityFailureMemoryFull",
+        "glirastes/react#ChatLocale.activityFailureMemorySaveFailed",
+        "glirastes/react#ChatLocale.activityFailureMemoryNoteMismatch",
+        "glirastes/react#ChatLocale.activityFailureMemoryRemoveFailed",
+        "glirastes/react#ChatLocale.activityFailureMemoryNoteNotFound",
+        "locale#activityFailureGeneric",
+        "locale#activityFailureInvalidInput",
+        "locale#activityFailureToolUnavailable",
+        "locale#activityFailureNotPermitted",
+        "locale#activityFailureIdentityMissing",
+        "locale#activityFailureAccountRefused",
+        "locale#activityFailureToolDisabled",
+        "locale#activityFailureRefused",
+        "locale#activityFailureLimitReached",
+        "locale#activityFailureLimitToolCalls",
+        "locale#activityFailureLimitModelSteps",
+        "locale#activityFailureLimitTime",
+        "locale#activityFailureLimitInputTokens",
+        "locale#activityFailureLimitOutputTokens",
+        "locale#activityFailureLimitCost",
+        "locale#activityFailureLimitRepeatedCalls",
+        "locale#activityFailureLimitConsecutiveErrors",
+        "locale#activityFailureRecordNotFound",
+        "locale#activityFailureRecordInvalidId",
+        "locale#activityFailureRecordUnchecked",
+        "locale#activityFailureEndpointFailed",
+        "locale#activityFailureEndpointPathNotRelative",
+        "locale#activityFailureEndpointPathNotAllowed",
+        "locale#activityFailureEndpointTimeout",
+        "locale#activityFailureEndpointResponseTooLarge",
+        "locale#activityFailureMemoryKindUnavailable",
+        "locale#activityFailureMemoryFull",
+        "locale#activityFailureMemorySaveFailed",
+        "locale#activityFailureMemoryNoteMismatch",
+        "locale#activityFailureMemoryRemoveFailed",
+        "locale#activityFailureMemoryNoteNotFound"
+      ]
+    },
+    {
+      "id": "async-chat-auth",
+      "kind": "optional",
+      "summary": "The chat `headers` function and `voice.getToken` may now return a Promise, so a short-lived token or ticket can be fetched per request.",
+      "howTo": "Drop any cast that forced an async function into `headers` or `getToken`; pass the async function directly.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "getToken",
+          "AiChatProvider",
+          "VercelAiChat"
+        ]
+      },
+      "surface": []
+    },
+    {
+      "id": "chat-markdown-plugins",
+      "kind": "optional",
+      "summary": "Chat Markdown lists show bullets and numbers by default, and the new `markdown` prop of AiChatProvider (also VercelAiChat and `<glirastes-chat>`) accepts remark plugins, e.g. for GFM tables.",
+      "howTo": "Nothing to change. For GFM tables you can run `bun add remark-gfm` and pass `markdown={{ remarkPlugins: [remarkGfm] }}` (memoized) to AiChatProvider. If you added your own list CSS (for example `list-style` overrides) only to get markers, you can remove it.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "AiChatProvider",
+          "VercelAiChat"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "remarkPlugins"
+        ]
+      },
+      "surface": [
+        "glirastes/embed#GlirastesChatElementConfig.markdown",
+        "glirastes/react#AiChatProviderConfig.markdown",
+        "glirastes/react#AiChatProviderProps.markdown",
+        "glirastes/react#ChatMarkdownOptions",
+        "glirastes/react#ChatMarkdownOptions.remarkPlugins",
+        "glirastes/react/vercel#VercelAiChatProps.markdown"
+      ]
+    },
+    {
+      "id": "completion-select",
+      "kind": "optional",
+      "summary": "Completion items set what a pick does with `select`: `chip` (default), `text` (inserts `insertText` or the label as plain text) or `run` (pill, then sends like the send button). `onCompletionSelect` on AiChatProvider can take over a pick.",
+      "howTo": "Prompt templates that you rewrite from a chip into text in `onBeforeSend` (as omnify does) can return `{ select: 'text', insertText: 'Fasse den Auftrag zusammen' }` from their provider instead; the user sees and edits the text before sending, and the `onBeforeSend` rewrite can go. Return `true` from `onCompletionSelect(item, { trigger, query, controls })` to take over a pick: the typed trigger and query leave the editor and the list closes. For a sub-list, call `controls.openCompletion({ trigger, source: 'templates' })` in `onCompletionSelect` and return `true`; `templates` is a second provider on the same trigger. Nothing changes without these fields.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "completionProviders",
+          "ChatCompletionProvider"
+        ]
+      },
+      "surface": [
+        "glirastes/embed#GlirastesChatElementConfig.onCompletionSelect",
+        "glirastes/react#AiChatProviderConfig.onCompletionSelect",
+        "glirastes/react#AiChatProviderProps.onCompletionSelect",
+        "glirastes/react#CompletionItem.insertText",
+        "glirastes/react#CompletionItem.select",
+        "glirastes/react#CompletionSelectContext",
+        "glirastes/react#CompletionSelectContext.controls",
+        "glirastes/react#CompletionSelectContext.query",
+        "glirastes/react#CompletionSelectContext.trigger",
+        "glirastes/react#MentionResult.insertText",
+        "glirastes/react#MentionResult.select",
+        "glirastes/react#RichMentionInputProps.onCompletionSelect",
+        "glirastes/react/vercel#VercelAiChatProps.onCompletionSelect"
+      ]
+    },
+    {
+      "id": "composer-initial-value-mount-only",
+      "kind": "recommended",
+      "summary": "useChatComposerInput applies initialValue only on mount, as documented. A value that arrives later is ignored; before, the first non-empty value was applied late and reset the caret (typing 'Welche' became 'elcheW W').",
+      "howTo": "For a draft or prefill that arrives after mount, call the composer's `setText` (or the input handle's `setValue`) instead of relying on a late `initialValue`.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "useChatComposerInput",
+          "MentionInput"
+        ]
+      }
+    },
+    {
+      "id": "composer-plus-menu",
+      "kind": "optional",
+      "summary": "The composer toolbar takes the builtin `plus`: a \"+\" button with a menu of `attach`, `trigger:<char>` rows, `composer.items` and an optional `source` section of completion entries (`composer.plusMenu`). Without `plus` in the toolbar nothing changes.",
+      "howTo": "If you built your own \"+\" or \"more\" menu next to the composer (via `renderActions` or `components.InputExtra`), put `'plus'` into `composer.toolbar.start` or `end` and list its rows in `composer.plusMenu.items`: `attach` opens the file picker, `'trigger:@'` opens the `@` list with the focus in the editor (named after the trigger's `label`), keys of `composer.items` run their `onSelect(controls)`. `plusMenu.source: { trigger: '/', source: 'templates', label: 'Templates' }` lists that provider's entries directly; choosing one follows its `select` (`text` inserts `insertText`). The menu texts are the optional locale keys `plusMenuButtonLabel` and `plusMenuAttachLabel` (English and German built in).",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "renderActions",
+          "InputExtra",
+          "ComposerConfig"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ChatLocale.plusMenuAttachLabel",
+        "glirastes/react#ChatLocale.plusMenuButtonLabel",
+        "glirastes/react#ComposerConfig.plusMenu",
+        "glirastes/react#ComposerPlusMenuConfig",
+        "glirastes/react#ComposerPlusMenuConfig.items",
+        "glirastes/react#ComposerPlusMenuConfig.source",
+        "locale#plusMenuAttachLabel",
+        "locale#plusMenuButtonLabel"
+      ]
+    },
+    {
+      "id": "composer-toolbar",
+      "kind": "optional",
+      "summary": "`AiChatProvider` takes `composer`: `toolbar.start`/`end` order builtin ids (`attach`, `mic`, `actions`, `extra`, `send`, `trigger:<char>`) and your own `items`; `components.ComposerToolbar` lays out the row itself. Without them the composer renders as before.",
+      "howTo": "If you place the composer's extra buttons through `renderActions` or `components.InputExtra` only to get them into a certain order, list them in `composer={{ toolbar: { start: ['attach'], end: ['mic', 'actions', 'extra', 'send'] } }}` (the default) and move ids around instead. A button that writes `@` into the editor becomes `'trigger:@'`, labeled from the trigger's `label` in `triggers`. Own buttons go into `items` and receive the composer controls in `onSelect(controls)`; `render(controls)` replaces the button. An item key equal to a builtin id replaces the builtin; unknown ids warn once in the console and are skipped. Memoize the `composer` object. `renderActions`, `renderSubmit` and `InputExtra` keep working unchanged. To decide whether an item may write into the composer, read `controls.canCompose` (the editor's own lock; with `queue.enabled` true while a turn streams), not `controls.isLoading`; the `trigger:<char>` buttons and `plus` follow it. `ChatComposerInputControls.canCompose` is a required member, so hand-written mocks or fakes of the controls must add it.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "renderActions",
+          "InputExtra",
+          "ChatInput"
+        ]
+      },
+      "surface": [
+        "glirastes/embed#GlirastesChatElementConfig.composer",
+        "glirastes/react#ChatComposerInput.canCompose",
+        "glirastes/react#ChatComposerInputControls.canCompose",
+        "glirastes/react#AiChatProviderConfig.composer",
+        "glirastes/react#AiChatProviderProps.composer",
+        "glirastes/react#ChatComponents.ComposerToolbar",
+        "glirastes/react#ComposerConfig",
+        "glirastes/react#ComposerConfig.items",
+        "glirastes/react#ComposerConfig.toolbar",
+        "glirastes/react#ComposerToolbarBuiltin",
+        "glirastes/react#ComposerToolbarItem",
+        "glirastes/react#ComposerToolbarItem.hidden",
+        "glirastes/react#ComposerToolbarItem.icon",
+        "glirastes/react#ComposerToolbarItem.label",
+        "glirastes/react#ComposerToolbarItem.onSelect",
+        "glirastes/react#ComposerToolbarItem.render",
+        "glirastes/react#ComposerToolbarProps",
+        "glirastes/react#ComposerToolbarProps.controls",
+        "glirastes/react#ComposerToolbarProps.editor",
+        "glirastes/react#ComposerToolbarProps.end",
+        "glirastes/react#ComposerToolbarProps.start",
+        "glirastes/react/vercel#VercelAiChatProps.composer"
+      ]
+    },
+    {
+      "id": "composer-triggers",
+      "kind": "optional",
+      "summary": "Completion providers may use any single trigger character, e.g. `#` for tickets, not only `@` and `/`. The new provider option `triggers` sets a char's label, pill prefix, default pick behavior and the mention types it owns.",
+      "howTo": "Set `trigger: '#'` on a `ChatCompletionProvider` to open its list with `#`; add `triggers={[{ char: '#', label, prefix, types: ['ticket'] }]}` (memoized) to AiChatProvider to change the defaults; sent messages, history and `createLocalSessionStore` session titles then show `#` for those types instead of `@` with no further config. Only then the provider calls `session.save(id, messages, { mentionPrefix })` with a third argument; a custom store may use it for its titles or ignore it. When you wrap `createLocalSessionStore`, forward the third argument (`save: (id, messages, options) => base.save!(id, messages, options)`), or its titles lose the prefix. Nothing changes without it: `@` and `/` keep their behavior. `RichMentionInputProps.triggers` widened to `ReadonlyArray<string | ChatTriggerDefinition>` and validates its entries; `composer.inputProps` from `useChatComposerInput` carries `triggers` only when the provider's list differs from the default `@` and `/` (an explicit `triggers` definition or a provider with another char); then spread it before your own `triggers` prop if you set one.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "completionProviders",
+          "ChatCompletionProvider"
+        ]
+      },
+      "surface": [
+        "glirastes/embed#GlirastesChatElementConfig.triggers",
+        "glirastes/react#AiChatProviderConfig.triggers",
+        "glirastes/react#AiChatProviderProps.triggers",
+        "glirastes/react#ChatTriggerDefinition",
+        "glirastes/react#ChatTriggerDefinition.char",
+        "glirastes/react#ChatTriggerDefinition.label",
+        "glirastes/react#ChatTriggerDefinition.prefix",
+        "glirastes/react#ChatTriggerDefinition.select",
+        "glirastes/react#ChatTriggerDefinition.types",
+        "glirastes/react#CompletionSelectKind",
+        "glirastes/react/vercel#VercelAiChatProps.triggers"
+      ]
+    },
+    {
+      "id": "localized-stream-errors",
+      "kind": "recommended",
+      "summary": "The handler now shows its fixed failure texts in the chat language: a German chat gets `KI-Anfrage fehlgeschlagen` instead of `AI request failed`, and the German text for invalid tool input. Both texts are keys of the handler's `locales` (`streamError`, `invalidToolInput`).",
+      "howTo": "Nothing to change for a German UI. Tests or log checks that assert on `AI request failed` in a `de*` chat now see the German text. Change the texts per language, or add another language, in the handler's `locales` (`locales: { de: { streamError: '...' }, pl: { streamError: '...', invalidToolInput: '...' } }`; in the runtime container `chat.locales`); languages without a table keep English. The two keys are optional additions to `ChatServerTexts`, so a type built as `Record<keyof ChatServerTexts, string>` or `satisfies Required<ChatServerTexts>` now needs them too. Some texts stay English in a German chat: the permission and budget denials shown by `toolDenialDisplayText`, the unavailable-tool text and the approval-subject refusal texts are not keys of `locales`. The chat UI's activity log still shows these two failures in its own `activityFailureGeneric` / `activityFailureInvalidInput` texts (app overrides included), not the server text: for a text other than the English built-in the stream adds a content-free `data-step-failure` part (`{ toolCallId, code }`) after the call. A test that counts all stream chunks of a German or overridden turn sees that part.",
+      "skill": "integrating-glirastes-nextjs",
+      "affectedWhen": {
+        "symbols": [
+          "ChatServerTexts"
+        ],
+        "patterns": [
+          "AI request failed"
+        ]
+      },
+      "surface": [
+        "glirastes/adapter/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts",
+        "glirastes/server/http#PrepareModelMessagesOptions.invalidToolInputTexts",
+        "glirastes/server/nextjs#PrepareModelMessagesOptions.invalidToolInputTexts"
+      ]
+    },
+    {
+      "id": "open-completion",
+      "kind": "recommended",
+      "summary": "`openCompletion({ trigger, query?, source? })` opens a completion list from code, e.g. a toolbar button: on `useChatComposer()`, `useChatComposerInput()` and the `RichMentionInput` handle. Closing the list untouched removes the inserted trigger again.",
+      "howTo": "If your toolbar opens the `@` or `/` list by writing the trigger into the editor and dispatching a synthetic `new InputEvent('input')`, call `composer.openCompletion({ trigger: '@' })` from `useChatComposerInput()` (or `useChatComposer().openCompletion`, which waits until the composer is mounted) instead. It does nothing while the composer is locked (`canCompose` false, also on a disabled `RichMentionInput`). It focuses the editor, adds a space when needed, searches at once without the debounce, and `source: 'people'` limits the list to those provider ids (the composer's search and one made by `createCompletionSearch`; an own `onSearch` gets `(query, trigger)` only). Escape, an outside click, blur, an empty result, Enter before the results show (it sends nothing) or an inserted mention remove the text again when the user typed nothing. A custom `RichMentionInputHandle` implementation may add the optional `openCompletion`. `ChatComposerInputControls.openCompletion` and `ChatComposer.openCompletion` are required members, so hand-written mocks or fakes of these types must add them.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "useChatComposer",
+          "useChatComposerInput"
+        ],
+        "patterns": [
+          "new InputEvent\\("
+        ]
+      },
+      "surface": [
+        "glirastes/react#ChatComposer.openCompletion",
+        "glirastes/react#ChatComposerInput.openCompletion",
+        "glirastes/react#ChatComposerInputControls.openCompletion",
+        "glirastes/react#OpenCompletionOptions",
+        "glirastes/react#OpenCompletionOptions.query",
+        "glirastes/react#OpenCompletionOptions.source",
+        "glirastes/react#OpenCompletionOptions.trigger",
+        "glirastes/react#RichMentionInputHandle.openCompletion"
+      ]
+    },
+    {
+      "id": "session-max-messages",
+      "kind": "optional",
+      "summary": "createLocalSessionStore accepts maxMessagesPerSession to cap the stored messages per chat. Default is unlimited, so nothing changes unless you set it.",
+      "howTo": "Pass maxMessagesPerSession (e.g. 120) to createLocalSessionStore instead of trimming messages in your own store. The kept messages start with a user message; the title still comes from the first question.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "createLocalSessionStore"
+        ]
+      },
+      "surface": [
+        "glirastes/react#LocalSessionStoreOptions.maxMessagesPerSession"
+      ]
+    },
+    {
+      "id": "stt-worklet-url",
+      "kind": "optional",
+      "summary": "The voice input's audio worklet path (/audio-worklet-processor.js, unchanged) is now exported as DEFAULT_AUDIO_WORKLET_URL and can be changed with the workletUrl option of the speech adapters, VoiceInputButton and the chat's voice config.",
+      "howTo": "Nothing to change while the worklet is served at /audio-worklet-processor.js as before. If you serve it elsewhere, you can set voice.workletUrl on the chat or pass workletUrl to the speech adapter; to keep the copy in sync, you can add predev and prebuild scripts that copy node_modules/glirastes/dist/react/audio-worklet-processor.js into public/ (see the speech worklet section of the building-glirastes-chat-ui references).",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "DeepgramSttAdapter",
+          "RecordedSttAdapter",
+          "VoiceInputButton",
+          "useDeepgramTranscription"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "workletUrl",
+          "DEFAULT_AUDIO_WORKLET_URL"
+        ]
+      },
+      "surface": [
+        "glirastes/react#DEFAULT_AUDIO_WORKLET_URL",
+        "glirastes/react#DeepgramSttAdapterOptions.workletUrl",
+        "glirastes/react#RecordedSttAdapterOptions.workletUrl",
+        "glirastes/react#UseDeepgramTranscriptionOptions.workletUrl",
+        "glirastes/react#VoiceInputButtonProps.workletUrl",
+        "glirastes/react#VoiceInputConfig.workletUrl",
+        "glirastes/stt#DEFAULT_AUDIO_WORKLET_URL",
+        "glirastes/stt#DeepgramSttAdapterOptions.workletUrl",
+        "glirastes/stt#RecordedSttAdapterOptions.workletUrl"
+      ]
+    },
+    {
+      "id": "temperature-null",
+      "kind": "optional",
+      "summary": "The Next.js chat handler option `temperature` accepts `null`, which sends no `temperature` to the model (also none to memory summary calls).",
+      "howTo": "Set `temperature: null` for models that reject it (reasoning models) instead of stripping it from the request. Custom `streamHandler`s still receive `ctx.temperature` as `number | undefined`: `undefined` when the option is `null`, so passing it on to `streamText` keeps compiling.",
+      "skill": "integrating-glirastes-nextjs",
+      "affectedWhen": {
+        "symbols": [
+          "temperature"
+        ]
+      },
+      "surface": []
+    },
+    {
+      "id": "turn-end-callback",
+      "kind": "optional",
+      "summary": "onTurnEnd(outcome, info) on AiChatProvider (config.onTurnEnd on <glirastes-chat>) is called once when a turn of the open chat ends, with its TurnOutcome and { sessionId }.",
+      "howTo": "Pass onTurnEnd instead of diffing turnOutcomes to react once per finished, stopped or failed turn. It is not called at an open approval, for stored history, for a chat that is not open or after clear(). Without it nothing changes.",
+      "skill": "building-glirastes-chat-ui#message-layout",
+      "affectedWhen": {
+        "symbols": [
+          "turnOutcomes",
+          "useTurnOutcomes"
+        ]
+      },
+      "adoptedWhen": {
+        "symbols": [
+          "onTurnEnd"
+        ]
+      },
+      "surface": [
+        "glirastes/react#OnTurnEnd",
+        "glirastes/react#TurnEndInfo.*",
+        "glirastes/react#AiChatProviderConfig.onTurnEnd",
+        "glirastes/react#AiChatProviderProps.onTurnEnd",
+        "glirastes/react/vercel#VercelAiChatProps.onTurnEnd",
+        "glirastes/embed#GlirastesChatElementConfig.onTurnEnd"
+      ]
+    },
+    {
+      "id": "upgrade-report",
+      "kind": "recommended",
+      "summary": "glirastes upgrade report lists release notes since the version this app last reviewed, checked against your code, and is the way agents learn what to do after an upgrade.",
+      "howTo": "After each glirastes upgrade, or when `glirastes tools refresh` prints its upgrade line, run `glirastes upgrade report` and follow the upgrading-glirastes skill. When the review is done, `glirastes upgrade ack` (with `--defer <id>` for postponed items) records it in `.glirastes/sdk-baseline.json`; commit that file.",
+      "skill": "upgrading-glirastes",
+      "affectedWhen": {
+        "imports": [
+          "glirastes"
+        ]
+      }
+    }
+  ]
+}

@@ -1,6 +1,102 @@
 {
   "components": {
     "schemas": {
+      "Channel": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "live": {
+            "title": "Live",
+            "type": "boolean"
+          },
+          "playlist_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Playlist Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "playlist_id",
+          "live"
+        ],
+        "title": "Channel",
+        "type": "object"
+      },
+      "ChannelList": {
+        "properties": {
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/Channel"
+            },
+            "title": "Channels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "channels"
+        ],
+        "title": "ChannelList",
+        "type": "object"
+      },
+      "ChannelRevision": {
+        "description": "The variant of a version record: `rev` instead of `versionNumber`, no name.",
+        "properties": {
+          "channelKey": {
+            "title": "Channelkey",
+            "type": "string"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "rev": {
+            "title": "Rev",
+            "type": "integer"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision_id",
+          "rev",
+          "channelKey",
+          "createdAt"
+        ],
+        "title": "ChannelRevision",
+        "type": "object"
+      },
+      "ChannelRevisionList": {
+        "properties": {
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelRevision"
+            },
+            "title": "Revisions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "revisions"
+        ],
+        "title": "ChannelRevisionList",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -12,6 +108,164 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Playlist": {
+        "properties": {
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlaylistItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "ownerKey": {
+            "title": "Ownerkey",
+            "type": "string"
+          },
+          "playlist_id": {
+            "title": "Playlist Id",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "playlist_id",
+          "displayName",
+          "status",
+          "ownerKey",
+          "items"
+        ],
+        "title": "Playlist",
+        "type": "object",
+        "x-glirastes-entity": {
+          "id": "playlist_id",
+          "name": "displayName"
+        }
+      },
+      "PlaylistItem": {
+        "properties": {
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "durationSec": {
+            "title": "Durationsec",
+            "type": "integer"
+          },
+          "fileUrl": {
+            "title": "Fileurl",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "item_id",
+          "displayName",
+          "durationSec",
+          "fileUrl"
+        ],
+        "title": "PlaylistItem",
+        "type": "object",
+        "x-glirastes-entity": {
+          "id": "item_id",
+          "name": "displayName"
+        }
+      },
+      "PlaylistPage": {
+        "properties": {
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "playlists": {
+            "items": {
+              "$ref": "#/components/schemas/Playlist"
+            },
+            "title": "Playlists",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "playlists",
+          "total"
+        ],
+        "title": "PlaylistPage",
+        "type": "object"
+      },
+      "PlaylistVersion": {
+        "properties": {
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "playlist_id": {
+            "title": "Playlist Id",
+            "type": "integer"
+          },
+          "versionNumber": {
+            "title": "Versionnumber",
+            "type": "integer"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_id",
+          "versionNumber",
+          "playlist_id",
+          "createdAt"
+        ],
+        "title": "PlaylistVersion",
+        "type": "object"
+      },
+      "PlaylistVersionList": {
+        "properties": {
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/PlaylistVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "versions"
+        ],
+        "title": "PlaylistVersionList",
         "type": "object"
       },
       "SessionUser": {
@@ -104,6 +358,45 @@
         "title": "TaskList",
         "type": "object"
       },
+      "User": {
+        "properties": {
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "displayName"
+        ],
+        "title": "User",
+        "type": "object",
+        "x-glirastes-entity": {
+          "id": "id",
+          "name": "displayName",
+          "type": "user"
+        }
+      },
+      "UserList": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/User"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "title": "UserList",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -163,6 +456,243 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/channels": {
+      "get": {
+        "description": "List the screen channels and the playlist each one plays.",
+        "operationId": "list_channels_api_channels_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Channels",
+        "tags": [
+          "channels"
+        ],
+        "x-glirastes-entity-lookup": {
+          "complete": true,
+          "params": {},
+          "type": "channel"
+        }
+      }
+    },
+    "/api/channels/{key}": {
+      "delete": {
+        "description": "Delete a channel by its key.",
+        "operationId": "delete_channel_api_channels__key__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string",
+              "x-glirastes-entity-ref": {
+                "type": "channel"
+              },
+              "x-glirastes-id-kind": "speaking"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Channel",
+        "tags": [
+          "channels"
+        ],
+        "x-glirastes-effect": "destructive",
+        "x-glirastes-title": {
+          "de": "Kanal l\u00f6schen"
+        }
+      }
+    },
+    "/api/channels/{key}/revisions": {
+      "get": {
+        "description": "List the saved revisions of a channel's settings, oldest first.",
+        "operationId": "list_channel_revisions_api_channels__key__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string",
+              "x-glirastes-entity-ref": {
+                "role": "parent",
+                "type": "channel"
+              },
+              "x-glirastes-id-kind": "speaking"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelRevisionList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Channel Revisions",
+        "tags": [
+          "channels"
+        ],
+        "x-glirastes-entities": [
+          {
+            "fallback": "rev",
+            "id": "revision_id",
+            "path": "revisions[]",
+            "type": "channel-revision"
+          }
+        ],
+        "x-glirastes-entity-lookup": {
+          "complete": true,
+          "params": {
+            "key": {
+              "ref": "channel"
+            }
+          },
+          "type": "channel-revision"
+        }
+      }
+    },
+    "/api/channels/{key}/revisions/{revision_id}/rollback": {
+      "post": {
+        "description": "Roll a channel's settings back to one of its saved revisions.",
+        "operationId": "roll_back_channel_api_channels__key__revisions__revision_id__rollback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string",
+              "x-glirastes-entity-ref": {
+                "role": "parent",
+                "type": "channel"
+              },
+              "x-glirastes-id-kind": "speaking"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "title": "Revision Id",
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "channel-revision"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelRevision"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Roll Back Channel",
+        "tags": [
+          "channels"
+        ],
+        "x-glirastes-effect": "write",
+        "x-glirastes-entities": [
+          {
+            "fallback": "rev",
+            "id": "revision_id",
+            "path": "",
+            "type": "channel-revision"
+          }
+        ]
+      }
+    },
     "/api/me": {
       "get": {
         "description": "The signed-in user; the chat runtime resolves the principal here.",
@@ -189,6 +719,388 @@
         ],
         "summary": "Me",
         "x-glirastes-ignore": true
+      }
+    },
+    "/api/playlists": {
+      "get": {
+        "description": "List your playlists with their items, optionally only one status.",
+        "operationId": "list_playlists_api_playlists_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "published",
+                    "archived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Omit to get all playlists",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omit to get all playlists",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Number of playlists to skip",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of playlists to skip",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Playlists",
+        "tags": [
+          "playlists"
+        ],
+        "x-glirastes-output-allowed-fields": [
+          "playlists[].playlist_id",
+          "playlists[].displayName",
+          "playlists[].status",
+          "playlists[].ownerKey",
+          "playlists[].items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "x-glirastes-output-default-fields": [
+          "playlists[].playlist_id",
+          "playlists[].displayName",
+          "playlists[].status",
+          "total"
+        ],
+        "x-glirastes-synonyms": {
+          "pl": [
+            "playlisty",
+            "listy odtwarzania"
+          ]
+        }
+      }
+    },
+    "/api/playlists/{playlist_id}": {
+      "delete": {
+        "description": "Delete a playlist and its versions.",
+        "operationId": "delete_playlist_api_playlists__playlist_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "title": "Playlist Id",
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "playlist"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Playlist",
+        "tags": [
+          "playlists"
+        ],
+        "x-glirastes-effect": "destructive",
+        "x-glirastes-title": {
+          "de": "Playlist l\u00f6schen",
+          "en": "Delete playlist",
+          "pl": "Usu\u0144 playlist\u0119"
+        }
+      },
+      "get": {
+        "description": "Get one playlist with all its items.",
+        "operationId": "get_playlist_api_playlists__playlist_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "title": "Playlist Id",
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "playlist"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Playlist"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Playlist",
+        "tags": [
+          "playlists"
+        ],
+        "x-glirastes-entity-lookup": {
+          "params": {
+            "playlist_id": "playlist_id"
+          },
+          "type": "playlist"
+        },
+        "x-glirastes-title": {
+          "de": "Playlist anzeigen",
+          "en": "Show playlist",
+          "pl": "Poka\u017c playlist\u0119"
+        }
+      }
+    },
+    "/api/playlists/{playlist_id}/versions": {
+      "get": {
+        "description": "List the saved versions of a playlist, oldest first.",
+        "operationId": "list_playlist_versions_api_playlists__playlist_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "title": "Playlist Id",
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "role": "parent",
+                "type": "playlist"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistVersionList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Playlist Versions",
+        "tags": [
+          "playlists"
+        ],
+        "x-glirastes-entities": [
+          {
+            "fallback": "versionNumber",
+            "id": "version_id",
+            "path": "versions[]",
+            "type": "playlist-version"
+          }
+        ],
+        "x-glirastes-entity-lookup": {
+          "complete": true,
+          "params": {
+            "playlist_id": {
+              "ref": "playlist"
+            }
+          },
+          "type": "playlist-version"
+        }
+      }
+    },
+    "/api/playlists/{playlist_id}/versions/{version_id}/rollback": {
+      "post": {
+        "description": "Roll a playlist back to one of its saved versions.",
+        "operationId": "roll_back_playlist_api_playlists__playlist_id__versions__version_id__rollback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "title": "Playlist Id",
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "role": "parent",
+                "type": "playlist"
+              }
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "playlist-version"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Roll Back Playlist",
+        "tags": [
+          "playlists"
+        ],
+        "x-glirastes-effect": "write",
+        "x-glirastes-entities": [
+          {
+            "fallback": "versionNumber",
+            "id": "version_id",
+            "path": "",
+            "type": "playlist-version"
+          }
+        ]
       }
     },
     "/api/tasks": {
@@ -300,6 +1212,123 @@
           "tasks"
         ],
         "x-glirastes-effect": "write"
+      }
+    },
+    "/api/users": {
+      "get": {
+        "description": "List the users of your workspace.",
+        "operationId": "list_users_api_users_get",
+        "parameters": [
+          {
+            "description": "Omit to get all users",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Omit to get all users",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Users",
+        "tags": [
+          "users"
+        ],
+        "x-glirastes-entity-lookup": {
+          "const": {
+            "limit": 2
+          },
+          "params": {},
+          "type": "user"
+        }
+      }
+    },
+    "/api/users/{user_id}": {
+      "delete": {
+        "description": "Remove a user from your workspace.",
+        "operationId": "delete_user_api_users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "integer",
+              "x-glirastes-entity-ref": {
+                "type": "user"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          },
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete User",
+        "tags": [
+          "users"
+        ],
+        "x-glirastes-effect": "destructive"
       }
     }
   }

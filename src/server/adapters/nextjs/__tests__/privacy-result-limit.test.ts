@@ -37,7 +37,7 @@ describe('protected result limits after upstream truncation integration', () => 
         tools:{list_tasks:defineTool({id:agentRevision.toolAllowlist[0]!,description:'Read person',inputSchema:z.object({}),execute})},
         systemPrompt:'Help',maxResultChars:1000,resultHandles,
         ...(['configured-off','local-stricter','signed-protected'].includes(mode)?{managedRuntime:{resolvePrincipal:async()=>principal,resolveTurnSnapshot:({turnId})=>createTurnSnapshot({turnId,agentRevision,manifestRevision,policyRevision:{...policyRevision,privacy:mode==='signed-protected'?signedBlock:{schemaVersion:1,profile:'off'}},principal,localLimits})}}:{}),
-        ...(mode!=='off'?{privacy:{shield:memoryShield(),providers:{registry},...(mode==='configured-off'?{policy:{required:false}}:{}),scope:()=>testScope({conversationId:'limit'}),knownIdentities:()=>[{name:sensitive}]}}:{}),
+        ...(mode!=='off'?{privacy:{shield:memoryShield(),providers:{registry},policy:{required:mode==='protected'||mode==='local-stricter'},scope:()=>testScope({conversationId:'limit'}),knownIdentities:()=>[{name:sensitive}]}}:{}),
       });
       const response=await handler(new Request('http://fixture/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:'limit',messages:[{id:'u',role:'user',parts:[{type:'text',text:'Read person'}]}]})}));
       const chunks=await streamChunks(response);
@@ -120,7 +120,7 @@ describe('externally supplied result readers under protection',()=>{
       const chunk=(value:unknown,finish:string|null)=>({id:'fixture',object:'chat.completion.chunk',created:1,model:'fixture',choices:[{index:0,delta:value,finish_reason:finish}]});
       return new Response([chunk(delta,null),chunk({},first?'tool_calls':'stop')].map(value=>`data: ${JSON.stringify(value)}\n\n`).join('')+'data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
     };
-    const handler=createAiChatHandler({model:createOpenAI({apiKey:'fixture',fetch:fetch as typeof globalThis.fetch}).chat('fixture'),systemPrompt:'Help',tools:{read_result:copied?{...reader,id:'renamed_reader'}:reader},privacy:{shield,scope:()=>scope,knownIdentities:()=>[{name:sensitive}]}});
+    const handler=createAiChatHandler({model:createOpenAI({apiKey:'fixture',fetch:fetch as typeof globalThis.fetch}).chat('fixture'),systemPrompt:'Help',tools:{read_result:copied?{...reader,id:'renamed_reader'}:reader},privacy:{policy:{required:true},shield,scope:()=>scope,knownIdentities:()=>[{name:sensitive}]}});
     const response=await handler(new Request('http://fixture/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:'reader',messages:[{id:'u',role:'user',parts:[{type:'text',text:'Read stored result'}]}]})}));
     await streamChunks(response);
     expect(requests).toHaveLength(2);

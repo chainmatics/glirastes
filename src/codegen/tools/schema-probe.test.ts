@@ -38,6 +38,22 @@ describe('schema probe', () => {
     expect(json).not.toHaveProperty('$schema');
   }, 30_000);
 
+  it('resolves aliases with the tsconfig the source names, not only the root one', async () => {
+    const app = await createAppFixture({
+      'apps/api/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '#lib/*': ['src/lib/*'] } } }),
+      'apps/api/src/lib/fields.ts': "import { z } from 'zod';\nexport const title = z.string().min(1);\n",
+      'apps/api/src/notes.ts': "import { z } from 'zod';\nimport { title } from '#lib/fields';\n"
+        + 'export const createNote = z.object({ title }).strict();\n',
+    });
+    const item = schemaItem('apps/api/src/notes.ts', 'createNote');
+    const [nested] = await createSchemaProbe().probe(app.root, [item], { tsconfig: app.path('apps/api/tsconfig.json') });
+    expect(nested).toMatchObject({ ok: true, kind: 'schema' });
+    const [rootOnly] = await createSchemaProbe().probe(app.root, [item]);
+    expect(rootOnly).toMatchObject({ ok: false });
+    const [none] = await createSchemaProbe().probe(app.root, [item], { tsconfig: null });
+    expect(none).toMatchObject({ ok: false });
+  }, 30_000);
+
   it('reads contract entries and reports a missing method entry', async () => {
     const app = await createAppFixture({
       'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
@@ -82,6 +98,91 @@ describe('schema probe', () => {
     // Only the field names travel; the invalid value is never carried and does not change the digest.
     expect(JSON.stringify(results)).not.toContain('destructve');
     expect(post?.moduleDigest).toBe(del?.moduleDigest);
+  }, 30_000);
+
+  it('reads the output fields of a contract entry, normalized, and flags invalid ones without their value', async () => {
+    const app = await createAppFixture({
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  GET: { input: z.object({}), outputAllowedFields: ['meta', 'data[].name', 'meta'], outputDeniedFields: ['**.fileUrl'] },\n"
+        + "  POST: { input: z.object({}), outputAllowedFields: ['data[7].SECRETNAME'], outputDeniedFields: ['**.a.SECRETNAME'], outputDefaultFields: 3 },\n"
+        + "  PUT: { input: z.object({}), outputDefaultFields: ['**.fileUrl'], outputAllowedFields: null, outputDeniedFields: ['**.fileUrl '] },\n"
+        + '  DELETE: { input: z.object({}) },\n};\n',
+    });
+    const entry = (method: string): SchemaProbeItem => ({
+      kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
+    });
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'PUT', 'DELETE'].map(entry));
+    const [get, post, put, del] = results.map((result) => (
+      result.ok && result.kind === 'contract-entry' ? result : undefined
+    ));
+    expect(get).toMatchObject({ outputAllowedFields: ['data[].name', 'meta'], outputDeniedFields: ['**.fileUrl'] });
+    expect(get).not.toHaveProperty('invalidFields');
+    expect(post).toMatchObject({ invalidFields: ['outputAllowedFields', 'outputDeniedFields', 'outputDefaultFields'] });
+    // null is no declaration but an invalid one (fail closed); so is whitespace in a path.
+    expect(put).toMatchObject({ invalidFields: ['outputAllowedFields', 'outputDeniedFields', 'outputDefaultFields'] });
+    expect(del).not.toHaveProperty('outputAllowedFields');
+    expect(JSON.stringify(results)).not.toContain('SECRETNAME');
+    // They shape results, not the contract module: the digest ignores them.
+    expect(get?.moduleDigest).toBe(del?.moduleDigest);
+  }, 30_000);
+
+  it('reads the entity declarations of a contract entry and flags invalid ones without their value', async () => {
+    const app = await createAppFixture({
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  GET: { input: z.object({}), outputEntities: [{ type: 'note', id: 'note_id', name: 'title', path: 'data[]' }],"
+        + " inputEntities: [{ type: 'folder', args: 'folderId', role: 'parent' }] },\n"
+        + "  POST: { input: z.object({}), outputEntities: [{ type: 'Bad SECRETNAME', id: 'x' }], inputEntities: 'nope' },\n"
+        + '  DELETE: { input: z.object({}) },\n};\n',
+    });
+    const entry = (method: string): SchemaProbeItem => ({
+      kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
+    });
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'DELETE'].map(entry));
+    const [get, post, del] = results.map((result) => (
+      result.ok && result.kind === 'contract-entry' ? result : undefined
+    ));
+    expect(get).toMatchObject({
+      outputEntities: [{ type: 'note', id: 'note_id', name: 'title', path: 'data[]' }],
+      inputEntities: [{ type: 'folder', args: 'folderId', role: 'parent' }],
+    });
+    expect(get).not.toHaveProperty('invalidFields');
+    expect(post).toMatchObject({ invalidFields: ['outputEntities', 'inputEntities'] });
+    expect(JSON.stringify(results)).not.toContain('SECRETNAME');
+    expect(get?.moduleDigest).toBe(del?.moduleDigest);
+  }, 30_000);
+
+  it('reads the approval-subject declarations of a contract entry and names invalid ones without their value', async () => {
+    const app = await createAppFixture({
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  GET: { input: z.object({}), entityLookup: { type: 'note', params: { note_id: 'note_id' } } },\n"
+        + "  POST: { input: z.object({}), entityLookup: [{ type: 'Bad SECRETNAME', params: {} }], approvalSubject: { recheck: 'SECRETNAME' },"
+        + " lookupEffect: 'SECRETNAME' },\n"
+        + "  PUT: { input: z.object({}), approvalSubject: false, lookupEffect: 'read', entityLookup: () => 1 },\n"
+        + '  DELETE: { input: z.object({}) },\n'
+        + "  PATCH: { input: z.object({}), approvalSubject: (() => { const a: Record<string, unknown> = { onUnavailable: 'block' }; a.self = a; return a; })() },\n};\n",
+    });
+    const entry = (method: string): SchemaProbeItem => ({
+      kind: 'contract-entry', io: 'input', module: 'src/app/api/notes/contract.ts', export: 'contract', property: [method],
+    });
+    const results = await createSchemaProbe().probe(app.root, ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(entry));
+    const [get, post, put, del, patch] = results.map((result) => (
+      result.ok && result.kind === 'contract-entry' ? result : undefined
+    ));
+    expect(get?.approval).toEqual({ entityLookup: [{ type: 'note', params: { note_id: 'note_id' } }] });
+    expect(post?.approval?.issues).toHaveLength(3);
+    expect(post?.approval).not.toHaveProperty('entityLookup');
+    // An explicit approvalSubject that is invalid, or that the probe cannot carry (a cycle), is never dropped: fail closed.
+    expect(post?.approval?.approvalSubject).toEqual({ refs: [], onUnavailable: 'block' });
+    expect(patch?.approval?.approvalSubject).toEqual({ refs: [], onUnavailable: 'block' });
+    expect(patch?.approval?.issues).toEqual([expect.stringMatching(/^approvalSubject that/)]);
+    // A function is no JSON value: an issue, and the valid fields still go on.
+    expect(put?.approval).toMatchObject({ approvalSubject: false, lookupEffect: 'read' });
+    expect(put?.approval?.issues).toHaveLength(1);
+    expect(del).not.toHaveProperty('approval');
+    // Never an invalid field of the contract (that would be a finding of the tool itself).
+    expect(post).not.toHaveProperty('invalidFields');
+    expect(JSON.stringify(results)).not.toContain('SECRETNAME');
+    expect(get?.moduleDigest).toBe(del?.moduleDigest);
   }, 30_000);
 
   it('reads maxResultChars of a contract entry and flags an invalid one without its value', async () => {
@@ -220,12 +321,14 @@ describe('schema probe', () => {
       'src/hangs.ts': 'setInterval(() => {}, 1_000);\nawait new Promise(() => {});\nexport const schema = 1;\n',
       'src/fine.ts': "import { z } from 'zod';\nexport const schema = z.object({ q: z.string() });\n",
     });
-    const results = await createSchemaProbe({ timeoutMs: 1_500 }).probe(app.root, [
+    // The budget covers the whole child: Node start, TS loader, zod import. The retried fine.ts needs all of
+    // that within it, and on a loaded runner (full suite, parallel workers) that took more than 1.5 s.
+    const results = await createSchemaProbe({ timeoutMs: 6_000 }).probe(app.root, [
       schemaItem('src/hangs.ts'),
       schemaItem('src/fine.ts'),
     ]);
     expect(results.map((result) => (result.ok ? 'ok' : result.reason))).toEqual(['timeout', 'ok']);
-  }, 30_000);
+  }, 60_000);
 
   it('digests zod v3 schemas and leaves JSON Schema empty without zod-to-json-schema', async () => {
     const app = await createAppFixture({

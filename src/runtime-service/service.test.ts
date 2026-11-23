@@ -17,14 +17,16 @@ const state = vi.hoisted(() => ({
   release: vi.fn(),
   end: vi.fn(),
 }));
-vi.mock("pg", () => ({
-  Pool: class {
+vi.mock("pg", () => {
+  class Pool {
     on() {}
     async end() {
       state.end();
     }
-  },
-}));
+  }
+  // The service uses the default export (pg below 8.15.0 has no named ESM exports).
+  return { default: { Pool } };
+});
 vi.mock("@ai-sdk/openai", () => ({
   createOpenAI: () => ({ chat: () => ({}) }),
 }));
@@ -313,6 +315,53 @@ describe("runtime context and cleanup", () => {
       cookie: "session=user",
     });
     expect(JSON.stringify(init?.headers)).not.toContain("ADMIN");
+  });
+
+  it("hands chat.uiActionOutcomes to the chat handler and leaves its default otherwise", async () => {
+    await started();
+    expect(state.handler!.uiActionOutcomes).toBeUndefined();
+    const base = config();
+    const service = await startRuntimeService({ ...base, chat: { uiActionOutcomes: "report-only" } });
+    cleanups.push(service.stop);
+    await state.host!.handleChat(request());
+    expect(state.handler!.uiActionOutcomes).toBe("report-only");
+  });
+
+  it("hands chat.history to the chat handler and leaves the SDK's history defaults otherwise", async () => {
+    await started();
+    expect(state.handler!.history).toBeUndefined();
+    const base = config();
+    const service = await startRuntimeService({ ...base, chat: { history: { toolTurnCounting: "all-turns", seenObjects: false } } });
+    cleanups.push(service.stop);
+    await state.host!.handleChat(request());
+    expect(state.handler!.history).toEqual({ toolTurnCounting: "all-turns", seenObjects: false });
+  });
+
+  it("hands chat.locales stream error texts to the chat handler, which streams them; an unknown key fails at start", async () => {
+    const base = config();
+    const locales = { pl: { streamError: "Żądanie nie powiodło się", invalidToolInput: "Nieprawidłowe dane" } };
+    const service = await startRuntimeService({ ...base, chat: { locale: "pl-PL", locales } });
+    cleanups.push(service.stop);
+    await state.host!.handleChat(request());
+    expect(state.handler!.locales).toEqual(locales);
+    // The texts the service handed on reach the stream error output of the real handler.
+    const { createAiChatHandler } = await vi.importActual<typeof import("../server/adapters/nextjs/create-ai-chat-handler.js")>(
+      "../server/adapters/nextjs/create-ai-chat-handler.js",
+    );
+    const { MockLanguageModelV3 } = await import("ai/test");
+    const handler = createAiChatHandler({
+      tools: {}, systemPrompt: "A", onError: vi.fn(), locale: state.handler!.locale, locales: state.handler!.locales,
+      model: new MockLanguageModelV3({ doStream: async () => { throw new Error("boom"); } }),
+    });
+    const body = await (await handler(new Request("http://localhost/api/ai/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ id: "m1", role: "user", parts: [{ type: "text", text: "Hello" }] }] }),
+    }))).text();
+    expect(body).toContain("Żądanie nie powiodło się");
+    expect(body).not.toContain("AI request failed");
+    await expect(startRuntimeService({ ...base, chat: { locales: { pl: { bogus: "x" } } } } as never))
+      .rejects.toThrow(/locales\.pl\.bogus is not a text key/);
   });
 
   it("emits no exception content in its handler error callback", async () => {

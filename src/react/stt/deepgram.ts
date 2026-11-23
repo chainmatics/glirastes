@@ -3,6 +3,8 @@ import type {
   SttProviderConnection,
 } from './controller.js';
 import type { SttSegment } from './segments.js';
+import type { MaybePromise } from '../types.js';
+import { AudioWorkletLoadError } from './worklet-error.js';
 
 interface DeepgramMessage {
   type?: string;
@@ -46,11 +48,23 @@ export function createDeepgramSegmentParser(): (
   };
 }
 
+/** Served path of the PCM worklet; the host must serve the file here or pass `workletUrl`. */
+export const DEFAULT_AUDIO_WORKLET_URL = '/audio-worklet-processor.js';
+
 export interface DeepgramSttAdapterOptions {
   baseUrl?: string;
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   connectTimeoutMs?: number;
   finalizeGraceMs?: number;
+  /**
+   * URL of the PCM worklet file. Wins over the chat's `voice.workletUrl`.
+   * Default: that one, else `DEFAULT_AUDIO_WORKLET_URL`.
+   */
+  workletUrl?: string;
+}
+
+export interface PcmPipelineOptions {
+  workletUrl?: string;
 }
 
 function resolveWebSocketUrl(
@@ -72,15 +86,48 @@ function resolveWebSocketUrl(
 export async function createPcmPipeline(
   stream: MediaStream,
   onAudio: (audio: ArrayBuffer) => void,
+  options: PcmPipelineOptions = {},
 ): Promise<() => Promise<void>> {
   const AudioContextCtor = globalThis.AudioContext
     ?? (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextCtor) throw new Error('Browser does not support AudioContext');
 
   const context = new AudioContextCtor({ sampleRate: 16_000 });
-  await context.audioWorklet.addModule('/audio-worklet-processor.js');
-  const source = context.createMediaStreamSource(stream);
-  const processor = new AudioWorkletNode(context, 'audio-processor');
+  const workletUrl = options.workletUrl ?? DEFAULT_AUDIO_WORKLET_URL;
+  const closeQuietly = () => {
+    void Promise.resolve().then(() => context.close()).catch(() => {});
+  };
+  const workletFailed = (workletLoadFailure: unknown): never => {
+    // Never silent: the developer sees the URL and the fix in the console,
+    // the user sees the chat's localized error text. Query and hash may
+    // carry tokens, so only the path is logged.
+    const workletPath = workletUrl.split(/[?#]/)[0];
+    console.error(
+      `[glirastes] Voice input: the audio worklet could not be loaded from ${workletPath}. Serve glirastes/react/audio-worklet-processor.js at that URL (\`glirastes stt worklet\` copies it into public/) or set workletUrl to where it is served.`,
+      workletLoadFailure,
+    );
+    closeQuietly();
+    throw new AudioWorkletLoadError(workletUrl, { cause: workletLoadFailure });
+  };
+  try {
+    await context.audioWorklet.addModule(workletUrl);
+  } catch (workletLoadFailure) {
+    workletFailed(workletLoadFailure);
+  }
+  let source: MediaStreamAudioSourceNode;
+  try {
+    source = context.createMediaStreamSource(stream);
+  } catch (error) {
+    closeQuietly();
+    throw error;
+  }
+  let processor: AudioWorkletNode;
+  try {
+    // Throws when the loaded file does not register 'audio-processor'.
+    processor = new AudioWorkletNode(context, 'audio-processor');
+  } catch (workletLoadFailure) {
+    return workletFailed(workletLoadFailure);
+  }
   processor.port.onmessage = (event: MessageEvent<Int16Array>) => {
     onAudio(event.data.buffer as ArrayBuffer);
   };
@@ -96,10 +143,14 @@ export async function createPcmPipeline(
 }
 
 export class DeepgramSttAdapter implements SttProviderAdapter {
+  /** `connect()` loads `input.workletUrl` when the constructor sets none. */
+  readonly acceptsWorkletUrl = true;
+
   constructor(private readonly options: DeepgramSttAdapterOptions = {}) {}
 
   async connect(input: Parameters<SttProviderAdapter['connect']>[0]): Promise<SttProviderConnection> {
-    const token = this.options.getToken?.();
+    const token = await this.options.getToken?.();
+    if (input.signal.aborted) throw new Error('Speech provider connection cancelled');
     const url = resolveWebSocketUrl(this.options.baseUrl, input.language, token);
     const socket = new WebSocket(url);
     const parser = createDeepgramSegmentParser();
@@ -200,7 +251,7 @@ export class DeepgramSttAdapter implements SttProviderAdapter {
     try {
       closeAudio = await createPcmPipeline(input.stream, (audio) => {
         if (socket.readyState === WebSocket.OPEN) socket.send(audio);
-      });
+      }, { workletUrl: this.options.workletUrl ?? input.workletUrl });
     } catch (error) {
       await close();
       throw error;

@@ -1,3 +1,4 @@
+import { entitiesOf } from '../entity-declarations.js';
 import ts from 'typescript';
 import { deriveToolPolicyDefaults } from '../../../contracts/tool-policy.js';
 import type { EndpointMethod } from '../../../types.js';
@@ -10,6 +11,7 @@ import {
   resolveEndpointContract,
   type ResolvedEndpointContract,
 } from '../contract-tiers.js';
+import { outputFieldLists } from '../output-fields.js';
 import { collectHandlerEvidence } from '../evidence.js';
 import { findExclusion, hasAiIgnoreMarker, importsChatHandler } from '../exclusions.js';
 import { toolFinding } from '../findings.js';
@@ -434,6 +436,7 @@ function observeEntry(
     },
     ...(analysis.inferredOutput ? { inferredOutput: analysis.inferredOutput } : {}),
     probes,
+    ...(ctx.config.output?.deniedFields ? { appDeniedFields: ctx.config.output.deniedFields } : {}),
     ...(resolution ? { resolution } : {}),
     ...(previousContract ? { previousContract } : {}),
   });
@@ -489,10 +492,14 @@ function toObserved(piece: NestPiece, definitionId: string): ObservedTool {
     findings: piece.findings,
     ...(resolved && Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),
     ...(resolved?.maxResultChars !== undefined ? { maxResultChars: resolved.maxResultChars } : {}),
+    ...outputFieldLists(resolved),
+    // Schema sites also without a code declaration: tools.json `identity.entities` applies by their type.
+    ...entitiesOf(resolved?.codeEntities, resolved?.contract?.output),
+    ...(resolved?.codeApproval ? { approvalDeclarations: { code: resolved.codeApproval } } : {}),
   };
 }
 
-async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string): Promise<ToolSourceObservation> {
+async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string, tsconfig?: string): Promise<ToolSourceObservation> {
   const scan = await scanAppSources(ctx.root, { srcDir, matches: (source) => NEST_MARKERS.test(source) });
   if (!scan.complete) return incomplete(scan.reason);
   const parsed = scan.files.map((file) => {
@@ -521,7 +528,12 @@ async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string): Pro
   excluded.sort((left, right) => compareCodeUnits(left.stableKey, right.stableKey));
   if (kept.length === 0) return { observations: [], findings, complete: true, excluded };
 
-  const app = createAppProgram({ root: ctx.root, rootNames: [...new Set(kept.map((entry) => entry.absoluteFile))] });
+  const app = createAppProgram({
+    root: ctx.root,
+    rootNames: [...new Set(kept.map((entry) => entry.absoluteFile))],
+    searchFrom: srcDir,
+    ...(tsconfig ? { tsconfig } : {}),
+  });
   const analyzed = kept.map((entry) => {
     const sourceFile = app.sourceFile(entry.absoluteFile);
     const member = sourceFile ? findMethod(sourceFile, entry) : undefined;
@@ -555,7 +567,9 @@ async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string): Pro
     if (resolution?.output?.schemaRef) request(probeItemFor(resolution.output.schemaRef, 'output'));
   }
   const keys = [...items.keys()].sort(compareCodeUnits);
-  const results = keys.length > 0 ? await ctx.probe.probe(ctx.root, keys.map((key) => items.get(key)!)) : [];
+  const results = keys.length > 0
+    ? await ctx.probe.probe(ctx.root, keys.map((key) => items.get(key)!), { tsconfig: app.tsconfigPath ?? null })
+    : [];
   const probes = new Map<string, SchemaProbeResult>(keys.map((key, index) => [
     key,
     results[index] ?? { ok: false, reason: 'probe-failed' },
@@ -587,7 +601,7 @@ async function observeNestEndpoints(ctx: ToolSourceContext, srcDir: string): Pro
  * `@nestjs/common`, read from syntax and the app's TypeScript checker. The
  * app is never imported or run.
  */
-export function createNestEndpointSource(options: { srcDir?: string } = {}): ToolSource {
+export function createNestEndpointSource(options: { srcDir?: string; tsconfig?: string } = {}): ToolSource {
   const srcDir = options.srcDir ?? NEST_DEFAULT_SRC_DIR;
-  return { kind: 'nest', observe: (ctx) => observeNestEndpoints(ctx, srcDir) };
+  return { kind: 'nest', observe: (ctx) => observeNestEndpoints(ctx, srcDir, options.tsconfig) };
 }

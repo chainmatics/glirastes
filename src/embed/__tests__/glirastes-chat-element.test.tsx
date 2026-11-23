@@ -3,6 +3,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SttProviderAdapter } from '../../react/stt/controller.js';
 import type { ChatMessage, ChatTransport } from '../../react/types.js';
+import { registerNavigationBridge } from '../../browser/navigation.js';
 import { CHAT_STYLES } from '../chat-styles.generated.js';
 import {
   EMBED_CSS_VARIABLES,
@@ -42,6 +43,22 @@ function sseResponse(text: string): Response {
   });
 }
 
+/** A UI message stream with one executed tool call and its output. */
+function toolStreamResponse(toolName: string, output: unknown): Response {
+  const chunks = [
+    { type: 'start' },
+    { type: 'start-step' },
+    { type: 'tool-input-available', toolCallId: 'call-1', toolName, input: {} },
+    { type: 'tool-output-available', toolCallId: 'call-1', output },
+    { type: 'finish-step' },
+    { type: 'finish' },
+  ];
+  const body = `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('')}data: [DONE]\n\n`;
+  return new Response(body, {
+    headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+  });
+}
+
 async function mount(
   configure: (element: GlirastesChatElement) => void = () => {},
   tag = 'glirastes-chat',
@@ -50,7 +67,7 @@ async function mount(
   const element = document.createElement(tag) as GlirastesChatElement;
   configure(element);
   const events: Array<{ type: string; detail: unknown }> = [];
-  for (const type of ['ready', 'status', 'tool-result', 'error']) {
+  for (const type of ['ready', 'status', 'tool-result', 'ui-action', 'error']) {
     document.addEventListener(`glirastes-chat:${type}`, (event) => {
       events.push({ type: event.type, detail: (event as CustomEvent).detail });
     });
@@ -81,6 +98,61 @@ describe('<glirastes-chat>', () => {
       'glirastes-chat:ready',
       'glirastes-chat:status',
     ]);
+  });
+
+  it('speaks the nearest lang of the element, not only the one of the page', async () => {
+    document.documentElement.setAttribute('lang', 'de');
+    defineGlirastesChatElement('glirastes-chat');
+    const region = document.createElement('div');
+    region.setAttribute('lang', 'pl-PL');
+    const element = document.createElement('glirastes-chat') as GlirastesChatElement;
+    element.transport = transport();
+    element.config = { locales: { pl: { placeholder: 'Napisz wiadomość' } } };
+    region.append(element);
+    await act(async () => { document.body.append(region); });
+    expect(element.shadowRoot!.querySelector('textarea')?.getAttribute('placeholder')).toBe('Napisz wiadomość');
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it('follows a lang the page sets after the element mounted, with English for the keys a partial table lacks', async () => {
+    document.documentElement.setAttribute('lang', 'de');
+    const { element } = await mount((node) => {
+      node.transport = transport();
+      node.config = { locales: { pl: { placeholder: 'Napisz wiadomość' } } };
+    });
+    const textarea = () => element.shadowRoot!.querySelector('textarea')!;
+    const send = () => element.shadowRoot!.querySelector('button[data-action="send"]')!;
+    expect(textarea().getAttribute('placeholder')).toBe('Nachricht eingeben…');
+    await act(async () => { document.documentElement.setAttribute('lang', 'pl'); });
+    await waitFor(() => expect(textarea().getAttribute('placeholder')).toBe('Napisz wiadomość'));
+    expect(send().textContent).toBe('Send');
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it("keeps the server's tool wording first with languageSource: 'server'", async () => {
+    document.documentElement.setAttribute('lang', 'en');
+    const handlers = new Set<(part: { type: string; data: unknown }) => void>();
+    const { element } = await mount((node) => {
+      node.transport = {
+        ...transport(),
+        subscribeToData: (handler) => {
+          handlers.add(handler);
+          return () => handlers.delete(handler);
+        },
+      };
+      node.config = { languageSource: 'server' };
+    });
+    await act(async () => {
+      handlers.forEach((handler) => handler({
+        type: 'data-tool-presentation',
+        data: { locale: 'de-DE', tools: { tasks_list: { label: 'Aufgaben lesen' } } },
+      }));
+    });
+    expect(element.shadowRoot!.querySelector('textarea')?.getAttribute('placeholder')).toBe('Nachricht eingeben…');
+    element.config = {};
+    await act(async () => {});
+    expect(element.shadowRoot!.querySelector('textarea')?.getAttribute('placeholder')).not.toBe('Nachricht eingeben…');
+    document.documentElement.removeAttribute('lang');
   });
 
   it('lets host CSS variables theme the panel instead of inline variables', async () => {
@@ -125,7 +197,20 @@ describe('<glirastes-chat>', () => {
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith({ text: 'Und morgen?' }));
   });
 
-  it('emits tool results for host-side UI actions', async () => {
+  it('emits tool results of the running request for host-side UI actions', async () => {
+    const output = { success: true, uiAction: { type: 'navigate', path: '/tasks' } };
+    vi.stubGlobal('fetch', vi.fn(async () => toolStreamResponse('ui_navigate', output)));
+    const { element, events } = await mount((node) => { node.setAttribute('endpoint', '/api/chat'); });
+    await act(async () => { expect(element.send('Öffne die Aufgaben')).toBe(true); });
+    await waitFor(() => expect(events).toContainEqual({
+      type: 'glirastes-chat:tool-result',
+      detail: { toolName: 'ui_navigate', result: output },
+    }));
+    // A host-side action has no generated UI action, so no outcome event.
+    expect(events.map((event) => event.type)).not.toContain('glirastes-chat:ui-action');
+  });
+
+  it('does not emit tool results of messages a custom transport starts with', async () => {
     const chat = transport([{
       id: 'a1',
       role: 'assistant',
@@ -135,13 +220,66 @@ describe('<glirastes-chat>', () => {
       }],
     } as unknown as ChatMessage]);
     const { events } = await mount((node) => { node.transport = chat; });
-    expect(events).toContainEqual({
-      type: 'glirastes-chat:tool-result',
-      detail: {
-        toolName: 'ui_navigate',
-        result: { success: true, uiAction: { type: 'navigate', path: '/tasks' } },
-      },
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(events.map((event) => event.type)).not.toContain('glirastes-chat:tool-result');
+  });
+
+  it('emits the outcome of a generated UI action without its payload', async () => {
+    const output = {
+      success: true,
+      message: 'Handed to the app.',
+      uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks?q=secret' } },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => toolStreamResponse('ui_navigate', output)));
+    const push = vi.fn();
+    const stopBridge = registerNavigationBridge({ push });
+    // A throwing host callback does not stop the DOM event.
+    const onUiActionOutcome = vi.fn(() => { throw new Error('host callback'); });
+    try {
+      const { element, events } = await mount((node) => {
+        node.setAttribute('endpoint', '/api/chat');
+        node.config = { onUiActionOutcome };
+      });
+      await act(async () => { expect(element.send('Zeige erledigte Aufgaben')).toBe(true); });
+      await waitFor(() => expect(events).toContainEqual({
+        type: 'glirastes-chat:ui-action',
+        detail: { toolName: 'ui_navigate', toolCallId: 'call-1', code: 'ok', actionIds: ['glirastes.navigate'] },
+      }));
+      expect(push).toHaveBeenCalledWith('/tasks?q=secret');
+      expect(onUiActionOutcome).toHaveBeenCalledWith(expect.objectContaining({ code: 'ok', toolCallId: 'call-1' }));
+      expect(JSON.stringify(events.filter((event) => event.type === 'glirastes-chat:ui-action'))).not.toContain('secret');
+    } finally {
+      stopBridge();
+    }
+  });
+
+  it('passes config.onTurnEnd through to the chat: called once when the turn ended', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse('Hallo')));
+    const onTurnEnd = vi.fn();
+    const { element } = await mount((node) => {
+      node.setAttribute('endpoint', '/api/chat');
+      node.config = { onTurnEnd };
     });
+    await act(async () => { expect(element.send('Hallo?')).toBe(true); });
+    await waitFor(() => expect(onTurnEnd).toHaveBeenCalledTimes(1));
+    expect(onTurnEnd).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'completed', reason: 'finished' }),
+      { sessionId: expect.any(String) },
+    );
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(onTurnEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('awaits an async headers function from the config', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Hallo'));
+    vi.stubGlobal('fetch', fetchMock);
+    const { element } = await mount((node) => {
+      node.setAttribute('endpoint', '/api/chat');
+      node.config = { headers: async () => ({ authorization: 'Bearer t' }) };
+    });
+    await act(async () => { expect(element.send('Hallo')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get('authorization')).toBe('Bearer t');
   });
 
   it('posts to the endpoint attribute with the config headers and bodyExtras', async () => {
@@ -178,6 +316,23 @@ describe('<glirastes-chat>', () => {
     await waitFor(() => expect(element.shadowRoot!.textContent).toContain('Hallo zurück'));
     await waitFor(() => expect(events.filter((event) => event.type === 'glirastes-chat:status').pop())
       .toMatchObject({ detail: { state: 'idle' } }));
+  });
+
+  it('names its nearest lang in each request (Content-Language), and none with sendLanguage: false', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Cześć'));
+    vi.stubGlobal('fetch', fetchMock);
+    document.documentElement.setAttribute('lang', 'pl-PL');
+    const { element } = await mount((node) => { node.setAttribute('endpoint', '/api/chat'); });
+    await act(async () => { expect(element.send('Cześć')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get('content-language')).toBe('pl-PL');
+    await waitFor(() => expect(element.shadowRoot!.textContent).toContain('Cześć'));
+    element.config = { sendLanguage: false };
+    await act(async () => {});
+    await act(async () => { expect(element.send('Jeszcze raz')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(new Headers(fetchMock.mock.calls[1]![1]?.headers).get('content-language')).toBeNull();
+    document.documentElement.removeAttribute('lang');
   });
 
   it('maps the voice and voice-language attributes onto the composer microphone', async () => {

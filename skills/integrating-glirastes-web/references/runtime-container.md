@@ -7,18 +7,18 @@ compatible. The container is one independent service per application and
 environment. It is not a sidecar per backend replica and does not offer HA.
 
 The official public Linux amd64 image is
-`ghcr.io/chainmatics/glirastes-runtime:0.14.0`; pulling needs no registry login.
+`ghcr.io/chainmatics/glirastes-runtime:0.23.0`; pulling needs no registry login.
 For this release, the verified immutable image reference is:
 
 ```sh
-export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:edf35f3d093d58c03361c0242350dd6d9fb70554e4deffa113002aaba8cac00c
+export GLIRASTES_RUNTIME_IMAGE=ghcr.io/chainmatics/glirastes-runtime@sha256:6fc8b35ec3f6c00782f70d8e2f91725cc78de36ed6799ba17e412a01f7c6fb04
 docker pull "$GLIRASTES_RUNTIME_IMAGE"
 ```
 
-Use the exact matching SDK version (0.14.0 for this image) for artifact builds
+Use the exact matching SDK version (0.23.0 for this image) for artifact builds
 and browser code. Do not substitute a newer CLI merely because it is available.
-The [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.14.0/examples/php-runtime)
-and [browser host examples](https://github.com/chainmatics/glirastes/tree/v0.14.0/examples/frontend-frameworks)
+The [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.23.0/examples/php-runtime)
+and [browser host examples](https://github.com/chainmatics/glirastes/tree/v0.23.0/examples/frontend-frameworks)
 are runnable references. PHP has real API/approval tests; Angular/SvelteKit/Nuxt
 have browser host tests. Neither establishes a full Rust/Java stack acceptance.
 
@@ -160,7 +160,47 @@ each successful tool result the model sees; an operation's
 `x-glirastes-max-result-chars` wins for that tool. A larger result gets a
 turn-scoped handle and an overview, and the model reads more with the built-in
 `read_result`; `application.resultHandles: false` (optional, default on) cuts
-it instead.
+it instead. `x-glirastes-output-allowed-fields`, `x-glirastes-output-denied-fields`
+(`**.fileUrl` removes a key at any depth) and `x-glirastes-output-default-fields`
+on an operation travel in the artifact too and are applied by the container: the
+upper bound before anything is stored or shown, the default view in the first
+answer.
+
+Languages (all optional, section `chat`): `chat.locale` (BCP-47, default
+English) is the language of the texts the runtime writes itself;
+`chat.requestLocaleHeader` names a request header with the turn's language
+(`accept-language` is read by preference, any other header holds one tag,
+e.g. `x-app-language` sent by the chat's transport). With neither set, the
+turn's language is the one the chat UI names in each request
+(`Content-Language`, sent by the React/Vercel transport and
+`<glirastes-chat>`; one BCP-47 tag, anything else ignored), else English;
+`chat.locale` or `chat.requestLocaleHeader` replaces it: a fixed `chat.locale`
+wins over the page language the chat sends, so set it only for a
+single-language app. A language stored per user (the app's database) goes
+into a header the chat's transport sends (`headers: { 'x-app-language':
+user.language }`), named in `chat.requestLocaleHeader`; pass the same value as
+the chat's `language` so its built-in texts match. `chat.locales` adds or
+changes the runtime's own texts per language (`{"pl": {"closing": "...",
+"silentTurn": "...", "streamError": "..."}}`, keys of the SDK handler's `locales`; partial tables
+fall back per key, an unknown key fails at start). The artifact carries the
+tool labels per language (`.glirastes/tools.json` `languages`, by default
+en, de and every declared language; local, never sent to the Platform), and
+the approval card and step display show them in the turn's language.
+
+`chat.uiActionOutcomes` (`confirm` default, `report-only`, `off`) is the UI
+action outcome protocol: with `confirm` a turn with a UI action takes two
+POSTs (up to four with retries, so up to four times the per-request budgets);
+a strict proxy in front must allow the body field `glirastesUiOutcomes`.
+Only a request with that field gets the hand-off result shape
+(`{ handedOff: true, … }`); every other request gets the 0.17.3 shape
+`{ success: true, … }` (SDK default `uiToolResultShape: 'auto'`, not
+configurable in the container).
+
+`chat.history` (optional, strict: `toolTurnCounting` `all-turns` or
+`tool-turns`, `seenObjects` `true` or `false`) changes how earlier turns reach
+the model. Absent: the 0.18 SDK defaults (`tool-turns`, seen-objects memo on
+for tools with `outputEntities`); `{"toolTurnCounting": "all-turns",
+"seenObjects": false}` restores the 0.17 model input.
 
 For bearer authentication use `"credential": {"type":"bearer"}`. For existing
 backend CSRF middleware set `identity.csrfHeader` to `x-csrf-token` or

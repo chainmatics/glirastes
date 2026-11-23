@@ -1,3 +1,4 @@
+import { entitiesOf } from '../entity-declarations.js';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -19,6 +20,7 @@ import {
   type ContractModuleCandidate,
   type ResolvedEndpointContract,
 } from '../contract-tiers.js';
+import { outputFieldLists } from '../output-fields.js';
 import { collectHandlerEvidence } from '../evidence.js';
 import { findExclusion, hasAiIgnoreMarker, importsChatHandler } from '../exclusions.js';
 import { toolFinding } from '../findings.js';
@@ -287,6 +289,7 @@ function observeRoute(
     },
     ...(inferredOutput ? { inferredOutput } : {}),
     probes,
+    ...(ctx.config.output?.deniedFields ? { appDeniedFields: ctx.config.output.deniedFields } : {}),
     ...(candidate ? { contractModule: candidate } : {}),
     ...(resolution ? { resolution } : {}),
     ...(previousContract ? { previousContract } : {}),
@@ -340,10 +343,14 @@ function toObserved(piece: RoutePiece, definitionId: string): ObservedTool {
     findings: piece.findings,
     ...(resolved && Object.keys(resolved.prose).length > 0 ? { prose: resolved.prose } : {}),
     ...(resolved?.maxResultChars !== undefined ? { maxResultChars: resolved.maxResultChars } : {}),
+    ...outputFieldLists(resolved),
+    // Schema sites also without a code declaration: tools.json `identity.entities` applies by their type.
+    ...entitiesOf(resolved?.codeEntities, resolved?.contract?.output),
+    ...(resolved?.codeApproval ? { approvalDeclarations: { code: resolved.codeApproval } } : {}),
   };
 }
 
-async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Promise<ToolSourceObservation> {
+async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string, tsconfig?: string): Promise<ToolSourceObservation> {
   if (!existsSync(resolve(ctx.root, apiDir))) {
     return { observations: [], findings: [], complete: true, excluded: [] };
   }
@@ -377,6 +384,8 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
   const app = createAppProgram({
     root: ctx.root,
     rootNames: [...new Set([...kept.map((entry) => entry.absoluteFile), ...contractFiles.values()])],
+    searchFrom: apiDir,
+    ...(tsconfig ? { tsconfig } : {}),
   });
   const conventions = ctx.resolutions.conventions;
   const analyzed: AnalyzedRoute[] = kept.map((entry) => {
@@ -417,7 +426,9 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
     if (resolution?.output?.schemaRef) request(probeItemFor(resolution.output.schemaRef, 'output'));
   }
   const keys = [...items.keys()].sort(compareCodeUnits);
-  const results = keys.length > 0 ? await ctx.probe.probe(ctx.root, keys.map((key) => items.get(key)!)) : [];
+  const results = keys.length > 0
+    ? await ctx.probe.probe(ctx.root, keys.map((key) => items.get(key)!), { tsconfig: app.tsconfigPath ?? null })
+    : [];
   const probes = new Map<string, SchemaProbeResult>(keys.map((key, index) => [
     key,
     results[index] ?? { ok: false, reason: 'probe-failed' },
@@ -442,7 +453,7 @@ async function observeNextEndpoints(ctx: ToolSourceContext, apiDir: string): Pro
   };
 }
 
-export function createNextEndpointSource(options: { apiDir?: string } = {}): ToolSource {
+export function createNextEndpointSource(options: { apiDir?: string; tsconfig?: string } = {}): ToolSource {
   const apiDir = options.apiDir ?? NEXT_DEFAULT_API_DIR;
-  return { kind: 'next-app', observe: (ctx) => observeNextEndpoints(ctx, apiDir) };
+  return { kind: 'next-app', observe: (ctx) => observeNextEndpoints(ctx, apiDir, options.tsconfig) };
 }

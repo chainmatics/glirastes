@@ -1,5 +1,8 @@
+import { useState, type SyntheticEvent } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
+import type { ChatLocale, TurnNoticeProps, TurnNoticeStatus, TurnOutcome } from '../types.js';
 import type { ActivityStep, ActivityStepStatus } from '../utils/activity.js';
+import { stepFailureText } from '../utils/step-failure.js';
 import { StatusIcon, type StatusIconKind } from './status-icon.js';
 
 export interface ActivityLogProps {
@@ -8,7 +11,45 @@ export interface ActivityLogProps {
   active: boolean;
   /** Pipeline stop or error text shown as the last line. */
   notice?: string;
+  /** Status behind `notice`, handed to a `components.TurnNotice` slot (default `'error'`). */
+  noticeStatus?: TurnNoticeStatus;
+  /** The recorded outcome of the turn, handed to a `components.TurnNotice` slot. */
+  noticeOutcome?: TurnOutcome;
   className?: string;
+}
+
+/** Replaces every `{name}` in a locale text. */
+export function fillLocaleText(template: string, values: Readonly<Record<string, string | number>>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in values ? String(values[name]) : match));
+}
+
+/**
+ * Default turn notice: the last line of the log (`data-element="activity-notice"`)
+ * or, outside it, its own element (`data-component="turn-notice"`).
+ */
+export function TurnNotice({ text, status, placement }: TurnNoticeProps) {
+  if (placement === 'log') return <p data-element="activity-notice">{text}</p>;
+  return <p data-component="turn-notice" data-status={status}>{text}</p>;
+}
+
+/** The detail line of a step: an SDK failure in the locale's words, else its own text, else a UI action's outcome. */
+function stepDetailText(step: ActivityStep, locale: ChatLocale, language: string | undefined): string | undefined {
+  if (step.failures && step.failures.length > 0) return stepFailureText(step.failures, locale, language);
+  return step.detail ?? uiOutcomeText(step, locale);
+}
+
+/** The locale text of a UI action's reported outcome, if any. */
+function uiOutcomeText(step: ActivityStep, locale: ChatLocale): string | undefined {
+  switch (step.uiOutcome) {
+    case 'pending': return locale.activityUiPendingLabel;
+    case 'rejected-contract': return locale.activityUiRejectedContract;
+    case 'rejected-handler': return locale.activityUiRejectedHandler;
+    case 'unavailable': return locale.activityUiUnavailable;
+    case 'failed': return locale.activityUiFailed;
+    case 'initiated': return locale.activityUiInitiated;
+    case 'unconfirmed': return locale.activityUiUnconfirmed;
+    default: return undefined;
+  }
 }
 
 const STEP_ICONS: Record<ActivityStepStatus, StatusIconKind> = {
@@ -16,6 +57,9 @@ const STEP_ICONS: Record<ActivityStepStatus, StatusIconKind> = {
   error: 'error',
   running: 'spinner',
   waiting: 'pending',
+  declined: 'declined',
+  expected: 'notice',
+  aborted: 'aborted',
 };
 
 /**
@@ -30,8 +74,10 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
       last
       && last.step.toolName === step.toolName
       && last.step.status === step.status
+      && last.step.declinedBy === step.declinedBy
       && !last.step.detail
       && !step.detail
+      && last.step.uiOutcome === step.uiOutcome
     ) {
       last.count += 1;
     } else {
@@ -48,37 +94,77 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
  *
  * Keeps styling neutral via `data-*` attributes.
  */
-export function ActivityLog({ steps, active, notice, className }: ActivityLogProps) {
-  const { locale, toolLabels } = useChatContext();
+export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, noticeOutcome, className }: ActivityLogProps) {
+  const { locale, toolLabels, components, activityLog, language } = useChatContext();
+  // Once the turn no longer runs: a UI action still waiting was never confirmed, a call still running was stopped
+  // (a step waiting for approval stays waiting).
+  const steps = active ? allSteps : allSteps.map((step) => (step.uiOutcome === 'pending'
+    ? { ...step, status: 'done' as const, uiOutcome: 'unconfirmed' as const }
+    : step.status === 'running' ? { ...step, status: 'aborted' as const } : step));
+  // The user's own toggle wins over expandWhileRunning; null until the user toggles.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
   if (steps.length === 0) return null;
 
   const label = (toolName: string) => toolLabels.labels?.[toolName]?.singular ?? toolName;
   const running = steps.find((step) => step.status === 'running');
   const failed = steps.filter((step) => step.status === 'error').length;
+  // A declined call is not a failure: counted on its own, never turns the summary to error.
+  const declined = steps.filter((step) => step.status === 'declined').length;
+  // An expected failure (classifyToolFailure) is a normal answer: counted on its own as well.
+  const expected = steps.filter((step) => step.status === 'expected').length;
+  // A call stopped with its turn is neither done nor failed.
+  const aborted = steps.filter((step) => step.status === 'aborted').length;
   const waiting = steps.some((step) => step.status === 'waiting');
+  // Counted on their own too, so the summary is true for every mix ("1 step done, 1 declined", "2 declined").
+  const done = steps.filter((step) => step.status === 'done').length;
 
   const state = running || active ? 'running' : waiting ? 'waiting' : failed > 0 ? 'error' : 'done';
+
+  const separator = locale.activitySummarySeparator ?? ', ';
 
   let summaryIcon: StatusIconKind;
   let summaryText: string;
   if (state === 'running') {
     summaryIcon = 'spinner';
-    summaryText = `${running ? label(running.toolName) : locale.activityWorkingLabel}…`;
+    const current = running ? label(running.toolName) : locale.activityWorkingLabel;
+    summaryText = activityLog?.runningProgress && done > 0
+      ? fillLocaleText(locale.activityRunningProgressLabel ?? '{count} done, {label}…', { count: done, label: current })
+      : fillLocaleText(locale.activityRunningLabel ?? '{label}…', { label: current });
   } else if (state === 'waiting') {
     summaryIcon = 'pending';
     summaryText = locale.activityWaitingLabel;
   } else {
-    summaryIcon = failed > 0 ? 'error' : 'check';
-    summaryText = steps.length === 1
-      ? locale.activityDoneOneLabel
-      : locale.activityDoneLabel.replace('{count}', String(steps.length));
-    if (failed > 0) {
-      summaryText += `, ${locale.activityFailedLabel.replace('{count}', String(failed))}`;
+    // A check mark only when a step succeeded; with none done and none failed, the neutral outcome's own icon
+    // (all stopped, all declined, all expected) or the notice for a mix of them.
+    const neutral = new Set(steps.map((step) => STEP_ICONS[step.status]));
+    summaryIcon = failed > 0 ? 'error' : done > 0 ? 'check' : neutral.size === 1 ? [...neutral][0]! : 'notice';
+    const counts: string[] = [];
+    if (done > 0) {
+      counts.push(done === 1 ? locale.activityDoneOneLabel : fillLocaleText(locale.activityDoneLabel, { count: done }));
     }
+    if (failed > 0) counts.push(fillLocaleText(locale.activityFailedLabel, { count: failed }));
+    if (declined > 0) counts.push(fillLocaleText(locale.activityDeclinedLabel, { count: declined }));
+    if (expected > 0) counts.push(fillLocaleText(locale.activityExpectedLabel, { count: expected }));
+    if (aborted > 0) counts.push(fillLocaleText(locale.activityAbortedLabel ?? '{count} stopped', { count: aborted }));
+    summaryText = counts.join(separator);
   }
 
+  const NoticeComponent = components?.TurnNotice ?? TurnNotice;
+  // Only with expandWhileRunning is `open` controlled; otherwise the element stays as before.
+  const controlled = activityLog?.expandWhileRunning === true;
+  const open = userOpen ?? state === 'running';
+  const openProps = controlled
+    ? {
+      open,
+      onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => {
+        // The browser also fires `toggle` for the `open` React sets: only a change of the user counts.
+        if (event.currentTarget.open !== open) setUserOpen(event.currentTarget.open);
+      },
+    }
+    : {};
+
   return (
-    <details className={className} data-component="activity-log" data-state={state}>
+    <details className={className} data-component="activity-log" data-state={state} {...openProps}>
       <summary data-element="activity-summary">
         <StatusIcon icon={summaryIcon} />
         <span data-element="label">{summaryText}</span>
@@ -90,12 +176,23 @@ export function ActivityLog({ steps, active, notice, className }: ActivityLogPro
             <span data-element="label">
               {count > 1 ? toolLabels.labels?.[step.toolName]?.plural ?? label(step.toolName) : label(step.toolName)}
             </span>
-            {count > 1 && <span data-element="count">×{count}</span>}
-            {step.detail && <span data-element="detail">{step.detail}</span>}
+            {count > 1 && (
+              <span data-element="count">{fillLocaleText(locale.activityStepCountLabel ?? '×{count}', { count })}</span>
+            )}
+            {stepDetailText(step, locale, language) && (
+              <span data-element="detail">{stepDetailText(step, locale, language)}</span>
+            )}
           </li>
         ))}
       </ol>
-      {notice && <p data-element="activity-notice">{notice}</p>}
+      {notice && (
+        <NoticeComponent
+          text={notice}
+          status={noticeStatus ?? 'error'}
+          placement="log"
+          {...(noticeOutcome ? { outcome: noticeOutcome } : {})}
+        />
+      )}
     </details>
   );
 }

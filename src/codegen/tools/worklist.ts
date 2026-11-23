@@ -6,7 +6,7 @@ import { TOOLS_PATHS } from './config.js';
 import { ToolContractsFileSchema } from './files.js';
 import type { ToolsPipelineResult, ToolsPipelineTool } from './pipeline.js';
 import { evaluateRouting, type RoutingSentenceFailure } from './routing-eval.js';
-import { SEMANTICS_FIELDS, type SemanticsLanguage } from './semantics.js';
+import { SEMANTICS_FIELDS } from './semantics.js';
 import type { ToolFinding } from './types.js';
 
 /**
@@ -100,7 +100,13 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'handler-unresolved',
   'navigation-bridge-missing',
   'ui-action-payload-untyped',
+  'ui-action-import-unresolved',
   'ui-action-contract-conflict',
+  'ui-action-contract-unprobed',
+  'ui-action-contract-mismatch',
+  'ui-action-effect-invalid',
+  'ui-action-effect-conflict',
+  'ui-action-effect-contradicted',
   'ui-action-route-invalid',
   'ui-action-route-conflict',
   'ui-action-indirect',
@@ -113,6 +119,13 @@ const APP_CODE_CODES: ReadonlySet<string> = new Set([
   'tool-group-invalid',
   'tool-roles-invalid',
   'max-result-chars-invalid',
+  'output-allowed-fields-invalid',
+  'output-denied-fields-invalid',
+  'output-default-fields-invalid',
+  'output-field-unknown',
+  'output-default-fields-outside-allowed',
+  'output-default-fields-denied',
+  'output-schema-unprojected',
   // A name (contract id or x-glirastes-name) taken from another tool, fixed where it is declared.
   'definition-id-reassigned',
 ]);
@@ -256,9 +269,21 @@ function resolveItem(finding: ToolFinding, tool: ToolsPipelineTool | undefined):
   if (code === 'resolution-rejected' || code === 'tool-semantics-invalid') {
     return { ...base, owner: 'agent', target: entryTarget(finding) };
   }
+  if (code === 'semantics-entry-orphaned') {
+    // `GET /api/tags` for a stableKey entry, `.glirastes/tool-semantics.json#tags.list` for a name-only one.
+    const prefix = `${TOOLS_PATHS.semantics}#`;
+    const key = finding.subjectRef.startsWith(prefix)
+      ? `tools[name=${JSON.stringify(finding.subjectRef.slice(prefix.length))}]`
+      : semanticsKey(finding.subjectRef);
+    return { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.semantics, key } };
+  }
   if (code === 'mcp-tool-names-invalid') {
     const key = finding.subjectRef.startsWith('.glirastes/') ? finding.subjectRef : toolKey(finding.subjectRef);
     return { ...base, owner: 'agent', target: { kind: 'file', file: TOOLS_PATHS.mcpToolNames, key } };
+  }
+  if (code === 'output-denied-key-unmatched') {
+    // tools.json is developer-owned: a person checks the pattern.
+    return { ...base, owner: 'developer', target: { kind: 'review', file: TOOLS_PATHS.config, key: 'output.deniedFields' } };
   }
   if (code === 'auth-evidence-missing') {
     return {
@@ -370,7 +395,7 @@ export interface DescribeWorkItem {
   /** Fields a human wrote, the code supplies or a review locked; leave them as they are. */
   protectedFields: string[];
   /** Required languages that still lack 3–5 example sentences. */
-  missingExamples: SemanticsLanguage[];
+  missingExamples: string[];
   /** Example sentences that do not find this tool (`tools eval`). */
   routing: RoutingSentenceFailure[];
   targets: {
@@ -386,7 +411,7 @@ export interface DescribeWorklist {
   outputsCurrent: boolean;
   blocking: BlockingFinding[];
   /** Languages every tool needs synonyms and examples in: the app language and English. */
-  languages: SemanticsLanguage[];
+  languages: string[];
   writeContracts: boolean;
   /** Tools of one module are described together, so similar tools set themselves apart. */
   modules: Array<{ module: string; tools: string[] }>;
@@ -397,7 +422,7 @@ export interface DescribeWorklist {
 export interface DescribeWorklistOptions {
   root: string;
   locale: string;
-  languages: SemanticsLanguage[];
+  languages: string[];
   /** Named tools (definition id or stable key); empty means every tool with a gap. */
   tools?: ReadonlyArray<string>;
   all?: boolean;
@@ -444,7 +469,7 @@ export function describeGaps(
   return gaps;
 }
 
-function perLanguage<T>(languages: ReadonlyArray<SemanticsLanguage>, value: (language: SemanticsLanguage) => T): Record<string, T> {
+function perLanguage<T>(languages: ReadonlyArray<string>, value: (language: string) => T): Record<string, T> {
   return Object.fromEntries(languages.map((language) => [language, value(language)]));
 }
 

@@ -1,10 +1,13 @@
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
+import type { InputEntityRef, OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
+import type { ObservedApprovalLevel } from './approval-subject-declarations.js';
 import type { EndpointMethod } from '../../types.js';
 import { compareCodeUnits, JsonSchemaCompileError, jsonSchemaDigest, OPAQUE_JSON_SCHEMA } from './canonical.js';
 import { toolFinding } from './findings.js';
 import type { SchemaUse } from './handler-analysis.js';
 import type { InputRole } from './input-roles.js';
 import { computeInterfaceDigest } from './interface-digest.js';
+import { invalidOutputFieldsFinding, resolveOutputFields, type DeclaredOutputFields } from './output-fields.js';
 import { inputEvidenceProblem, type ResolutionEntry } from './resolutions.js';
 import type {
   ProbedContractEntry,
@@ -54,6 +57,13 @@ export interface ResolveEndpointContractInput {
    * before a sibling contract module.
    */
   openapi?: OpenapiOperationInput;
+  /**
+   * Output fields an OpenAPI operation declares (`x-glirastes-output-*`); a
+   * sibling contract module declares its own in its entry.
+   */
+  outputFields?: DeclaredOutputFields;
+  /** `output.deniedFields` of `.glirastes/tools.json`: any-depth patterns every endpoint tool gets. */
+  appDeniedFields?: ReadonlyArray<string>;
 }
 
 export interface OpenapiOperationInput {
@@ -73,6 +83,26 @@ export interface ResolvedEndpointContract {
   declaredEffect?: DeclaredEffect;
   /** `maxResultChars` of the sibling contract module, when valid. */
   maxResultChars?: number;
+  /** Effective `outputAllowedFields` (`[]` when a declaration of the upper bound is invalid). */
+  outputAllowedFields?: string[];
+  /** Effective `outputDeniedFields`. */
+  outputDeniedFields?: string[];
+  /** Effective `outputDefaultFields`: within the upper bound. */
+  outputDefaultFields?: string[];
+  /** App-wide patterns the declared output schema names, and case near-misses (not written to outputs). */
+  appDeniedHits?: string[];
+  appDeniedNearKeys?: string[];
+  /** `outputEntities` / `inputEntities` of the sibling contract module entry (tool code), when valid. */
+  codeEntities?: CodeEntities;
+  /** `entityLookup` / `approvalSubject` / `lookupEffect` of the contract module entry (tool code), and their issues. */
+  codeApproval?: ObservedApprovalLevel;
+}
+
+/** Entity declarations of a contract module entry, the highest level. */
+export interface CodeEntities {
+  where: string;
+  output?: OutputEntityDeclaration[];
+  input?: InputEntityRef[];
 }
 
 export const OPAQUE_SCHEMA_DIGEST = jsonSchemaDigest(OPAQUE_JSON_SCHEMA);
@@ -178,9 +208,24 @@ function invalidMetadataFindings(subject: string, module: string, entry: ProbedC
     findings.push(toolFinding('contract-presentation-invalid', 'warning', subject,
       `${module} declares a presentation that does not match the presentation schema, so it is ignored.`));
   }
+  for (const field of ['title', 'description', 'synonyms', 'examples'] as const) {
+    if (entry.invalidFields?.includes(field)) {
+      findings.push(toolFinding('tool-texts-invalid', 'warning', subject,
+        `${module} declares a ${field} that is not one text or one text per language tag within the limits (or looks like a secret); it is ignored.`));
+    }
+  }
   if (entry.invalidFields?.includes('maxResultChars')) {
     findings.push(toolFinding('max-result-chars-invalid', 'warning', subject,
       `${module} declares a maxResultChars that is not an integer from 1000 to 200000; the declaration is ignored and the handler's limit applies.`));
+  }
+  for (const [field, which] of [['outputAllowedFields', 'allowed'], ['outputDeniedFields', 'denied'], ['outputDefaultFields', 'default']] as const) {
+    if (entry.invalidFields?.includes(field)) findings.push(invalidOutputFieldsFinding(subject, module, 'contract', which));
+  }
+  for (const field of ['outputEntities', 'inputEntities'] as const) {
+    if (entry.invalidFields?.includes(field)) {
+      findings.push(toolFinding('entity-declaration-invalid', 'warning', subject,
+        `${module} declares ${field} that are not a list of at most 20 valid declarations; they are ignored and the identity is guessed from field names.`));
+    }
   }
   return findings;
 }
@@ -491,11 +536,48 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
   const assessment = assessResolution(input, interfaceDigest);
   const resolution = assessment.usable;
   const effect = strongerEffect(strongerEffect(entry?.effect, resolution?.effect), input.openapi?.effect);
+  // A contract.ts description per language keeps the place of a plain one: below the JSDoc.
+  const { declaredDescription: contractDescriptions, title: contractTitle, ...contractTexts } = entry?.texts ?? {};
+  const contractDescription = entry?.description ?? contractDescriptions;
   const prose: ToolProseHints = {
-    ...(entry?.description ? { contractDescription: entry.description } : {}),
+    ...(contractDescription ? { contractDescription } : {}),
     ...(entry?.module ? { module: entry.module } : {}),
     ...(entry?.usageHints?.length ? { usageHints: entry.usageHints } : {}),
     ...(entry?.presentation ? { presentation: entry.presentation } : {}),
+    ...(entry?.presentations ? { presentations: entry.presentations } : {}),
+    ...(contractTitle !== undefined ? { contractTitle } : {}),
+    ...contractTexts,
+  };
+  // Output fields: of the OpenAPI operation, else of the contract module entry.
+  const ownFields: DeclaredOutputFields | undefined = input.outputFields ?? (entry && input.contractModule
+    ? {
+        where: input.contractModule.module,
+        form: 'contract',
+        ...(entry.outputAllowedFields ? { allowed: entry.outputAllowedFields } : {}),
+        ...(entry.outputDeniedFields ? { denied: entry.outputDeniedFields } : {}),
+        ...(entry.outputDefaultFields ? { default: entry.outputDefaultFields } : {}),
+        ...(entry.invalidFields?.includes('outputAllowedFields') ? { allowed: 'invalid' as const } : {}),
+        ...(entry.invalidFields?.includes('outputDeniedFields') ? { denied: 'invalid' as const } : {}),
+        ...(entry.invalidFields?.includes('outputDefaultFields') ? { default: 'invalid' as const } : {}),
+      }
+    : undefined);
+  // The app-wide patterns of tools.json join every tool's own deny-list.
+  const appDenied = input.appDeniedFields && input.appDeniedFields.length > 0 ? [...input.appDeniedFields] : undefined;
+  const declaredFields: DeclaredOutputFields | undefined = appDenied
+    ? { ...(ownFields ?? { where: '.glirastes/tools.json output.deniedFields', form: 'contract' as const }), appDenied }
+    : ownFields;
+  const outputFieldsOf = (output: JsonSchemaLike | undefined) => {
+    const fields = resolveOutputFields(subject, declaredFields, output);
+    return {
+      fields,
+      lists: {
+        ...(fields.allowed ? { outputAllowedFields: fields.allowed } : {}),
+        ...(fields.denied ? { outputDeniedFields: fields.denied } : {}),
+        ...(fields.default ? { outputDefaultFields: fields.default } : {}),
+        ...(fields.appDeniedHits ? { appDeniedHits: fields.appDeniedHits } : {}),
+        ...(fields.appDeniedNearKeys ? { appDeniedNearKeys: fields.appDeniedNearKeys } : {}),
+      },
+    };
   };
   const base = {
     interfaceDigest,
@@ -503,6 +585,18 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     ...(entry?.id ? { explicitId: entry.id } : {}),
     ...(effect ? { declaredEffect: effect } : {}),
     ...(entry?.maxResultChars !== undefined ? { maxResultChars: entry.maxResultChars } : {}),
+    ...(entry && input.contractModule && (entry.outputEntities || entry.inputEntities)
+      ? {
+        codeEntities: {
+          where: input.contractModule.module,
+          ...(entry.outputEntities ? { output: entry.outputEntities } : {}),
+          ...(entry.inputEntities ? { input: entry.inputEntities } : {}),
+        },
+      }
+      : {}),
+    ...(entry?.approval && input.contractModule
+      ? { codeApproval: { where: input.contractModule.module, ...entry.approval } }
+      : {}),
   };
   // A contract module with secret-looking content or unusable metadata is reported on every path, also when another tier wins.
   const moduleFindings = ((): ToolFinding[] => {
@@ -517,13 +611,29 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
       finding.code === extra.code && finding.message === extra.message
     ))),
   ];
-  const unresolved = (findings: ToolFinding[]): ResolvedEndpointContract => ({
-    ...base,
-    inputSchemaDigest: OPAQUE_SCHEMA_DIGEST,
-    outputSchemaDigest: OPAQUE_SCHEMA_DIGEST,
-    findings: withModuleFindings(findings),
-  });
-  const output = chooseOutput(input, entry, resolution);
+  const unresolved = (findings: ToolFinding[]): ResolvedEndpointContract => {
+    const { fields, lists } = outputFieldsOf(undefined);
+    return {
+      ...base,
+      ...lists,
+      inputSchemaDigest: OPAQUE_SCHEMA_DIGEST,
+      outputSchemaDigest: OPAQUE_SCHEMA_DIGEST,
+      findings: withModuleFindings([...findings, ...fields.findings]),
+    };
+  };
+  const chosen = chooseOutput(input, entry, resolution);
+  // The output contract tells the model only about fields within the upper bound.
+  const { fields: outputFields, lists: outputLists } = outputFieldsOf(chosen.json);
+  const output: OutputChoice = outputFields.output
+    ? {
+        ...chosen,
+        json: outputFields.output,
+        ...(chosen.source.kind === 'json'
+          ? { source: jsonSource(outputFields.output), digest: jsonSchemaDigest(outputFields.output) }
+          : {}),
+        findings: [...chosen.findings, ...outputFields.findings],
+      }
+    : { ...chosen, findings: [...chosen.findings, ...outputFields.findings] };
   const finish = (
     source: ToolContract['source'],
     loadBearing: boolean,
@@ -536,6 +646,7 @@ export function resolveEndpointContract(input: ResolveEndpointContractInput): Re
     const description = schemaDescription ?? output.description;
     return {
       ...base,
+      ...outputLists,
       prose: { ...prose, ...(description ? { schemaDescription: description } : {}) },
       contract: {
         source,

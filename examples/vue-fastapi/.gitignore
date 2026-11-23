@@ -1,3 +1,11 @@
 __pycache__/
 web/node_modules/
 web/dist/
+# Written by `glirastes tools refresh` (scripts/acceptance-run.sh runs it); the tests regenerate them.
+.glirastes/build/
+.glirastes/foundation-execution-inventory.json
+.glirastes/setup-artifact.json
+.glirastes/setup-receipt.json
+.glirastes/tool-contracts.json
+.glirastes/tool-report.json
+.glirastes/tool-tombstones.json

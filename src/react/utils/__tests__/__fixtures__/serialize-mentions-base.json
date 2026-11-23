@@ -1,0 +1,1555 @@
+[
+  {
+    "name": "id \"AB 123\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "AB 123",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:AB 123:Acme}} now"
+  },
+  {
+    "name": "id \"My File.pdf\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "My File.pdf",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:My File.pdf:Acme}} now"
+  },
+  {
+    "name": "id \"a<b\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "a<b",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:a<b:Acme}} now"
+  },
+  {
+    "name": "id \"a>b\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "a>b",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:a>b:Acme}} now"
+  },
+  {
+    "name": "id \"{x\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "{x",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:{x:Acme}} now"
+  },
+  {
+    "name": "id \"tenant:42\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "tenant:42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:tenant:42:Acme}} now"
+  },
+  {
+    "name": "id \"https://example.com/x?y=1&z=2\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "https://example.com/x?y=1&z=2",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:https://example.com/x?y=1&z=2:Acme}} now"
+  },
+  {
+    "name": "id \"gid://shopify/Product/123\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "gid://shopify/Product/123",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:gid://shopify/Product/123:Acme}} now"
+  },
+  {
+    "name": "id \"550e8400-e29b-41d4-a716-446655440000\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:550e8400-e29b-41d4-a716-446655440000:Acme}} now"
+  },
+  {
+    "name": "id \"42\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:42:Acme}} now"
+  },
+  {
+    "name": "id \"user+tag@example.com\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "user+tag@example.com",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:user+tag@example.com:Acme}} now"
+  },
+  {
+    "name": "id \"Ä-1\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "Ä-1",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:Ä-1:Acme}} now"
+  },
+  {
+    "name": "id \"lobby/4\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "lobby/4",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:lobby/4:Acme}} now"
+  },
+  {
+    "name": "id \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:Acme}} now"
+  },
+  {
+    "name": "id \"a/b c\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "a/b c",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:a/b c:Acme}} now"
+  },
+  {
+    "name": "id \"ü@ß!\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "ü@ß!",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Show {{mention:customer:ü@ß!:Acme}} now"
+  },
+  {
+    "name": "id in block \"AB 123\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "AB 123",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: AB 123)]--> Show {{mention:customer:AB 123:Acme}} now"
+  },
+  {
+    "name": "id in block \"My File.pdf\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "My File.pdf",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: My File.pdf)]--> Show {{mention:customer:My File.pdf:Acme}} now"
+  },
+  {
+    "name": "id in block \"a<b\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "a<b",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: a<b)]--> Show {{mention:customer:a<b:Acme}} now"
+  },
+  {
+    "name": "id in block \"a>b\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "a>b",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: a>b)]--> Show {{mention:customer:a>b:Acme}} now"
+  },
+  {
+    "name": "id in block \"{x\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "{x",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: {x)]--> Show {{mention:customer:{x:Acme}} now"
+  },
+  {
+    "name": "id in block \"tenant:42\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "tenant:42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: tenant:42)]--> Show {{mention:customer:tenant:42:Acme}} now"
+  },
+  {
+    "name": "id in block \"https://example.com/x?y=1&z=2\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "https://example.com/x?y=1&z=2",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: https://example.com/x?y=1&z=2)]--> Show {{mention:customer:https://example.com/x?y=1&z=2:Acme}} now"
+  },
+  {
+    "name": "id in block \"gid://shopify/Product/123\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "gid://shopify/Product/123",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: gid://shopify/Product/123)]--> Show {{mention:customer:gid://shopify/Product/123:Acme}} now"
+  },
+  {
+    "name": "id in block \"550e8400-e29b-41d4-a716-446655440000\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: 550e8400-e29b-41d4-a716-446655440000)]--> Show {{mention:customer:550e8400-e29b-41d4-a716-446655440000:Acme}} now"
+  },
+  {
+    "name": "id in block \"42\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: 42)]--> Show {{mention:customer:42:Acme}} now"
+  },
+  {
+    "name": "id in block \"user+tag@example.com\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "user+tag@example.com",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: user+tag@example.com)]--> Show {{mention:customer:user+tag@example.com:Acme}} now"
+  },
+  {
+    "name": "id in block \"Ä-1\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "Ä-1",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: Ä-1)]--> Show {{mention:customer:Ä-1:Acme}} now"
+  },
+  {
+    "name": "id in block \"lobby/4\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "lobby/4",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: lobby/4)]--> Show {{mention:customer:lobby/4:Acme}} now"
+  },
+  {
+    "name": "id in block \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)]--> Show {{mention:customer:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:Acme}} now"
+  },
+  {
+    "name": "id in block \"a/b c\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "a/b c",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: a/b c)]--> Show {{mention:customer:a/b c:Acme}} now"
+  },
+  {
+    "name": "id in block \"ü@ß!\"",
+    "text": "Show @acme now",
+    "mentions": [
+      {
+        "id": "ü@ß!",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: ü@ß!)]--> Show {{mention:customer:ü@ß!:Acme}} now"
+  },
+  {
+    "name": "type \"customer\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:customer:42:Acme}}"
+  },
+  {
+    "name": "type \"Customer\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "Customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:Customer:42:Acme}}"
+  },
+  {
+    "name": "type \"salesOrder\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "salesOrder",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:salesOrder:42:Acme}}"
+  },
+  {
+    "name": "type \"_x\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "_x",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:_x:42:Acme}}"
+  },
+  {
+    "name": "type \"1a\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "1a",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:1a:42:Acme}}"
+  },
+  {
+    "name": "type \"tâche\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "tâche",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:tâche:42:Acme}}"
+  },
+  {
+    "name": "type \"ttttttttttttttttttttttttttttttttttttttt",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt:42:Acme}}"
+  },
+  {
+    "name": "type \"crm.contact\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "crm.contact",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:crm.contact:42:Acme}}"
+  },
+  {
+    "name": "type \"command\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "command",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:command:42:Acme}}"
+  },
+  {
+    "name": "type \"my type\"",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "my type",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:my type:42:Acme}}"
+  },
+  {
+    "name": "label \"Acme GmbH\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme GmbH",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme GmbH (ID: 42)]--> See {{mention:customer:42:Acme GmbH}}"
+  },
+  {
+    "name": "label \"ACME <Süd> & Co. -> a/b\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "ACME <Süd> & Co. -> a/b",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: ACME <Süd> & Co. -> a/b (ID: 42)]--> See {{mention:customer:42:ACME <Süd> & Co. -> a/b}}"
+  },
+  {
+    "name": "label \"Müller\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Müller",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Müller (ID: 42)]--> See {{mention:customer:42:Müller}}"
+  },
+  {
+    "name": "label \"日本語のタスク\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "日本語のタスク",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: 日本語のタスク (ID: 42)]--> See {{mention:customer:42:日本語のタスク}}"
+  },
+  {
+    "name": "label \"Live + v2\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Live + v2",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Live + v2 (ID: 42)]--> See {{mention:customer:42:Live + v2}}"
+  },
+  {
+    "name": "label \"O'Brien (x) [y] *z* _w_ `c` | ~\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "O'Brien (x) [y] *z* _w_ `c` | ~",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: O'Brien (x) [y] *z* _w_ `c` | ~ (ID: 42)]--> See {{mention:customer:42:O'Brien (x) [y] *z* _w_ `c` | ~}}"
+  },
+  {
+    "name": "label \"👨‍👩‍👧 Team\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "👨‍👩‍👧 Team",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: 👨‍👩‍👧 Team (ID: 42)]--> See {{mention:customer:42:👨‍👩‍👧 Team}}"
+  },
+  {
+    "name": "label \"🏴󠁧󠁢󠁥󠁮󠁧󠁿 FC\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 FC",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: 🏴󠁧󠁢󠁥󠁮󠁧󠁿 FC (ID: 42)]--> See {{mention:customer:42:🏴󠁧󠁢󠁥󠁮󠁧󠁿 FC}}"
+  },
+  {
+    "name": "label \"🇩🇪 GmbH\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "🇩🇪 GmbH",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: 🇩🇪 GmbH (ID: 42)]--> See {{mention:customer:42:🇩🇪 GmbH}}"
+  },
+  {
+    "name": "label \"می‌خواهم\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "می‌خواهم",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: می‌خواهم (ID: 42)]--> See {{mention:customer:42:می‌خواهم}}"
+  },
+  {
+    "name": "label \"क्‍ष\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "क्‍ष",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: क्‍ष (ID: 42)]--> See {{mention:customer:42:क्‍ष}}"
+  },
+  {
+    "name": "label \"Acme GmbH\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme GmbH",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme GmbH (ID: 42)]--> See {{mention:customer:42:Acme GmbH}}"
+  },
+  {
+    "name": "label \"Acme  GmbH\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme  GmbH",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme  GmbH (ID: 42)]--> See {{mention:customer:42:Acme  GmbH}}"
+  },
+  {
+    "name": "label \"Acme GmbH　AG\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme GmbH　AG",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme GmbH　AG (ID: 42)]--> See {{mention:customer:42:Acme GmbH　AG}}"
+  },
+  {
+    "name": "label \"葛󠄀飾\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "葛󠄀飾",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: 葛󠄀飾 (ID: 42)]--> See {{mention:customer:42:葛󠄀飾}}"
+  },
+  {
+    "name": "label \"1️⃣ Platz\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "1️⃣ Platz",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: 1️⃣ Platz (ID: 42)]--> See {{mention:customer:42:1️⃣ Platz}}"
+  },
+  {
+    "name": "label \"❤️ Team\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "❤️ Team",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: ❤️ Team (ID: 42)]--> See {{mention:customer:42:❤️ Team}}"
+  },
+  {
+    "name": "label \"a < b > c\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "a < b > c",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: a < b > c (ID: 42)]--> See {{mention:customer:42:a < b > c}}"
+  },
+  {
+    "name": "label \"x->y <b>bold</b> --flag\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "x->y <b>bold</b> --flag",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: x->y <b>bold</b> --flag (ID: 42)]--> See {{mention:customer:42:x->y <b>bold</b> --flag}}"
+  },
+  {
+    "name": "label \"Dr. 👩🏽‍⚕️\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Dr. 👩🏽‍⚕️",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Dr. 👩🏽‍⚕️ (ID: 42)]--> See {{mention:customer:42:Dr. 👩🏽‍⚕️}}"
+  },
+  {
+    "name": "label \"Release 1.2: final\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Release 1.2: final",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Release 1.2: final (ID: 42)]--> See {{mention:customer:42:Release 1.2: final}}"
+  },
+  {
+    "name": "label \"50 % ✓\"",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "50 % ✓",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: 50 % ✓ (ID: 42)]--> See {{mention:customer:42:50 % ✓}}"
+  },
+  {
+    "name": "label \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "text": "See @acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (ID: 42)]--> See {{mention:customer:42:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}}"
+  },
+  {
+    "name": "repeated mention of the same entity",
+    "text": "@acme and @acme again",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      },
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:customer:42:Acme}} and {{mention:customer:42:Acme}} again"
+  },
+  {
+    "name": "two entities with the same token: the first in the list wins",
+    "text": "@alex asks @alex",
+    "mentions": [
+      {
+        "id": "first",
+        "type": "user",
+        "label": "Alex",
+        "slug": "alex",
+        "prefix": "@"
+      },
+      {
+        "id": "second",
+        "type": "user",
+        "label": "Alex",
+        "slug": "alex",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:first:Alex}} asks {{mention:user:first:Alex}}"
+  },
+  {
+    "name": "slug that is a prefix of another",
+    "text": "@ab and @abc",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "Ab",
+        "slug": "ab",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "Abc",
+        "slug": "abc",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:Ab}} and {{mention:user:2:Abc}}"
+  },
+  {
+    "name": "slug that is a prefix of another, longer first",
+    "text": "@ab and @abc",
+    "mentions": [
+      {
+        "id": "2",
+        "type": "user",
+        "label": "Abc",
+        "slug": "abc",
+        "prefix": "@"
+      },
+      {
+        "id": "1",
+        "type": "user",
+        "label": "Ab",
+        "slug": "ab",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:Ab}} and {{mention:user:2:Abc}}"
+  },
+  {
+    "name": "case differences",
+    "text": "@Bob and @bob",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "Bob",
+        "slug": "Bob",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "bob",
+        "slug": "bob",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:Bob}} and {{mention:user:2:bob}}"
+  },
+  {
+    "name": "mention not in the text",
+    "text": "nothing here",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "Bob",
+        "slug": "bob",
+        "prefix": "@"
+      }
+    ],
+    "expected": "nothing here"
+  },
+  {
+    "name": "token glued to text is no token",
+    "text": "x@bob @bob, @bob",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "Bob",
+        "slug": "bob",
+        "prefix": "@"
+      }
+    ],
+    "expected": "x@bob @bob, {{mention:user:1:Bob}}"
+  },
+  {
+    "name": "token at start, end, between newlines",
+    "text": "@bob\n@bob\t@bob",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "Bob",
+        "slug": "bob",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:Bob}}\n{{mention:user:1:Bob}}\t{{mention:user:1:Bob}}"
+  },
+  {
+    "name": "slug derived from the label",
+    "text": "Hi @erste-aufgabe",
+    "mentions": [
+      {
+        "id": "t1",
+        "type": "task",
+        "label": "Erste Aufgabe"
+      }
+    ],
+    "expected": "Hi {{mention:task:t1:Erste Aufgabe}}"
+  },
+  {
+    "name": "command with tool reference and entity",
+    "text": "/budget for @acme",
+    "mentions": [
+      {
+        "id": "tasks.budget",
+        "type": "command",
+        "label": "Budget",
+        "slug": "budget",
+        "prefix": "/",
+        "definitionId": "tasks.budget",
+        "args": {
+          "year": 2026
+        }
+      },
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "<!--context:[Referenced entities: Budget (ID: tasks.budget, tool: tasks.budget, args: {\"year\":2026})]--> {{mention:command:tasks.budget:Budget}} for {{mention:customer:42:Acme}}"
+  },
+  {
+    "name": "three entities in block",
+    "text": "@a, @b and @c",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "task",
+        "label": "B",
+        "slug": "b",
+        "prefix": "@"
+      },
+      {
+        "id": "3",
+        "type": "customer",
+        "label": "C",
+        "slug": "c",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true,
+      "contextLabel": "Refs"
+    },
+    "expected": "<!--context:[Refs: B (ID: 2), C (ID: 3)]--> @a, {{mention:task:2:B}} and {{mention:customer:3:C}}"
+  },
+  {
+    "name": "existing context block is stripped",
+    "text": "<!--context:[old]--> @a",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:A}}"
+  },
+  {
+    "name": "empty id is skipped",
+    "text": "@a",
+    "mentions": [
+      {
+        "id": "",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      }
+    ],
+    "expected": "@a"
+  },
+  {
+    "name": "serialization disabled",
+    "text": "@a",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "enabled": false
+    },
+    "expected": "@a"
+  },
+  {
+    "name": "slug with a space",
+    "text": "ask @a b now",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "AB",
+        "slug": "a b",
+        "prefix": "@"
+      }
+    ],
+    "expected": "ask {{mention:user:1:AB}} now"
+  },
+  {
+    "name": "raw: ordinary labels",
+    "text": "See @acme and @bob",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme GmbH",
+        "slug": "acme",
+        "prefix": "@"
+      },
+      {
+        "id": "7",
+        "type": "user",
+        "label": "Bob",
+        "slug": "bob",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "labels": "raw"
+    },
+    "expected": "See {{mention:customer:42:Acme GmbH}} and {{mention:user:7:Bob}}"
+  },
+  {
+    "name": "raw: id with colon and type with capitals",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "tenant:42",
+        "type": "Customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "labels": "raw",
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: tenant:42)]--> {{mention:Customer:tenant:42:Acme}}"
+  },
+  {
+    "name": "token with whitespace and overlap",
+    "text": "#t @p @p @p",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "T",
+        "prefix": "#",
+        "slug": "t @p"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "P",
+        "prefix": "@",
+        "slug": "p @p"
+      }
+    ],
+    "expected": "{{mention:user:1:T}} {{mention:user:2:P}}"
+  },
+  {
+    "name": "self-overlapping token",
+    "text": "@p @p @p @p @p",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "P",
+        "slug": "p @p",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:P}} {{mention:user:1:P}} @p"
+  },
+  {
+    "name": "later mention inside an earlier token is not split",
+    "text": "@a b @b",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "AB",
+        "slug": "a b",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "B",
+        "slug": "b",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:AB}} {{mention:user:2:B}}"
+  },
+  {
+    "name": "different prefixes, same slug",
+    "text": "#x @x /x",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "tag",
+        "label": "X",
+        "slug": "x",
+        "prefix": "#"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "X",
+        "slug": "x",
+        "prefix": "@"
+      },
+      {
+        "id": "3",
+        "type": "command",
+        "label": "X",
+        "slug": "x",
+        "prefix": "/"
+      }
+    ],
+    "expected": "{{mention:tag:1:X}} {{mention:user:2:X}} {{mention:command:3:X}}"
+  },
+  {
+    "name": "unicode slug",
+    "text": "Hallo @müller-gmbh!",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "customer",
+        "label": "Müller GmbH",
+        "slug": "müller-gmbh",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Hallo @müller-gmbh!"
+  },
+  {
+    "name": "unicode slug with boundary",
+    "text": "Hallo @müller-gmbh und @müller-gmbh",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "customer",
+        "label": "Müller GmbH",
+        "slug": "müller-gmbh",
+        "prefix": "@"
+      }
+    ],
+    "expected": "Hallo {{mention:customer:1:Müller GmbH}} und {{mention:customer:1:Müller GmbH}}"
+  },
+  {
+    "name": "tabs, newlines and NBSP around tokens",
+    "text": "@a\t@b\n@a @b",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "B",
+        "slug": "b",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:A}}\t{{mention:user:2:B}}\n{{mention:user:1:A}} {{mention:user:2:B}}"
+  },
+  {
+    "name": "many repeats of one mention",
+    "text": "@a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a @a",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}} {{mention:user:1:A}}"
+  },
+  {
+    "name": "same entity under two tokens, listed in block twice",
+    "text": "@acme @acme-gmbh",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme",
+        "prefix": "@"
+      },
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "Acme",
+        "slug": "acme-gmbh",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: Acme (ID: 42), Acme (ID: 42)]--> {{mention:customer:42:Acme}} {{mention:customer:42:Acme}}"
+  },
+  {
+    "name": "mention order differs from text order",
+    "text": "@b then @a",
+    "mentions": [
+      {
+        "id": "1",
+        "type": "user",
+        "label": "A",
+        "slug": "a",
+        "prefix": "@"
+      },
+      {
+        "id": "2",
+        "type": "user",
+        "label": "B",
+        "slug": "b",
+        "prefix": "@"
+      }
+    ],
+    "options": {
+      "includeContextBlock": true
+    },
+    "expected": "<!--context:[Referenced entities: A (ID: 1), B (ID: 2)]--> {{mention:user:2:B}} then {{mention:user:1:A}}"
+  },
+  {
+    "name": "label with 120 code points of emoji",
+    "text": "@acme",
+    "mentions": [
+      {
+        "id": "42",
+        "type": "customer",
+        "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "slug": "acme",
+        "prefix": "@"
+      }
+    ],
+    "expected": "{{mention:customer:42:😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀}}"
+  }
+]

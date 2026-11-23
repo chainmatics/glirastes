@@ -8,20 +8,34 @@ import { PlanChecklist } from '../plan-checklist.js';
 import { DEFAULT_LOCALE } from '../../provider/ai-chat-provider.js';
 import { deChatLocale } from '../../locale-de.js';
 
-vi.mock('../../provider/chat-context.js', () => ({
-  useChatContext: () => ({
+const chatContext = vi.hoisted(() => ({
+  current: {
     classNames: {},
-    locale: deChatLocale,
+    components: {} as Record<string, unknown>,
+    activityLog: {} as Record<string, unknown>,
+    locale: {} as Record<string, string>,
     toolLabels: {
       labels: {
         list_tasks: { singular: 'Aufgaben lesen', plural: 'Aufgaben lesen' },
         create_team: { singular: 'Team anlegen', plural: 'Teams anlegen' },
       },
     },
-  }),
+  },
 }));
 
-afterEach(cleanup);
+vi.mock('../../provider/chat-context.js', () => ({
+  useChatContext: () => chatContext.current,
+}));
+
+// vi.hoisted runs before imports, so the locale is set here.
+chatContext.current.locale = deChatLocale as unknown as Record<string, string>;
+
+afterEach(() => {
+  cleanup();
+  chatContext.current.components = {};
+  chatContext.current.activityLog = {};
+  chatContext.current.locale = deChatLocale as unknown as Record<string, string>;
+});
 
 function root() {
   return document.querySelector('[data-component="activity-log"]') as HTMLDetailsElement | null;
@@ -30,6 +44,35 @@ function root() {
 function rows() {
   return Array.from(document.querySelectorAll('[data-element="activity-step"]'));
 }
+
+describe('ActivityLog summary icon', () => {
+  const summaryIcon = () => document.querySelector('[data-element="activity-summary"] [data-element="icon"]')!.getAttribute('data-icon');
+  type Status = 'done' | 'error' | 'declined' | 'expected' | 'aborted';
+  const stepsOf = (statuses: Status[]) => statuses.map((status, index) => ({ id: `c${index}`, toolName: 'list_tasks', status }));
+
+  it.each<[Status[], string]>([
+    [['done'], 'check'],
+    [['done', 'declined'], 'check'],
+    [['done', 'aborted', 'expected'], 'check'],
+    [['aborted'], 'aborted'],
+    [['aborted', 'aborted'], 'aborted'],
+    [['declined'], 'declined'],
+    [['expected'], 'notice'],
+    [['declined', 'aborted'], 'notice'],
+    [['expected', 'declined'], 'notice'],
+    [['error'], 'error'],
+    [['done', 'error'], 'error'],
+    [['aborted', 'error'], 'error'],
+  ])('shows a check mark only when a step succeeded and none failed: %j → %s', (statuses, icon) => {
+    render(<ActivityLog active={false} steps={stepsOf(statuses)} />);
+    expect(summaryIcon()).toBe(icon);
+  });
+
+  it('shows a neutral icon for a step that was still running when its turn ended', () => {
+    render(<ActivityLog active={false} steps={[{ id: 'c1', toolName: 'list_tasks', status: 'running' }]} />);
+    expect(summaryIcon()).toBe('aborted');
+  });
+});
 
 describe('ActivityLog', () => {
   it('renders nothing without tool steps', () => {
@@ -55,7 +98,7 @@ describe('ActivityLog', () => {
 
     // The summary still counts every call.
     expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
-      .toContain('7 Schritte ausgeführt');
+      .toBe('6 Schritte ausgeführt, 1 fehlgeschlagen');
     expect(rows().map((row) => row.textContent)).toEqual([
       'Aufgaben lesen×3',
       'Team anlegen',
@@ -104,8 +147,7 @@ describe('ActivityLog', () => {
     );
     const summary = document.querySelector('[data-element="activity-summary"]')!;
     expect(root()!.getAttribute('data-state')).toBe('error');
-    expect(summary.textContent).toContain('3 Schritte ausgeführt');
-    expect(summary.textContent).toContain('1 fehlgeschlagen');
+    expect(summary.textContent).toBe('2 Schritte ausgeführt, 1 fehlgeschlagen');
 
     fireEvent.click(summary);
     expect(root()!.open).toBe(true);
@@ -116,6 +158,130 @@ describe('ActivityLog', () => {
     expect(rows()[0].textContent).toContain('3 Aufgaben');
     expect(rows()[1].textContent).toContain('Name fehlt');
     expect(rows()[2].textContent).toContain('unknown_tool');
+  });
+
+  it('shows a declined call neutrally: not counted as failed, no error state', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'done' },
+          { id: 'c2', toolName: 'create_team', status: 'declined' },
+        ]}
+      />,
+    );
+    const summary = document.querySelector('[data-element="activity-summary"]')!;
+    expect(root()!.getAttribute('data-state')).toBe('done');
+    expect(summary.textContent).toBe('1 Schritt ausgeführt, 1 abgelehnt');
+    expect(summary.querySelector('[data-icon="check"]')).not.toBeNull();
+    expect(rows()[1].getAttribute('data-status')).toBe('declined');
+    expect(rows()[1].querySelector('[data-element="icon"]')!.getAttribute('data-icon')).toBe('declined');
+  });
+
+  it('shows an expected failure neutrally: counted on its own, not as failed, no error state', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'expected', detail: 'Nicht gefunden' },
+          { id: 'c2', toolName: 'list_tasks', status: 'done' },
+        ]}
+      />,
+    );
+    const summary = document.querySelector('[data-element="activity-summary"]')!;
+    expect(root()!.getAttribute('data-state')).toBe('done');
+    expect(summary.textContent).toBe('1 Schritt ausgeführt, 1 ohne Ergebnis');
+    expect(summary.querySelector('[data-icon="check"]')).not.toBeNull();
+    expect(rows()[0].getAttribute('data-status')).toBe('expected');
+    expect(rows()[0].querySelector('[data-element="icon"]')!.getAttribute('data-icon')).toBe('notice');
+    expect(rows()[0].textContent).toContain('Nicht gefunden');
+  });
+
+  it('counts failed, declined and expected calls apart', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'create_team', status: 'error' },
+          { id: 'c2', toolName: 'list_tasks', status: 'declined' },
+          { id: 'c3', toolName: 'list_tasks', status: 'expected' },
+        ]}
+      />,
+    );
+    expect(root()!.getAttribute('data-state')).toBe('error');
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toBe('1 fehlgeschlagen, 1 abgelehnt, 1 ohne Ergebnis');
+  });
+
+  it('counts failed and declined calls apart', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'create_team', status: 'error' },
+          { id: 'c2', toolName: 'list_tasks', status: 'declined' },
+        ]}
+      />,
+    );
+    expect(root()!.getAttribute('data-state')).toBe('error');
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toBe('1 fehlgeschlagen, 1 abgelehnt');
+  });
+
+  it('words the summary true for every mix of outcomes (de and en)', () => {
+    const summary = () => document.querySelector('[data-element="activity-summary"]')!.textContent;
+    const cases: Array<[Array<'done' | 'error' | 'declined' | 'expected'>, string, string]> = [
+      [['expected', 'expected'], '2 ohne Ergebnis', '2 without result'],
+      [['declined', 'declined'], '2 abgelehnt', '2 declined'],
+      [['done', 'declined'], '1 Schritt ausgeführt, 1 abgelehnt', '1 step done, 1 declined'],
+      [['done', 'done', 'expected'], '2 Schritte ausgeführt, 1 ohne Ergebnis', '2 steps done, 1 without result'],
+      [['error'], '1 fehlgeschlagen', '1 failed'],
+      [['done', 'error', 'error', 'declined', 'expected'], '1 Schritt ausgeführt, 2 fehlgeschlagen, 1 abgelehnt, 1 ohne Ergebnis',
+        '1 step done, 2 failed, 1 declined, 1 without result'],
+    ];
+    for (const [statuses, german, english] of cases) {
+      const steps = statuses.map((status, i) => ({ id: `c${i}`, toolName: i % 2 ? 'list_tasks' : 'create_team', status }));
+      for (const [locale, text] of [[deChatLocale, german], [DEFAULT_LOCALE, english]] as const) {
+        chatContext.current.locale = locale as unknown as Record<string, string>;
+        render(<ActivityLog active={false} steps={steps} />);
+        expect(summary()).toBe(text);
+        cleanup();
+      }
+    }
+  });
+
+  it('keeps an app override of the done texts, now with the done steps as {count}', () => {
+    chatContext.current.locale = {
+      ...deChatLocale,
+      activityDoneLabel: '{count} Aktionen',
+      activityDoneOneLabel: 'Eine Aktion',
+    } as unknown as Record<string, string>;
+    const view = render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'done' },
+          { id: 'c2', toolName: 'create_team', status: 'done' },
+          { id: 'c3', toolName: 'create_team', status: 'declined' },
+        ]}
+      />,
+    );
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent).toBe('2 Aktionen, 1 abgelehnt');
+    view.rerender(<ActivityLog active={false} steps={[{ id: 'c1', toolName: 'list_tasks', status: 'done' }]} />);
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent).toBe('Eine Aktion');
+  });
+
+  it('keeps an approval the server did not use apart from a refused one', () => {
+    render(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'create_team', status: 'declined', declinedBy: 'user' },
+          { id: 'c2', toolName: 'create_team', status: 'declined', declinedBy: 'server' },
+        ]}
+      />,
+    );
+    expect(rows()).toHaveLength(2);
   });
 
   it('uses the singular for one step', () => {
@@ -143,9 +309,128 @@ describe('ActivityLog', () => {
       .toBe('Sicherheitsstopp');
   });
 
+  it('stays collapsed while running by default and opens only with expandWhileRunning', () => {
+    const steps = [
+      { id: 'c1', toolName: 'list_tasks', status: 'done' as const },
+      { id: 'c2', toolName: 'create_team', status: 'running' as const },
+    ];
+    render(<ActivityLog active steps={steps} />);
+    expect(root()!.open).toBe(false);
+    expect(root()!.hasAttribute('open')).toBe(false);
+
+    cleanup();
+    chatContext.current.activityLog = { expandWhileRunning: true };
+    const view = render(<ActivityLog active steps={steps} />);
+    expect(root()!.open).toBe(true);
+    // Collapses again when the turn is over.
+    view.rerender(
+      <ActivityLog active={false} steps={[steps[0]!, { ...steps[1]!, status: 'done' }]} />,
+    );
+    expect(root()!.open).toBe(false);
+  });
+
+  it('keeps a log the user closed during the run closed', () => {
+    chatContext.current.activityLog = { expandWhileRunning: true };
+    const steps = [{ id: 'c1', toolName: 'create_team', status: 'running' as const }];
+    const view = render(<ActivityLog active steps={steps} />);
+    expect(root()!.open).toBe(true);
+    root()!.open = false;
+    fireEvent(root()!, new Event('toggle'));
+    view.rerender(<ActivityLog active steps={[...steps, { id: 'c2', toolName: 'list_tasks', status: 'running' as const }]} />);
+    expect(root()!.open).toBe(false);
+  });
+
+  it('shows the progress of a running turn only with runningProgress', () => {
+    const steps = [
+      { id: 'c1', toolName: 'list_tasks', status: 'done' as const },
+      { id: 'c2', toolName: 'list_tasks', status: 'expected' as const },
+      { id: 'c3', toolName: 'create_team', status: 'running' as const },
+    ];
+    render(<ActivityLog active steps={steps} />);
+    const summary = () => document.querySelector('[data-element="activity-summary"]')!.textContent;
+    expect(summary()).toBe('Team anlegen…');
+
+    cleanup();
+    chatContext.current.activityLog = { runningProgress: true };
+    render(<ActivityLog active steps={steps} />);
+    // Only done steps count: the neutral one is not "erledigt".
+    expect(summary()).toBe('1 erledigt, Team anlegen…');
+
+    cleanup();
+    render(<ActivityLog active steps={[{ id: 'c1', toolName: 'create_team', status: 'running' }]} />);
+    // Nothing finished yet: no count.
+    expect(summary()).toBe('Team anlegen…');
+
+    cleanup();
+    render(<ActivityLog active steps={[{ id: 'c1', toolName: 'create_team', status: 'done' }]} />);
+    expect(summary()).toBe('1 erledigt, Arbeitet…');
+  });
+
+  it('takes every text of the summary and the steps from the locale', () => {
+    chatContext.current.locale = {
+      ...deChatLocale,
+      activityRunningLabel: '«{label}»',
+      activityStepCountLabel: '({count})',
+      activitySummarySeparator: ' / ',
+    } as unknown as Record<string, string>;
+    const view = render(<ActivityLog active steps={[{ id: 'c1', toolName: 'create_team', status: 'running' }]} />);
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent).toBe('«Team anlegen»');
+    view.rerender(
+      <ActivityLog
+        active={false}
+        steps={[
+          { id: 'c1', toolName: 'list_tasks', status: 'error' },
+          { id: 'c2', toolName: 'list_tasks', status: 'error' },
+          { id: 'c3', toolName: 'create_team', status: 'declined' },
+        ]}
+      />,
+    );
+    expect(document.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toBe('2 fehlgeschlagen / 1 abgelehnt');
+    expect(rows()[0]!.querySelector('[data-element="count"]')!.textContent).toBe('(2)');
+  });
+
+  it('renders the notice through the TurnNotice slot inside the log', () => {
+    const seen: unknown[] = [];
+    chatContext.current.components = {
+      TurnNotice: (props: { text: string; status: string; placement: string }) => {
+        seen.push(props);
+        return <em data-testid="notice">{props.text}</em>;
+      },
+    };
+    render(
+      <ActivityLog
+        active={false}
+        notice="Gestoppt"
+        noticeStatus="aborted"
+        steps={[{ id: 'c1', toolName: 'list_tasks', status: 'done' }]}
+      />,
+    );
+    expect(root()!.querySelector('[data-testid="notice"]')!.textContent).toBe('Gestoppt');
+    expect(root()!.querySelector('[data-element="activity-notice"]')).toBeNull();
+    expect(seen).toEqual([{ text: 'Gestoppt', status: 'aborted', placement: 'log' }]);
+  });
+
+  it('has English and German defaults for the layout texts', () => {
+    expect(DEFAULT_LOCALE.activityRunningLabel).toBe('{label}…');
+    expect(deChatLocale.activityRunningLabel).toBe('{label}…');
+    expect(DEFAULT_LOCALE.activityRunningProgressLabel).toBe('{count} done, {label}…');
+    expect(deChatLocale.activityRunningProgressLabel).toBe('{count} erledigt, {label}…');
+    expect(DEFAULT_LOCALE.activityStepCountLabel).toBe('×{count}');
+    expect(deChatLocale.activityStepCountLabel).toBe('×{count}');
+    expect(DEFAULT_LOCALE.activitySummarySeparator).toBe(', ');
+    expect(deChatLocale.activitySummarySeparator).toBe(', ');
+  });
+
   it('has English defaults for every new text', () => {
     expect(DEFAULT_LOCALE.activityDoneLabel).toBe('{count} steps done');
     expect(DEFAULT_LOCALE.activityDoneOneLabel).toBe('1 step done');
+    expect(DEFAULT_LOCALE.activityDeclinedLabel).toBe('{count} declined');
+    expect(deChatLocale.activityDeclinedLabel).toBe('{count} abgelehnt');
+    expect(DEFAULT_LOCALE.activityExpectedLabel).toBe('{count} without result');
+    expect(deChatLocale.activityExpectedLabel).toBe('{count} ohne Ergebnis');
+    expect(DEFAULT_LOCALE.activityAbortedLabel).toBe('{count} stopped');
+    expect(deChatLocale.activityAbortedLabel).toBe('{count} abgebrochen');
   });
 });
 
@@ -179,5 +464,44 @@ describe('PlanChecklist', () => {
     render(<PlanChecklist active={false} items={items} />);
     expect(planRows()[1].querySelector('[data-element="icon"]')!.getAttribute('data-icon'))
       .toBe('pending');
+  });
+});
+
+describe('ActivityLog and UI action outcomes', () => {
+  const details = () => rows().map((row) => row.querySelector('[data-element="detail"]')?.textContent ?? null);
+
+  it('names each reported outcome in the chat language, without folding different ones', () => {
+    render(
+      <ActivityLog
+        active
+        steps={[
+          { id: 'c1', toolName: 'ui_navigate', status: 'waiting', uiOutcome: 'pending' },
+          { id: 'c2', toolName: 'ui_navigate', status: 'error', uiOutcome: 'rejected-contract' },
+          { id: 'c3', toolName: 'ui_navigate', status: 'error', uiOutcome: 'rejected-handler' },
+          { id: 'c4', toolName: 'ui_navigate', status: 'error', uiOutcome: 'unavailable' },
+          { id: 'c5', toolName: 'ui_navigate', status: 'error', uiOutcome: 'failed' },
+          { id: 'c6', toolName: 'ui_navigate', status: 'done', uiOutcome: 'initiated' },
+          { id: 'c7', toolName: 'ui_navigate', status: 'done', uiOutcome: 'unconfirmed' },
+          { id: 'c8', toolName: 'ui_navigate', status: 'done' },
+        ]}
+      />,
+    );
+    expect(details()).toEqual([
+      'Wartet auf die App',
+      'Von der App abgelehnt (ungültige Eingabe)',
+      'Von der App nicht ausgeführt',
+      'Auf dieser Seite nicht verfügbar',
+      'In der App fehlgeschlagen',
+      'Gestartet',
+      'Nicht bestätigt',
+      null,
+    ]);
+  });
+
+  it('shows a result still waiting after its turn ended as not confirmed', () => {
+    chatContext.current.locale = DEFAULT_LOCALE as unknown as Record<string, string>;
+    render(<ActivityLog active={false} steps={[{ id: 'c1', toolName: 'ui_navigate', status: 'waiting', uiOutcome: 'pending' }]} />);
+    expect(details()).toEqual(['Not confirmed']);
+    expect(rows()[0]!.getAttribute('data-status')).toBe('done');
   });
 });

@@ -5,6 +5,11 @@ import type { UseSuggestionsReturn } from '../types.js';
 /**
  * Hook for accessing followup suggestion chips.
  *
+ * `chips` are the latest turn's follow-ups, else `suggestions.staticChips`.
+ * `suggestions.enabled: false` hides the SDK's `SuggestionBar` and the
+ * follow-ups under the answer, but `chips` stays filled: a bar of your own
+ * that should honour the switch checks the config itself.
+ *
  * @example
  * ```tsx
  * function SuggestionBar() {

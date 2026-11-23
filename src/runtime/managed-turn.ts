@@ -51,6 +51,15 @@ export interface ManagedTurnGuard {
   afterToolCall(call: AiSdkToolSuccess): Promise<void>;
   onToolError(call: AiSdkToolFailure): Promise<void>;
   resolveApproval(call: AiSdkToolCall): Promise<boolean>;
+  /**
+   * Authorizes a server-side approval-subject lookup through a read tool:
+   * the same check as a tool call (freshly resolved principal, freshly
+   * loaded revocations, pinned agent, manifest and policy), without counting
+   * a tool call: the model did not make it. Returns whether the policy asks
+   * for approval of the read tool. Throws `ToolExecutionDeniedError` like
+   * `beforeToolCall`.
+   */
+  beforeSubjectLookup(call: AiSdkToolCall): Promise<{ requiresApproval: boolean }>;
 }
 
 export function createManagedTurnGuard(
@@ -135,6 +144,7 @@ export function createManagedTurnGuard(
           'budget_exhausted',
           call.toolName,
           currentBudget.reasons.join(','),
+          tracker.limitStates(currentBudget.reasons),
         );
       }
 
@@ -189,6 +199,11 @@ export function createManagedTurnGuard(
     async resolveApproval(call) {
       const { authorization } = await authorize(call);
       return authorization.requiresApproval;
+    },
+
+    async beforeSubjectLookup(call) {
+      const { authorization } = await authorize(call);
+      return { requiresApproval: authorization.requiresApproval };
     },
   };
 }

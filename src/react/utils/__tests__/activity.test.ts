@@ -18,7 +18,7 @@ describe('readActivitySteps', () => {
       { id: 'c1', toolName: 'list_tasks', status: 'done', detail: '3 Aufgaben' },
       { id: 'c3', toolName: 'create_team', status: 'error', detail: 'Name fehlt' },
       { id: 'c4', toolName: 'invite_member', status: 'waiting' },
-      { id: 'c5', toolName: 'delete_task', status: 'error' },
+      { id: 'c5', toolName: 'delete_task', status: 'declined' },
       { id: 'c7', toolName: 'archive_task', status: 'running' },
     ]);
   });
@@ -49,5 +49,35 @@ describe('readLatestPlan', () => {
 
   it('returns null without a plan call', () => {
     expect(readLatestPlan(parts.slice(0, 2))).toBeNull();
+  });
+});
+
+describe('readActivitySteps for UI actions of the outcome protocol', () => {
+  const ui = (toolCallId: string, extra: Record<string, unknown>) => ({
+    type: 'tool-ui_navigate', toolCallId, state: 'output-available', input: {},
+    output: { handedOff: true, message: 'Opened the list.', uiAction: { type: 'glirastes.navigate' }, ...extra },
+  });
+
+  it('waits while the outcome is open and shows each code by its own text, never the message', () => {
+    expect(readActivitySteps([
+      ui('c1', { awaitsOutcome: true }),
+      ui('c2', { awaitsOutcome: true, outcome: { v: 1, code: 'ok' } }),
+      ui('c3', { awaitsOutcome: true, outcome: { v: 1, code: 'rejected-contract' } }),
+      ui('c4', { awaitsOutcome: true, outcome: { v: 1, code: 'unavailable' } }),
+      ui('c5', { awaitsOutcome: true, outcome: { v: 1, code: 'initiated', at: 1 } }),
+      ui('c6', { awaitsOutcome: true, outcome: { v: 1 } }),
+      ui('c7', { awaitsOutcome: false }),
+      ui('c8', {}),
+    ], () => true)).toEqual([
+      { id: 'c1', toolName: 'ui_navigate', status: 'waiting', uiOutcome: 'pending' },
+      { id: 'c2', toolName: 'ui_navigate', status: 'done' },
+      { id: 'c3', toolName: 'ui_navigate', status: 'error', uiOutcome: 'rejected-contract' },
+      { id: 'c4', toolName: 'ui_navigate', status: 'error', uiOutcome: 'unavailable' },
+      { id: 'c5', toolName: 'ui_navigate', status: 'done', uiOutcome: 'initiated' },
+      { id: 'c6', toolName: 'ui_navigate', status: 'done', uiOutcome: 'unconfirmed' },
+      { id: 'c7', toolName: 'ui_navigate', status: 'done' },
+      // Without the protocol (old server, fallback): done, with the app's message.
+      { id: 'c8', toolName: 'ui_navigate', status: 'done', detail: 'Opened the list.' },
+    ]);
   });
 });

@@ -328,7 +328,7 @@ export async function runToolsEnrich(
   const describeOptions = {
     root,
     locale: config.locale,
-    languages: requiredLanguages(config.locale),
+    languages: requiredLanguages(config.locale, config.languages),
     writeContracts: config.enrich.writeContracts === true,
   };
   const scope = enrichScope(buildResolveWorklist(initial).items, buildDescribeWorklist(initial, describeOptions).items, firstRun);

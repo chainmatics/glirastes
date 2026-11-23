@@ -26,7 +26,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -69,7 +69,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -80,6 +80,10 @@ jobs:
 
       - name: Install the NestJS fixture API
         run: bun install --frozen-lockfile --cwd examples/react-nest-separate/api
+
+      # pg at the floor of the declared range, for the plain-Node import test.
+      - name: Install the pg floor fixture
+        run: bun install --frozen-lockfile --cwd tests/fixtures/pg-floor
 
       # Without Python the Vue+FastAPI tests skip visibly here; the reference-fastapi job runs them.
       - name: Test
@@ -100,7 +104,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -120,7 +124,7 @@ jobs:
         env:
           GLIRASTES_REQUIRE_PYTHON: '1'
           GLIRASTES_TEST_PYTHON: python
-        run: bunx vitest run tests/tool-sync-vue-fastapi.test.ts tests/tool-sync-vue-fastapi-ui.test.ts
+        run: bunx vitest run tests/tool-sync-vue-fastapi.test.ts tests/tool-sync-vue-fastapi-ui.test.ts tests/second-acceptance-vue-fastapi.test.ts tests/second-acceptance-vue-fastapi-languages.test.ts tests/second-acceptance-vue-fastapi-ui-outcomes.test.ts tests/second-acceptance-vue-fastapi-ui-outcomes-reload.test.tsx
 
   build:
     name: Build
@@ -134,7 +138,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

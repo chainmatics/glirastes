@@ -126,10 +126,10 @@ export const RuntimeTurnToolUsageSchema = z.object({
   path: ['errors'],
 });
 
-export const TechnicalRuntimeEventV2Schema = z.object({
+/** Fields of a turn event, without its type. */
+const turnEventFields = {
   schemaVersion: z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION),
   eventId: z.uuid(),
-  eventType: z.literal('turn.finished'),
   occurredAt: z.iso.datetime({ offset: true }),
   appId: z.uuid(),
   environmentId: z.uuid(),
@@ -149,7 +149,11 @@ export const TechnicalRuntimeEventV2Schema = z.object({
   toolCallCount: callCount,
   toolErrorCount: callCount,
   tools: z.array(RuntimeTurnToolUsageSchema).max(RUNTIME_METRIC_MAX_TOOLS),
-}).strict().superRefine((event, context) => {
+};
+
+type TurnEventFields = z.infer<z.ZodObject<typeof turnEventFields>>;
+
+function refineTurnEvent(event: TurnEventFields, context: z.RefinementCtx): void {
   const allowed = ERROR_CODES_BY_STATUS[event.status];
   if (allowed ? !event.errorCode || !allowed.includes(event.errorCode) : event.errorCode !== null) {
     context.addIssue({
@@ -200,9 +204,42 @@ export const TechnicalRuntimeEventV2Schema = z.object({
       path: forbidden,
     });
   }
-});
+}
+
+export const TechnicalRuntimeEventV2Schema = z.object({
+  ...turnEventFields,
+  eventType: z.literal('turn.finished'),
+}).strict().superRefine(refineTurnEvent);
+
+/** Why a request continued a turn instead of starting one: answered approvals, or reported UI outcomes. */
+export const TurnContinuationSchema = z.enum(['approval', 'ui-outcome']);
+
+/**
+ * Opaque reference of the turn a continuation belongs to: 32 lower-case hex
+ * characters (128 bits of an HMAC-SHA-256 under a key that never leaves the
+ * consumer). Every continuation of one turn carries the same value; it
+ * reveals nothing about the turn, its messages or the client's message id.
+ */
+const RUNTIME_METRIC_TURN_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+/**
+ * A request that continued a turn (no new user message): the same numbers
+ * as `turn.finished` for that request, so turns are not counted twice. A
+ * type of its own, sent in batches of its own: a Platform that does not know
+ * it yet refuses only these batches and keeps receiving finished turns.
+ * `turnId` groups the continuations of one turn; `turn.finished` carries
+ * none, so the first request of a turn cannot be joined to them.
+ */
+export const TurnContinuedEventSchema = z.object({
+  ...turnEventFields,
+  eventType: z.literal('turn.continued'),
+  continuation: TurnContinuationSchema,
+  turnId: z.string().regex(RUNTIME_METRIC_TURN_ID_PATTERN),
+}).strict().superRefine(refineTurnEvent);
 
 export type TechnicalRuntimeEventV2 = z.infer<typeof TechnicalRuntimeEventV2Schema>;
+export type TurnContinuation = z.infer<typeof TurnContinuationSchema>;
+export type TurnContinuedEvent = z.infer<typeof TurnContinuedEventSchema>;
 export type RuntimeTurnStatus = z.infer<typeof RuntimeTurnStatusSchema>;
 export type RuntimeTurnErrorCode = z.infer<typeof RuntimeTurnErrorCodeSchema>;
 export type RuntimeCostSource = z.infer<typeof RuntimeCostSourceSchema>;
@@ -320,9 +357,10 @@ export const PrivacyDecisionsEventSchema = z.object({
 
 export type PrivacyDecisionsEvent = z.infer<typeof PrivacyDecisionsEventSchema>;
 
-/** Every content-free metric event of the runtime: finished turns, contract rejections, privacy decisions. */
+/** Every content-free metric event of the runtime: finished and continued turns, contract rejections, privacy decisions. */
 export const RuntimeMetricEventSchema = z.discriminatedUnion('eventType', [
   TechnicalRuntimeEventV2Schema,
+  TurnContinuedEventSchema,
   ToolContractRejectedEventSchema,
   PrivacyDecisionsEventSchema,
 ]);

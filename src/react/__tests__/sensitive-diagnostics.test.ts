@@ -15,7 +15,18 @@ function productionSources(directory: string): string[] {
   });
 }
 
+/**
+ * Developer configuration and browser load failures, never user content: the
+ * URL of the audio worklet file (a static asset path the app configures) and
+ * the browser's error for loading it. A failed worklet must name both, or
+ * voice input fails without a hint.
+ */
+const DEVELOPER_CONFIG_IDENTIFIERS = new Set(['workletPath', 'workletLoadFailure']);
+
 function isBoundedDiagnosticExpression(expression: ts.Expression): boolean {
+  if (ts.isIdentifier(expression) && DEVELOPER_CONFIG_IDENTIFIERS.has(expression.text)) {
+    return true;
+  }
   if (
     ts.isStringLiteral(expression)
     || ts.isNoSubstitutionTemplateLiteral(expression)

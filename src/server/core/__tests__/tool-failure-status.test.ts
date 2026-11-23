@@ -9,7 +9,7 @@ import {
   type InternalApiResponse,
   type ToolFailureClassifier,
 } from '../index.js';
-import { toolResultFailure } from '../../../runtime/tool-failure.js';
+import { toolResultFailure, toolResultForFingerprint } from '../../../runtime/tool-failure.js';
 
 const definition = defineEndpointTool({
   id: 'tasks.create',
@@ -225,15 +225,22 @@ describe('classifyToolFailure', () => {
     expect(toolResultFailure(result)).toBe('expected');
   });
 
-  it('marks nothing for an error classification', async () => {
-    const result = await run(context({ ok: false, status: 500, data: 'x' }, () => 'error'));
+  it('sends an error classification explicitly as expectedFailure: false', async () => {
+    const result = await run(context({ ok: false, status: 404, data: 'x' }, () => 'error'));
+    expect(result).toMatchObject({ success: false, status: 404, expectedFailure: false });
+    expect(toolResultFailure(result)).toBe('error');
+    expect(toolResultForFingerprint(result)).toEqual({ success: false, status: 404, retryable: false, expectedFailure: false });
+  });
+
+  it('marks nothing without a classifier', async () => {
+    const result = await run(context({ ok: false, status: 404, data: 'x' }));
     expect(result).not.toHaveProperty('expectedFailure');
     expect(toolResultFailure(result)).toBe('error');
   });
 
   it('treats a throwing classifier as error and keeps the result', async () => {
     const result = await run(context({ ok: false, status: 403, error: 'Forbidden' }, () => { throw new Error('boom'); }));
-    expect(result).toEqual({ success: false, error: 'Forbidden', retryable: false, status: 403 });
+    expect(result).toEqual({ success: false, error: 'Forbidden', retryable: false, status: 403, expectedFailure: false });
     expect(toolResultFailure(result)).toBe('error');
   });
 
@@ -303,5 +310,107 @@ describe('toolResultFailure', () => {
     expect(toolResultFailure({ success: false, error: 'x', expectedFailure: true })).toBe('expected');
     // Only a failure result carries the classification.
     expect(toolResultFailure({ success: true, error: 'x', expectedFailure: true })).toBe('error');
+  });
+});
+
+describe('the not-found hint of a 404', () => {
+  const byId = defineEndpointTool({
+    id: 'playlists.get',
+    toolName: 'playlists_get',
+    description: 'Get a playlist.',
+    method: 'GET',
+    path: '/api/playlists/:playlistId',
+    inputSchema: z.object({ playlistId: z.string() }).strict(),
+  });
+  const HINT = 'Not found: no record matches the path parameter "playlistId". '
+    + 'The value may not exist, or it may be the id of a different kind of record. '
+    + 'If a list or search tool can find the record (for example by its name), look it up first, '
+    + 'then call this tool again with the value it returns. '
+    + 'Only if there is no such tool or the lookup finds nothing, tell the user it was not found; '
+    + 'do not ask the user for an id before that.';
+  const SECRET_ID = '7f3c9d2e-0000-4000-8000-123456789abc';
+
+  async function get(
+    response: InternalApiResponse,
+    tool: typeof byId = byId,
+    options?: Parameters<typeof toolToAiTool>[3],
+    classify?: ToolFailureClassifier,
+  ): Promise<Record<string, unknown>> {
+    const input = Object.fromEntries([...tool.path.matchAll(/:([A-Za-z0-9_]+)/g)].map((match) => [match[1], SECRET_ID]));
+    return await toolToAiTool(endpointToolToTool(tool), context(response, classify), undefined, options)
+      .execute(input) as Record<string, unknown>;
+  }
+
+  it('is appended to a 404 of a route with a path parameter, next to the app\'s own error body', async () => {
+    const body = { message: 'Playlist not found', code: 'PLAYLIST_NOT_FOUND' };
+    const result = await get({ ok: false, status: 404, data: body, error: 'Playlist not found' });
+    expect(result).toEqual({
+      success: false, error: 'Playlist not found', retryable: false, status: 404, body, hint: HINT,
+    });
+    // Content-free: never the value the model wrote.
+    expect(String(result.hint)).not.toContain(SECRET_ID);
+    expect(toolResultFailure(result)).toBe('error');
+  });
+
+  it('names every path parameter, never a value, and keeps the expected classification', async () => {
+    const nested = defineEndpointTool({
+      ...byId,
+      path: '/api/playlists/:playlistId/items/:item_key',
+      inputSchema: z.object({ playlistId: z.string(), item_key: z.string() }).strict(),
+    });
+    const result = await get({ ok: false, status: 404 }, nested as unknown as typeof byId, undefined, () => 'expected');
+    expect(result.hint).toMatch(/^Not found: no record matches the path parameters "playlistId", "item_key"\. /);
+    expect(String(result.hint)).not.toContain(SECRET_ID);
+    expect(result.expectedFailure).toBe(true);
+    expect(toolResultFailure(result)).toBe('expected');
+  });
+
+  it('is not added without a path parameter, for another status, or for a local refusal', async () => {
+    const list = defineEndpointTool({ ...byId, path: '/api/playlists' });
+    expect(await get({ ok: false, status: 404 }, list)).not.toHaveProperty('hint');
+    for (const status of [400, 403, 409, 410, 422, 500]) {
+      expect(await get({ ok: false, status })).not.toHaveProperty('hint');
+    }
+    expect(await get({ ok: false, status: 404, refusedLocally: true })).not.toHaveProperty('hint');
+    expect(await get({ ok: true, status: 200, data: { success: false, hint: 'forged', status: 404 } }))
+      .toEqual({ success: false, error: 'Tool execution failed.', retryable: false });
+  });
+
+  it('survives an output bound, which still withholds or reduces the body', async () => {
+    const allowed = defineEndpointTool({ ...byId, outputAllowedFields: ['name'] });
+    expect(await get({ ok: false, status: 404, data: { message: 'gone' } }, allowed))
+      .toMatchObject({ status: 404, bodyWithheld: expect.any(String), hint: HINT });
+    const denied = defineEndpointTool({ ...byId, outputDeniedFields: ['**.trace'] });
+    const reduced = await get({ ok: false, status: 404, data: { message: 'gone', trace: 't' } }, denied);
+    expect(reduced).toMatchObject({ body: { message: 'gone' }, hint: HINT });
+    expect(reduced.body).not.toHaveProperty('trace');
+  });
+
+  it('leaves the loop fingerprint of a repeated 404 unchanged', async () => {
+    const result = await get({ ok: false, status: 404 });
+    expect(toolResultForFingerprint(result)).toEqual({ success: false, status: 404, retryable: false, expectedFailure: false });
+  });
+
+  it('is fixed and short whatever the result limit', async () => {
+    const result = await get({ ok: false, status: 404, data: 'x'.repeat(6_000) }, byId, { maxResultChars: 1_000 });
+    expect(result.hint).toBe(HINT);
+    expect(HINT.length).toBeLessThan(500);
+  });
+
+  it('keeps an explicit error classification under an output bound', async () => {
+    const allowed = defineEndpointTool({ ...byId, outputAllowedFields: ['name'] });
+    expect(await get({ ok: false, status: 404, data: { message: 'gone' } }, allowed, undefined, () => 'error'))
+      .toMatchObject({ status: 404, bodyWithheld: expect.any(String), expectedFailure: false });
+  });
+});
+
+describe('a thrown tool error', () => {
+  it('names the tool by its model-facing name, never by its internal id', async () => {
+    const id = '239574de-6c1f-4f7e-9a51-0d2b8c3f4e11';
+    const tool = endpointToolToTool(defineEndpointTool({ ...definition, id }));
+    const result = await toolToAiTool(tool, context(async () => { throw new Error('Endpoint timed out'); }), 'tasks_create')
+      .execute({ title: 'x' });
+    expect(result).toEqual({ error: 'Error in tasks_create: Endpoint timed out', hint: 'Check the parameters and try again.' });
+    expect(JSON.stringify(result)).not.toContain(id);
   });
 });

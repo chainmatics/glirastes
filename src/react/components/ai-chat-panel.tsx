@@ -5,10 +5,28 @@ import { MessageList } from './message-list.js';
 import { ChatInput } from './chat-input.js';
 import { MentionInput } from './mention-input.js';
 import { SuggestionBar } from './suggestion-bar.js';
+import { ChatStarters } from './chat-starters.js';
+import { ClarificationChips } from './clarification-chips.js';
+import { composerContextOf } from '../provider/composer-context.js';
 import { ApprovalCard as DefaultApprovalCard } from './approval-card.js';
 import { BulkApprovalCard as DefaultBulkApprovalCard } from './bulk-approval-card.js';
-import { readActivitySteps, readLatestPlan } from '../utils/activity.js';
-import type { AiChatPanelProps, PendingApproval } from '../types.js';
+import { ChatQueue as DefaultChatQueue } from './chat-queue.js';
+import { readActivitySteps, readLatestPlan, withoutHiddenTools } from '../utils/activity.js';
+import type { AiChatPanelProps, ChatMessage, PendingApproval } from '../types.js';
+
+/** Approval ids of the tool parts of the shown messages (where an inline card renders). */
+function approvalIdsOf(messages: ReadonlyArray<ChatMessage>): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      const approval = (part as { approval?: unknown }).approval;
+      if (typeof approval === 'object' && approval !== null && typeof (approval as { id?: unknown }).id === 'string') {
+        ids.add((approval as { id: string }).id);
+      }
+    }
+  }
+  return ids;
+}
 
 /**
  * Batteries-included chat panel.
@@ -20,6 +38,7 @@ import type { AiChatPanelProps, PendingApproval } from '../types.js';
  * Uses configuration from the parent `<AiChatProvider>`.
  */
 export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
+  const context = useChatContext();
   const {
     classNames,
     hasMentions,
@@ -44,20 +63,32 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     themeEffect,
     unstyled,
     attachments,
-  } = useChatContext();
+    approvalDisplay,
+    queue,
+    suggestions,
+    activityLog,
+  } = context;
+  // Starters replace the static suggestion chips on an empty chat.
+  const startersShown = messages.length === 0 && (composerContextOf(context).composer?.starters?.length ?? 0) > 0;
 
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const BulkApprovalCardComponent = components.BulkApprovalCard ?? DefaultBulkApprovalCard;
+  // `components.ChatQueue: null` hides it (the app renders the queue itself).
+  const ChatQueueComponent = components.ChatQueue === null ? null : components.ChatQueue ?? DefaultChatQueue;
   // The work log lives in each assistant bubble; a pipeline bar only shows
   // when the app supplies its own component.
   const PipelineTimelineComponent = components.PipelineTimeline;
   const InputComponent = components.ChatInput
     ?? (hasMentions || hasCompletions || attachments ? MentionInput : ChatInput);
 
+  // `approvalDisplay.open: 'inline'`: a card whose message is shown renders at its tool part instead.
+  const inline = approvalDisplay?.open === 'inline';
   // Group approvals by tool name for bulk operations
   const { singleApprovals, bulkGroups } = useMemo(() => {
     const groups = new Map<string, PendingApproval[]>();
+    const shown = inline ? approvalIdsOf(messages) : undefined;
     for (const approval of pendingApprovals) {
+      if (shown?.has(approval.id)) continue;
       const existing = groups.get(approval.toolName) ?? [];
       existing.push(approval);
       groups.set(approval.toolName, existing);
@@ -73,7 +104,7 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
       }
     }
     return { singleApprovals: singles, bulkGroups: bulks };
-  }, [pendingApprovals]);
+  }, [pendingApprovals, inline, messages]);
 
   // Check if last assistant message has visible text (for typing indicator)
   const showTypingIndicator = useMemo(() => {
@@ -82,14 +113,14 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
     if (!lastAssistant) return true;
     // The activity log already shows a spinner for running tools.
     if (
-      readActivitySteps(lastAssistant.parts, () => false).length > 0
+      withoutHiddenTools(readActivitySteps(lastAssistant.parts, () => false), activityLog?.hiddenTools).length > 0
       || (readLatestPlan(lastAssistant.parts)?.length ?? 0) >= 2
     ) return false;
     const hasText = lastAssistant.parts.some(
       p => 'text' in p && typeof p.text === 'string' && p.text.trim().length > 0,
     );
     return !hasText;
-  }, [isLoading, messages]);
+  }, [isLoading, messages, activityLog?.hiddenTools]);
 
   return (
     <div
@@ -158,7 +189,10 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
 
       {approvalReminder && pendingApprovals.length > 0 && (
         <div data-component="approval-reminder" role="status">
-          {locale.approvalPendingHint}
+          {/* A queued message waits for the card; without one the send was refused. */}
+          {queue.enabled && queue.items.length > 0
+            ? locale.queueApprovalWaitingHint ?? locale.approvalPendingHint
+            : locale.approvalPendingHint}
         </div>
       )}
 
@@ -186,7 +220,10 @@ export function AiChatPanel({ className, welcomeMessage }: AiChatPanelProps) {
         </div>
       )}
 
-      {!isLoading && !showTypingIndicator && <SuggestionBar />}
+      {startersShown && <ChatStarters />}
+      {composerContextOf(context).composer?.clarificationChips && <ClarificationChips />}
+      {!isLoading && !showTypingIndicator && !startersShown && suggestions?.placement !== 'message' && <SuggestionBar />}
+      {queue?.enabled && ChatQueueComponent && <ChatQueueComponent />}
       <InputComponent />
     </div>
   );

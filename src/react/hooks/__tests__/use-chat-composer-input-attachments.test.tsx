@@ -78,7 +78,10 @@ describe('useChatComposerInput attachments', () => {
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
     expect(chat.sendMessage).toHaveBeenCalledWith({
       text: '',
-      files: [{ type: 'file', mediaType: 'image/png', url: dataUrl, filename: 'shot.png' }],
+      files: [{
+        type: 'file', mediaType: 'image/png', url: dataUrl, filename: 'shot.png',
+        providerMetadata: { glirastes: { attachmentId: expect.stringMatching(/^att_/) } },
+      }],
     });
     await waitFor(() => expect(composer!.attachments).toHaveLength(0));
   });

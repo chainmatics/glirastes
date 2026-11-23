@@ -22,7 +22,7 @@ describe('collectEntityNames', () => {
     expect(names.get(OTHER)).toBe('Vertrieb');
   });
 
-  it('prefers the latest result and ignores unfinished calls, inputs and non-UUID ids', () => {
+  it('prefers the latest result and ignores unfinished calls and inputs', () => {
     const names = collectEntityNames([
       toolMessage({ id: TASK, title: 'Alt' }),
       toolMessage({ id: TASK, title: 'Neu' }),
@@ -33,7 +33,9 @@ describe('collectEntityNames', () => {
     ]);
 
     expect(names.get(TASK)).toBe('Neu');
-    expect(names.size).toBe(1);
+    // Ids other than UUIDs count too: the approval card checks every id argument.
+    expect(names.get('42')).toBe('Keine UUID');
+    expect(names.size).toBe(2);
   });
 });
 

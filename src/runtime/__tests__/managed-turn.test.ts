@@ -127,7 +127,13 @@ describe('createManagedTurnGuard', () => {
     await expect(guard.beforeToolCall({
       toolName: 'list_tasks',
       input: {},
-    })).rejects.toThrow(/maxToolCalls/);
+    })).rejects.toMatchObject({
+      reason: 'budget_exhausted',
+      recoverable: false,
+      budget: [{ dimension: 'maxToolCalls', limit: 1, used: 1 }],
+      message: 'Tool call not executed: the limit of 1 tool call per turn is reached (1 used). '
+        + 'Do not retry in this turn; tell the user which requests are still open.',
+    });
     expect(guard.tracker.usage.toolCalls).toBe(1);
   });
 
@@ -540,6 +546,39 @@ describe('createManagedTurnGuard: tool denials', () => {
       await expect(guard.beforeToolCall({ toolName: 'unknown_tool', input: {} }))
         .rejects.toMatchObject({ reason: 'manifest_tool_unavailable', recoverable: true });
       expect(guard.tracker.usage).toMatchObject({ toolCalls: 1, consecutiveErrors: 1 });
+    });
+  });
+
+  describe('beforeSubjectLookup', () => {
+    it('authorizes a lookup with a fresh principal and counts no tool call', async () => {
+      let currentPrincipal: Principal | undefined = principal;
+      const resolvePrincipal = vi.fn(async () => currentPrincipal);
+      const guard = createManagedTurnGuard({ snapshot: createSnapshot(), resolvePrincipal });
+      await expect(guard.beforeSubjectLookup({ toolName: 'list_tasks', input: {} })).resolves.toEqual({ requiresApproval: false });
+      expect(guard.tracker.usage.toolCalls).toBe(0);
+      currentPrincipal = { ...principal, roles: ['viewer'] };
+      await expect(guard.beforeSubjectLookup({ toolName: 'list_tasks', input: {} })).rejects.toMatchObject({ reason: 'principal_role_denied' });
+      expect(guard.tracker.usage).toMatchObject({ toolCalls: 0, consecutiveErrors: 0 });
+      expect(resolvePrincipal).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses a revoked read tool', async () => {
+      const guard = createManagedTurnGuard({
+        snapshot: createSnapshot(),
+        resolvePrincipal: async () => principal,
+        loadRevocations: async () => [{
+          revocationId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d3a09',
+          environmentId: manifestRevision.environmentId,
+          effectiveAt: new Date(0).toISOString(),
+          reasonCode: 'security-disable',
+          toolIds: [agentRevision.toolAllowlist[0]!],
+          agentRevisionIds: [],
+          policyRevisionIds: [],
+          signature: agentRevision.signature,
+        } as SecurityRevocation],
+      });
+      await expect(guard.beforeSubjectLookup({ toolName: 'list_tasks', input: {} })).rejects.toMatchObject({ reason: 'revoked' });
+      expect(guard.tracker.usage.toolCalls).toBe(0);
     });
   });
 });

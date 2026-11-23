@@ -44,18 +44,58 @@ import {
   enforceApprovalBindings,
   gateApprovalTools,
   resolveApprovalBinder,
+  resolveApprovalSecret,
   type ApprovalBinder,
   type VerifiedApproval,
 } from './approval-binding.js';
+import { withModelFacingDenialReasons } from './approval-denial-text.js';
+import {
+  createApprovalSubjectResolver,
+  resolveApprovalSubjectLimits,
+  toolsRequiringServerCheck,
+  type ApprovalSubjectResolver,
+} from './approval-subject-lookup.js';
 import {
   pseudonymizeCommandToolInputs,
   resolveDirectCommand,
   runDirectCommand,
   stripChatCommandMessages,
 } from './direct-command.js';
-import { collectIdLabels, createHideIdsTransform, HIDE_IDS_PROMPT, type IdLabels } from './hide-ids.js';
+import {
+  collectDeclaredIdLabelsFromMessages,
+  collectIdLabels,
+  createHideIdsTransform,
+  HIDE_IDS_PROMPT,
+  type IdLabels,
+} from './hide-ids.js';
+import { entityDeclarationsOfTools, TOOL_ENTITIES_PART_TYPE } from './tool-entities.js';
+import { builtInStreamErrorTexts, createToolStreamErrorMask, streamErrorText, withStepFailureParts, type StreamErrorTexts } from './stream-error-text.js';
+import {
+  budgetStopText,
+  resolveBudgetStopTexts,
+  withStopNotice,
+  type BudgetStopLimit,
+  type BudgetStopTexts,
+  type StopNotice,
+} from './budget-stop-notice.js';
+import { finalSummaryInstruction } from '../../../runtime/tool-denial.js';
+import { createExecutionFingerprint } from '../../../runtime/fingerprint.js';
+import {
+  blockedCallFingerprints,
+  budgetContinuationInstruction,
+  budgetStopPart,
+  budgetStopSummary,
+  readBudgetContinuation,
+  REPEATED_WRITE_REFUSAL,
+  turnToolCallsBeforeLatestStop,
+  turnToolCallsOf,
+  withBudgetContinuationGuard,
+  type TurnToolCall,
+} from './budget-continuation.js';
+import type { BudgetLimitState } from '../../../runtime/budget.js';
 import type { ToolToAiToolOptions } from '../../core/index.js';
-import type { Tool, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
+import { assertToolMiddleware, type ToolMiddleware } from '../../core/tool-middleware.js';
+import type { Tool, ToolContext, ToolRegistry, ConversationMessage, PiiShield, PromptOverride } from '../../../types.js';
 import { applyPromptOverride } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import {
@@ -86,11 +126,14 @@ import {
   createUIMessageStreamResponse,
   type streamText,
   type UIMessage,
+  type UIMessageChunk,
 } from 'ai';
 import { protectedGenerateText, protectedStreamText } from '../../pii-shield/model-calls.js';
 import type {
+  AiChatErrorInfo,
   AiChatHandlerConfig,
   IntentRoutingResult,
+  ModelInputEvent,
   PipelineStepReport,
   PipelineStreamState,
   PipelineResult,
@@ -104,8 +147,10 @@ import {
   prepareModelMessages,
   wrapToolsForVercelAi,
   type HistoryOptions,
+  type ModelInputBreakdown,
 } from './prepare-model-messages.js';
 import { filterFallbackError } from './filter-fallback-error.js';
+import { createSidePartOrder } from './side-part-order.js';
 import {
   isSilentTurn,
   resumesToolApprovals,
@@ -113,6 +158,8 @@ import {
   withSilentTurnFallback,
 } from './silent-turn-fallback.js';
 import { toolPresentationOf, type ToolPresentationPart } from './tool-presentation.js';
+import { assertChatServerLocales, resolveChatServerTexts } from './chat-texts.js';
+import { chatLanguageOf, CHAT_LANGUAGE_HEADER, isLanguageTag } from '../../../contracts/localized-text.js';
 import {
   PrincipalSchema,
   type Principal,
@@ -141,10 +188,24 @@ import { privacyDecisionRecorderFor, type PrivacyDecisionPolicy } from '../../..
 import { effectivePrivacyPolicyDigest, privacyPolicyDigest } from '../../../sync/privacy-digest.js';
 import {
   createHybridToolDiscovery,
+  FIND_TOOLS_PROMPT,
   NON_DOMAIN_TOOL_NAMES,
   type HybridToolDiscovery,
 } from './tool-discovery.js';
 import { defaultIntentRouterFor, previousTurnScope } from './default-intent-routing.js';
+import {
+  assertUiActionOutcomesOption,
+  currentTurnToolNames,
+  readUiOutcomesFlag,
+  stepAwaitsUiOutcome,
+  turnContinuationOf,
+  uiOutcomeCapReached,
+  uiOutcomeModeOf,
+  withUiOutcomeMarkers,
+  type UiOutcomePlan,
+} from './ui-outcomes.js';
+import { UI_OUTCOME_SYSTEM_NOTE } from '../../../contracts/ui-outcome.js';
+import type { TurnContinuation } from '../../../contracts/events.js';
 
 /**
  * Callback that the consumer provides to stream the AI response.
@@ -197,10 +258,18 @@ export interface StreamHandlerContext {
   emitStepReports: boolean;
   /** Optional per-step callback */
   onStepReport?: (report: PipelineStepReport) => void;
+  /** The debug hook `AiChatHandlerConfig.onModelInput` (carries content; local only). */
+  onModelInput?: (event: ModelInputEvent) => void;
+  /**
+   * Set with `history.seenObjects` (default on) and a tool that declares its identity: the UI messages ahead of `messages`
+   * that the message window or the chat memory left out. Pass them on as
+   * `prepareModelMessages`' `earlierMessages`; only their tool results are read.
+   */
+  earlierMessages?: unknown[];
   /** Max output tokens */
   maxOutputTokens: number;
-  /** Temperature */
-  temperature: number;
+  /** Temperature; `undefined` when the handler config is `null` (send none). */
+  temperature?: number;
   /** Max context messages for model-message preparation */
   maxContextMessages: number;
   /** Model tier from intent routing or pipeline */
@@ -271,6 +340,13 @@ export interface StreamHandlerContext {
    * refused on the next request (`approval_not_issued`).
    */
   bindApprovalRequests?: <T extends { type: string }>(stream: ReadableStream<T>) => ReadableStream<T>;
+  /**
+   * The server's approval-subject lookups of this request, set for the
+   * built-in stream handler when a tool declares them
+   * (docs/approval-subjects.md). It hooks them into the tools; the
+   * subjects then reach the stream through `bindApprovalRequests`.
+   */
+  approvalSubjects?: ApprovalSubjectResolver;
 }
 
 /**
@@ -561,6 +637,40 @@ function orderToolsForCaching(
   return ordered;
 }
 
+/** What the handler knows about the request beyond the stream handler context. */
+interface RequestTurnState {
+  /** Set when the client reports UI outcomes and the handler's mode is not `off`. */
+  uiOutcomes?: UiOutcomePlan;
+  /** Set when the request continues a turn: approvals, UI outcomes, or a budget stop (`'budget'`, local only). */
+  continuation?: TurnContinuation | 'budget';
+  /**
+   * Whether a stop of this request may be offered as continuable: the
+   * built-in stream handler serves it and the request is no direct command.
+   */
+  budgetContinuable?: boolean;
+}
+
+/**
+ * Whether a tool of the turn only reads: a GET or HEAD call that needs no
+ * approval (`_readOnly` of the converted tool); in a managed turn the pinned
+ * manifest and policy say so (`safe-read`, no approval, GET or HEAD).
+ * Everything else, also an unknown tool, counts as a write.
+ */
+function isReadOnlyTurnTool(ctx: StreamHandlerContext, name: string): boolean {
+  const tool = ctx.tools[name] as { _toolId?: unknown; _readOnly?: unknown } | undefined;
+  if (!tool) return false;
+  const snapshot = ctx.managedTurn?.snapshot;
+  // Unmanaged: the converted tool says it (GET or HEAD, no approval).
+  if (!snapshot) return tool._readOnly === true;
+  // Managed: the pinned revisions decide; the approval follows the policy.
+  const entry = snapshot.manifestRevision.tools.find((candidate) => candidate.toolId === tool._toolId);
+  if (!entry) return false;
+  const policy = snapshot.policyRevision.toolPolicies.find((candidate) => candidate.toolId === entry.toolId);
+  const method = (entry as { method?: string }).method?.toUpperCase();
+  return entry.riskClass === 'safe-read' && (method === 'GET' || method === 'HEAD')
+    && (!policy || (policy.riskClass === 'safe-read' && !policy.requiresApproval));
+}
+
 /**
  * Built-in default stream handler.
  *
@@ -570,8 +680,14 @@ function orderToolsForCaching(
 async function defaultStreamHandler(
   ctx: StreamHandlerContext,
   onFinish?: AiChatHandlerConfig['onFinish'],
-  onStreamError?: (error: unknown) => void,
+  onStreamError?: (error: unknown, info?: AiChatErrorInfo) => void,
+  budgetStopTexts: BudgetStopTexts = resolveBudgetStopTexts(ctx.locale, undefined),
+  silentTurnText?: string,
+  request: RequestTurnState = {},
+  streamErrorTexts: StreamErrorTexts = builtInStreamErrorTexts(ctx.locale),
+  configuredInvalidToolInputTexts: ReadonlyArray<string> = [],
 ): Promise<Response> {
+  const uiOutcomes = request.uiOutcomes;
   // SDK built-ins the handler created itself are not manifest tools, so the
   // managed guard would deny them. Everything else stays guarded.
   const builtinNames = new Set(ctx.handlerBuiltinToolNames ?? []);
@@ -580,6 +696,10 @@ async function defaultStreamHandler(
   for (const [name, tool] of Object.entries(ctx.tools)) {
     (builtinNames.has(name) ? builtinTools : domainTools)[name] = tool;
   }
+  // Server lookups of approval subjects, after the decision that a call needs approval.
+  const subjectHook = ctx.approvalSubjects
+    ? { resolveApprovalSubjects: ctx.approvalSubjects.resolve }
+    : {};
   const vercelTools = wrapToolsForVercelAi(
     domainTools,
     ctx.managedTurn
@@ -589,22 +709,73 @@ async function defaultStreamHandler(
           onToolError: ctx.managedTurn.onToolError,
           resolveApproval: ctx.managedTurn.resolveApproval,
           toolTimeoutMs: ctx.managedTurn.toolTimeoutMs,
+          ...subjectHook,
         }
-      : undefined,
+      : ctx.approvalSubjects ? subjectHook : undefined,
   );
   if (Object.keys(builtinTools).length > 0) {
     Object.assign(vercelTools, wrapToolsForVercelAi(builtinTools));
   }
-  const orderedTools = ctx.toolDiscovery
-    ? orderToolsForCaching(vercelTools, ctx.toolDiscovery.activeToolNames())
+  // Calls of the turn so far (earlier requests of it); local only.
+  const turnCalls = turnToolCallsOf(ctx.messages);
+  const builtinSet = new Set<string>([...builtinNames, ...NON_DOMAIN_TOOL_NAMES]);
+  const isReadOnly = (name: string) => isReadOnlyTurnTool(ctx, name);
+  // Once the handler stopped this turn at a limit, no later request of it (the continuation,
+  // an approval or UI outcome after it) runs a write call attempted before the latest stop again (fail closed).
+  const callsBeforeStop = turnToolCallsBeforeLatestStop(ctx.messages);
+  const stoppedTurn = request.continuation === 'budget' || callsBeforeStop.length > 0;
+  const turnTracker = ctx.managedTurn?.tracker;
+  const guardedTools = stoppedTurn
+    ? withBudgetContinuationGuard(
+        vercelTools,
+        blockedCallFingerprints(callsBeforeStop.filter((call) => !builtinSet.has(call.toolName)), isReadOnly),
+        isReadOnly,
+        // A refusal is a tool error of the turn: maxConsecutiveErrors and loop detection see it.
+        turnTracker
+          ? (name, input) => {
+              const toolId = (ctx.tools[name] as { _toolId?: unknown } | undefined)?._toolId;
+              turnTracker.recordFingerprint(createExecutionFingerprint({
+                toolId: typeof toolId === 'string' ? toolId : name, arguments: input ?? null, result: REPEATED_WRITE_REFUSAL,
+              }));
+              turnTracker.recordError();
+            }
+          : undefined,
+      )
     : vercelTools;
+  // The outcome marker goes on last, after every wrapper shaped the result.
+  const markedTools = uiOutcomes ? withUiOutcomeMarkers(guardedTools, ctx.tools, uiOutcomes) : guardedTools;
+  const orderedTools = ctx.toolDiscovery
+    ? orderToolsForCaching(markedTools, ctx.toolDiscovery.activeToolNames())
+    : markedTools;
   const promptCaching = ctx.promptCaching !== false;
   const hideIds = ctx.hideIds !== false;
-  const systemPrompt = hideIds && ctx.systemPrompt
-    ? `${ctx.systemPrompt}\n\n${HIDE_IDS_PROMPT}`
-    : ctx.systemPrompt;
+  // Fixed notes after the app's own prompt: no ids in answers, and with
+  // discovery that the offered tools are a start set `find_tools` widens.
+  const uiOutcomeNote = uiOutcomes && !uiOutcomes.capReached ? [UI_OUTCOME_SYSTEM_NOTE] : [];
+  // A later request of a stopped turn (approval, UI outcome after a continuation): the same
+  // instruction as the continuation's, in the system prompt so the resumed history stays as it is.
+  const stoppedTurnNote = stoppedTurn && request.continuation !== 'budget'
+    ? [budgetContinuationInstruction(callsBeforeStop, builtinSet)]
+    : [];
+  const notes = [...uiOutcomeNote, ...stoppedTurnNote];
+  const systemPrompt = ctx.systemPrompt
+    ? [
+        ctx.systemPrompt,
+        ...(hideIds ? [HIDE_IDS_PROMPT] : []),
+        ...(ctx.toolDiscovery ? [FIND_TOOLS_PROMPT] : []),
+        ...notes,
+      ].join('\n\n')
+    // The notes hold without an app prompt too.
+    : notes.length > 0 ? notes.join('\n\n') : ctx.systemPrompt;
   let idLabels: IdLabels = new Map();
-  if (hideIds) collectIdLabels(ctx.messages, idLabels);
+  // Declared identity of the turn's tools (field names only): history, hideIds and the browser.
+  const toolEntities = entityDeclarationsOfTools(ctx.tools);
+  if (hideIds) {
+    collectIdLabels(ctx.messages, idLabels);
+    collectDeclaredIdLabelsFromMessages(ctx.messages, toolEntities, idLabels);
+    // The seen-objects memo shows declared ids of these messages: their labels are learnt too.
+    if (ctx.earlierMessages) collectDeclaredIdLabelsFromMessages(ctx.earlierMessages, toolEntities, idLabels);
+  }
   if (hideIds && ctx.privacy) {
     // The model answers with pseudonyms; its ids are matched as such.
     const session = ctx.privacy.boundary.session;
@@ -614,6 +785,13 @@ async function defaultStreamHandler(
     }
     idLabels = protectedLabels;
   }
+  let breakdown: ModelInputBreakdown | undefined;
+  // Seen objects and the debug hook only; without them the options are as before.
+  const historyExtras = {
+    ...(ctx.earlierMessages ? { earlierMessages: ctx.earlierMessages as UIMessage[] } : {}),
+    invalidToolInputTexts: [streamErrorTexts.invalidToolInput, ...configuredInvalidToolInputTexts],
+    ...(ctx.onModelInput ? { onBreakdown: (value: ModelInputBreakdown) => { breakdown = value; } } : {}),
+  };
   const preparedMessages = await prepareModelMessages(
     ctx.messages as UIMessage[],
     ctx.memory?.historyTokens
@@ -625,13 +803,19 @@ async function defaultStreamHandler(
             maxTurns: Number.MAX_SAFE_INTEGER,
             maxTokens: ctx.memory.historyTokens,
           },
+          ...(toolEntities ? { entities: toolEntities } : {}),
+          ...historyExtras,
         }
-      : { maxContextMessages: ctx.maxContextMessages, history: ctx.history },
+      : { maxContextMessages: ctx.maxContextMessages, history: ctx.privacy ? false : ctx.history, ...(toolEntities ? { entities: toolEntities } : {}), ...historyExtras },
   );
   // User role, not system: memory is background a user could have written.
-  const modelMessages = ctx.memory?.preamble
+  const withMemory = ctx.memory?.preamble
     ? [{ role: 'user', content: ctx.memory.preamble }, ...preparedMessages]
     : preparedMessages;
+  // A budget continuation: what already ran and to do only the open steps (this request only, never part of the chat).
+  const modelMessages = request.continuation === 'budget'
+    ? [...withMemory, { role: 'user', content: budgetContinuationInstruction(callsBeforeStop, builtinSet) }]
+    : withMemory;
   // Executed approvals are visible output for the stream and the metric alike.
   const resumedApprovals = resumesToolApprovals(modelMessages);
   const promptMessages = promptCaching
@@ -639,27 +823,145 @@ async function defaultStreamHandler(
     : modelMessages;
 
   let wasTruncated = false;
-  // At the runtime budget the turn blocks further tools and gets one bounded
-  // final summary, so it still ends with an answer instead of silence.
+  // At a tool limit of the runtime budget the turn blocks further tools and
+  // gets one bounded final summary, so it still ends with an answer instead
+  // of silence. `stepNumber` is the summary's step, `answered` whether it
+  // said anything.
   let finalSummaryClaimed = false;
+  let finalSummary: { budget: BudgetLimitState[]; stepNumber: number; answered: boolean } | null = null;
+  // Set when the turn stops at a limit without a summary call: the handler
+  // closes the answer with the notice of these limits.
+  let stopLimits: BudgetStopLimit[] | null = null;
+  // Set when the request ends to let the browser report a UI outcome.
+  let awaitingUiOutcome = false;
   const budgetExhausted = () =>
     ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
   const shouldStop = (event: {
-    steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
+    steps: Array<{ toolCalls: Array<{ toolName: string }>; toolResults?: ReadonlyArray<unknown> }>;
   }) => {
-    const budgetState = ctx.managedTurn?.tracker.evaluate().state;
-    const summarize = budgetState === 'hard-limit'
-      && ctx.managedTurn!.tracker.claimFinalSummary();
-    if (summarize) finalSummaryClaimed = true;
-    return shouldStopManagedExecution({
-      stepCount: event.steps.length,
+    // A handed-off UI action ends the request without a notice: the
+    // continuation answers once the browser reported its outcome.
+    if (uiOutcomes && stepAwaitsUiOutcome(event.steps.at(-1))) {
+      awaitingUiOutcome = true;
+      return true;
+    }
+    const tracker = ctx.managedTurn?.tracker;
+    const evaluation = tracker?.evaluate();
+    const budgetState = evaluation?.state;
+    const stepCount = event.steps.length;
+    const atStepCap = stepCount >= ctx.maxSteps;
+    // At the step cap no further step runs, so no summary is claimed.
+    const summarize = budgetState === 'hard-limit' && !atStepCap && tracker!.claimFinalSummary();
+    if (summarize) {
+      finalSummaryClaimed = true;
+      finalSummary = { budget: tracker!.limitStates(evaluation!.reasons), stepNumber: stepCount, answered: false };
+    }
+    const lastStepToolNames = event.steps.at(-1)?.toolCalls.map((call) => call.toolName);
+    const stop = shouldStopManagedExecution({
+      stepCount,
       maxSteps: ctx.maxSteps,
       budgetState: summarize ? undefined : budgetState,
-      lastStepToolNames: event.steps.at(-1)?.toolCalls.map((call) => call.toolName),
+      lastStepToolNames,
     });
+    // A clarification ends the turn on purpose; it needs no notice.
+    if (stop && !(lastStepToolNames ?? []).includes(CLARIFICATION_TOOL_NAME)) {
+      stopLimits = budgetState === 'hard-limit'
+        ? tracker!.limitStates(evaluation!.reasons)
+        : atStepCap ? [{ dimension: 'maxSteps', limit: ctx.maxSteps }] : null;
+    }
+    return stop;
+  };
+  /**
+   * The closing notice for the turn's last stream part, if it ends at a
+   * limit without a final answer: stopped without a summary call, a summary
+   * that failed or said nothing, or the turn's time limit.
+   */
+  const stopNotice = (
+    terminal: 'finish' | 'error' | 'abort',
+    hadText: boolean,
+    requestCalls: TurnToolCall[],
+  ): StopNotice<UIMessageChunk> => {
+    let limits: ReadonlyArray<BudgetStopLimit> | null = null;
+    if (terminal === 'abort') {
+      // Only the turn timeout aborts a request the browser did not cancel.
+      const tracker = ctx.managedTurn?.tracker;
+      if (!ctx.abortSignal?.aborted && tracker) {
+        const evaluation = tracker.evaluate();
+        limits = tracker.limitStates(evaluation.state === 'hard-limit' ? evaluation.reasons : ['totalTimeoutMs']);
+      }
+    } else if (stopLimits) {
+      limits = stopLimits;
+    } else if (finalSummary && !finalSummary.answered) {
+      limits = finalSummary.budget;
+    }
+    if (!limits || limits.length === 0) return undefined;
+    const stop = budgetStopPart(ctx.messages, request.budgetContinuable === true);
+    // The calls of earlier requests of the turn, then this request's (a call resumed here replaces its earlier entry).
+    const ids = new Set(requestCalls.flatMap((call) => (call.id ? [call.id] : [])));
+    const calls = [...turnCalls.filter((call) => !call.id || !ids.has(call.id)), ...requestCalls];
+    const labels = ctx.toolPresentation?.tools;
+    const summary = budgetStopSummary({
+      calls,
+      labelOf: (name) => labels?.[name]?.label ?? name,
+      hiddenNames: builtinSet,
+      texts: budgetStopTexts,
+      continuable: stop.data.continuable,
+    });
+    return {
+      text: [budgetStopText(limits, budgetStopTexts, ctx.locale, hadText), summary].join('\n\n'),
+      before: [stop as UIMessageChunk],
+    };
   };
 
   let providerErrorReported = false;
+  // Each failure reaches the app's callback once, even when the AI SDK hands
+  // the same error to several of its error hooks. A throwing callback must
+  // not break the stream.
+  const reportedErrors = new Set<unknown>();
+  // `failure` is the error as a hook received it; `error` what the app gets for it.
+  const reportError = (failure: unknown, info?: AiChatErrorInfo, error: unknown = failure) => {
+    if (reportedErrors.has(failure)) return;
+    reportedErrors.add(failure);
+    try {
+      onStreamError?.(error, info);
+    } catch {
+      // The app's diagnostics failed; the turn goes on.
+    }
+  };
+  // Failed tool calls pass the UI stream's error mask: the chat gets a fixed
+  // text, the app's callback the cause (see createToolStreamErrorMask).
+  const toolErrorMask = createToolStreamErrorMask(streamErrorTexts);
+  const maskToolStreamError = (error: unknown) => {
+    const masked = toolErrorMask(error);
+    if (masked.report) reportError(error, masked.report.info, masked.report.error);
+    return masked.text;
+  };
+  /**
+   * The step preparation, then the debug hook (`onModelInput`) with the
+   * messages the step really sends. Local only; a throw from it is ignored.
+   */
+  const withModelInput = <O extends { messages: unknown[]; stepNumber: number }, R>(
+    prepare: (options: O) => Promise<R>,
+  ) => async (options: O): Promise<R> => {
+    const step = await prepare(options);
+    const hook = ctx.onModelInput;
+    if (hook && breakdown) {
+      const messages = (step as { messages?: unknown[] } | undefined)?.messages ?? options.messages;
+      const system = promptCaching ? undefined : systemPrompt;
+      try {
+        hook({
+          stepNumber: options.stepNumber,
+          messages,
+          ...(system ? { system } : {}),
+          breakdown,
+          estimatedTokens: Math.ceil(((JSON.stringify(messages)?.length ?? 0) + (system?.length ?? 0)) / 4),
+        });
+      } catch {
+        // The app's diagnostics failed; the turn goes on.
+      }
+    }
+    return step;
+  };
   const stream = createUIMessageStream({
     // Approval responses continue the last assistant message instead of appending
     // another snapshot with the same tool call IDs.
@@ -670,15 +972,17 @@ async function defaultStreamHandler(
     onError: (error) => {
       if (!providerErrorReported) {
         providerErrorReported = true;
-        onStreamError?.(error);
+        reportError(error);
       }
-      return 'AI request failed';
+      return streamErrorText(error, streamErrorTexts);
     },
     execute: async ({ writer }) => {
       let totalSteps = 0;
       let finalStateWritten = false;
       // Cost of the running model step, read from its raw stream chunks.
       let stepRawCostUsd: number | null = null;
+
+      const sideParts = createSidePartOrder<Parameters<typeof writer.write>[0]>((part) => writer.write(part));
 
       const memoryUpdates = ctx.memory?.connect((part) => {
         writer.write(part as Parameters<typeof writer.write>[0]);
@@ -694,11 +998,18 @@ async function defaultStreamHandler(
           transient,
         });
       };
+      const writeFinalPipelineState = (state: PipelineStreamState) => {
+        sideParts.beforeEnd({ type: 'data-pipeline-state', data: state, transient: false });
+      };
 
       // Ahead of the first chunk, so the UI can name a tool the moment it is called.
       const presentation = ctx.toolPresentation;
       if (presentation) {
         writer.write({ type: 'data-tool-presentation', data: presentation, transient: true });
+      }
+      // Only when a tool declares its identity: an app that declares nothing gets no new part.
+      if (toolEntities) {
+        writer.write({ type: TOOL_ENTITIES_PART_TYPE, data: { tools: toolEntities }, transient: true });
       }
 
       writePipelineState(
@@ -716,16 +1027,23 @@ async function defaultStreamHandler(
         model: ctx.model as Parameters<typeof streamText>[0]['model'],
         messages: promptMessages as NonNullable<Parameters<typeof streamText>[0]['messages']>,
         ...(promptCaching ? {} : { system: systemPrompt }),
-        ...(hideIds ? { experimental_transform: createHideIdsTransform(idLabels) } : {}),
+        ...(hideIds ? { experimental_transform: createHideIdsTransform(idLabels, toolEntities ? { entities: toolEntities, messages: ctx.messages } : {}) } : {}),
         tools: orderedTools as Parameters<typeof streamText>[0]['tools'],
         ...(ctx.toolDiscovery
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
-        prepareStep: async () => {
-          // A lock during the turn ends it here, before the step's model call.
+        prepareStep: withModelInput(async ({ messages }) => {
           await ctx.beforeModelStep?.();
           if (budgetExhausted()) {
-            return { activeTools: [], toolChoice: 'none' as const };
+            // The summary call: no tools, and the instruction to close the
+            // answer (for this call only; it is no part of the chat).
+            return {
+              activeTools: [],
+              toolChoice: 'none' as const,
+              ...(finalSummary
+                ? { messages: [...messages, { role: 'user' as const, content: finalSummaryInstruction(finalSummary.budget) }] }
+                : {}),
+            };
           }
           // A role lost or a revocation loaded since the request started
           // takes the tool away from the next step, not only from its call.
@@ -735,9 +1053,9 @@ async function defaultStreamHandler(
             : permitted ? Object.keys(orderedTools) : undefined;
           if (!active) return {};
           return { activeTools: permitted ? active.filter((name) => permitted.has(name)) : active };
-        },
+        }),
         maxOutputTokens: ctx.maxOutputTokens,
-        temperature: ctx.temperature,
+        ...(ctx.temperature === undefined ? {} : { temperature: ctx.temperature }),
         timeout: resolveTurnTimeout(
           ctx.managedTurn?.snapshot.budget.totalTimeoutMs,
         ),
@@ -756,64 +1074,69 @@ async function defaultStreamHandler(
         // request/response content. Only the local consumer owns diagnostics.
         onError: ({ error }) => {
           providerErrorReported = true;
-          onStreamError?.(error);
+          reportError(error);
         },
         onStepFinish: async (event) => {
-          const inputTokens = event.usage.inputTokens ?? 0;
-          const outputTokens = event.usage.outputTokens ?? 0;
-          const model = stepModelId(event);
-          const rawCostUsd = stepRawCostUsd;
-          stepRawCostUsd = null;
-          const cost = resolveStepCost({
-            model,
-            inputTokens,
-            outputTokens,
-            providerMetadata: event.providerMetadata,
-            usageRaw: event.usage.raw,
-            rawChunkCostUsd: rawCostUsd,
-          }, ctx.modelPricing);
-          // A known cost counts against maxEstimatedCostUsd; an unknown one
-          // is never recorded as 0.
-          await ctx.managedTurn?.afterModelStep({
-            inputTokens,
-            outputTokens,
-            ...(cost.usd !== null ? { estimatedCostUsd: cost.usd } : {}),
-          });
-          ctx.turnMetrics?.recordStep({
-            model,
-            inputTokens,
-            outputTokens,
-            cost,
-            toolNames: event.toolCalls.map((call) => call.toolName),
-            failedToolNames: failedToolNames(event.content),
-          });
-          const report = buildStepReport({
-            stepNumber: event.stepNumber,
-            finishReason: event.finishReason,
-            toolCalls: event.toolCalls.map((call) => ({
-              toolName: call.toolName,
-            })),
-            toolResults: event.toolResults,
-            text: event.text,
-            usage: {
-              inputTokens: event.usage.inputTokens,
-              outputTokens: event.usage.outputTokens,
-              totalTokens: event.usage.totalTokens,
-            },
-          });
-          totalSteps = Math.max(totalSteps, report.stepNumber + 1);
-          if (ctx.emitStepReports) {
-            writer.write({
-              type: 'data-step-report',
-              data: report,
+          // Exactly once per step, also when the callback fails: the step's finish-step waits for it.
+          let stepParts: Array<Parameters<typeof writer.write>[0]> = [];
+          try {
+            if (finalSummary && event.stepNumber === finalSummary.stepNumber && event.text.trim() !== '') {
+              finalSummary.answered = true;
+            }
+            const inputTokens = event.usage.inputTokens ?? 0;
+            const outputTokens = event.usage.outputTokens ?? 0;
+            const model = stepModelId(event);
+            const rawCostUsd = stepRawCostUsd;
+            stepRawCostUsd = null;
+            const cost = resolveStepCost({
+              model,
+              inputTokens,
+              outputTokens,
+              providerMetadata: event.providerMetadata,
+              usageRaw: event.usage.raw,
+              rawChunkCostUsd: rawCostUsd,
+            }, ctx.modelPricing);
+            // A known cost counts against maxEstimatedCostUsd; an unknown one
+            // is never recorded as 0.
+            await ctx.managedTurn?.afterModelStep({
+              inputTokens,
+              outputTokens,
+              ...(cost.usd !== null ? { estimatedCostUsd: cost.usd } : {}),
             });
+            ctx.turnMetrics?.recordStep({
+              model,
+              inputTokens,
+              outputTokens,
+              cost,
+              toolNames: event.toolCalls.map((call) => call.toolName),
+              failedToolNames: failedToolNames(event.content),
+            });
+            const report = buildStepReport({
+              stepNumber: event.stepNumber,
+              finishReason: event.finishReason,
+              toolCalls: event.toolCalls.map((call) => ({
+                toolName: call.toolName,
+              })),
+              toolResults: event.toolResults,
+              text: event.text,
+              usage: {
+                inputTokens: event.usage.inputTokens,
+                outputTokens: event.usage.outputTokens,
+                totalTokens: event.usage.totalTokens,
+              },
+            });
+            totalSteps = Math.max(totalSteps, report.stepNumber + 1);
+            if (ctx.emitStepReports) stepParts = [{ type: 'data-step-report', data: report }];
+            ctx.onStepReport?.(report);
+          } finally {
+            sideParts.stepFinished(stepParts);
           }
-          ctx.onStepReport?.(report);
         },
         onAbort: (event) => {
           // Distinguish request cancellation from a runtime budget stop.
+          const budgetEvaluation = ctx.managedTurn?.tracker.evaluate();
           const abortedByBudget =
-            !ctx.abortSignal?.aborted && ctx.managedTurn?.tracker.evaluate().state === 'hard-limit';
+            !ctx.abortSignal?.aborted && budgetEvaluation?.state === 'hard-limit';
           ctx.turnMetrics?.finish(
             abortedByBudget
               ? { status: 'safety-stop', errorCode: 'budget_exhausted' }
@@ -821,14 +1144,16 @@ async function defaultStreamHandler(
           );
           if (finalStateWritten) return;
           totalSteps = Math.max(totalSteps, event.steps.length);
-          writePipelineState(
+          writeFinalPipelineState(
             createPipelineState({
               status: 'aborted',
               totalSteps,
               finishReason: 'stop',
               maxSteps: ctx.maxSteps,
               stepLimitSource: ctx.stepLimitSource,
-              message: 'Stopped by user.',
+              message: abortedByBudget
+                ? `Stopped at runtime budget: ${budgetEvaluation!.reasons.join(', ')}.`
+                : 'Stopped by user.',
             }),
           );
           finalStateWritten = true;
@@ -837,10 +1162,11 @@ async function defaultStreamHandler(
           const budgetEvaluation = ctx.managedTurn?.tracker.evaluate();
           const stoppedByBudget =
             budgetEvaluation?.state === 'hard-limit';
-          wasTruncated = finalSummaryClaimed || (
+          // Ending for a UI outcome is no cut: the continuation answers.
+          wasTruncated = !awaitingUiOutcome && (finalSummaryClaimed || (
             event.finishReason === 'tool-calls' &&
             (event.steps.length >= ctx.maxSteps || stoppedByBudget)
-          );
+          ));
           totalSteps = Math.max(totalSteps, event.steps.length);
 
           const isSafetyStop =
@@ -868,7 +1194,7 @@ async function defaultStreamHandler(
           });
 
           if (!finalStateWritten) {
-            writePipelineState(
+            writeFinalPipelineState(
               createPipelineState({
                 status,
                 totalSteps,
@@ -906,29 +1232,35 @@ async function defaultStreamHandler(
               (count, step) => count + failedToolNames(step.content, 'expected').length,
               0,
             ),
+            ...(request.continuation ? { continuation: request.continuation } : {}),
+            ...(awaitingUiOutcome ? { awaitingUiOutcome: true as const } : {}),
           });
         },
       }, ctx.privacy?.boundary ?? null);
 
-      const errorText = ctx.privacy ? privacyStreamErrorText : () => 'AI request failed';
-      const modelStream = resumedApprovals
-        ? result.toUIMessageStream({ onError: errorText })
-        : withSilentTurnFallback(
-          result.toUIMessageStream({ onError: errorText }),
-          silentTurnFallbackText(ctx.locale),
-        );
-      // The principal sees the originals; approvals bind to what it sees.
+      // Settles once the turn has written its final state, the error state included.
+      let settleTurn!: () => void;
+      const turnSettled = new Promise<void>((resolve) => { settleTurn = resolve; });
+      const modelStream = sideParts.sequence(
+        withStepFailureParts(result.toUIMessageStream({ onError: ctx.privacy ? privacyStreamErrorText : maskToolStreamError }), streamErrorTexts),
+        turnSettled,
+      );
+      const answerStream = withStopNotice(modelStream, stopNotice);
+      const answerUiStream = resumedApprovals
+        ? answerStream
+        : withSilentTurnFallback(answerStream, silentTurnText ?? silentTurnFallbackText(ctx.locale));
       const uiStream = ctx.privacy
-        ? projectUiMessageStream(modelStream, ctx.privacy.boundary.session, { status: ctx.privacy.status })
-        : modelStream;
+        ? projectUiMessageStream(answerUiStream, ctx.privacy.boundary.session, { status: ctx.privacy.status })
+        : answerUiStream;
       writer.merge(ctx.bindApprovalRequests ? ctx.bindApprovalRequests(uiStream) : uiStream);
       try {
         await result.response;
+        settleTurn();
         await memoryUpdates?.done();
       } catch (error) {
         ctx.turnMetrics?.finish({ status: 'error', errorCode: 'model_error' });
         if (finalStateWritten) return;
-        writePipelineState(
+        writeFinalPipelineState(
           createPipelineState({
             status: 'error',
             totalSteps,
@@ -940,6 +1272,8 @@ async function defaultStreamHandler(
         );
         finalStateWritten = true;
         if (!providerErrorReported) throw error;
+      } finally {
+        settleTurn();
       }
     },
   });
@@ -993,7 +1327,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     // Shared
     model: modelConfig,
     systemPrompt: systemPromptConfig,
-    locale = 'en-US',
+    locale: configuredLocale = 'en-US',
+    requestLocale,
+    clientLanguage = true,
+    locales: localesConfig,
+    toolTexts,
     uiActionSchema,
     maxOutputTokens = 600,
     temperature = 0.2,
@@ -1011,6 +1349,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     wrapHandler,
     onError: onErrorConfig,
     onToolError,
+    toolMiddleware,
     classifyToolFailure,
     maxResultChars,
     resultHandles,
@@ -1030,17 +1369,99 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     approvalMaxAgeMs,
     approvalStore: configuredApprovalStore,
     approvalScope: approvalScopeOf,
+    approvalSubjects: approvalSubjectsConfig,
     allowedOrigins,
     crossOriginProtection,
     maxBodyBytes: configuredMaxBodyBytes,
     attachments,
     memory: memoryConfig,
+    budgetStopTexts: budgetStopTextsConfig,
+    uiActionOutcomes = 'confirm',
+    uiToolResultShape = 'auto',
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
+  assertToolMiddleware(toolMiddleware);
+  // Server lookups behind approval cards: only the built-in stream handler makes them.
+  const approvalSubjectLimits = customStreamHandler || approvalSubjectsConfig === false
+    ? undefined
+    : resolveApprovalSubjectLimits(approvalSubjectsConfig);
+  assertUiActionOutcomesOption(uiActionOutcomes, 'createAiChatHandler');
+  if (followups && followups.enabled !== false && !pipeline) {
+    // Registration is unchanged: the follow-up tool exists only in pipeline mode.
+    console.warn(
+      '[glirastes] createAiChatHandler: `followups` is set without `pipeline`, so the model gets no suggest_followups tool. '
+      + 'Pass a `pipeline` (glirastes/server) to enable it, or remove `followups`; the chat UI then reads a trailing '
+      + 'suggestion list of the answer instead.',
+    );
+  }
+  if (uiToolResultShape !== 'auto' && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
+    throw new Error("createAiChatHandler: uiToolResultShape must be 'auto', 'handoff' or 'legacy'");
+  }
+  const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
+  assertChatServerLocales(localesConfig);
+  // Every configured invalid-input text, of any language: a later turn's history swaps it for the model's English text.
+  const configuredInvalidToolInputTexts = Object.values(localesConfig ?? {})
+    .flatMap((table) => (typeof table.invalidToolInput === 'string' ? [table.invalidToolInput] : []));
+  const explicitLocale = config.locale;
+  if (requestLocale !== undefined && typeof requestLocale !== 'function') {
+    throw new Error('createAiChatHandler: requestLocale must be a function of the request');
+  }
+  // The handler's own texts per turn language; without locales or requestLocale exactly the texts of before.
+  type TurnTexts = { budgetStop: BudgetStopTexts; silentTurn?: string; streamErrors: StreamErrorTexts };
+  const configuredTexts: TurnTexts = {
+    budgetStop: budgetStopTexts,
+    // Detected like the budget stop notice of this path, so one chat never mixes languages.
+    streamErrors: builtInStreamErrorTexts(configuredLocale),
+  };
+  const serverTexts = new Map<string, TurnTexts>();
+  const textsFor = (turnLocale: string | undefined): TurnTexts => {
+    if (!localesConfig && (turnLocale === undefined || turnLocale === configuredLocale)) return configuredTexts;
+    const key = turnLocale ?? configuredLocale;
+    let texts = serverTexts.get(key);
+    if (!texts) {
+      const { silentTurn, streamError, invalidToolInput, ...budgetStop } = resolveChatServerTexts(key, budgetStopTextsConfig, localesConfig);
+      texts = { budgetStop: Object.freeze(budgetStop), silentTurn, streamErrors: Object.freeze({ streamError, invalidToolInput }) };
+      if (serverTexts.size < 100) serverTexts.set(key, texts);
+    }
+    return texts;
+  };
+  /**
+   * The language of one request: the app's `requestLocale`, else (without an explicit `locale`)
+   * the language the chat UI sent, else the configured `locale`.
+   */
+  const turnLocaleOf = async (req: Request): Promise<string | undefined> => {
+    if (!requestLocale) {
+      return explicitLocale === undefined && clientLanguage !== false
+        ? chatLanguageOf(req.headers.get(CHAT_LANGUAGE_HEADER))
+        : undefined;
+    }
+    try {
+      const value = await requestLocale(req);
+      return typeof value === 'string' && isLanguageTag(value.replace(/_/g, '-')) ? value.replace(/_/g, '-') : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
-  const chatMemory = memoryConfig ? createChatMemory(memoryConfig) : null;
+  const chatMemory = memoryConfig ? createChatMemory(memoryConfig, process.env, { temperature }) : null;
+  /**
+   * With `history.seenObjects` (default on): the messages the window or the chat memory
+   * left out ahead of `recent` (a suffix of `all`), for the memo; else none.
+   * They get the same PII treatment as the window (`anonymizeMessages`). The
+   * memo reads only their tool results, which the shield sealed when the
+   * tool ran (`wrapToolsWithShield`), exactly like the tool results the
+   * window sends; shielding them again would map a pseudonym once more.
+   */
+  const seenObjectsSource = (all: unknown[], recent: unknown[], tools: Readonly<Record<string, unknown>>): unknown[] | undefined => (
+    // On by default (`false` turns it off), and only for a turn with a tool that declares its identity:
+    // without one the memo lists nothing, so the window's messages are not prepared for it at all.
+    history !== false && history?.seenObjects !== false && recent.length < all.length
+      && entityDeclarationsOfTools(tools) !== undefined
+      ? all.slice(0, all.length - recent.length)
+      : undefined
+  );
   if (approvalMaxAgeMs !== undefined) assertApprovalMaxAge(approvalMaxAgeMs);
-  if (privacy) {
+  if (privacy?.policy?.required === true) {
     if (piiShield) throw new Error('createAiChatHandler: privacy replaces piiShield; set only one');
     if (lancer || telemetry) {
       throw new Error('createAiChatHandler: privacy cannot be combined with lancer or telemetry, which send content to Platform services');
@@ -1060,17 +1481,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   // Without a callback a failed turn would only say "AI request failed" to
   // the user and nothing to the developer. Name only: provider errors can
   // carry request and response content.
-  const reportError = onErrorConfig ?? ((error: unknown) => {
+  const reportError = onErrorConfig ?? ((error: unknown, _req: Request, info?: AiChatErrorInfo) => {
     const name = error instanceof Error ? error.name : typeof error;
-    console.error(`[glirastes] AI chat turn failed (${name}). Pass onError to createAiChatHandler to see the cause.`);
+    const what = info?.source === 'tool-call' ? 'tool call' : 'turn';
+    console.error(`[glirastes] AI chat ${what} failed (${name}). Pass onError to createAiChatHandler to see the cause.`);
   });
   // The protected profile hands callbacks a name and a code, never content.
-  const onError = privacy
-    ? (error: unknown, req: Request) => reportError(privacySafeError(error), req)
-    : reportError;
-  const reportToolError = privacy && onToolError
-    ? (toolId: string, error: unknown) => onToolError(toolId, privacySafeError(error))
-    : onToolError;
+  const protectedRequests = new WeakSet<Request>();
+  const onError = (error: unknown, req: Request, info?: AiChatErrorInfo) => {
+    const protectedRequest = privacy?.policy?.required === true || protectedRequests.has(req);
+    const safe = protectedRequest ? privacySafeError(error) : error;
+    if (info && !protectedRequest) reportError(safe, req, info);
+    else reportError(safe, req);
+  };
 
   // The Proctor endpoint behind Lancer telemetry is not served by the
   // Foundation control plane and its audit payloads are not content-free;
@@ -1097,11 +1520,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
 
   // Build stream handler factory — per-request to allow session.ended audit
-  function createStreamHandler(req: Request, auditContext?: {
+  function createStreamHandler(req: Request, auditContext: {
     sessionId: string;
     requestStart: number;
     modelId?: string;
-  }) {
+  } | undefined, requestState: RequestTurnState) {
     const wrappedOnFinish: typeof onFinish = (event) => {
       onFinish?.(event);
       if (auditContext && (onAudit || telemetry)) {
@@ -1136,9 +1559,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
     };
     return (ctx: StreamHandlerContext) => {
-      const context = { ...ctx, abortSignal: req.signal };
+      // The debug hook comes from the server config only, never from a request.
+      const context = { ...ctx, abortSignal: req.signal, ...(!ctx.privacy && config.onModelInput ? { onModelInput: config.onModelInput } : {}) };
+      const texts = textsFor(ctx.locale);
       return customStreamHandler ? customStreamHandler(context) : defaultStreamHandler(
-        context, wrappedOnFinish, (error) => onError?.(error, req),
+        context, wrappedOnFinish, (error, info) => (info ? onError?.(error, req, info) : onError?.(error, req)),
+        texts.budgetStop,
+        texts.silentTurn,
+        requestState,
+        texts.streamErrors,
+        configuredInvalidToolInputTexts,
       );
     };
   }
@@ -1238,6 +1668,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     messages: unknown[],
     managedTurn: ManagedTurnGuard | undefined,
     scope: string,
+    subjects?: ApprovalSubjectResolver,
   ): Promise<{ binder: ApprovalBinder; storeScope: string; messages: unknown[]; verified: VerifiedApproval[] }> {
     const binder = resolveApprovalBinder({
       secret: approvalSecret,
@@ -1252,8 +1683,15 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     const storeScope = storeScopeOf(req, scope, binder);
     const checked = await enforceApprovalBindings(messages, {
       binder, store: approvalStore, scope: storeScope, localToolNames: new Set(Object.keys(registry)),
+      // Declared tools only: their approvals carry the signed subject digest, and may be checked again.
+      ...(subjects
+        ? { requiresSubjectDigest: (toolName: string) => subjects.isDeclared(toolName), recheck: (approval) => subjects.recheck(approval) }
+        : {}),
     });
-    return { binder, storeScope, messages: checked.messages, verified: checked.verified };
+    // The model reads a refusal or denial as the server's fixed text, never
+    // the reason the client wrote or a bare code.
+    const messagesForModel = withModelFacingDenialReasons(checked.messages, checked.denied);
+    return { binder, storeScope, messages: messagesForModel, verified: checked.verified };
   }
 
   /**
@@ -1294,6 +1732,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     try {
       const body = await readJsonBody(req, maxBodyBytes);
       if (!body.ok) return body.response;
+      // The language of this turn: the request's (requestLocale, else the chat UI's), else the configured one.
+      const requestedLocale = await turnLocaleOf(req);
+      const locale = requestedLocale ?? configuredLocale;
       const { messages: sentMessages, glirastesClientActions } = body.value as {
         messages?: unknown;
         glirastesClientActions?: unknown;
@@ -1405,6 +1846,16 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           await managedRuntime.privacyGate({ request: req, snapshot: pinnedSnapshot });
         }
         const signedBlock = pinnedSnapshot?.policyRevision.privacy;
+        if (isProtectedPolicy(signedBlock) || privacy?.policy?.required === true) {
+          protectedRequests.add(req);
+          if (toolMiddleware?.length) {
+            return Response.json({ code: 'privacy_unsupported_content', feature: 'middleware',
+              error: 'Tool middleware is unavailable while pseudonymization is active.' }, { status: 503 });
+          }
+          if (piiShield || lancer || telemetry || (pipeline && !isLocalAiPipeline(pipeline))) {
+            throw new PrivacyError('privacy_unsupported_content');
+          }
+        }
         const reportedDigest = pinnedSnapshot && managedRuntime?.privacyEffectiveDigest
           ? managedRuntime.privacyEffectiveDigest({ request: req, snapshot: pinnedSnapshot })
           : undefined;
@@ -1420,11 +1871,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (!privacy) {
           if (isProtectedPolicy(signedBlock)) throw new PrivacyError('privacy_not_configured');
           assertReported(null);
+        } else if (!isProtectedPolicy(signedBlock) && privacy.policy?.required !== true) {
+          assertReported(null);
         } else {
           const registry = privacy.providers?.registry;
           const effective = mergePrivacyPolicy(
             signedBlock ?? null,
-            { required: true, ...privacy.policy },
+            privacy.policy ?? {},
             { bindings: registry?.bindings() ?? {}, ...(registry ? { defaultEntryId: registry.defaultEntryId } : {}) },
           );
           assertReported(effective ? effectivePrivacyPolicyDigest(effective) : null);
@@ -1473,6 +1926,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         return privacyRefusal(error);
       }
       if (privacy && privacyPolicy) {
+        // Canonical browser labels can already be shortened before the server
+        // knows their identity. Until they have an authenticated binding, do
+        // not treat marker fragments as protected text.
+        if (JSON.stringify(requestMessages).includes('{{mention:')) {
+          return Response.json({ code: 'privacy_unsupported_content', feature: 'mentions',
+            error: 'Mentions are unavailable with pseudonymization. Enter a plain-text request.' }, { status: 503 });
+        }
         try {
           const opened = await openChatPrivacyTurn(privacy, req, body.value as { id?: unknown }, privacyPolicy);
           if (!opened) {
@@ -1507,6 +1967,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // A direct command (`/` command or entity action) runs its tool without
       // the model; the model sees earlier commands only by their label.
       const directCommand = directCommands ? resolveDirectCommand(requestMessages) : undefined;
+      if (privacyTurn && directCommand) {
+        return Response.json({ code: 'privacy_unsupported_content', feature: 'direct-commands',
+          error: 'Direct commands are unavailable with pseudonymization. Enter a plain-text request.' }, { status: 503 });
+      }
 
       // A clarification answer resumes its original request: routing sees
       // request + answer, the model sees an explicit continuation. The client
@@ -1565,12 +2029,45 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const clientActions = readClientActions(glirastesClientActions);
       if (clientActions) toolContext.runtime = { ...toolContext.runtime, clientActions };
       const requestStart = Date.now();
+      // "Continue" after a budget stop: only for a history that ends with a continuable stop (fail closed).
+      const budgetContinuation = directCommand ? undefined : readBudgetContinuation(body.value, requestMessages);
+      if (budgetContinuation === 'invalid' || (budgetContinuation && customStreamHandler)) {
+        return new Response(
+          JSON.stringify({ error: 'Nothing to continue' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      // A request without a new user message continues the turn (approvals, UI outcomes, a budget stop).
+      const continuation = directCommand ? undefined : budgetContinuation ?? turnContinuationOf(requestMessages);
+      // Only the built-in stream handler marks, stops and explains; others get no marker.
+      const requestState: RequestTurnState = {
+        ...(continuation ? { continuation } : {}),
+        budgetContinuable: !customStreamHandler && !directCommand,
+        ...(!customStreamHandler && uiActionOutcomes !== 'off' && readUiOutcomesFlag(body.value)
+          ? {
+              uiOutcomes: {
+                modeOf: (toolName: string) => uiOutcomeModeOf(uiActionOutcomes, toolName),
+                capReached: uiOutcomeCapReached(requestMessages),
+              },
+            }
+          : {}),
+      };
 
       turnMetrics = metrics
         ? createTurnMetricsRecorder({
             sink: metrics,
             snapshot: managedTurn?.snapshot,
             startedAtMs: requestStart,
+            // A budget continuation is a request the user asked for: a finished turn for the
+            // Platform, whose contract knows only approval and UI outcome continuations.
+            ...(continuation && continuation !== 'budget'
+              ? {
+                  continuation,
+                  // Keyed like approvals: the configured approval secret is
+                  // shared by every instance and survives a restart.
+                  continuedTurn: { turnId, secret: resolveApprovalSecret({ secret: approvalSecret }) },
+                }
+              : {}),
           })
         : undefined;
 
@@ -1662,6 +2159,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             principal: managedPrincipal,
             revocations: await loadTurnRevocations(),
           }),
+          {
+            ...(toolTexts ? { texts: toolTexts } : {}),
+            // A turn language only where the app states one; otherwise the manifest's, as before.
+            ...(requestedLocale ?? explicitLocale) !== undefined ? { locale: (requestedLocale ?? explicitLocale)! } : {},
+          },
         ) ?? undefined;
       };
 
@@ -1678,6 +2180,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // through the manifest-checked index.
         const builtinToolNames = handlerBuiltinNames.filter((name) =>
           ALWAYS_ON_BUILTINS.includes(name) || initialToolNames.includes(name));
+        // A UI outcome or budget continuation keeps the tools the turn already called, also those `find_tools` added.
+        if (continuation === 'ui-outcome' || continuation === 'budget') {
+          initialToolNames = [...new Set([...initialToolNames, ...currentTurnToolNames(requestMessages)])];
+        }
         if (!managedTurn) {
           return createHybridToolDiscovery({
             discovery: createRegistryToolDiscovery({
@@ -1709,14 +2215,21 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       const toolOptions: ToolToAiToolOptions = {
         uiActionSchema,
-        onError: reportToolError,
-        ...(privacy ? { contentFreeErrors: true } : {}),
+        onError: privacyTurn && onToolError
+          ? (toolId, error) => onToolError(toolId, privacySafeError(error))
+          : onToolError,
+        ...(privacyTurn ? { contentFreeErrors: true } : {}),
         ...(privacyTurn ? { protectedResults: true } : {}),
         onAudit,
         sessionId,
         traceId: sessionId || undefined,
         telemetry,
         ...(maxResultChars !== undefined ? { maxResultChars } : {}),
+        // `'auto'`: the hand-off shape only for a client that reads it (it sends the outcome flag);
+        // every other request gets the shape a 0.17 browser runs.
+        uiToolResultShape: uiToolResultShape === 'auto'
+          ? (readUiOutcomesFlag(body.value) ? 'handoff' : 'legacy')
+          : uiToolResultShape,
       };
       /**
        * The result handles and `read_result` of a model turn (not of a direct
@@ -1742,6 +2255,42 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const ownReadResult = (registry: ToolRegistry, results: TurnResults | undefined): string | undefined => (
         results && registry[READ_RESULT_TOOL_NAME] === results.tool ? READ_RESULT_TOOL_NAME : undefined
       );
+      /**
+       * The approval-subject lookups of this request (docs/approval-subjects.md),
+       * or undefined when no tool declares them (then nothing changes).
+       * Lookups run through `context` (this request's transport, the user's
+       * credentials) and, in a managed turn, the guard. Each lookup runs its
+       * source tool through the app's `toolMiddleware`, as a read call.
+       */
+      const approvalSubjectResolverFor = (
+        registry: ToolRegistry,
+        context: ToolContext,
+        shieldSessionId: () => string,
+        scope: string,
+        builtinNames: ReadonlyArray<string>,
+      ): ApprovalSubjectResolver | undefined => {
+        if (!approvalSubjectLimits) return undefined;
+        const resolver = createApprovalSubjectResolver({
+          registry,
+          context,
+          ...(managedTurn ? { guard: managedTurn } : {}),
+          ...(piiShield ? { shield: { shield: piiShield, sessionId: shieldSessionId } } : {}),
+          limits: approvalSubjectLimits,
+          signal: req.signal,
+          ...(toolMiddleware && toolMiddleware.length > 0
+            ? { toolMiddleware: appToolMiddleware(toolMiddleware, builtinNames) }
+            : {}),
+          // The whole turn's time limit bounds every lookup, the rechecks before the model too.
+          ...(managedTurn ? { turnDeadline: requestStart + managedTurn.snapshot.budget.totalTimeoutMs } : {}),
+          scope,
+        });
+        if (privacyTurn && resolver.hasDeclarations()) {
+          // Approval list/preview lookups predate scoped pseudonym rehydration.
+          // Do not execute them or issue a partially checked approval card.
+          throw new PrivacyError('privacy_unsupported_content');
+        }
+        return resolver.hasDeclarations() ? resolver : undefined;
+      };
       const withResultTool = (registry: ToolRegistry, results: TurnResults | undefined): ToolRegistry => (
         results ? { ...registry, [results.tool.id]: results.tool } : registry
       );
@@ -1789,7 +2338,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         const registry = staticTools ?? await loadTools!(endpointToolContext);
         const commandScope = await requestApprovalScope(req, managedTurn);
         const { binder: commandBinder, storeScope: commandStoreScope } = await secureApprovals(req, registry, [], managedTurn, commandScope);
-        let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, toolOptions);
+        let commandTools: Record<string, unknown> = toolsToAiTools(registry, endpointToolContext, {
+          ...toolOptions,
+          toolMiddleware: appToolMiddleware(toolMiddleware, findHandlerBuiltins(registry, [clarificationTool, planTool])),
+        });
         // The result stays in the chat history that later model turns send to the model.
         if (piiShield) {
           commandTools = wrapToolsWithShield(commandTools, piiShield, sessionId);
@@ -1806,6 +2358,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           approvals: commandBinder,
           approvalStore,
           approvalScope: commandStoreScope,
+          // A direct command makes no lookups: a tool that declares block or a recheck is refused, never run unchecked.
+          ...(approvalSubjectsConfig !== false
+            ? (() => {
+                const checked = toolsRequiringServerCheck(registry);
+                return checked.size > 0 ? { requiresServerCheck: (toolName: string) => checked.has(toolName) } : {};
+              })()
+            : {}),
           onError: (error) => onError?.(error, req),
         });
       }
@@ -1856,15 +2415,19 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           registry = { ...registry, [followupTool.id]: followupTool };
         }
         const turnResults = beginTurnResults(registry, () => sessionId);
-        const pipelineToolOptions: ToolToAiToolOptions = turnResults
-          ? { ...toolOptions, resultStore: turnResults.store }
-          : toolOptions;
         registry = withResultTool(withMemoryTools(withAlwaysOnBuiltins(registry)), turnResults);
         const handlerBuiltinNames = findHandlerBuiltins(
           registry,
           [followupTool, clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
         );
-        const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
+        const pipelineToolOptions: ToolToAiToolOptions = {
+          ...toolOptions,
+          ...(turnResults ? { resultStore: turnResults.store } : {}),
+          toolMiddleware: appToolMiddleware(toolMiddleware, handlerBuiltinNames),
+        };
+        const pipelineScope = await requestApprovalScope(req, managedTurn);
+        const pipelineSubjects = approvalSubjectResolverFor(registry, endpointToolContext, () => sessionId, pipelineScope, handlerBuiltinNames);
+        const pipelineApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, pipelineScope, pipelineSubjects);
         processedMessages = pipelineApprovals.messages;
 
         // Extract user input for pipeline
@@ -2095,10 +2658,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxContextMessages;
         const memory = await prepareMemory(processedMessages, model, sessionId);
         let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
+        let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
 
         // PII Shield: anonymize message history + wrap tools
         if (piiShield) {
           recentMessages = await anonymizeMessages(recentMessages, piiShield, sessionId);
+          if (earlierMessages) earlierMessages = await anonymizeMessages(earlierMessages, piiShield, sessionId);
           aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
         }
         // Protected turn: the model is wrapped by the boundary (every call of
@@ -2125,7 +2690,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           sessionId,
           requestStart,
           modelId: resolvedModelId,
-        } : undefined);
+        } : undefined, requestState);
 
         return clearWhenDone(await pipelineStreamHandler({
           tools: discoveryController
@@ -2139,11 +2704,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           emitStepReports,
           onStepReport,
           maxOutputTokens,
-          temperature,
+          temperature: temperature ?? undefined,
           maxContextMessages,
         locale,
         history,
         memory,
+        ...(earlierMessages ? { earlierMessages } : {}),
         promptCaching,
         hideIds,
           modelTier: pipelineResult.model.modelId,
@@ -2166,7 +2732,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
           ...(beforeModelStep ? { beforeModelStep } : {}),
-          bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder),
+          bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder, pipelineSubjects),
+          ...(pipelineSubjects ? { approvalSubjects: pipelineSubjects } : {}),
         }), turnResults?.store);
       }
 
@@ -2195,15 +2762,22 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       // The shield session of the legacy path is derived below; results are sealed only once tools run.
       const turnResults = beginTurnResults(registry, () => legacySessionId);
-      const legacyToolOptions: ToolToAiToolOptions = turnResults
-        ? { ...toolOptions, resultStore: turnResults.store }
-        : toolOptions;
       registry = withResultTool(withMemoryTools(withAlwaysOnBuiltins(registry)), turnResults);
       const handlerBuiltinNames = findHandlerBuiltins(
         registry,
         [clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
       );
-      const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, await requestApprovalScope(req, managedTurn));
+      const legacyToolOptions: ToolToAiToolOptions = {
+        ...toolOptions,
+        ...(turnResults ? { resultStore: turnResults.store } : {}),
+        toolMiddleware: appToolMiddleware(toolMiddleware, handlerBuiltinNames),
+      };
+      const legacyScope = await requestApprovalScope(req, managedTurn);
+      // The shield session of the legacy path, derived once (also for a recheck before it is used below).
+      let legacyShieldSession: string | undefined;
+      const legacyShieldSessionOf = () => (legacyShieldSession ??= deriveSessionId(processedMessages));
+      const legacySubjects = approvalSubjectResolverFor(registry, endpointToolContext, legacyShieldSessionOf, legacyScope, handlerBuiltinNames);
+      const legacyApprovals = await secureApprovals(req, registry, processedMessages, managedTurn, legacyScope, legacySubjects);
       processedMessages = legacyApprovals.messages;
       // Routing sees what the model may see: a consumer router can hand the
       // names on to a model of its own, so a managed turn names only the
@@ -2216,7 +2790,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
 
       // PII Shield: anonymize for legacy mode
-      const legacySessionId = piiShield ? deriveSessionId(processedMessages) : '';
+      const legacySessionId = piiShield ? legacyShieldSessionOf() : '';
       if (piiShield) {
         const lastUserText = extractLastUserText(processedMessages);
         await piiShield.outbound(lastUserText, legacySessionId);
@@ -2316,10 +2890,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
       const memory = await prepareMemory(processedMessages, model, legacySessionId);
       let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
+      let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
 
       // PII Shield: anonymize message history + wrap tools (legacy mode)
       if (piiShield) {
         recentMessages = await anonymizeMessages(recentMessages, piiShield, legacySessionId);
+        if (earlierMessages) earlierMessages = await anonymizeMessages(earlierMessages, piiShield, legacySessionId);
         aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
       }
       let legacyPrivacy: StreamHandlerContext['privacy'];
@@ -2343,7 +2919,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const legacyStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
         sessionId: legacySessionId || sessionId,
         requestStart,
-      } : undefined);
+      } : undefined, requestState);
 
       // Delegate streaming to consumer's handler
       return clearWhenDone(await legacyStreamHandler({
@@ -2358,11 +2934,12 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         emitStepReports,
         onStepReport,
         maxOutputTokens,
-        temperature,
+        temperature: temperature ?? undefined,
         maxContextMessages,
         locale,
         history,
         memory,
+        ...(earlierMessages ? { earlierMessages } : {}),
         promptCaching,
         hideIds,
         modelTier: routing?.modelTier,
@@ -2385,7 +2962,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,
         ...(beforeModelStep ? { beforeModelStep } : {}),
-        bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder),
+        bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder, legacySubjects),
+        ...(legacySubjects ? { approvalSubjects: legacySubjects } : {}),
       }), turnResults?.store);
     } catch (error) {
       turnResultStore?.clear();
@@ -2421,6 +2999,21 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
  * Instance identity decides, not the name: a registry- or manifest-supplied
  * tool that shares a built-in's name is never listed and stays fully guarded.
  */
+/**
+ * The app's middleware for app tools only: SDK built-ins of the handler pass
+ * straight through. The built-in names come from `findHandlerBuiltins`, which
+ * decides by instance identity, so an app tool that shares a built-in's name
+ * still runs through the middleware.
+ */
+function appToolMiddleware(
+  middleware: ReadonlyArray<ToolMiddleware> | undefined,
+  builtinNames: ReadonlyArray<string>,
+): ReadonlyArray<ToolMiddleware> | undefined {
+  if (!middleware || middleware.length === 0) return undefined;
+  const skip = new Set(builtinNames);
+  return middleware.map((entry): ToolMiddleware => (call, next) => (skip.has(call.toolName) ? next() : entry(call, next)));
+}
+
 function findHandlerBuiltins(
   registry: ToolRegistry,
   created: ReadonlyArray<Tool | null>,

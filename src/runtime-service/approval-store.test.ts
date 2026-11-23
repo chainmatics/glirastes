@@ -1,12 +1,14 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { Pool } from "pg";
+import pg from "pg";
 import {
   acquireRuntimeLease,
   createPostgresApprovalStore,
   type ApprovalPgPool,
 } from "./approval-store.js";
+
+const { Pool } = pg;
 
 class FailingClient extends EventEmitter {
   released = false;
@@ -67,7 +69,7 @@ const postgresUrl = process.env.GLIRASTES_TEST_POSTGRES_URL;
 describe.skipIf(!postgresUrl)(
   "Postgres approval store with a real database",
   () => {
-    let pool: Pool;
+    let pool: pg.Pool;
     const namespace = `runtime-test-${randomUUID()}`;
     beforeAll(async () => {
       pool = new Pool({ connectionString: postgresUrl, max: 12 });

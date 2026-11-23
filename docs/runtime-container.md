@@ -6,15 +6,15 @@ configuration; they do not write a Node server. A suitable existing Node/Next.js
 server can continue embedding the SDK instead. `glirastes/server/http` is an
 alias for the framework-neutral handler exports previously named `/server/nextjs`.
 
-The official image is `ghcr.io/chainmatics/glirastes-runtime:0.14.0` for
+The official image is `ghcr.io/chainmatics/glirastes-runtime:0.23.0` for
 Linux amd64. Use a pinned version (or digest) with matching artifact SDK version;
 ARM users can build the supplied Dockerfile locally.
 
-Start with the [public image and artifact commands](../containers/runtime/README.md),
-the [PHP walkthrough](../examples/php-runtime/README.md), its
-[JSON configuration](../examples/php-runtime/runtime.example.json) and
-[Docker Compose](../examples/php-runtime/compose.yaml). The image is public and
-does not require registry login. The [release record](acceptance/2026-11-15-runtime-container-v1.md)
+Start with the [public image and artifact commands](https://github.com/chainmatics/glirastes/blob/v0.23.0/containers/runtime/README.md),
+the [PHP walkthrough](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/README.md), its
+[JSON configuration](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/runtime.example.json) and
+[Docker Compose](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/compose.yaml). The image is public and
+does not require registry login. The [release record](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/2026-11-15-runtime-container-v1.md)
 separates container tests, publication and the embedded SDK's production rollout.
 
 ## Responsibilities and deployment
@@ -166,6 +166,70 @@ wins for that tool and travels in the artifact's local tool contracts.
 A result over the bound keeps a turn-scoped handle that the model reads with
 the built-in `read_result` (see `docs/concepts.md`); `application.resultHandles:
 false` turns that off, so large results are only cut.
+
+An operation's `x-glirastes-output-allowed-fields`, `x-glirastes-output-denied-fields`
+(also `**.<key>` at any depth, e.g. `**.fileUrl` for signed URLs) and
+`x-glirastes-output-default-fields` travel the same way, as `outputAllowedFields`,
+`outputDeniedFields` and `outputDefaultFields` in the artifact's local tool
+contracts (absent when not declared; never sent to the Platform). The container
+applies them like the SDK: fields outside the upper bound are removed before the
+result is stored, shown or cut, and the first answer shows the default view. An
+invalid allow- or deny-list disables the tool at build time; an artifact whose
+lists are not valid field paths is refused when it is loaded.
+
+Approval subjects ([approval-subjects.md](approval-subjects.md)): declared
+`entityLookup`, `approvalSubject` and `lookupEffect` travel in the artifact's
+local tool contracts; the artifact carries the exact SDK version, so rebuild
+it after declaring. The container looks the records up through the declared
+read tool with the forwarded user credentials and the pinned tenant and user
+headers. `limits.approvalLookups` sets its local limits (`maxLookupsPerTurn`
+32, `maxSubjectsPerCall` 4, `lookupTimeoutMs` 3000, `maxLookupTimePerTurnMs`
+10000) or `false` turns the lookups off. They never count against
+`limits.maxToolCalls`, which means calls made by the model.
+
+Languages (all optional, section `chat`): `chat.locale` (BCP-47, default
+English) is the language of the texts the runtime writes itself;
+`chat.requestLocaleHeader` names a request header with the turn's language
+(`accept-language` is read by preference, any other header holds one tag,
+e.g. `x-app-language` sent by the chat's transport). With neither set, the
+turn's language is the one the chat UI names in each request
+(`Content-Language`, sent by the React/Vercel transport and
+`<glirastes-chat>`; one BCP-47 tag, anything else ignored), else English;
+`chat.locale` or `chat.requestLocaleHeader` replaces it: a fixed `chat.locale`
+wins over the page language the chat sends, so set it only for a
+single-language app. A language stored per user (the app's database) goes
+into a header the chat's transport sends (`headers: { 'x-app-language':
+user.language }`), named in `chat.requestLocaleHeader`; pass the same value as
+the chat's `language` so its built-in texts match. `chat.locales` adds or
+changes the runtime's own texts per language (`{"pl": {"closing": "...",
+"silentTurn": "...", "streamError": "..."}}`, keys of the SDK handler's `locales`; partial tables
+fall back per key, an unknown key fails at start). The artifact carries the
+tool labels per language (`.glirastes/tools.json` `languages`, by default
+en, de and every declared language; local, never sent to the Platform), and
+the approval card and step display show them in the turn's language.
+
+UI action outcomes (optional): `chat.uiActionOutcomes` is `confirm` (default),
+`report-only` or `off`, the handler's `uiActionOutcomes` (see
+[UI action outcomes](ui-action-outcomes.md)). With `confirm` a turn with a UI
+action takes two POSTs to `chatPath`, each its own request with its own
+budgets and its own place in `maxConcurrentTurns`; a turn can cost up to four
+times the per-request budgets. A strict proxy in front of the container must
+allow the body field `glirastesUiOutcomes`. The shape of a UI tool result
+is not configurable here: the container follows the SDK default
+(`uiToolResultShape: 'auto'`), so a request with that field gets
+`{ handedOff: true, … }` and every other request the 0.17.3 shape
+`{ success: true, … }`.
+
+The model history uses the SDK defaults (`history`, `maxContextMessages`):
+since 0.18.0 `history.toolTurnCounting` is `tool-turns` and the seen-objects
+memo is on for tools with declared identity (see
+[History measurement](history-measurement.md)). `chat.history` (optional,
+strict) is the way back: `{"toolTurnCounting": "all-turns", "seenObjects":
+false}` restores the 0.17 model input; each key is optional (`all-turns` or
+`tool-turns`, `true` or `false`), any other key fails at start. The other
+history limits keep the SDK defaults. The debug hook
+`onModelInput` is embedded-only by design: it carries prompts and tool
+results, and the container's stdout carries content-free events only.
 
 ## State, cancellation and lifecycle
 

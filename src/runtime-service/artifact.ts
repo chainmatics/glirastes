@@ -22,6 +22,7 @@ import {
   type ToolReportFile,
 } from "../codegen/tools/artifact.js";
 import { canonicalJson } from "../codegen/tools/canonical.js";
+import { toolSearchSemanticsOf } from "../codegen/tools/emit-module.js";
 import {
   loadToolsConfig,
   normalizeSources,
@@ -415,6 +416,10 @@ function materialize(
   const bindings: GeneratedToolBinding[] = tools.map((tool) => {
     const contract = byId.get(tool.toolId)?.contract;
     const maxResultChars = byId.get(tool.toolId)?.maxResultChars;
+    const {
+      outputAllowedFields, outputDeniedFields, outputDefaultFields, outputEntities, inputEntities,
+      entityLookup, approvalSubject, lookupEffect,
+    } = byId.get(tool.toolId) ?? {};
     if (
       !contract ||
       contract.runtime.input.kind !== "json" ||
@@ -458,6 +463,14 @@ function materialize(
           method: tool.method,
           path: tool.path,
           ...(maxResultChars !== undefined ? { maxResultChars } : {}),
+          ...(outputAllowedFields ? { outputAllowedFields } : {}),
+          ...(outputDeniedFields ? { outputDeniedFields } : {}),
+          ...(outputDefaultFields ? { outputDefaultFields } : {}),
+          ...(outputEntities ? { outputEntities } : {}),
+          ...(inputEntities ? { inputEntities } : {}),
+          ...(entityLookup ? { entityLookup } : {}),
+          ...(approvalSubject !== undefined ? { approvalSubject } : {}),
+          ...(lookupEffect ? { lookupEffect } : {}),
         }),
       };
     }
@@ -470,6 +483,13 @@ function materialize(
       tool: uiActionToolToTool({ ...definition, action: contract.uiAction }),
     };
   });
+  // Labels per language (tools.json languages): local data of the artifact, keyed like toolSearchSemantics.
+  const toolTexts = Object.fromEntries(
+    tools.flatMap((tool) => {
+      const labels = byId.get(tool.toolId)?.labels;
+      return labels ? [[tool.modelName ?? modelFacingToolName(tool.name), { labels }]] : [];
+    }),
+  );
   const generated: LoadedRuntimeArtifact = {
     setupArtifact,
     promptBundle,
@@ -477,12 +497,13 @@ function materialize(
     manifest,
     toolSearchSemantics: Object.fromEntries(
       tools.flatMap((tool) => {
-        const synonyms = byId.get(tool.toolId)?.search?.synonyms;
-        return synonyms?.length
-          ? [[tool.modelName ?? modelFacingToolName(tool.name), { synonyms }]]
+        const semantics = toolSearchSemanticsOf(byId.get(tool.toolId)?.search);
+        return semantics
+          ? [[tool.modelName ?? modelFacingToolName(tool.name), semantics]]
           : [];
       }),
     ),
+    ...(Object.keys(toolTexts).length > 0 ? { toolTexts } : {}),
     createToolBindings: () => bindings,
   };
   if (createContractBindings(generated).disabled.length)

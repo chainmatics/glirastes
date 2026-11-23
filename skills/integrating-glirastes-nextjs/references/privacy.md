@@ -1,7 +1,12 @@
-# Protected-text privacy profile
+# Pseudonymization (opt-in protected-text profile)
 
-`privacy` on `createAiChatHandler` (`glirastes/server/nextjs`) protects
-personal data in every model call of a chat turn. All names below come from
+The Apache-2.0 SDK leaves ordinary chat unchanged without explicit activation.
+Local `privacy.policy.required: true` on `createAiChatHandler`
+(`glirastes/server/nextjs`) activates self-managed pseudonymization.
+Configuration alone is not proof of managed protection. The managed Platform
+**PII-Schild** is a Business/Enterprise feature; a signed protected policy
+always requires enforcement, even with local `required: false`.
+An inactive configuration does not open mappings, require keys or inspect providers. All names below come from
 `glirastes/server`.
 
 ## Contents
@@ -53,6 +58,7 @@ const shield = createStrictPiiShield({ store, locale: 'de-DE' });
 export const POST = createAiChatHandler({
   // ...
   privacy: {
+    policy: { required: true },
     shield,
     scope: async (req, chat) => {
       const user = await auth(req);
@@ -319,7 +325,7 @@ app tightened as `PrivacyLocalRestrictionCode`).
 const glirastes = createGlirastes({
   generated,
   // GlirastesPrivacyOptions: lets the runner enforce and report a signed block.
-  privacy: { shield, providers: registry, local: { mapping: { idleTtlSeconds: 1800 } } },
+  privacy: { managed: true, shield, providers: registry, local: { mapping: { idleTtlSeconds: 1800 } } },
 });
 
 export const POST = createAiChatHandler({
@@ -334,15 +340,16 @@ export const POST = createAiChatHandler({
 ```
 
 - `policy` (`LocalPrivacyPolicy`) is the app's own floor. `required`
-  defaults to true, so the profile stays on when the Platform publishes
-  `off` or nothing. Without a signed block the local values apply
+  defaults to false; explicit `required: true` keeps pseudonymization on
+  when the Platform publishes `off` or nothing. Without a signed block the local values apply
   (`PRIVACY_LOCAL_DEFAULTS`: 1 h idle, 24 h absolute, 60 s speech), exactly
   as the reported effective digest says: screenshots stay blocked unless
   `policy.screenshots.mode` is `allow-original`, `providerEntryIds` narrow
   the registry's offer and `openRouterOnly` the upstream providers. The
   `attachments` rule only narrows that further; on its own it never opens
-  originals. Pass `required: false` only where an unprotected turn is
-  acceptable without a Platform decision.
+  originals. Missing/false does not weaken a signed protected policy.
+  For managed bootstrap, set `privacy.managed: true` on `createGlirastes`;
+  this waits for current authenticated authority without forcing a local profile.
 - Approvals name an entry id and the digest of its non-secret binding
   (`ProviderBinding`: adapter, protocol, endpoint, model, routing, image
   capability; `normalizeProviderEndpoint`). Re-pointing an entry at another
@@ -386,9 +393,10 @@ export const POST = createAiChatHandler({
   during a turn stops the next call, so no result of a running tool reaches
   the model after the lock. A custom `streamHandler` must await
   `ctx.beforeModelStep?.()` first in `prepareStep`, as the built-in one does.
-- Managed privacy needs durable state. A connected runner is managed when it
-  has `privacy`, a `stateStore`, or `privacyProviders` in its setup
-  artifact. Pass `stateStore: (environmentId) => new FileRuntimeStateStore(path)`
+- Managed privacy needs durable state. Explicit `privacy.managed: true`
+  or `privacy.local.required: true` opts into fail-closed bootstrap.
+  A verified signed privacy block or retained authority also binds the runner;
+  a generic state store or provider metadata alone does not activate protection. Pass `stateStore: (environmentId) => new FileRuntimeStateStore(path)`
   (`glirastes/sync`, one file per environment, on a persistent volume).
   Without a durable store (none, or `MemoryRuntimeStateStore`) the runner
   claims no `privacyPolicyVersions` capability and refuses a protected block
@@ -402,8 +410,8 @@ export const POST = createAiChatHandler({
   overwritten with defaults) and a failed save (blocked until a later
   verified state was saved). A lost state has no local floor: the first
   verified answer of the Platform decides.
-- A connected runner without `privacy`, `stateStore` or privacy providers
-  works as before: it claims no privacy capability, and a protected block is
+- A runner without explicit activation or verified privacy authority works
+  as before: it claims no privacy capability, and a protected block is
   refused, never applied.
 - With `metrics` on the handler, decisions under a policy are also counted
   as content-free `privacy.decisions` events (codes from
@@ -470,3 +478,26 @@ export const POST = createAiChatHandler({
 - Speech must be transcribed locally before it enters the chat.
 
 Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.
+
+## Current port boundaries
+
+Protected turns refuse mention markers and direct composer commands with
+HTTP 503 `privacy_unsupported_content` and a named feature. Enter plain text
+instead. Browser canonicalization can shorten identity labels before the
+server sees them; these fragments are not asserted to be protected.
+The `onModelInput` content debug hook is disabled in protected turns.
+Protected history uses complete admitted messages and does not generate
+compacted identity summaries or seen-object memos. Generic tool failure
+details are withheld before any text clipping. Ordinary off behavior retains
+these features. The Node HTTP bridge delegates to this same protected handler.
+At fixed base f29b3607 view-context is a contract only; arbitrary request
+view-context fields are not consumed as model context.
+
+For the GID Stage 1 delivery, speech is blocked when protection is effective.
+Existing cloud speech remains available only in ordinary off mode. The
+previous consumer Whisper deployment is a separate follow-up, and upstream
+SDK local STT is not evidence of deployed or qualified consumer speech.
+
+Tool middleware is currently unavailable in protected turns: the handler returns `503 privacy_unsupported_content` with `feature: middleware` before middleware, tools or model calls. Ordinary unprotected calls retain middleware behavior. Delayed middleware execution needs a separate authorization boundary before it can be supported.
+
+Server approval-subject/list/preview lookups are not yet supported under pseudonymization. A protected handler with such declarations returns `503 privacy_unsupported_content` before model calls or backend reads. Ordinary approvals without subject lookups keep the scoped receipt flow; ordinary unprotected subject lookups are unchanged. Do not disable required approval checks to work around this boundary.

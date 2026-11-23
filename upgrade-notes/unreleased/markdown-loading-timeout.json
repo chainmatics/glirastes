@@ -1,0 +1,21 @@
+{
+  "id": "markdown-loading-timeout",
+  "kind": "recommended",
+  "summary": "A message showing the Markdown loading skeleton switches to its raw text when react-markdown has not arrived within markdown.loadingTimeoutMs (default 4000 ms from the start of the import), and to Markdown if it still arrives.",
+  "howTo": "Nothing to do. Set markdown={{ loadingTimeoutMs }} to change the limit: a number of milliseconds counted from the start of the import (the provider's preload at mount, the first message, or an own preloadMarkdown() at app start: the clock starts at every start of the import, so the limit may have passed before the chat appears, and its messages then show the raw text directly); false, Infinity or more than 2^31 - 1 keep the skeleton until react-markdown loads or fails (as in 0.24); 0 shows no skeleton at all (the raw text while loading, as before 0.24.0); a negative number, NaN or a non-number means the default. A bubble that first renders after the limit shows the raw text directly. The raw text is [data-component=\"markdown\"] with the source as text; the copy button is unchanged; nothing is announced. Tests with fake timers that keep react-markdown pending longer than 4 s now see the raw text instead of the skeleton.",
+  "skill": "building-glirastes-chat-ui#pills-chat-about-this-and-chips-in-answers",
+  "affectedWhen": {
+    "imports": [
+      "glirastes/react",
+      "glirastes/embed"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "loadingTimeoutMs"
+    ]
+  },
+  "surface": [
+    "*#ChatMarkdownOptions.loadingTimeoutMs"
+  ]
+}

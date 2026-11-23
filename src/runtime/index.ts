@@ -22,8 +22,13 @@ export {
   type ToolDenialReason,
 } from './tool-denial.js';
 export {
+  ToolInputValidationError,
+  type ToolInputIssue,
+} from './tool-input-error.js';
+export {
   ExecutionBudgetTracker,
   type BudgetEvaluation,
+  type BudgetLimitState,
   type BudgetReason,
   type ExecutionUsage,
 } from './budget.js';
@@ -88,10 +93,17 @@ export {
   type TurnToolDiscoveryOptions,
 } from './tool-discovery.js';
 export {
+  mergeToolSearchSemantics,
+  type ToolLabelTexts,
+  type ToolTexts,
+  type ToolTextsMap,
+} from './tool-texts.js';
+export {
   createToolSearchIndex,
   searchTermVariants,
   searchTokens,
   type ToolSearchDocument,
+  type ToolSearchHit,
   type ToolSearchIndex,
 } from './tool-search.js';
 export {

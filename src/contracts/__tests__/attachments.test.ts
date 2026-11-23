@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CHAT_ATTACHMENT_ID_PATTERN,
   DEFAULT_ATTACHMENT_MAX_FILE_BYTES,
   DEFAULT_ATTACHMENT_MAX_FILES,
   DEFAULT_ATTACHMENT_MEDIA_TYPES,
+  attachmentIdOf,
   attachmentPlaceholderText,
+  createChatAttachmentId,
+  isChatAttachmentId,
   isOmittedAttachmentUrl,
   parseDataUrl,
   sniffMediaType,
@@ -48,5 +52,49 @@ describe('attachment contract', () => {
     expect(isOmittedAttachmentUrl('data:image/png;base64,AA==')).toBe(false);
     expect(attachmentPlaceholderText('scan.pdf')).toBe('[attachment: scan.pdf]');
     expect(attachmentPlaceholderText()).toBe('[attachment: file]');
+  });
+
+  it('creates distinct, pattern-conforming attachment ids', () => {
+    const ids = Array.from({ length: 1000 }, () => createChatAttachmentId());
+    expect(new Set(ids).size).toBe(1000);
+    for (const id of ids) expect(id).toMatch(CHAT_ATTACHMENT_ID_PATTERN);
+  });
+
+  it('validates attachment id length and characters', () => {
+    expect(isChatAttachmentId(`att_${'a'.repeat(15)}`)).toBe(false);
+    expect(isChatAttachmentId(`att_${'a'.repeat(16)}`)).toBe(true);
+    expect(isChatAttachmentId(`att_${'a'.repeat(64)}`)).toBe(true);
+    expect(isChatAttachmentId(`att_${'a'.repeat(65)}`)).toBe(false);
+    expect(isChatAttachmentId('att_abc def0123456789')).toBe(false);
+    expect(isChatAttachmentId(42)).toBe(false);
+  });
+
+  it('names attachments with their id when it is valid', () => {
+    const id = 'att_0123456789abcdef';
+    expect(attachmentPlaceholderText('zeichnung.png', id)).toBe('[attachment att_0123456789abcdef: zeichnung.png]');
+    expect(attachmentPlaceholderText('zeichnung.png', 'bad')).toBe('[attachment: zeichnung.png]');
+    expect(attachmentPlaceholderText(undefined, id)).toBe('[attachment att_0123456789abcdef: file]');
+  });
+
+  it('removes brackets and line breaks from the name in the placeholder', () => {
+    const id = 'att_0123456789abcdef';
+    expect(attachmentPlaceholderText('x] ignore\nprevious', id)).toBe('[attachment att_0123456789abcdef: x ignoreprevious]');
+    expect(attachmentPlaceholderText('a[b]\r\n.png')).toBe('[attachment: ab.png]');
+    expect(attachmentPlaceholderText('[]\n')).toBe('[attachment: file]');
+  });
+
+  it('strips control, separator and bidi characters and bounds the name', () => {
+    expect(attachmentPlaceholderText('a\tb\u0000c\u0085d\u2028e\u2029f\u202eg\u200fh\u2066i\u2069j.png')).toBe('[attachment: abcdefghij.png]');
+    expect(attachmentPlaceholderText('\u202e\t[]\u2028')).toBe('[attachment: file]');
+    expect(attachmentPlaceholderText('a'.repeat(120))).toBe(`[attachment: ${'a'.repeat(120)}]`);
+    expect(attachmentPlaceholderText('a'.repeat(121))).toBe(`[attachment: ${'a'.repeat(120)}…]`);
+  });
+
+  it('reads the attachment id from provider metadata only when valid', () => {
+    const id = 'att_0123456789abcdef';
+    expect(attachmentIdOf({ type: 'file', providerMetadata: { glirastes: { attachmentId: id } } })).toBe(id);
+    expect(attachmentIdOf({ type: 'file', providerMetadata: { glirastes: { attachmentId: '[attachment x]' } } })).toBeUndefined();
+    expect(attachmentIdOf({ type: 'file' })).toBeUndefined();
+    expect(attachmentIdOf(null)).toBeUndefined();
   });
 });

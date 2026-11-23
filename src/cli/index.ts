@@ -48,7 +48,9 @@ import { runSync, type SyncCommandDependencies } from './commands/sync.js';
 import { inspectSetupProject, formatSetupProjectInspection } from './commands/project-inspection.js';
 import { runAgentSetup, type AgentSetupDependencies } from './commands/agent-setup.js';
 import { writeCiWorkflow } from './commands/ci-workflow.js';
+import { runUpgradeCommand } from './commands/upgrade/index.js';
 import { runToolsCommand, type ToolsCommandDependencies } from './commands/tools/index.js';
+import { runSttCommand, type SttPullDependencies } from './commands/stt/index.js';
 
 type CommandName =
   | 'init'
@@ -60,7 +62,9 @@ type CommandName =
   | 'install'
   | 'validate'
   | 'build'
-  | 'tools';
+  | 'tools'
+  | 'stt'
+  | 'upgrade';
 
 export interface CliDependencies {
   init?: AgentSetupDependencies;
@@ -68,6 +72,7 @@ export interface CliDependencies {
   connect?: ConnectCommandDependencies;
   sync?: SyncCommandDependencies;
   tools?: ToolsCommandDependencies;
+  stt?: SttPullDependencies;
 }
 
 /** `--flag value` or `--flag=value`. */
@@ -160,7 +165,13 @@ export const CLI_USAGE =
   + '       glirastes doctor [--root] [--managed] [--dotenv <path>] [--json] [--verbose]\n'
   + '       glirastes build [--root] [--app-id] [--output]\n'
   + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify|enrich> [options]\n'
-  + '         derive chat tools from the code, check them, show them and print agent work lists\n';
+  + '         derive chat tools from the code, check them, show them and print agent work lists\n'
+  + '       glirastes upgrade <report|ack> [options]\n'
+  + '         see what changed in the SDK since this app was last reviewed, acknowledge the review\n'
+  + '       glirastes stt pull [--dir <path>] [--mirror <url>] [--json]\n'
+  + '         download the sha256-pinned local speech models for glirastes/server/stt-local\n'
+  + '       glirastes stt worklet [--out <dir>] [--root <path>] [--json]\n'
+  + '         copy the audio worklet voice input needs into public/ (served at /audio-worklet-processor.js)\n';
 
 const HELP_FLAGS = new Set(['--help', '-h', 'help']);
 
@@ -202,6 +213,8 @@ function parseCommand(args: string[]): {
     && command !== 'validate'
     && command !== 'build'
     && command !== 'tools'
+    && command !== 'stt'
+    && command !== 'upgrade'
   ) {
     throw new FoundationDiagnosticError({
       code: 'E-SETUP-030',
@@ -794,6 +807,16 @@ export async function runCli(
   }
   if (command === 'tools') {
     const exitCode = await runToolsCommand(rest, dependencies.tools);
+    if (exitCode !== 0) process.exitCode = exitCode;
+    return;
+  }
+  if (command === 'stt') {
+    const exitCode = await runSttCommand(rest, dependencies.stt);
+    if (exitCode !== 0) process.exitCode = exitCode;
+    return;
+  }
+  if (command === 'upgrade') {
+    const exitCode = await runUpgradeCommand(rest, { cwd: process.cwd() });
     if (exitCode !== 0) process.exitCode = exitCode;
     return;
   }

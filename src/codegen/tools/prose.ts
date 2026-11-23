@@ -9,7 +9,22 @@ import type { EndpointMethod } from '../../types.js';
 import { TOOLS_PATHS } from './config.js';
 import { toolFinding } from './findings.js';
 import { deriveDefinitionId } from './identity.js';
-import { isAgenticSemantics, SEMANTICS_LANGUAGES, SemanticsEntrySchema, type ToolSemanticsEntry } from './semantics.js';
+import {
+  resolveLayered,
+  resolveLayeredEntry,
+  textLayer,
+  type LocalizedText,
+  type TextLayer,
+} from '../../contracts/localized-text.js';
+import {
+  isAgenticSemantics,
+  isMaintainedField,
+  LocalizedPresentationSchema,
+  SEMANTICS_LANGUAGES,
+  SemanticsEntrySchema,
+  type PresentationLabels,
+  type ToolSemanticsEntry,
+} from './semantics.js';
 import type { ToolFinding, ToolProseHints } from './types.js';
 
 export type { ToolSemanticsEntry } from './semantics.js';
@@ -186,13 +201,87 @@ function presentationOf(value: unknown): ToolPresentation | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
+type Labels = PresentationLabels;
+
+function safeLabels(labels: Labels): boolean {
+  return !findSensitiveStringPath(labels);
+}
+
+/** A presentation as a text layer: one locale, or labels per language tag (secret-looking texts left out). */
+function presentationLayer(value: unknown): TextLayer<Labels> | undefined {
+  const single = presentationOf(value);
+  if (single) {
+    const { locale, ...labels } = single;
+    return safeLabels(labels) ? { byLanguage: { [locale]: labels } } : undefined;
+  }
+  const map = LocalizedPresentationSchema.safeParse(value);
+  if (!map.success) return undefined;
+  const byLanguage = Object.fromEntries(Object.entries(map.data).filter(([, labels]) => safeLabels(labels)));
+  return Object.keys(byLanguage).length > 0 ? { byLanguage } : undefined;
+}
+
+function labelsOf(text: string): Labels {
+  const label = clamp(text, MAX_LABEL);
+  return { singular: label, plural: label, approval: label };
+}
+
+/** A text layer whose texts are bounded and free of secrets; undefined when none is left. */
+function boundedLayer<T>(value: LocalizedText | undefined, max: number, map: (text: string) => T): TextLayer<T> | undefined {
+  const layer = textLayer(value);
+  if (!layer) return undefined;
+  const anyText = bounded(layer.any, max);
+  const byLanguage = Object.fromEntries(Object.entries(layer.byLanguage ?? {})
+    .map(([language, text]) => [language, bounded(text, max)] as const)
+    .filter((entry): entry is readonly [string, string] => entry[1] !== undefined)
+    .map(([language, text]) => [language, map(text)] as const));
+  if (anyText === undefined && Object.keys(byLanguage).length === 0) return undefined;
+  return {
+    ...(anyText !== undefined ? { any: map(anyText) } : {}),
+    ...(Object.keys(byLanguage).length > 0 ? { byLanguage } : {}),
+  };
+}
+
+const descriptionLayer = (value: LocalizedText | undefined) => boundedLayer(value, MAX_DESCRIPTION, (text) => text);
+/** A title (one text, or per language) as labels: the same text for one call, several and the approval. */
+const titleLayer = (value: LocalizedText | undefined) => boundedLayer(value, MAX_LABEL, labelsOf);
+
+function sameLabels(left: Labels, right: Labels): boolean {
+  return left.singular === right.singular && left.plural === right.plural && left.approval === right.approval;
+}
+
+/**
+ * Leaves out a region variant (`de-DE`) whose labels equal those of its
+ * nearest shorter tag (`de`): every lookup falls back from the variant to
+ * that tag, so it would only repeat it. A variant that differs (`pt-BR`
+ * next to `pt`) or has no shorter tag stays.
+ */
+function withoutRedundantRegions(labels: Record<string, Labels>): void {
+  const longestFirst = Object.keys(labels).sort((left, right) => right.split('-').length - left.split('-').length);
+  for (const tag of longestFirst) {
+    const parts = tag.toLowerCase().split('-');
+    for (let length = parts.length - 1; length > 0; length -= 1) {
+      const shorter = parts.slice(0, length).join('-');
+      const base = Object.keys(labels).find((key) => key.toLowerCase() === shorter);
+      if (base === undefined) continue;
+      if (sameLabels(labels[tag]!, labels[base]!)) delete labels[tag];
+      break;
+    }
+  }
+}
+
 export interface ToolProse {
+  /** The one description the model gets (see `MODEL_LANGUAGE`). */
   description: string;
   descriptionOrigin: DescriptionOrigin;
   module: string;
   sharedWith: string[];
   usageHints: string[];
+  /** The labels in the app's locale, for the setup artifact. */
   presentation: ToolPresentation;
+  /** Labels per language of `languages` (the pipeline passes the derived ones without tools.json `languages`); absent without it. Local only. */
+  labels?: Record<string, Labels>;
+  /** Languages of `languages` without an own label (they show a fallback). */
+  missingLabelLanguages?: string[];
   findings: ToolFinding[];
 }
 
@@ -203,6 +292,8 @@ export interface ResolveToolProseInput {
   path?: string;
   operationGroup: ToolPolicyDefaults['operationGroup'];
   locale: string;
+  /** tools.json `languages`: with it, labels are resolved per language and titles become labels. */
+  languages?: ReadonlyArray<string>;
   jsDoc?: string;
   hints?: ToolProseHints;
   semantics: ToolSemantics;
@@ -210,6 +301,12 @@ export interface ResolveToolProseInput {
   entry?: ToolSemanticsEntry | null;
   policyDescription?: string;
 }
+
+/**
+ * The model gets one description in one language, whatever the user writes:
+ * English, as the describing skill asks for, else the fallback order.
+ */
+export const MODEL_LANGUAGE = 'en';
 
 /** The semantics entry of a tool: by stable key first, then by definition id. */
 export function lookupSemantics(
@@ -220,7 +317,41 @@ export function lookupSemantics(
   return semantics.byStableKey.get(stableKey) ?? semantics.byName.get(definitionId);
 }
 
-/** Prose without a model; templates are the visible floor, never a blocker. */
+function overrideFinding(stableKey: string, field: string): ToolFinding {
+  return toolFinding('semantics-overrides-code', 'warning', stableKey,
+    `The ${field} in tool-semantics.json differs from the code's and is used: a maintained semantics entry beats the code since 0.18.0.`);
+}
+
+/** The template labels speak these languages; labels per language always cover them. */
+export const TEMPLATE_LABEL_LANGUAGES = ['de', 'en'] as const;
+
+/**
+ * The languages a tool's people-facing texts are declared in: the tags of
+ * its presentations and titles (code and tool-semantics.json). Language-free
+ * texts name none.
+ */
+export function declaredLabelLanguages(hints: ToolProseHints | undefined, entry: ToolSemanticsEntry | undefined): string[] {
+  const layers = [
+    presentationLayer(entry?.presentation),
+    titleLayer(entry?.title),
+    presentationLayer(hints?.presentations ?? hints?.presentation),
+    presentationLayer(hints?.presentation),
+    titleLayer(hints?.title),
+    titleLayer(hints?.contractTitle),
+  ];
+  return layers.flatMap((layer) => Object.keys(layer?.byLanguage ?? {}));
+}
+
+/**
+ * Prose without a model; templates are the visible floor, never a blocker.
+ *
+ * Precedence of every text, highest first: tool-policy.json, a maintained
+ * tool-semantics.json field (human or locked), the code (the endpoint's
+ * declared texts, JSDoc or the OpenAPI description, contract.ts, the
+ * schema), an agent or code-copied semantics field, the template. Per
+ * language: a layer without the language (and without a language-free
+ * text) lets the next one speak for it. The module stays a code decision.
+ */
 export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
   const entry = input.entry === undefined
     ? lookupSemantics(input.semantics, input.stableKey, input.definitionId)
@@ -230,31 +361,42 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     : entry?.origin?.description === 'code' ? 'code' : 'human';
   const language = input.locale.toLowerCase().startsWith('de') ? 'de' : 'en';
   const operation = operationOf(input.operationGroup, input.path);
-  const label = labelOf(language, operation, resourceWords(input, operation));
-  const candidates: ReadonlyArray<readonly [string | undefined, DescriptionOrigin]> = [
-    [input.policyDescription, 'human'],
-    [input.jsDoc, 'code'],
-    [input.hints?.contractDescription, 'code'],
-    [input.hints?.schemaDescription, 'code'],
-    [entry?.description, entryOrigin],
-  ];
+  const words = resourceWords(input, operation);
+  const label = labelOf(language, operation, words);
   const findings: ToolFinding[] = [];
-  let description: string | undefined;
+
+  // Description: one text, in one language, for the model.
+  const maintainedDescription = isMaintainedField(entry, 'description');
+  const semanticsDescription = descriptionLayer(entry?.description);
+  const codeDescriptions = [
+    descriptionLayer(input.hints?.declaredDescription),
+    descriptionLayer(input.jsDoc),
+    descriptionLayer(input.hints?.contractDescription),
+    descriptionLayer(input.hints?.schemaDescription),
+  ];
+  const descriptionLayers: ReadonlyArray<readonly [TextLayer<string> | undefined, DescriptionOrigin]> = [
+    [descriptionLayer(input.policyDescription), 'human'],
+    [maintainedDescription ? semanticsDescription : undefined, entryOrigin],
+    ...codeDescriptions.map((layer) => [layer, 'code'] as const),
+    [maintainedDescription ? undefined : semanticsDescription, entryOrigin],
+  ];
+  const chosen = resolveLayeredEntry(descriptionLayers.map(([layer]) => layer), MODEL_LANGUAGE);
+  let description: string;
   let descriptionOrigin: DescriptionOrigin = 'template';
-  for (const [value, origin] of candidates) {
-    const text = bounded(value, MAX_DESCRIPTION);
-    if (text) {
-      description = text;
-      descriptionOrigin = origin;
-      break;
+  if (chosen) {
+    description = chosen.value;
+    descriptionOrigin = descriptionLayers[chosen.layer]![1];
+    if (chosen.layer === 1) {
+      const code = resolveLayered(codeDescriptions, MODEL_LANGUAGE);
+      if (code !== undefined && code !== description) findings.push(overrideFinding(input.stableKey, 'description'));
     }
-  }
-  if (!description) {
+  } else {
     description = clamp(input.method && input.path ? `${label} (${input.method} ${input.path}).` : `${label}.`, MAX_DESCRIPTION);
     findings.push(toolFinding('description-templated', 'warning', input.stableKey,
       'Only a template description is available; the model may pick this tool less reliably.'));
   }
   // Highest first: a code hint (OpenAPI x-glirastes-group, a contract module), tool-semantics.json, the name.
+  // A module groups tools; it is no text people read, so the code keeps deciding it.
   const module = identifier(input.hints?.module)
     ?? identifier(entry?.module)
     ?? (endpointResource(input) || 'tools');
@@ -263,18 +405,77 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     .filter((value): value is string => value !== undefined && value !== module))]
     .sort(compareCodeUnits)
     .slice(0, 50);
-  const hintSource = input.hints?.usageHints?.length
-    ? input.hints.usageHints
-    : entry?.usageHints?.length || entry?.approvalHint
-      ? [...entry.usageHints ?? [], ...entry.approvalHint ? [entry.approvalHint] : []]
-      : [description];
+  // Usage hints and the approval hint each by their own origin, then joined (code hints replace both, as before,
+  // unless a maintained field of the entry beats them).
+  const codeHints = input.hints?.usageHints?.length ? input.hints.usageHints : undefined;
+  const entryUsage = entry?.usageHints?.length ? entry.usageHints : undefined;
+  const maintainedUsage = entryUsage !== undefined && isMaintainedField(entry, 'usageHints');
+  const maintainedApproval = entry?.approvalHint !== undefined && isMaintainedField(entry, 'approvalHint');
+  const usagePart = (maintainedUsage ? entryUsage : codeHints ?? entryUsage) ?? [];
+  const approvalPart = entry?.approvalHint && (maintainedApproval || !codeHints) ? [entry.approvalHint] : [];
+  const joinedHints = [...usagePart, ...approvalPart];
+  if ((maintainedUsage || maintainedApproval) && codeHints && codeHints.join('\n') !== joinedHints.join('\n')) {
+    findings.push(overrideFinding(input.stableKey, 'usageHints'));
+  }
+  const hintSource = joinedHints.length > 0 ? joinedHints : [description];
   const usageHints = hintSource
     .map((hint) => bounded(hint, MAX_HINT))
     .filter((hint): hint is string => hint !== undefined)
     .slice(0, 20);
-  const presentation = input.hints?.presentation
-    ?? presentationOf(entry?.presentation)
-    ?? { locale: input.locale, singular: label, plural: label, approval: label };
+
+  // Labels people read: the presentation, a title (with tools.json languages only), the template.
+  const withTitles = (input.languages?.length ?? 0) > 0;
+  const semanticsPresentation = presentationLayer(entry?.presentation);
+  const maintainedPresentation = isMaintainedField(entry, 'presentation');
+  // A source may give both: one locale (the artifact as before) and every language it knows (with languages).
+  const codePresentation = withTitles
+    ? presentationLayer(input.hints?.presentations ?? input.hints?.presentation)
+    : presentationLayer(input.hints?.presentation ?? input.hints?.presentations);
+  const semanticsTitle = withTitles ? titleLayer(entry?.title) : undefined;
+  const maintainedTitle = isMaintainedField(entry, 'title');
+  const templateLayer: TextLayer<Labels> = withTitles
+    ? { byLanguage: { en: labelsOf(labelOf('en', operation, words)), de: labelsOf(labelOf('de', operation, words)) } }
+    : { any: labelsOf(label) };
+  const declaredLabels: ReadonlyArray<TextLayer<Labels> | undefined> = [
+    maintainedPresentation ? semanticsPresentation : undefined,
+    maintainedTitle ? semanticsTitle : undefined,
+    codePresentation,
+    withTitles ? titleLayer(input.hints?.title) : undefined,
+    withTitles ? titleLayer(input.hints?.contractTitle) : undefined,
+    maintainedPresentation ? undefined : semanticsPresentation,
+    maintainedTitle ? undefined : semanticsTitle,
+  ];
+  if (maintainedPresentation && semanticsPresentation && codePresentation) {
+    const own = resolveLayered([semanticsPresentation], input.locale);
+    const code = resolveLayered([codePresentation], input.locale);
+    if (own && code && !sameLabels(own, code)) findings.push(overrideFinding(input.stableKey, 'presentation'));
+  }
+  let presentation: ToolPresentation;
+  let labels: Record<string, Labels> | undefined;
+  const missingLabelLanguages: string[] = [];
+  if (!withTitles) {
+    // As before tools.json languages: the first declared presentation, whatever its locale, else the template.
+    // A presentation per language gives the app's locale (or its fallback).
+    const declared = resolveLayeredEntry([declaredLabels.find((layer) => layer !== undefined)], input.locale);
+    presentation = declared?.language !== undefined
+      ? { locale: declared.language, ...declared.value }
+      : { locale: input.locale, ...labelsOf(label) };
+  } else {
+    const layers = [...declaredLabels, templateLayer];
+    const forLocale = resolveLayeredEntry(layers, input.locale);
+    // A template label keeps the app's locale, as without languages (the setup artifact stays as it was).
+    const templated = forLocale?.layer === layers.length - 1;
+    const tag = forLocale?.level === 'request' || forLocale?.language === undefined || templated ? input.locale : forLocale.language;
+    presentation = { locale: tag, ...(forLocale?.value ?? labelsOf(label)) };
+    labels = {};
+    for (const wanted of input.languages!) {
+      const found = resolveLayeredEntry(layers, wanted);
+      if (found) labels[wanted] = found.value;
+      // The template speaks English and German; any other language needs a declaration of its own.
+      if (found?.level !== 'request') missingLabelLanguages.push(wanted);
+    }
+    withoutRedundantRegions(labels);
+  }
   return {
     description,
     descriptionOrigin,
@@ -282,6 +483,8 @@ export function resolveToolProse(input: ResolveToolProseInput): ToolProse {
     sharedWith,
     usageHints: usageHints.length > 0 ? usageHints : [description.slice(0, MAX_HINT)],
     presentation,
+    ...(labels ? { labels } : {}),
+    ...(missingLabelLanguages.length > 0 ? { missingLabelLanguages } : {}),
     findings,
   };
 }

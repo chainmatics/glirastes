@@ -1,4 +1,9 @@
 import type { ToolPresentation } from '../../contracts/index.js';
+import type { LocalizedText } from '../../contracts/localized-text.js';
+import type { InputEntityRef, OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
+import type { ObservedEntities } from './entity-declarations.js';
+import type { ApprovalSubjectOption, EntityLookup, LookupEffect } from '../../contracts/approval-subject.js';
+import type { ObservedApprovalDeclarations } from './approval-subject-declarations.js';
 import type { DeclaredEffect, ToolPolicyDefaults, ToolPolicyFile } from '../../contracts/tool-policy.js';
 import type { LocalJsonSchema } from '../../runtime/json-schema.js';
 import type { GeneratedUiAction } from '../../server/core/generated-ui-tool.js';
@@ -63,11 +68,23 @@ export interface ToolContract {
 }
 
 export interface ToolProseHints {
-  contractDescription?: string;
+  /** contract.ts `description`: one text, or one per language tag. */
+  contractDescription?: LocalizedText;
   schemaDescription?: string;
+  /** The endpoint's own description per language (OpenAPI `x-glirastes-description`); above its plain description. */
+  declaredDescription?: LocalizedText;
   module?: string;
   usageHints?: string[];
   presentation?: ToolPresentation;
+  /** contract.ts `presentation` given per language tag. */
+  presentations?: Readonly<Record<string, { singular: string; plural: string; approval: string }>>;
+  /** The endpoint's title (OpenAPI `x-glirastes-title`): one text, or one per language tag. */
+  title?: LocalizedText;
+  /** contract.ts `title`, below the OpenAPI one per language (a language-free one stays for the languages it lacks). */
+  contractTitle?: LocalizedText;
+  /** The endpoint's synonyms and example requests per language (search only). */
+  synonyms?: Readonly<Record<string, ReadonlyArray<string>>>;
+  examples?: Readonly<Record<string, ReadonlyArray<string>>>;
   /**
    * Set by the openapi source only: a name without a dot there comes from
    * `x-glirastes-name` (`list_tags`) and carries its verb, so module and
@@ -113,6 +130,36 @@ export interface ObservedTool {
    * Platform.
    */
   maxResultChars?: number;
+  /**
+   * Output fields the code declares (OpenAPI `x-glirastes-output-allowed-fields`,
+   * `-denied-fields`, `-default-fields`; contract.ts `outputAllowedFields`,
+   * `outputDeniedFields`, `outputDefaultFields`); effective and normalized.
+   * Local only: written to tool-contracts.json, never sent to the Platform.
+   */
+  outputAllowedFields?: string[];
+  outputDeniedFields?: string[];
+  outputDefaultFields?: string[];
+  /**
+   * App-wide patterns (`output.deniedFields` of tools.json) whose key this
+   * tool's declared output schema names, and declared keys that differ from
+   * one only by case. Only for the warning about a pattern that matches no
+   * tool; never written to an output.
+   */
+  appDeniedHits?: string[];
+  appDeniedNearKeys?: string[];
+  /**
+   * Entity declarations by level (tool code, OpenAPI operation, response
+   * schema) and the response's object schemas; resolved by the pipeline with
+   * tools.json `identity`. Local only.
+   */
+  entities?: ObservedEntities;
+  /**
+   * Approval-subject declarations by level (tool code, OpenAPI operation):
+   * `entityLookup`, `approvalSubject`, `lookupEffect`, the valid ones and
+   * the issues of the others; resolved by the pipeline with tools.json.
+   * Local only.
+   */
+  approvalDeclarations?: ObservedApprovalDeclarations;
 }
 
 export interface ExcludedTool {
@@ -126,7 +173,7 @@ export interface ExcludedTool {
   origin: 'default' | 'policy' | 'code';
 }
 
-/** Checked stage-2 search data: synonyms reach `find_tools`, examples feed `tools eval`. */
+/** Checked stage-2 search data: both rank `find_tools` and the start set; examples are also the `tools eval` corpus. */
 export interface ToolSearchFacts {
   synonyms?: string[];
   examples?: string[];
@@ -140,9 +187,11 @@ export interface McpToolName {
   name: string;
 }
 
+/** A tool's title per BCP-47 language tag (`de`, `en`, `pl-PL`). */
 export interface ToolTitle {
-  de?: string;
-  en?: string;
+  readonly de?: string;
+  readonly en?: string;
+  readonly [language: string]: string | undefined;
 }
 
 export interface ToolContractsEntry {
@@ -153,9 +202,26 @@ export interface ToolContractsEntry {
   defaults: ToolPolicyDefaults;
   search?: ToolSearchFacts;
   title?: ToolTitle;
+  /**
+   * Labels per language for the chat (tools.json `languages`). Local only:
+   * the generated module and the container artifact carry them, the setup
+   * artifact keeps its one `presentation`.
+   */
+  labels?: Record<string, { singular: string; plural: string; approval: string }>;
   mcp?: McpToolName[];
   /** Upper bound of the serialized result the code declares; the generated module passes it on. */
   maxResultChars?: number;
+  /** Output fields the code declares (see `ObservedTool`); the generated module passes them on. */
+  outputAllowedFields?: string[];
+  outputDeniedFields?: string[];
+  outputDefaultFields?: string[];
+  /** Resolved entity declarations (field names only); the generated module passes them on. */
+  outputEntities?: OutputEntityDeclaration[];
+  inputEntities?: InputEntityRef[];
+  /** Resolved approval-subject declarations (field and tool names only); the generated module passes them on. */
+  entityLookup?: EntityLookup[];
+  approvalSubject?: ApprovalSubjectOption;
+  lookupEffect?: LookupEffect;
 }
 
 export interface ToolSourceContext {

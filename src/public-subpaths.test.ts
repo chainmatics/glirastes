@@ -17,6 +17,8 @@ describe('public foundation subpaths', () => {
     ],
     ['framework-neutral chat embed', './embed', './dist/embed/index.js'],
     ['framework-neutral UI bridge', './browser', './dist/browser/index.js'],
+    ['node:http bridge', './server/node', './dist/server/node/index.js'],
+    ['local STT', './server/stt-local', './dist/server/stt-local/index.js'],
   ])('exports the independently importable %s surface', async (
     _label,
     subpath,
@@ -32,6 +34,84 @@ describe('public foundation subpaths', () => {
     expect(configured).toBeDefined();
     expect(configured?.default ?? configured?.import?.default)
       .toBe(expectedDefault);
+  });
+
+  it('exports the voice input audio worklet file', async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { exports: Record<string, unknown> };
+    expect(packageJson.exports['./react/audio-worklet-processor.js'])
+      .toBe('./dist/react/audio-worklet-processor.js');
+    // The worklet is loaded by the browser as a module of its own: no imports.
+    const source = await readFile(new URL('./react/audio-worklet-processor.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/^import\s/m);
+    expect(source).toContain("registerProcessor('audio-processor'");
+  });
+
+  it('ships local STT ESM only with an exactly pinned optional peer', async () => {
+    const [packageJson, cjsConfig, serverSource, shims] = await Promise.all([
+      readFile(new URL('../package.json', import.meta.url), 'utf8').then((text) => JSON.parse(text) as {
+        exports: Record<string, { import?: unknown; require?: unknown }>;
+        peerDependencies: Record<string, string>;
+        peerDependenciesMeta: Record<string, { optional?: boolean }>;
+        devDependencies?: Record<string, string>;
+        dependencies?: Record<string, string>;
+        files: string[];
+      }),
+      readFile(new URL('../tsconfig.cjs.json', import.meta.url), 'utf8').then((text) => JSON.parse(text) as { exclude: string[] }),
+      readFile(new URL('./server/index.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../scripts/generate-subpath-shims.mjs', import.meta.url), 'utf8'),
+    ]);
+    expect(packageJson.exports['./server/stt-local']).toEqual({
+      import: { types: './dist/server/stt-local/index.d.ts', default: './dist/server/stt-local/index.js' },
+    });
+    expect(packageJson.exports['./server/stt-local']!.require).toBeUndefined();
+    expect(packageJson.peerDependencies['sherpa-onnx-node']).toBe('2.0.1');
+    expect(packageJson.peerDependenciesMeta['sherpa-onnx-node']!.optional).toBe(true);
+    expect(packageJson.devDependencies?.['sherpa-onnx-node']).toBeUndefined();
+    expect(packageJson.dependencies?.['sherpa-onnx-node']).toBeUndefined();
+    expect(packageJson.files).toContain('docs/local-stt.md');
+    expect(cjsConfig.exclude).toContain('src/server/stt-local/**');
+    expect(serverSource).not.toContain('stt-local');
+    expect(shims).toContain("['server/stt-local', 'server/stt-local', { esmOnly: true }]");
+  });
+
+  it('keeps glirastes/server/node free of Platform and engine imports', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const dir = new URL('./server/node/', import.meta.url);
+    const files = (await readdir(dir)).filter(
+      (name) => name.endsWith('.ts') && !name.endsWith('.test.ts'),
+    );
+    expect(files).toContain('index.ts');
+    for (const name of files) {
+      const source = await readFile(new URL(name, dir), 'utf8');
+      expect(source, name).not.toMatch(/from ['"]\.\.\/\.\.\/(?:sync|runtime-service)\//);
+      expect(source, name).not.toMatch(/lancer/);
+      expect(source, name).not.toMatch(/from ['"]ai['"]/);
+      expect(source, name).not.toMatch(/console\./);
+    }
+  });
+
+  it('keeps glirastes/server/node on Node built-ins and its own files at runtime', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const dir = new URL('./server/node/', import.meta.url);
+    const files = (await readdir(dir)).filter(
+      (name) => name.endsWith('.ts') && !name.endsWith('.test.ts'),
+    );
+    const runtimeImports = (source: string) => [...source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+['"]([^'"]+)['"]/gms)]
+      .map((match) => match[1]!);
+    for (const name of files) {
+      const source = await readFile(new URL(name, dir), 'utf8');
+      for (const specifier of runtimeImports(source)) {
+        expect(
+          specifier.startsWith('node:') || /^\.\/[\w-]+\.js$/.test(specifier) || specifier === '../body-limit.js',
+          `${name} imports ${specifier}`,
+        ).toBe(true);
+      }
+    }
+    // The shared limit is a leaf: it imports nothing.
+    const leaf = await readFile(new URL('./server/body-limit.ts', import.meta.url), 'utf8');
+    expect(leaf).not.toMatch(/^import\s/m);
   });
 
   it('packages accepted skills without exposing deferred adapters', async () => {
@@ -52,6 +132,9 @@ describe('public foundation subpaths', () => {
     }
     expect(packageJson.files).not.toContain('openapi');
     expect(packageJson.files).toContain('skills');
+    // Upgrade notes ship; the api-surface snapshot is a repo-only CI input.
+    expect(packageJson.files).toContain('upgrade-notes');
+    expect(packageJson.files).toContain('!upgrade-notes/api-surface.released.json');
   });
 
   it('keeps deferred generator APIs out of the Foundation codegen surface', async () => {
@@ -150,6 +233,14 @@ describe('public foundation subpaths', () => {
     expect(shims).toContain("['embed', 'embed']");
     expect(embedSource).toContain('defineGlirastesChatElement');
     expect(embedSource).not.toMatch(/from ['"]\.\.\/react\/index\.js['"]/);
+  });
+
+  it('builds into an emptied dist/, so compiled files of removed sources are neither packed nor checked', async () => {
+    const parsed = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { scripts?: Record<string, string> };
+    const build = parsed.scripts?.build ?? '';
+    const clear = build.indexOf("rmSync('dist', { recursive: true, force: true })");
+    expect(clear).toBeGreaterThan(-1);
+    expect(clear).toBeLessThan(build.indexOf('tsc -p tsconfig.json'));
   });
 
   it('ships glirastes/browser framework-neutral, with its legacy shim', async () => {

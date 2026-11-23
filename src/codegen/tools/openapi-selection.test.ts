@@ -15,9 +15,13 @@ afterEach(removeAppFixtures);
 
 const NOW = () => new Date('2026-11-16T00:00:00.000Z');
 
-/** The committed OpenAPI documents of the examples; their outputs must not move with the opt-in extensions. */
+/**
+ * The committed OpenAPI documents of the examples; their outputs must not move with the opt-in extensions.
+ * `openapi.vue-fastapi-tasks.json` is the Vue+FastAPI export as pinned (tasks only), frozen when that
+ * example gained the second-acceptance routers with x-glirastes-output-* extensions.
+ */
 const COMMITTED_DOCUMENTS = [
-  'examples/vue-fastapi/api/openapi.json',
+  'examples/openapi.vue-fastapi-tasks.json',
   'examples/php-runtime/api/openapi.json',
   'examples/openapi.todo.json',
   'examples/openapi-3.0.tasks.json',
@@ -30,10 +34,10 @@ const OUTPUTS = [
   TOOLS_PATHS.setupArtifact,
 ];
 
-async function outputDigests(document: string, source: unknown): Promise<Record<string, string>> {
+async function outputDigests(document: string, source: unknown, config: Record<string, unknown> = { languages: [] }): Promise<Record<string, string>> {
   const fixture = await createAppFixture(
     { 'openapi.json': await readFile(join(SDK_ROOT, document), 'utf8') },
-    { toolsConfig: { sources: [source] } },
+    { toolsConfig: { sources: [source], ...config } },
   );
   const result = await runToolsPipelineWith({ root: fixture.root, mode: 'write', keepGoing: true }, { now: NOW });
   const module = generatedModulePath(loadToolsConfig(fixture.root));
@@ -52,6 +56,7 @@ describe('the openapi source without the opt-in extensions', () => {
       digests[document] = bare;
     }
     // Pinned from 0.14.0 plus OpenAPI 3.0 support, before `selection` and the x-glirastes-* extensions existed.
+    // `languages: []` is the way back to the one label of before 0.18.0, byte for byte.
     expect(digests).toMatchInlineSnapshot(`
       {
         "examples/openapi-3.0.tasks.json": {
@@ -68,6 +73,13 @@ describe('the openapi source without the opt-in extensions', () => {
           ".glirastes/tool-report.json": "555cec9eb5d05788",
           "module": "5892c7bbf0795a84",
         },
+        "examples/openapi.vue-fastapi-tasks.json": {
+          ".glirastes/foundation-execution-inventory.json": "63da202d5e7280cf",
+          ".glirastes/setup-artifact.json": "012ef8a6afdd9599",
+          ".glirastes/tool-contracts.json": "335ebed18b38ef75",
+          ".glirastes/tool-report.json": "f5f615ed8686b5fa",
+          "module": "0554be95b97e371d",
+        },
         "examples/php-runtime/api/openapi.json": {
           ".glirastes/foundation-execution-inventory.json": "e25bb3820cdb3aa1",
           ".glirastes/setup-artifact.json": "271f44587c09988b",
@@ -75,15 +87,19 @@ describe('the openapi source without the opt-in extensions', () => {
           ".glirastes/tool-report.json": "015806f5bf3cd8a1",
           "module": "58d4277081607834",
         },
-        "examples/vue-fastapi/api/openapi.json": {
-          ".glirastes/foundation-execution-inventory.json": "63da202d5e7280cf",
-          ".glirastes/setup-artifact.json": "012ef8a6afdd9599",
-          ".glirastes/tool-contracts.json": "335ebed18b38ef75",
-          ".glirastes/tool-report.json": "f5f615ed8686b5fa",
-          "module": "0554be95b97e371d",
-        },
       }
     `);
+  }, 60_000);
+
+  it('adds the labels per language by default, without touching the setup artifact, the inventory or the report', async () => {
+    for (const document of COMMITTED_DOCUMENTS) {
+      const single = await outputDigests(document, 'openapi');
+      const perLanguage = await outputDigests(document, 'openapi', {});
+      for (const path of [TOOLS_PATHS.inventory, TOOLS_PATHS.setupArtifact, TOOLS_PATHS.report]) {
+        expect(perLanguage[path], `${document} ${path}`).toBe(single[path]);
+      }
+      expect(perLanguage[TOOLS_PATHS.contracts], document).not.toBe(single[TOOLS_PATHS.contracts]);
+    }
   }, 60_000);
 });
 
@@ -141,7 +157,7 @@ describe('an opt-in OpenAPI source through the tools pipeline', () => {
     // Roles on unmarked operations (one of them malformed) report nothing; a malformed marker and an excluded marked operation do.
     expect(result.findings.map((finding) => [finding.code, finding.subjectRef])).toEqual([
       ['opt-in-excluded', 'POST /api/auth/login'],
-      ['output-contract-opaque', 'DELETE /api/tags/:tagId'],
+      // DELETE /api/tags/{tagId} declares only 204: no output-contract-opaque.
       ['tool-marker-invalid', 'GET /api/reports'],
     ]);
     // Neither finding is swallowed because its operation is no tool.
@@ -429,4 +445,75 @@ describe('applyCodeRoles', () => {
     expect(disjointCodeRolesFinding(execution, resolved(['a']), undefined)).toBeUndefined();
     expect(disjointCodeRolesFinding(execution, resolved(['a']), [])).toBeUndefined();
   });
+});
+
+describe('tool-semantics.json entries that match no tool', () => {
+  const orphans = (result: ToolsPipelineResult) => result.findings
+    .filter((finding) => finding.code === 'semantics-entry-orphaned')
+    .map((finding) => [finding.severity, finding.subjectRef, finding.message]);
+  const semantics = (tools: unknown[]) => JSON.stringify({ schemaVersion: 1, tools });
+
+  it('reports each orphaned entry once by its key, never one that matches or belongs to an excluded operation', async () => {
+    const app = await optInApp();
+    await app.write(TOOLS_PATHS.semantics, semantics([
+      { stableKey: 'GET /api/tags', usageHints: ['Lists the tags.'] },
+      { name: 'delete_tag', usageHints: ['Deletes a tag.'] },
+      // Its stableKey is gone, but the name matches a tool: used.
+      { stableKey: 'POST /api/old-tags', name: 'create_tag', usageHints: ['Creates a tag.'] },
+      // Excluded as not-opted-in: not reported.
+      { stableKey: 'GET /api/tasks', usageHints: ['Lists the tasks.'] },
+      { stableKey: 'GET /api/gone', usageHints: ['Secret-free text that is never repeated.'] },
+      { name: 'nothing.here', usageHints: ['Never repeated either.'] },
+    ]));
+    const result = await refresh(app);
+
+    expect(orphans(result)).toEqual([
+      ['warning', '.glirastes/tool-semantics.json#nothing.here',
+        'The tool-semantics.json entry with name "nothing.here" matches no tool, so its texts are not used.'],
+      ['warning', 'GET /api/gone',
+        'The tool-semantics.json entry with stableKey "GET /api/gone" matches no tool, so its texts are not used.'],
+    ]);
+    expect(JSON.stringify(result.findings)).not.toContain('never repeated');
+    expect(candidates(result).get('POST /api/tags')?.usageHints).toEqual(['Creates a tag.']);
+    expect(buildResolveWorklist(result).items.filter((item) => item.code === 'semantics-entry-orphaned').map((item) => item.target))
+      .toEqual([
+        { kind: 'file', file: TOOLS_PATHS.semantics, key: 'tools[name="nothing.here"]' },
+        { kind: 'file', file: TOOLS_PATHS.semantics, key: 'tools[stableKey="GET /api/gone"]' },
+      ]);
+    // A warning: the frozen check stays green once the outputs are current.
+    const frozen = await runToolsPipelineWith({ root: app.root, mode: 'frozen', keepGoing: true }, { now: NOW });
+    expect(frozen.driftPaths).toEqual([]);
+    expect(orphans(frozen)).toEqual(orphans(result));
+  }, 60_000);
+
+  it('reports a stableKey entry after the path changed, with the tool that kept its name', async () => {
+    const spec = await optInSpec();
+    const app = await optInApp({ spec });
+    await app.write(TOOLS_PATHS.semantics, semantics([{ stableKey: 'PATCH /api/tags/:tagId', usageHints: ['Renames a tag.'] }]));
+    expect(orphans(await refresh(app))).toEqual([]);
+
+    spec.paths['/api/labels/{tagId}'] = { patch: spec.paths['/api/tags/{tagId}']!.patch! };
+    delete spec.paths['/api/tags/{tagId}']!.patch;
+    await app.write('openapi.json', JSON.stringify(spec));
+    const message = 'The tool-semantics.json entry with stableKey "PATCH /api/tags/:tagId" matches no tool, so its texts are not used.'
+      + ' The tool named update_tag is now "PATCH /api/labels/:tagId".';
+    const moved = await refresh(app);
+    expect(orphans(moved)).toEqual([['warning', 'PATCH /api/tags/:tagId', message]]);
+    // The next refresh (and check) still finds the earlier name, now in the tombstones.
+    expect(orphans(await refresh(app))).toEqual([['warning', 'PATCH /api/tags/:tagId', message]]);
+  }, 60_000);
+
+  it('reports a name-only entry once after the tool was renamed', async () => {
+    const spec = await optInSpec();
+    const app = await optInApp({ spec });
+    await app.write(TOOLS_PATHS.semantics, semantics([{ name: 'update_tag', usageHints: ['Renames a tag.'] }]));
+    expect(orphans(await refresh(app))).toEqual([]);
+
+    spec.paths['/api/tags/{tagId}']!.patch!['x-glirastes-name'] = 'rename_tag';
+    await app.write('openapi.json', JSON.stringify(spec));
+    expect(orphans(await refresh(app))).toEqual([[
+      'warning', '.glirastes/tool-semantics.json#update_tag',
+      'The tool-semantics.json entry with name "update_tag" matches no tool, so its texts are not used.',
+    ]]);
+  }, 60_000);
 });

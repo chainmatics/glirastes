@@ -32,12 +32,16 @@ export interface TurnToolDiscoveryOptions {
 }
 
 /**
- * Search-only enrichment keyed by the model-facing tool name. Synonyms are
- * indexed but never returned and never make a tool eligible.
+ * Search-only enrichment keyed by the model-facing tool name. Synonyms and
+ * examples are indexed but never returned and never make a tool eligible.
  */
 export interface ToolSearchSemantics {
   readonly synonyms?: ReadonlyArray<string>;
-  /** Example requests; only the default intent router of the chat handler reads them. */
+  /**
+   * Example requests a user would type. They rank the tool for `find_tools`
+   * (with the weight of usage hints) and for the start set of the default
+   * intent router. At most 10, each cut to 200 characters.
+   */
   readonly examples?: ReadonlyArray<string>;
 }
 
@@ -46,6 +50,8 @@ export type ToolSearchSemanticsMap = Readonly<Record<string, ToolSearchSemantics
 interface DiscoveryEntry {
   result: ToolDiscoveryResult;
   synonyms: ReadonlyArray<string>;
+  /** Indexed like usage hints, never returned. */
+  examples: ReadonlyArray<string>;
   sharedWith: ReadonlyArray<string>;
 }
 
@@ -56,6 +62,8 @@ const DEFAULT_MAX_DESCRIPTION_LENGTH = 500;
 const DEFAULT_MAX_HINT_LENGTH = 300;
 const MAX_SYNONYMS = 20;
 const MAX_SYNONYM_LENGTH = 100;
+const MAX_EXAMPLES = 10;
+const MAX_EXAMPLE_LENGTH = 200;
 
 function bounded(value: string, maxLength: number): string {
   return value.slice(0, maxLength);
@@ -67,17 +75,25 @@ function freezeResult(result: ToolDiscoveryResult): ToolDiscoveryResult {
   return Object.freeze(result);
 }
 
-function boundedSynonyms(
+function boundedTexts(values: unknown, maxCount: number, maxLength: number): ReadonlyArray<string> {
+  return (Array.isArray(values) ? values : [])
+    .filter((value): value is string => typeof value === 'string')
+    .slice(0, maxCount)
+    .map((value) => bounded(value, maxLength));
+}
+
+/** Synonyms and examples of one tool, bounded; an app-supplied map is not trusted to be. */
+function boundedSemantics(
   semantics: ToolSearchSemanticsMap | undefined,
   name: string,
-): ReadonlyArray<string> {
+): Pick<DiscoveryEntry, 'synonyms' | 'examples'> {
   const entry = semantics && Object.hasOwn(semantics, name)
     ? semantics[name]
     : undefined;
-  return (entry?.synonyms ?? [])
-    .filter((synonym): synonym is string => typeof synonym === 'string')
-    .slice(0, MAX_SYNONYMS)
-    .map((synonym) => bounded(synonym, MAX_SYNONYM_LENGTH));
+  return {
+    synonyms: boundedTexts(entry?.synonyms, MAX_SYNONYMS, MAX_SYNONYM_LENGTH),
+    examples: boundedTexts(entry?.examples, MAX_EXAMPLES, MAX_EXAMPLE_LENGTH),
+  };
 }
 
 function resolveLimits(options: TurnToolDiscoveryOptions) {
@@ -116,7 +132,7 @@ function createDiscovery(
     description: entry.result.description,
     ...(entry.result.module ? { module: entry.result.module } : {}),
     sharedWith: entry.sharedWith,
-    ...(entry.result.usageHints ? { usageHints: entry.result.usageHints } : {}),
+    usageHints: [...entry.result.usageHints ?? [], ...entry.examples],
     synonyms: entry.synonyms,
   })));
 
@@ -196,7 +212,7 @@ export function createTurnToolDiscovery(
     });
     entries.push({
       result,
-      synonyms: boundedSynonyms(input.semantics, name),
+      ...boundedSemantics(input.semantics, name),
       sharedWith: manifestTool.sharedWith ?? [],
     });
   }
@@ -227,7 +243,7 @@ export function createRegistryToolDiscovery(
         name,
         description: bounded(tool.description, limits.maxDescriptionLength),
       }),
-      synonyms: boundedSynonyms(input.semantics, name),
+      ...boundedSemantics(input.semantics, name),
       sharedWith: [],
     });
   }

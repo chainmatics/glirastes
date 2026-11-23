@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import type { DeclaredEffect } from '../../../contracts/tool-policy.js';
 import { TOOL_NAME_PATTERN } from '../../../runtime/local-tool-bindings.js';
 import type { GeneratedUiAction } from '../../../server/core/generated-ui-tool.js';
 import { canonicalJson, compareCodeUnits, jsonSchemaDigest, sha256Digest } from '../canonical.js';
@@ -186,18 +187,18 @@ export function importedCalls(source: ts.SourceFile, specs: ReadonlyArray<Import
 
 const BRIDGE_IMPORTS: ReadonlyArray<ImportSpec> = [
   { module: 'glirastes/react', names: ['useGlirastesNavigationBridge'] },
-  { module: 'glirastes/browser', names: ['registerNavigationBridge'] },
+  { module: 'glirastes/browser', names: ['registerNavigationBridge', 'registerDocumentNavigation'] },
 ];
 
 /** True when app code calls the navigation bridge that executes `ui.navigate` and `ui.filter.*`. */
 export function hasNavigationBridge(files: ReadonlyArray<Pick<AppSourceFile, 'path' | 'source'>>): boolean {
   return files.some((file) => (
-    file.source.includes('NavigationBridge') && importedCalls(parseAppSource(file), BRIDGE_IMPORTS).length > 0
+    mentionsNavigationBridge(file.source) && importedCalls(parseAppSource(file), BRIDGE_IMPORTS).length > 0
   ));
 }
 
 export function mentionsNavigationBridge(source: string): boolean {
-  return source.includes('NavigationBridge');
+  return source.includes('NavigationBridge') || source.includes('registerDocumentNavigation');
 }
 
 export interface UiObservationInput {
@@ -214,6 +215,8 @@ export interface UiObservationInput {
   prose?: ToolProseHints;
   jsDoc?: string;
   uiMutation?: boolean;
+  /** The effect the registration declares (`{ effect }`); raise-only, like a contract's effect. */
+  declaredEffect?: DeclaredEffect;
   /** App-relative files that register or read this tool, for the work lists. */
   files?: string[];
 }
@@ -250,6 +253,7 @@ export function uiObservation(input: UiObservationInput): ObservedTool {
       externalCall: false,
       ...(input.jsDoc ? { jsDoc: input.jsDoc } : {}),
       ...(input.uiMutation ? { uiMutation: true } : {}),
+      ...(input.declaredEffect ? { declaredEffect: input.declaredEffect } : {}),
     },
     findings: input.findings,
     ...(input.prose ? { prose: input.prose } : {}),

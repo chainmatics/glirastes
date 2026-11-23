@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import type { ChatTransport } from '../types.js';
+import { UI_ACTION_HANDOFF_MESSAGE } from '../../browser/ui-action-handoff.js';
 import {
   dispatchAiClientAction,
   getDefaultUiActionBus,
@@ -76,14 +77,14 @@ describe('useGlirastesNavigationBridge', () => {
 });
 
 describe('AiChatProvider and generated UI actions', () => {
-  function transport(output: unknown): ChatTransport {
+  function transport(output: unknown, status: ChatTransport['status'] = 'ready'): ChatTransport {
     return {
-      messages: [{
+      messages: output === undefined ? [] : [{
         id: 'assistant-1',
         role: 'assistant',
         parts: [{ type: 'tool-ui_navigate', toolCallId: 'call-1', state: 'output-available', output } as never],
       }],
-      status: 'ready',
+      status,
       error: null,
       sendMessage: vi.fn(async () => {}),
       stop: vi.fn(),
@@ -92,23 +93,22 @@ describe('AiChatProvider and generated UI actions', () => {
     };
   }
 
+  /** A request of this chat that delivers `output` and ends. */
+  function renderStreamed(output: unknown, props: Omit<React.ComponentProps<typeof AiChatProvider>, 'transport'>) {
+    const view = render(<AiChatProvider transport={transport(undefined, 'submitted')} {...props} />);
+    view.rerender(<AiChatProvider transport={transport(output, 'ready')} {...props} />);
+    return view;
+  }
+
   it('hands a generated navigation result to the bus after onToolResult', async () => {
     const bus = new UiActionBus();
     const push = vi.fn();
     const onToolResult = vi.fn();
-    render(
-      <AiChatProvider
-        transport={transport({
-          success: true,
-          message: 'Action executed.',
-          uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks?status=done' } },
-        })}
-        uiActionBus={bus}
-        onToolResult={onToolResult}
-      >
-        <Bridge push={push} bus={bus} />
-      </AiChatProvider>,
-    );
+    renderStreamed({
+      success: true,
+      message: UI_ACTION_HANDOFF_MESSAGE,
+      uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks?status=done' } },
+    }, { uiActionBus: bus, onToolResult, children: <Bridge push={push} bus={bus} /> });
     await waitFor(() => expect(push).toHaveBeenCalledWith('/tasks?status=done'));
     expect(onToolResult).toHaveBeenCalledWith('ui_navigate', expect.objectContaining({ success: true }));
   });
@@ -117,12 +117,29 @@ describe('AiChatProvider and generated UI actions', () => {
     const bus = new UiActionBus();
     const seen = vi.fn();
     bus.subscribeByType('set-filters', seen);
+    renderStreamed({ success: true, uiAction: { type: 'set-filters', filters: {} } }, { uiActionBus: bus, children: <div /> });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(seen).not.toHaveBeenCalled();
+  });
+
+  it('does not run a stored result the chat did not stream', async () => {
+    const bus = new UiActionBus();
+    const push = vi.fn();
+    const onToolResult = vi.fn();
     render(
-      <AiChatProvider transport={transport({ success: true, uiAction: { type: 'set-filters', filters: {} } })} uiActionBus={bus}>
-        <div />
+      <AiChatProvider
+        transport={transport({
+          success: true,
+          uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks' } },
+        })}
+        uiActionBus={bus}
+        onToolResult={onToolResult}
+      >
+        <Bridge push={push} bus={bus} />
       </AiChatProvider>,
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(seen).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(onToolResult).not.toHaveBeenCalled();
   });
 });

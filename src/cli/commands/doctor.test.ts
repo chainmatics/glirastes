@@ -357,6 +357,21 @@ describe('createDoctorReport', () => {
       .toBe(before);
   });
 
+  it.each([
+    ['an own guard with a declared principal', { '@nestjs/core': '11.0.0' }, true, 'pass', 'E-SCOPE-100'],
+    ['Passport without a declared principal', { '@nestjs/core': '11.0.0', '@nestjs/passport': '11.0.0' }, false, 'pass', 'E-SCOPE-100'],
+    ['no known package and no declaration', { '@nestjs/core': '11.0.0' }, false, 'warn', 'E-SCOPE-101'],
+  ] as const)('sign-in integration: %s', async (_label, dependencies, principal, status, code) => {
+    const rootDir = await fixture(principal);
+    const path = join(rootDir, 'package.json');
+    const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    await writeFile(path, JSON.stringify({ ...manifest, dependencies }));
+
+    const report = await createDoctorReport({ rootDir });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({ name: 'auth-provider', status, code }));
+  });
+
   it('fails when server-verified principal wiring is not declared', async () => {
     const rootDir = await fixture(false);
 
@@ -410,6 +425,120 @@ describe('createDoctorReport', () => {
     expect(JSON.parse(String(log.mock.calls[0]?.[0])).status).toBe('fail');
     expect(process.exitCode).toBe(1);
     log.mockRestore();
+  });
+
+  describe('voice input worklet', () => {
+    const CHAT = "import { AiChatProvider } from 'glirastes/react';\n"
+      + 'export function Chat() { return <AiChatProvider transport={t} voice={{ enabled: true }} />; }\n';
+
+    it('adds no check for an app without voice input', async () => {
+      const rootDir = await fixture();
+      const report = await createDoctorReport({ rootDir });
+      expect(report.checks.map(({ name }) => name)).not.toContain('voice-worklet');
+    });
+
+    it('fails with the concrete fix when voice is used and the worklet is not provided', async () => {
+      const rootDir = await fixture();
+      await mkdir(join(rootDir, 'src/components'), { recursive: true });
+      await writeFile(join(rootDir, 'src/components/chat.tsx'), CHAT);
+
+      const report = await createDoctorReport({ rootDir });
+
+      expect(report.status).toBe('fail');
+      expect(report.checks).toContainEqual({
+        name: 'voice-worklet', status: 'fail', code: 'E-SETUP-034', remediation: 'provide-audio-worklet',
+      });
+      const text = formatDoctorReport(report);
+      expect(text).toContain('✗ Voice input audio worklet');
+      expect(text).toContain('glirastes stt worklet');
+      expect(text).toContain('"predev": "glirastes stt worklet && <existing predev>"');
+      expect(text).not.toContain('next dev"');
+      expect(text).toContain('Next.js, Vite and Create React App');
+      expect(formatDoctorReport(report, { verbose: true })).toContain('Voice input audio worklet (E-SETUP-034)');
+    });
+
+    const useVoice = async (rootDir: string, options = '') => {
+      await mkdir(join(rootDir, 'src'), { recursive: true });
+      await writeFile(join(rootDir, 'src/voice.ts'),
+        `import { RecordedSttAdapter } from 'glirastes/react';\nexport const stt = new RecordedSttAdapter(${options});\n`);
+    };
+    const serve = async (rootDir: string, path = 'audio-worklet-processor.js') => {
+      await mkdir(join(rootDir, 'public', path, '..'), { recursive: true });
+      await writeFile(join(rootDir, 'public', path), "registerProcessor('audio-processor', class {});\n");
+    };
+    const scripts = async (rootDir: string, value: Record<string, string>, extra: Record<string, unknown> = {}) => {
+      const path = join(rootDir, 'package.json');
+      const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+      await writeFile(path, JSON.stringify({ ...manifest, ...extra, scripts: value }));
+    };
+    const voiceCheck = async (rootDir: string) => (await createDoctorReport({ rootDir })).checks
+      .find(({ name }) => name === 'voice-worklet');
+
+    it('passes when the file is served at the default URL', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await serve(rootDir);
+      expect(await voiceCheck(rootDir)).toEqual({ name: 'voice-worklet', status: 'pass', code: 'E-SETUP-108', remediation: 'none' });
+    });
+
+    it('only warns when a copy step exists but the file is not there yet (next dev started directly)', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await scripts(rootDir, { predev: 'glirastes stt worklet && glirastes tools refresh --keep-going' });
+      const report = await createDoctorReport({ rootDir });
+      expect(report.checks).toContainEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'run-audio-worklet-copy',
+      });
+      const text = formatDoctorReport(report);
+      expect(text).toContain('! Voice input audio worklet');
+      expect(text).toContain('pnpm');
+      await serve(rootDir);
+      expect((await voiceCheck(rootDir))?.status).toBe('pass');
+    });
+
+    it('reads the copy step from the scripts only, not from the rest of the manifest', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await scripts(rootDir, {}, { description: 'serves audio-worklet-processor.js via glirastes stt worklet' });
+      expect((await voiceCheck(rootDir))?.status).toBe('fail');
+    });
+
+    it('treats a copy step with another --out folder as unverifiable', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await scripts(rootDir, { prebuild: 'glirastes stt worklet --out static' });
+      expect(await voiceCheck(rootDir)).toEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'verify-audio-worklet-url',
+      });
+    });
+
+    it('checks a configured worklet path, not the default file, and only warns about an absolute URL', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir, "{ workletUrl: '/static/pcm.js?v=2' }");
+      await serve(rootDir);
+      expect((await voiceCheck(rootDir))?.status).toBe('fail');
+      await serve(rootDir, 'static/pcm.js');
+      expect((await voiceCheck(rootDir))?.status).toBe('pass');
+      await useVoice(rootDir, "{ workletUrl: 'https://cdn.example.test/pcm.js' }");
+      expect(await voiceCheck(rootDir)).toEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'verify-audio-worklet-url',
+      });
+    });
+
+    it('reports the check in the JSON output of the CLI', async () => {
+      const rootDir = await fixture();
+      await mkdir(join(rootDir, 'src'), { recursive: true });
+      await writeFile(join(rootDir, 'src/chat.tsx'), CHAT);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await runCli(['doctor', '--root', rootDir, '--json']);
+        const report = JSON.parse(String(log.mock.calls[0]?.[0])) as { checks: Array<{ name: string; status: string }> };
+        expect(report.checks).toContainEqual(expect.objectContaining({ name: 'voice-worklet', status: 'fail' }));
+      } finally {
+        log.mockRestore();
+        process.exitCode = 0;
+      }
+    });
   });
 
   describe('apps without Next.js', () => {

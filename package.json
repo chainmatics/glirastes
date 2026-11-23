@@ -1,6 +1,6 @@
 {
   "name": "glirastes",
-  "version": "0.17.0",
+  "version": "0.24.1",
   "description": "Official Chainmatics SDK for building AI-powered chat, tools, and agent systems. Part of the Glirastes platform.",
   "license": "Apache-2.0",
   "author": {
@@ -153,6 +153,22 @@
         "default": "./dist/cjs/server/adapters/nextjs/index.js"
       }
     },
+    "./server/node": {
+      "import": {
+        "types": "./dist/server/node/index.d.ts",
+        "default": "./dist/server/node/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server/node/index.d.ts",
+        "default": "./dist/cjs/server/node/index.js"
+      }
+    },
+    "./server/stt-local": {
+      "import": {
+        "types": "./dist/server/stt-local/index.d.ts",
+        "default": "./dist/server/stt-local/index.js"
+      }
+    },
     "./server/testing": {
       "types": "./dist/server/testing/index.d.ts",
       "default": "./dist/server/testing/index.js"
@@ -167,6 +183,7 @@
     },
     "./react/styles.css": "./dist/react/styles.css",
     "./react/pills.css": "./dist/react/pills.css",
+    "./react/audio-worklet-processor.js": "./dist/react/audio-worklet-processor.js",
     "./embed": {
       "types": "./dist/embed/index.d.ts",
       "default": "./dist/embed/index.js"
@@ -228,8 +245,6 @@
     "!dist/cjs/codegen/coverage.*",
     "!dist/codegen/scaffolder.*",
     "!dist/cjs/codegen/scaffolder.*",
-    "!dist/cli/commands/check-upgrade.*",
-    "!dist/cjs/cli/commands/check-upgrade.*",
     "!dist/cli/commands/test.*",
     "!dist/cjs/cli/commands/test.*",
     "!dist/cli/utils",
@@ -279,7 +294,25 @@
     "browser",
     "codegen",
     "skills",
+    "upgrade-notes",
+    "!upgrade-notes/api-surface.released.json",
     "docs/README.md",
+    "docs/approval-subjects.md",
+    "docs/chat-attachments.md",
+    "docs/chat-interactions.md",
+    "docs/chat-queue.md",
+    "docs/chat-route-security.md",
+    "docs/concepts.md",
+    "docs/entity-identity.md",
+    "docs/history-measurement.md",
+    "docs/local-stt.md",
+    "docs/managed-runtime-sync.md",
+    "docs/node-servers.md",
+    "docs/runtime-container.md",
+    "docs/runtime-persistence.md",
+    "docs/support-matrix.md",
+    "docs/tool-policy.md",
+    "docs/ui-action-outcomes.md",
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
@@ -289,17 +322,19 @@
     "SECURITY.md"
   ],
   "scripts": {
-    "build": "node scripts/generate-embed-styles.mjs --check && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && cp src/react/pills.css dist/react/pills.css && cp src/react/pills.css dist/cjs/react/pills.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/ && cp src/codegen/tools/sources/fastapi-routes.py dist/codegen/tools/sources/",
+    "build": "node scripts/generate-embed-styles.mjs --check && node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && cp src/react/styles.css dist/react/styles.css && cp src/react/styles.css dist/cjs/react/styles.css && cp src/react/pills.css dist/react/pills.css && cp src/react/pills.css dist/cjs/react/pills.css && node -e \"require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\" && node scripts/generate-subpath-shims.mjs && cp src/codegen/tools/probe-child.mjs src/codegen/tools/probe-loader.mjs dist/codegen/tools/ && cp src/codegen/tools/sources/fastapi-routes.py dist/codegen/tools/sources/",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "check:egress": "bun scripts/check-model-egress.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "api-surface": "bun scripts/api-surface.ts --write",
+    "release:prepare": "bun scripts/prepare-release.ts"
   },
   "dependencies": {
     "ai": "^6.0.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
-    "pg": "^8.23.1",
+    "pg": ">=8.11 <9",
     "snowball-stemmers": "^0.6.0",
     "typescript": "^5.7.3",
     "zod": "^4.0.0"
@@ -320,7 +355,8 @@
     "class-transformer": ">=0.5 <1",
     "class-validator": ">=0.14 <1",
     "reflect-metadata": ">=0.2 <1",
-    "vitest": ">=2.0.0"
+    "vitest": ">=2.0.0",
+    "sherpa-onnx-node": "2.0.1"
   },
   "peerDependenciesMeta": {
     "@ai-sdk/openai": {
@@ -370,6 +406,9 @@
     },
     "vitest": {
       "optional": true
+    },
+    "sherpa-onnx-node": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -392,6 +431,7 @@
     "class-transformer": "^0.5.0",
     "class-validator": "^0.15.1",
     "express": "^5.0.0",
+    "fake-indexeddb": "^6",
     "jsdom": "^28.1.0",
     "next": "^15.0.0",
     "passport": "^0.7",
@@ -399,6 +439,7 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "reflect-metadata": "^0.2.0",
+    "remark-gfm": "^4.0.1",
     "vitest": "^4.0.18",
     "ws": "^8.0.0",
     "zod-v3": "npm:zod@3.25.76"

@@ -1,3 +1,8 @@
+import { z } from 'zod';
+import { defineTool } from '../../../types.js';
+import { toolToAiTool } from '../../core/index.js';
+import { generateText } from 'ai';
+import { providerAdapters } from './privacy-fixtures.js';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPostgresRuntimeStore, type PostgresQueryClient } from '../../../runtime/postgres-store.js';
@@ -48,6 +53,48 @@ async function setup() {
 }
 
 describe('authorized tool rehydration', () => {
+  it.each([false, true])('protects failure fragments in normally converted tools (copy=%s)', async (copy) => {
+    const { boundary } = await setup();
+    const name = 'ConvertedIdentityCanary' + 'X'.repeat(1600);
+    await boundary.session.registerIdentities([{ name }]);
+    const converted = toolToAiTool(defineTool({ id: 'read', description: 'Read', inputSchema: z.object({}),
+      execute: async () => ({ success: false, error: name }) }), { currentDate: new Date(), locale: 'en' });
+    const wrapped = wrapToolsForPrivacy({ read: copy ? { ...converted } : converted }, boundary);
+    const output = await wrapped.read.execute({});
+    const adapter = providerAdapters().openrouter;
+    await generateText({ model: boundary.wrapModel(adapter.model), messages: [
+      { role: 'user', content: 'Read' },
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c', toolName: 'read', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c', toolName: 'read', output: { type: 'json', value: output as never } }] },
+    ] });
+    expect(adapter.requests).toHaveLength(1);
+    expect(JSON.stringify(adapter.requests)).not.toContain('ConvertedIdentityCanary');
+  });
+
+  it('does not bypass an added execution guard when rebuilding a converted tool', async () => {
+    const { boundary } = await setup();
+    const execute = vi.fn(async () => ({ value: 'private' }));
+    const converted = toolToAiTool(defineTool({ id: 'read', description: 'Read', inputSchema: z.object({}), execute }),
+      { currentDate: new Date(), locale: 'en' });
+    const replacement = vi.fn(async (_input: unknown) => ({ value: 'replacement' }));
+    const wrapped = wrapToolsForPrivacy({ read: { ...converted, execute: replacement } }, boundary);
+    expect(await wrapped.read.execute({})).toMatchObject({ success: false, error: 'privacy_tool_conversion_unsupported' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(replacement).not.toHaveBeenCalled();
+  });
+
+  it('does not run delayed middleware in a low-level protected conversion', async () => {
+    const { boundary } = await setup();
+    const execute = vi.fn(async () => ({ value: 'private' }));
+    const middleware = vi.fn(async (_call, next) => next());
+    const converted = toolToAiTool(defineTool({ id: 'read', description: 'Read', inputSchema: z.object({}), execute }),
+      { currentDate: new Date(), locale: 'en' }, 'read', { toolMiddleware: [middleware] });
+    const wrapped = wrapToolsForPrivacy({ read: converted }, boundary);
+    expect(await wrapped.read.execute({})).toMatchObject({ success: false, error: 'privacy_tool_middleware_unsupported' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(middleware).not.toHaveBeenCalled();
+  });
+
   it('rehydrates pseudonyms to the originals before needsApproval and execute', async () => {
     const { boundary, fakeEmail, fakeId } = await setup();
     const needsApproval = vi.fn(async (_input: unknown) => false);

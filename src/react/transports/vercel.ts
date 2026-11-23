@@ -10,7 +10,7 @@
 
 import { useCallback, useMemo, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart } from 'ai';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import type {
   ChatTransport,
@@ -21,7 +21,38 @@ import type {
 } from '../types.js';
 import { limitRequestAttachments } from '../utils/attachments.js';
 import { MEMORY_BODY_FIELD, MEMORY_MAX_USER_NOTES, MEMORY_NOTES_PART, readMemoryEntries } from '../../contracts/memory.js';
+import { UI_OUTCOME_PROTOCOL_VERSION, UI_OUTCOMES_REQUEST_FIELD } from '../../contracts/ui-outcome.js';
+import { CHAT_LANGUAGE_HEADER, chatLanguageOf } from '../../contracts/localized-text.js';
+import { shouldContinueChat } from '../utils/ui-outcome-continuation.js';
+import { BUDGET_CONTINUATION, CONTINUATION_REQUEST_FIELD } from '../../contracts/budget-continuation.js';
 import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
+
+import type { MaybePromise } from '../types.js';
+
+type HeadersSource = Record<string, string> | (() => MaybePromise<Record<string, string>>);
+
+/**
+ * Headers of each chat request: the host's, plus the chat language
+ * (`Content-Language`, one BCP-47 tag) unless the host sets that header itself.
+ * @internal
+ */
+export function chatRequestHeaders(
+  headers: HeadersSource | undefined,
+  language: string | null,
+): MaybePromise<Record<string, string>> {
+  const source = !headers ? {} : typeof headers === 'function' ? headers() : headers;
+  const tag = chatLanguageOf(language);
+  const withLanguage = (resolved: Record<string, string>): Record<string, string> => {
+    if (!tag || Object.keys(resolved).some((name) => name.toLowerCase() === CHAT_LANGUAGE_HEADER)) return resolved;
+    return { ...resolved, [CHAT_LANGUAGE_HEADER]: tag };
+  };
+  // A sync source stays sync; only an async one makes the result a promise.
+  return isPromiseLike(source) ? Promise.resolve(source).then(withLanguage) : withLanguage(source);
+}
+
+function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {
+  return typeof (value as Promise<T> | null)?.then === 'function';
+}
 
 /**
  * Body of each chat request: the client actions the open page handles, so
@@ -31,16 +62,21 @@ import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
 export function chatRequestBody(
   extras: Record<string, unknown> | (() => Record<string, unknown>) | undefined,
   memory?: BrowserMemoryStore,
+  reportsUiOutcomes = false,
 ): Record<string, unknown> {
   const resolved = !extras ? {} : typeof extras === 'function' ? extras() : extras;
   return {
     glirastesClientActions: getDefaultUiActionBus().registeredActionIds(),
+    // The chat reports UI outcomes and sends the history again (protocol version 1).
+    ...(reportsUiOutcomes ? { [UI_OUTCOMES_REQUEST_FIELD]: UI_OUTCOME_PROTOCOL_VERSION } : {}),
     ...(memory ? { [MEMORY_BODY_FIELD]: { user: memory.read() } } : {}),
     ...resolved,
   };
 }
 
-export interface UseVercelAiChatTransportOptions extends ChatTransportConfig {
+export interface UseVercelAiChatTransportOptions extends Omit<ChatTransportConfig, 'headers'> {
+  /** Static headers, or a (possibly async) function called per request. */
+  headers?: HeadersSource;
   /**
    * When true, automatically resumes generation after all pending
    * approval responses are provided. Default: true.
@@ -64,6 +100,14 @@ export interface UseVercelAiChatTransportOptions extends ChatTransportConfig {
    * model adds or removes one. Not needed when the handler has a store.
    */
   memory?: BrowserMemoryStore;
+  /**
+   * Outcome protocol of UI actions (default true): once an `AiChatProvider`
+   * reports outcomes through this transport, every request says so
+   * (`glirastesUiOutcomes: 1`), the provider writes each outcome into its
+   * tool result, and the transport sends the history again once every
+   * result that waits for one has it. `false` sends neither.
+   */
+  uiActionOutcomes?: boolean;
 }
 
 export function useVercelAiChatTransport(
@@ -76,13 +120,30 @@ export function useVercelAiChatTransport(
     autoResumeOnApproval = true,
     bodyExtras,
     memory,
+    uiActionOutcomes = true,
   } = options;
 
   const memoryRef = useRef(memory);
   memoryRef.current = memory;
 
+  // Set by the provider that reports outcomes through this transport.
+  const reportingRef = useRef(false);
+  const uiActionOutcomesRef = useRef(uiActionOutcomes);
+  uiActionOutcomesRef.current = uiActionOutcomes;
+  const setUiOutcomeReporting = useCallback((enabled: boolean) => {
+    reportingRef.current = enabled;
+  }, []);
+  const reportsUiOutcomes = () => uiActionOutcomesRef.current && reportingRef.current;
+  const autoResumeRef = useRef(autoResumeOnApproval);
+  autoResumeRef.current = autoResumeOnApproval;
+
   const headersRef = useRef(userHeaders);
   headersRef.current = userHeaders;
+  // Set by the provider: the chat language each request names.
+  const languageRef = useRef<string | null>(null);
+  const setRequestLanguage = useCallback((language: string | null) => {
+    languageRef.current = language;
+  }, []);
 
   const onDataRef = useRef(onData);
   onDataRef.current = onData;
@@ -102,13 +163,8 @@ export function useVercelAiChatTransport(
     () =>
       new DefaultChatTransport({
         api: endpoint,
-        headers: userHeaders
-          ? () => {
-              const h = headersRef.current;
-              return typeof h === 'function' ? h() : h ?? {};
-            }
-          : undefined,
-        body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current),
+        headers: () => chatRequestHeaders(headersRef.current, languageRef.current),
+        body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current, reportsUiOutcomes()),
         // Same body as the default, with file data only in the latest user turns.
         prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => ({
           body: {
@@ -120,8 +176,8 @@ export function useVercelAiChatTransport(
           },
         }),
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- headersRef/bodyExtrasRef are stable
-    [endpoint, !!userHeaders],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- headersRef/bodyExtrasRef/languageRef are stable
+    [endpoint],
   );
 
   const {
@@ -132,11 +188,17 @@ export function useVercelAiChatTransport(
     stop,
     setMessages,
     addToolApprovalResponse,
+    addToolOutput,
   } = useChat({
     transport,
-    sendAutomaticallyWhen: autoResumeOnApproval
-      ? lastAssistantMessageIsCompleteWithApprovalResponses
-      : undefined,
+    // With the outcome protocol: approvals answered and every UI outcome reported (see shouldContinueChat).
+    sendAutomaticallyWhen: uiActionOutcomes
+      ? (options) => (reportsUiOutcomes()
+        ? shouldContinueChat(options, { approvals: autoResumeRef.current })
+        : autoResumeRef.current && lastAssistantMessageIsCompleteWithApprovalResponses(options))
+      : autoResumeOnApproval
+        ? lastAssistantMessageIsCompleteWithApprovalResponses
+        : undefined,
     onData: (dataPart) => {
       const part = dataPart as { type: string; data: unknown };
       if (part.type === MEMORY_NOTES_PART && memoryRef.current) {
@@ -151,8 +213,24 @@ export function useVercelAiChatTransport(
   const send = useCallback(
     ({ text, files }: { text: string; files?: FilePart[] }) => {
       if (!files || files.length === 0) return sendMessage({ text });
-      return text === '' ? sendMessage({ parts: files }) : sendMessage({ text, files });
+      // Only the open metadata record differs from the SDK's JSON-typed one.
+      const uiFiles = files as FileUIPart[];
+      return text === '' ? sendMessage({ parts: uiFiles }) : sendMessage({ text, files: uiFiles });
     },
+    [sendMessage],
+  );
+
+  const writeToolOutput = useCallback<NonNullable<ChatTransport['addToolOutput']>>(
+    ({ tool, toolCallId, output }) => (addToolOutput as unknown as (
+      value: { tool: string; toolCallId: string; output: unknown },
+    ) => Promise<void>)({ tool, toolCallId, output }),
+    [addToolOutput],
+  );
+  // The history as it is, sent again without a new message (a turn continued on a new page).
+  const continueTurn = useCallback(() => sendMessage(), [sendMessage]);
+  // The history again with the marker of a budget continuation ("Continue" under a stop notice).
+  const continueAfterBudgetStop = useCallback(
+    () => sendMessage(undefined, { body: { [CONTINUATION_REQUEST_FIELD]: BUDGET_CONTINUATION } }),
     [sendMessage],
   );
 
@@ -166,7 +244,11 @@ export function useVercelAiChatTransport(
       setMessages: setMessages as unknown as ChatTransport['setMessages'],
       addToolApprovalResponse,
       subscribeToData,
+      setRequestLanguage,
+      continueAfterBudgetStop,
+      ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
-    [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData],
+    [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
+      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
   );
 }

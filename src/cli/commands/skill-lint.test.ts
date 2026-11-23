@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { lintSkill, readSkill, skillCommands } from './__tests__/skill-lint.js';
 
 /** Shipped skills that follow the P05 contract; each skill task adds its name. */
-const LINTED_SKILLS: string[] = ['setting-up-glirastes', 'integrating-glirastes-nextjs', 'integrating-glirastes-web', 'maintaining-glirastes-tools', 'describing-glirastes-tools', 'building-glirastes-chat-ui', 'migrating-to-glirastes', 'curating-glirastes-chat-interactions', 'setting-up-glirastes-memory'];
+const LINTED_SKILLS: string[] = ['setting-up-glirastes', 'integrating-glirastes-nextjs', 'integrating-glirastes-web', 'maintaining-glirastes-tools', 'describing-glirastes-tools', 'building-glirastes-chat-ui', 'migrating-to-glirastes', 'curating-glirastes-chat-interactions', 'setting-up-glirastes-memory', 'upgrading-glirastes'];
 
 const VALID = [
   '---',
@@ -45,6 +45,11 @@ describe('skill lint', () => {
       ['glirastes', 'tools', 'describe', '--print', '<tool>'],
       ['glirastes', 'tools', 'policy', 'raise', '<tool>', 'write', '--reason', 'writes through a helper'],
     ]);
+  });
+
+  it('allows only glirastes upgrade ack --force', () => {
+    expect(lintSkill('example-skill', `${VALID}\nThen run \`glirastes upgrade ack --force\`.\n`)).toEqual([]);
+    expect(lintSkill('example-skill', `${VALID}\nRun glirastes upgrade report --force.\n`).join('\n')).toContain('never teaches --force');
   });
 
   it.each([

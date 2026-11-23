@@ -74,6 +74,7 @@ function registry(needsApproval = false) {
 function privacyConfig(extra: Partial<ChatPrivacyConfig> = {}): ChatPrivacyConfig {
   const scope = testScope({ conversationId: 'chat-1' });
   return {
+    policy: { required: true },
     shield: memoryShield(),
     scope: (_req, chat) => ({ ...scope, conversationId: chat.conversationId }),
     knownIdentities: () => [
@@ -348,7 +349,7 @@ describe('screenshots', () => {
     const handler = createAiChatHandler({
       tools, model, systemPrompt: SYSTEM, attachments: { enabled: true },
       privacy: privacyConfig({
-        policy: { screenshots: { mode: 'allow-original' } },
+        policy: { required: true, screenshots: { mode: 'allow-original' } },
         attachments: () => ({ app: 'allow-original', tenant: 'allow-original' }),
         modelCapabilities: { images: true },
       }),
@@ -365,7 +366,7 @@ describe('screenshots', () => {
     const { model, calls } = echoModel();
     const handler = createAiChatHandler({
       tools, model, systemPrompt: SYSTEM, attachments: { enabled: true },
-      privacy: privacyConfig({ policy: { screenshots: { mode: 'allow-original' } }, attachments: () => ({ app: 'allow-original' }) }),
+      privacy: privacyConfig({ policy: { required: true, screenshots: { mode: 'allow-original' } }, attachments: () => ({ app: 'allow-original' }) }),
     });
     const response = await handler(post([user('Bild', 'u1', [shot])]));
     expect(response.status).toBe(422);

@@ -16,6 +16,7 @@ export function ClarificationCard({
   request,
   interactive,
   onAnswer,
+  showOptions = true,
   className,
 }: ClarificationCardProps) {
   const { classNames, locale, messages } = useChatContext();
@@ -47,7 +48,7 @@ export function ClarificationCard({
       aria-labelledby={questionId}
     >
       <p id={questionId} data-element="question">{request.question}</p>
-      {request.options.length > 0 && (
+      {showOptions && request.options.length > 0 && (
         <div data-element="options">
           {request.options.map((option) => (
             <button

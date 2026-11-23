@@ -1,6 +1,31 @@
 import { trimTrailingSlashes } from '../../../contracts/url.js';
+import { decodeRecordingWav } from './recording-wav.js';
 /** The languages a recording may be transcribed in, unless the app sets its own list. */
 export const DEFAULT_RECORDING_LANGUAGES = ['de', 'en', 'de-DE', 'en-US', 'en-GB', 'fr', 'es', 'it', 'nl', 'pt'] as const;
+
+/** A decoded recording: mono samples in [-1, 1) at 16 kHz. */
+export interface RecordingAudio {
+  samples: Float32Array;
+  sampleRate: 16000;
+}
+
+/**
+ * Transcribes a decoded recording inside the app's own server, for example
+ * `createLocalTranscriber().transcribe` from `glirastes/server/stt-local`.
+ * `language` is the two-letter code; `signal` aborts on client disconnect or timeout.
+ */
+export type RecordingTranscriber = (
+  audio: RecordingAudio,
+  options: { language: string; signal: AbortSignal },
+) => Promise<{ text: string }>;
+
+/** Thrown by a `RecordingTranscriber` that cannot take another job now; the handler answers 503. */
+export class TranscriptionUnavailableError extends Error {
+  constructor(message = 'Transcription unavailable') {
+    super(message);
+    this.name = 'TranscriptionUnavailableError';
+  }
+}
 
 export interface RecordingTranscriptionHandlerConfig {
   /** The app's own session check; `false` answers 401 before the audio is read. */
@@ -46,6 +71,35 @@ export interface RecordingTranscriptionHandlerConfig {
   /** Receives a content-free failure for the server log; the browser only learns that it failed. */
   onError?: (error: unknown) => void;
   fetch?: typeof globalThis.fetch;
+  /** Only in `LocalRecordingTranscriptionHandlerConfig`. */
+  transcribe?: never;
+}
+
+/** The handler config that transcribes in the app's own server instead of calling a service. */
+export interface LocalRecordingTranscriptionHandlerConfig {
+  maxDurationSeconds?: number;
+  maxConcurrent?: number;
+  maxQueued?: number;
+  localOnly?: boolean;
+  policy?: () => SpeechPrivacyPolicy | 'off' | null | undefined;
+  /** The app's own session check; `false` answers 401 before the audio is read. */
+  authorize(request: Request): boolean | Promise<boolean>;
+  /** Allowed `?language=` values; the first two letters go to `transcribe`. Default `DEFAULT_RECORDING_LANGUAGES`. */
+  languages?: readonly string[];
+  /** Used when the request names no language. Default `de`. */
+  defaultLanguage?: string;
+  /** Default 5 MB, more than two minutes of 16 kHz mono 16-bit audio. */
+  maxBytes?: number;
+  /** Default 120 seconds. */
+  timeoutMs?: number;
+  /** Receives the failure for the server log; the browser only learns that it failed. */
+  onError?: (error: unknown) => void;
+  /** Receives PCM16 mono 16 kHz recordings as samples; any other WAV answers 415. A `TranscriptionUnavailableError` answers 503. */
+  transcribe: RecordingTranscriber;
+  url?: never;
+  apiKey?: never;
+  model?: never;
+  fetch?: never;
 }
 
 /** The speech limits of a protected privacy policy (`EffectivePrivacyPolicy['speech']`). */
@@ -242,20 +296,25 @@ function contentFreeError(error: unknown): string {
   return 'unknown';
 }
 
+/** Duck-typed so a CommonJS and an ESM copy of the class agree. */
+const isUnavailable = (error: unknown) => error instanceof Error && error.name === 'TranscriptionUnavailableError';
+
 /**
  * A Next.js route handler for the `recording` speech input
  * (`RecordedSttAdapter`, which posts `audio/wav` to `/api/ai/speech-recognize`).
- * It checks the app's session, the format, language, size and duration, and
- * forwards the recording to the app's own transcription service, whose
- * address, key and model stay on the server. Audio is held in memory for
- * the request only and never logged; the transcript goes back to the
- * browser for review and never triggers an action on its own.
+ * It checks the app's session, the format, language and size, and either
+ * forwards the recording to the app's own transcription service (`url`), whose
+ * address, key and model stay on the server, or decodes it and hands the
+ * samples to a local `transcribe` function.
  */
-export function createRecordingTranscriptionHandler(config: RecordingTranscriptionHandlerConfig) {
+export function createRecordingTranscriptionHandler(
+  config: RecordingTranscriptionHandlerConfig | LocalRecordingTranscriptionHandlerConfig,
+) {
+  const transcribe = 'transcribe' in config && config.transcribe ? config.transcribe : undefined;
   const languages = config.languages ?? DEFAULT_RECORDING_LANGUAGES;
   const maxBytes = config.maxBytes ?? 5 * 1024 * 1024;
-  const configuredMaxDuration = config.maxDurationSeconds ?? 60;
-  const timeoutMs = config.timeoutMs ?? 45_000;
+  const configuredMaxDuration = config.maxDurationSeconds ?? Infinity;
+  const timeoutMs = config.timeoutMs ?? (transcribe ? 120_000 : 45_000);
   const gate = createGate(Math.max(1, config.maxConcurrent ?? 2), Math.max(0, config.maxQueued ?? 8));
   const onError = config.onError
     ?? ((error: unknown) => console.error(`[speech] Recording transcription failed: ${contentFreeError(error)}`));
@@ -271,8 +330,8 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
     }
     const localOnly = policy ? true : config.localOnly;
     const maxDuration = Math.min(configuredMaxDuration, policy?.maxDurationSeconds ?? Infinity);
-    if (!config.url) return failed(503, 'Speech service not configured');
-    if (localOnly && !isPrivateServiceUrl(config.url)) {
+    if (!transcribe && !config.url) return failed(503, 'Speech service not configured');
+    if (!transcribe && localOnly && !isPrivateServiceUrl(config.url!)) {
       onError(new TranscriptionFailure('service_not_local'));
       return failed(503, 'Speech service not configured');
     }
@@ -283,7 +342,9 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
     if (Number.isFinite(declared) && declared > maxBytes) return failed(413, 'Recording too long');
 
     // One deadline for the wait for a slot, the upload and the service call.
-    const timeout = AbortSignal.timeout(timeoutMs);
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new DOMException('Transcription timed out', 'TimeoutError')), timeoutMs);
+    const timeout = deadline.signal;
     const signal = AbortSignal.any([request.signal, timeout]);
     let release: (() => void) | undefined;
     try {
@@ -299,12 +360,18 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
       if (duration === undefined) return failed(415, 'Unsupported audio format');
       if (duration > maxDuration) return failed(413, 'Recording too long');
 
+      if (transcribe) {
+        const samples = decodeRecordingWav(new Uint8Array(audio).buffer);
+        if (!samples) return failed(415, 'Unsupported audio format');
+        const result = await transcribe({ samples, sampleRate: 16000 }, { language: language.slice(0, 2), signal });
+        return Response.json({ text: typeof result?.text === 'string' ? result.text.trim() : '' });
+      }
       const form = new FormData();
       form.set('file', new File([audio as BlobPart], 'recording.wav', { type: 'audio/wav' }));
       form.set('model', config.model || 'parakeet-tdt-0.6b-v3');
       form.set('language', language.slice(0, 2));
 
-      const response = await (config.fetch ?? globalThis.fetch)(`${trimTrailingSlashes(config.url)}/v1/audio/transcriptions`, {
+      const response = await (config.fetch ?? globalThis.fetch)(`${trimTrailingSlashes(config.url!)}/v1/audio/transcriptions`, {
         method: 'POST',
         headers: config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {},
         body: form,
@@ -317,7 +384,12 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
       if (!result || typeof result.text !== 'string') throw new TranscriptionFailure('invalid_result');
       return Response.json({ text: result.text.trim() }, { headers: { 'cache-control': 'no-store' } });
     } catch (error) {
-      if (request.signal.aborted) return failed(499, 'Recording cancelled');
+      if (transcribe && isUnavailable(error)) return failed(503, 'Speech service busy');
+      if (transcribe && timeout.aborted) {
+        onError(new TranscriptionFailure('transcription_timeout'));
+        return failed(504, 'Transcription timed out');
+      }
+      if (request.signal.aborted) return failed(499, transcribe ? 'Client closed request' : 'Recording cancelled');
       if (error instanceof TranscriptionFailure && error.code === 'upload_timeout') {
         onError(error);
         return failed(408, 'Upload timed out');
@@ -325,6 +397,7 @@ export function createRecordingTranscriptionHandler(config: RecordingTranscripti
       onError(error instanceof TranscriptionFailure ? error : new TranscriptionFailure(contentFreeError(error)));
       return failed(502, 'Transcription failed');
     } finally {
+      clearTimeout(timer);
       release?.();
     }
   };

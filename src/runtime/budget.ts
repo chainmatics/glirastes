@@ -21,6 +21,35 @@ export type BudgetReason =
   | 'maxRepeatedFingerprint'
   | 'maxConsecutiveErrors';
 
+/** The usage counter each budget dimension is measured by. */
+export const BUDGET_USAGE_KEYS: Readonly<Record<BudgetReason, keyof ExecutionUsage>> = Object.freeze({
+  maxModelSteps: 'modelSteps',
+  maxToolCalls: 'toolCalls',
+  totalTimeoutMs: 'elapsedMs',
+  maxInputTokens: 'inputTokens',
+  maxOutputTokens: 'outputTokens',
+  maxEstimatedCostUsd: 'estimatedCostUsd',
+  maxRepeatedFingerprint: 'maxFingerprintRepeats',
+  maxConsecutiveErrors: 'consecutiveErrors',
+});
+
+/**
+ * The limits after which the turn still gets one tool-free final summary
+ * call: they limit tools, and the summary calls none.
+ */
+export const FINAL_SUMMARY_REASONS: ReadonlySet<BudgetReason> = new Set<BudgetReason>([
+  'maxToolCalls',
+  'maxRepeatedFingerprint',
+  'maxConsecutiveErrors',
+]);
+
+/** One budget dimension with its limit and what the turn has used of it. */
+export interface BudgetLimitState {
+  dimension: BudgetReason;
+  limit: number;
+  used: number;
+}
+
 export interface BudgetEvaluation {
   state: 'within-budget' | 'soft-limit' | 'hard-limit';
   reasons: BudgetReason[];
@@ -93,26 +122,25 @@ export class ExecutionBudgetTracker {
     );
   }
 
+  /** Limit and current use of the given dimensions, in their order. */
+  limitStates(dimensions: ReadonlyArray<BudgetReason>): BudgetLimitState[] {
+    const usage = this.usage;
+    return dimensions.map((dimension) => ({
+      dimension,
+      limit: this.budget[dimension],
+      used: usage[BUDGET_USAGE_KEYS[dimension]],
+    }));
+  }
+
   evaluate(): BudgetEvaluation {
     const usage = this.usage;
-    const dimensions: Array<[BudgetReason, number, number]> = [
-      ['maxModelSteps', usage.modelSteps, this.budget.maxModelSteps],
-      ['maxToolCalls', usage.toolCalls, this.budget.maxToolCalls],
-      ['totalTimeoutMs', usage.elapsedMs, this.budget.totalTimeoutMs],
-      ['maxInputTokens', usage.inputTokens, this.budget.maxInputTokens],
-      ['maxOutputTokens', usage.outputTokens, this.budget.maxOutputTokens],
-      ['maxEstimatedCostUsd', usage.estimatedCostUsd, this.budget.maxEstimatedCostUsd],
-      [
-        'maxRepeatedFingerprint',
-        usage.maxFingerprintRepeats,
-        this.budget.maxRepeatedFingerprint,
+    const dimensions = (Object.keys(BUDGET_USAGE_KEYS) as BudgetReason[]).map(
+      (reason): [BudgetReason, number, number] => [
+        reason,
+        usage[BUDGET_USAGE_KEYS[reason]],
+        this.budget[reason],
       ],
-      [
-        'maxConsecutiveErrors',
-        usage.consecutiveErrors,
-        this.budget.maxConsecutiveErrors,
-      ],
-    ];
+    );
 
     const hard = dimensions
       .filter(([, value, limit]) => limit === 0 ? value > 0 : value >= limit)
@@ -127,8 +155,19 @@ export class ExecutionBudgetTracker {
     return { state: 'within-budget', reasons: [] };
   }
 
+  /**
+   * Grants the one tool-free final summary call at the hard limit, once, and
+   * only when every reached limit is a tool limit (see
+   * `FINAL_SUMMARY_REASONS`): a limit on model steps, tokens, cost or time
+   * would be exceeded by that call itself.
+   */
   claimFinalSummary(): boolean {
-    if (this.evaluate().state !== 'hard-limit' || this.finalSummaryClaimed) {
+    const evaluation = this.evaluate();
+    if (
+      evaluation.state !== 'hard-limit'
+      || this.finalSummaryClaimed
+      || !evaluation.reasons.every((reason) => FINAL_SUMMARY_REASONS.has(reason))
+    ) {
       return false;
     }
     this.finalSummaryClaimed = true;

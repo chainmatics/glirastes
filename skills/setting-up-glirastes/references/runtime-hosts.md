@@ -9,7 +9,8 @@ available in `integrating-glirastes-web` when that optional skill is installed.
 1. Reuse an existing Node/Next.js server if it authenticates the user, can reach
    the API and supports long streams. The framework-neutral handler is
    `createAiChatHandler` from `glirastes/server/http`; the Next.js export remains
-   compatible. Keep existing SDK tools, guards and authorization.
+   compatible; for `node:http`-style servers wrap it with `createNodeHandler`
+   (`glirastes/server/node`). Keep existing SDK tools, guards and authorization.
 2. For Rust/PHP/Java or an application without a suitable Node host, use the
    0.14 `glirastes-runtime` container. It is one active service per app/environment,
    independently of backend replica count. The customer needs no Node server code
@@ -17,14 +18,23 @@ available in `integrating-glirastes-web` when that optional skill is installed.
 3. A real sidecar is an exception for local-only interfaces or coupled lifecycle.
    V1 offers neither HA nor multiple active runtimes in one app/environment.
 
+## Package dependencies in a Node host
+
+The SDK depends on `zod` 4 (`^4.0.0`). An app on zod 4 shares its copy; an app
+on zod 3 gets a second zod 4 copy for the SDK. App schemas keep working because
+the SDK reads schemas by shape; the cost is disk and bundle size, and the zod 4
+contract schemas the SDK exports cannot be nested in zod 3 schemas. Do not
+upgrade the app's zod only for the SDK. `pg` (`>=8.11 <9`) is used only by the
+`glirastes-runtime` binary; any pg 8.11+ the app has is shared.
+
 ## Container input contract
 
 The official public image is
-`ghcr.io/chainmatics/glirastes-runtime:0.14.0` for Linux amd64; no registry login
+`ghcr.io/chainmatics/glirastes-runtime:0.23.0` for Linux amd64; no registry login
 is required. Pin the approved digest in production and match its exact SDK
 version in artifact generation and the browser package. The
-[image guide](https://github.com/chainmatics/glirastes/blob/v0.14.0/containers/runtime/README.md)
-and [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.14.0/examples/php-runtime)
+[image guide](https://github.com/chainmatics/glirastes/blob/v0.23.0/containers/runtime/README.md)
+and [PHP Compose example](https://github.com/chainmatics/glirastes/tree/v0.23.0/examples/php-runtime)
 are optional source references; the contracts below remain available offline.
 
 Provide `.glirastes/tools.json` with schemaVersion 1, a stable unique UUID appId,
@@ -95,7 +105,16 @@ to it anyway never executes: the AI SDK answers it as an unavailable tool and
 the turn continues, bounded by `maxModelSteps`. A tool that becomes denied
 after the request started (a role lost) gets
 `Tool execution denied: <reason> (<tool>)` as a tool error instead, counted
-toward `maxConsecutiveErrors`.
+toward `maxConsecutiveErrors`. At the turn budget (`limits.maxToolCalls`,
+default 8, `read_result` included; capped by agent revision and policy) the
+remaining calls get `Tool call not executed: the limit of 8 tool calls per
+turn is reached (8 used). ...`, the chat shows `Tool call limit for this turn
+reached (8).` and the turn ends with one final answer.
+A turn that reaches `limits.maxModelSteps` (default 10, before 0.24 it was 6)
+or `limits.maxInputTokens` (default 60,000, before 40,000) ends with a stop
+notice that lists what was done and what is open; the chat's "Continue" button
+continues it without repeating a write call (see `docs/managed-runtime-sync.md`,
+"Continuing a stopped turn"). Set both limits explicitly to keep the old values.
 
 The identity endpoint validates the selected cookie/bearer credential and returns
 exactly `{"userId":"42","tenantId":"business-a","roles":["editor"]}`.

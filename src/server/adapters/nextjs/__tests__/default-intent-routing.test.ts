@@ -89,6 +89,30 @@ describe('default intent routing over a generated ~100-tool app', () => {
   });
 });
 
+describe('ties in the start set', () => {
+  // Twelve tools match "playlists" equally in their name; "zeig" matches none.
+  const writes = ['addItem', 'archive', 'assign', 'clone', 'create', 'delete', 'duplicate', 'export', 'pause', 'publish', 'removeItem']
+    .map((action): RoutableTool => ({
+      name: `playlists_${action}`, description: `Playlist action ${action}.`, module: 'playlists', kind: 'endpoint', method: 'POST',
+    }));
+  const list: RoutableTool = {
+    name: 'playlists_list', description: 'Playlist overview of the user.', module: 'playlists', kind: 'endpoint', method: 'GET',
+  };
+
+  it('puts a read tool first among equally relevant tools, so it is not cut by name order', () => {
+    const names = createDefaultIntentRouter([...writes, list], { maxStartTools: 6 })
+      .route({ text: 'Zeig mir meine Playlists' }).toolNames;
+    expect(names).toHaveLength(6);
+    expect(names[0]).toBe('playlists_list');
+  });
+
+  it('still lets a better match win over a read tool', () => {
+    const names = createDefaultIntentRouter([...writes, list], { maxStartTools: 3 })
+      .route({ text: 'Playlist duplicate' }).toolNames;
+    expect(names[0]).toBe('playlists_duplicate');
+  });
+});
+
 describe('previousTurnScope', () => {
   it('reads the tools of the last assistant turn and the earlier user texts', () => {
     const scope = previousTurnScope([

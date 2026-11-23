@@ -54,3 +54,5 @@ export function isOutcomeUnknown(result: unknown): boolean {
   return typeof result === 'object' && result !== null
     && (result as { [TOOL_OUTCOME_UNKNOWN]?: unknown })[TOOL_OUTCOME_UNKNOWN] === true;
 }
+
+export const OUTCOME_UNKNOWN_HINT = 'The outcome is unknown. Do not repeat the call before checking whether it took effect.';

@@ -1,0 +1,11 @@
+{
+  "name": "glirastes-pg-floor-fixture",
+  "private": true,
+  "description": "pg at the floor of the declared range, with the pg-pool it shipped with, for tests/pg-import.test.ts",
+  "dependencies": {
+    "pg": "8.11.0"
+  },
+  "overrides": {
+    "pg-pool": "3.6.0"
+  }
+}

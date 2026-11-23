@@ -162,7 +162,10 @@ glirastes tools check
   types, and a search without hits says so.
 - A `/` command sent alone runs without a model call: no model request in the
   network log or the app's model mock, and the bubble shows the label.
-- A destructive action answers with the approval card.
+- A destructive action answers with the approval card. After a list, the card
+  names the entity (e.g. "Playlist: Abend-Promos"); an id the chat never showed
+  gets a visible warning with the id. Both come from the browser's history
+  (convenience, not a trust boundary).
 - A user with a narrower role gets a shorter GET list and a refused POST for
   a hand-typed command.
 - The chat route logs no stale-patch warning, and `glirastes tools check`

@@ -135,6 +135,57 @@ describe('next-app endpoint source', () => {
     expect(notes.prose?.contractDescription).toBe('Create a note for the caller');
   }, 60_000);
 
+  it('carries output fields of the sibling contract.ts, reduces the output contract and fails closed on an invalid bound', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  POST: { input: z.object({ title: z.string() }), id: 'notes.add',\n"
+        + '    output: z.object({ id: z.string(), title: z.string(), fileUrl: z.string(), meta: z.object({ etag: z.string() }) }),\n'
+        + "    outputAllowedFields: ['title', 'id', 'meta'], outputDeniedFields: ['**.fileUrl', 'meta.etag'], outputDefaultFields: ['title'] },\n"
+        + "  GET: { input: z.object({}), id: 'notes.list', outputAllowedFields: ['data[0]'], outputDefaultFields: 'title' },\n};\n",
+      'src/app/api/notes/route.ts': "import { getSession } from '@/lib/session';\nimport { contract } from './contract';\n"
+        + 'declare function createNote(input: unknown, shape: typeof contract): Promise<{ id: string }>;\n'
+        + 'export async function POST(request: Request) {\n  await getSession(request);\n  const body = await request.json();\n'
+        + '  return Response.json(await createNote(body, contract));\n}\n'
+        + 'export async function GET(request: Request) {\n  await getSession(request);\n  return Response.json(await createNote({}, contract));\n}\n',
+    });
+    const observed = await createNextEndpointSource().observe(context(app.root));
+    const tools = byKey(observed.observations);
+    const add = tools.get('POST /api/notes')!;
+    expect(add.outputAllowedFields).toEqual(['id', 'meta', 'title']);
+    expect(add.outputDeniedFields).toEqual(['**.fileUrl', 'meta.etag']);
+    expect(add.outputDefaultFields).toEqual(['title']);
+    expect(JSON.stringify(add.contract!.output)).not.toContain('fileUrl');
+    expect(JSON.stringify(add.contract!.output)).not.toContain('etag');
+    // A zod output keeps its runtime schema and digest: the Returns: text is reduced at runtime.
+    expect(add.contract!.runtime.output.kind).toBe('module-export');
+    const list = tools.get('GET /api/notes')!;
+    expect(list.findings.map((finding) => [finding.code, finding.severity])).toEqual(expect.arrayContaining([
+      ['output-allowed-fields-invalid', 'needs_attention'],
+      ['output-default-fields-invalid', 'warning'],
+    ]));
+    expect(list.findings.find((finding) => finding.code === 'output-allowed-fields-invalid')!.message)
+      .toContain('src/app/api/notes/contract.ts declares an outputAllowedFields');
+    expect(list.outputAllowedFields).toEqual([]);
+    expect(list).not.toHaveProperty('outputDefaultFields');
+    expect(tools.get('GET /api/tasks')).not.toHaveProperty('outputAllowedFields');
+  }, 30_000);
+
+  it('joins the app-wide output.deniedFields of tools.json with a contract.ts deny-list', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  POST: { input: z.object({ title: z.string() }), id: 'notes.add', output: z.object({ id: z.string(), fileUrl: z.string(), etag: z.string() }),\n"
+        + "    outputDeniedFields: ['etag'] },\n};\n",
+    }, { toolsConfig: { output: { deniedFields: ['**.fileUrl'] } } });
+    const tools = byKey((await createNextEndpointSource().observe(context(app.root))).observations);
+    const add = tools.get('POST /api/notes')!;
+    expect(add.outputDeniedFields).toEqual(['**.fileUrl', 'etag']);
+    expect(JSON.stringify(add.contract!.output)).not.toMatch(/fileUrl|etag/);
+    expect(tools.get('GET /api/tasks')!.outputDeniedFields).toEqual(['**.fileUrl']);
+    expect(add.findings.filter((finding) => finding.code === 'output-field-unknown')).toEqual([]);
+  }, 30_000);
+
   it('carries maxResultChars of the sibling contract.ts to the observation', async () => {
     const app = await createAppFixture({
       ...APP_FILES,
@@ -145,6 +196,24 @@ describe('next-app endpoint source', () => {
     const tools = byKey(observed.observations);
     expect(tools.get('POST /api/notes')!.maxResultChars).toBe(40_000);
     expect(tools.get('GET /api/tasks')).not.toHaveProperty('maxResultChars');
+  }, 30_000);
+
+  it('carries the approval-subject declarations of the sibling contract.ts as the tool code level, never as a finding of the tool', async () => {
+    const app = await createAppFixture({
+      ...APP_FILES,
+      'src/app/api/notes/contract.ts': "import { z } from 'zod';\nexport const contract = {\n"
+        + "  POST: { input: z.object({ title: z.string() }), id: 'notes.add', approvalSubject: { onUnavailable: 'block' },"
+        + " lookupEffect: 'write' },\n};\n",
+    });
+    const observed = await createNextEndpointSource().observe(context(app.root));
+    const add = byKey(observed.observations).get('POST /api/notes')!;
+    expect(add.approvalDeclarations?.code).toMatchObject({
+      where: 'src/app/api/notes/contract.ts',
+      approvalSubject: { onUnavailable: 'block' },
+    });
+    expect(add.approvalDeclarations?.code?.issues).toHaveLength(1);
+    expect(add.findings.filter((finding) => finding.code.startsWith('approval'))).toEqual([]);
+    expect(byKey(observed.observations).get('GET /api/tasks')).not.toHaveProperty('approvalDeclarations');
   }, 30_000);
 
   it('enumerates HEAD as a read tool and reports only OPTIONS as unsupported', async () => {
@@ -278,6 +347,27 @@ describe('next-app endpoint source', () => {
     const observed = await createNextEndpointSource().observe(context(app.root));
     expect(observed.excluded).toContainEqual({ stableKey: 'GET /api/admin/tenants', reason: 'ai-ignore', origin: 'code' });
     expect(byKey(observed.observations).has('GET /api/admin/tenants')).toBe(false);
+  }, 60_000);
+
+  it('reads and probes schemas through the path aliases of the app tsconfig in a monorepo', async () => {
+    const app = await createAppFixture({
+      'apps/web/tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      'apps/web/src/lib/fields.ts': "import { z } from 'zod';\nexport const title = z.string().min(1);\n",
+      'apps/web/src/lib/schemas.ts': "import { z } from 'zod';\nimport { title } from '@/lib/fields';\n"
+        + 'export const createTask = z.object({ title }).strict();\n',
+      'apps/web/src/app/api/tasks/route.ts': "import { createTask } from '@/lib/schemas';\n"
+        + 'declare function getSession(): Promise<unknown>;\n'
+        + 'export async function POST(request: Request) {\n  await getSession();\n'
+        + '  const input = createTask.parse(await request.json());\n  return Response.json({ id: \'1\', title: input.title });\n}\n',
+    });
+    const observed = await createNextEndpointSource({ apiDir: 'apps/web/src/app/api' }).observe(context(app.root));
+    const [create] = observed.observations;
+    expect(create?.contract).toMatchObject({
+      source: 'native',
+      params: { body: ['title'] },
+      runtime: { input: { kind: 'module-export', module: 'apps/web/src/lib/schemas.ts', export: 'createTask' } },
+    });
+    expect(create?.findings.filter((finding) => finding.severity === 'needs_attention')).toEqual([]);
   }, 60_000);
 
   it('keeps a previous definition id and handles apps without an API directory', async () => {

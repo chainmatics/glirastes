@@ -106,7 +106,7 @@ describe.skipIf(!PYTHON_READY)('Vue+FastAPI endpoint change corpus', () => {
 
     // The code moved, the export did not: the count stops the check before any drift is computed.
     expect(await staleExportCheck(root))
-      .toBe('api/openapi.json lists 3 operations, the FastAPI code in api/app declares 5; run the export again.');
+      .toBe('api/openapi.json lists 14 operations, the FastAPI code in api/app declares 16; run the export again.');
     await exportOpenapi(root);
     expect((await failingCheck(root)).changes.added).toHaveLength(2);
 
@@ -184,7 +184,8 @@ describe.skipIf(!PYTHON_READY)('Vue+FastAPI endpoint change corpus', () => {
     const refreshed = await runToolsPipeline({ root, mode: 'write' });
     expect(refreshed.changes.removed).toEqual([tasksId]);
     expect(await tombstonesOf(root)).toEqual([expect.objectContaining({ toolId: tasksId, stableKey: 'GET /api/tasks' })]);
-    expect((await artifactOf(root)).tools.filter((tool) => tool.executionKind === 'endpoint').map((tool) => tool.name))
+    expect((await artifactOf(root)).tools
+      .filter((tool) => tool.executionKind === 'endpoint' && tool.path?.startsWith('/api/tasks')).map((tool) => tool.name))
       .toEqual(['tasks.create']);
     await passingCheck(root);
 
@@ -206,7 +207,7 @@ describe.skipIf(!PYTHON_READY)('Vue+FastAPI agentic entry', () => {
       findings: Array<{ code: string; subjectRef: string }>;
     };
     expect(report.findings).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: 'route-hidden', subjectRef: 'api/app/main.py:16' }),
+      expect.objectContaining({ code: 'route-hidden', subjectRef: 'api/app/main.py:20' }),
     ]));
     const app = await bootFastapiApp(root, scriptedModel);
     const cookie = `session=${app.token}`;

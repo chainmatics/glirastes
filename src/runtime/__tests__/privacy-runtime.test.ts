@@ -102,7 +102,7 @@ describe('privacyRuntimeStatus', () => {
   });
 
   it('enforces the local profile without a block (local source, no provider check)', () => {
-    const status = privacyRuntimeStatus(undefined, privacy({}));
+    const status = privacyRuntimeStatus(undefined, privacy({}, { required: true }));
     expect(status).toMatchObject({ state: 'enforced', policyRevisionId: null, publishedPolicyDigest: null, localRestrictions: ['local_profile_required'] });
   });
 
@@ -121,7 +121,7 @@ describe('assertPrivacyTurn', () => {
   });
 
   it('blocks while a connected runtime has no verified policy', () => {
-    expect(codeOf(() => assertPrivacyTurn({ pinned: undefined, privacy: privacy(), revocations: [], awaitingPolicy: true })))
+    expect(codeOf(() => assertPrivacyTurn({ pinned: undefined, privacy: { ...privacy(), managed: true }, revocations: [], awaitingPolicy: true })))
       .toBe('privacy_policy_unavailable');
   });
 

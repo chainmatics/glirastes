@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandArgumentsForm as DefaultCommandArgumentsForm } from '../components/command-arguments-form.js';
 import { useChatComposerTarget } from '../composer/chat-composer.js';
-import { useChatContext } from '../provider/chat-context.js';
+import { useComposerDraft } from '../composer/use-composer-draft.js';
+import { useComposerContext } from '../provider/composer-context.js';
 import type {
   ChatAttachment,
   ChatComposerInput,
+  ChatComposerInputControls,
   ChatLocale,
   MentionData,
+  OpenCompletionOptions,
   RichMentionInputHandle,
   UseChatComposerInputOptions,
 } from '../types.js';
+import type { ResolvedChatTrigger } from '../completions/triggers.js';
 import { formatBytes, readAttachments, toFilePart, type AttachmentProblem } from '../utils/attachments.js';
 
 function describeProblem(problem: AttachmentProblem, locale: ChatLocale): string {
@@ -25,6 +29,14 @@ function describeProblem(problem: AttachmentProblem, locale: ChatLocale): string
   }
 }
 
+/** Exactly the built-in `@` and `/` (default prefix and pick, no label or types): the input's own default. */
+function isDefaultTriggers(triggers: ReadonlyArray<ResolvedChatTrigger>): boolean {
+  return triggers.length === 2 && triggers.every((trigger, index) => (
+    trigger.char === ['@', '/'][index] && trigger.prefix === trigger.char && trigger.select === 'chip'
+    && trigger.label === undefined && trigger.types === undefined
+  ));
+}
+
 /**
  * The composer logic of the chat (suggestion search, direct `/` commands,
  * the argument form, entity actions, references from `mentionEntity`) for a
@@ -36,9 +48,12 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     send,
     stop,
     isLoading,
+    canCompose: composable,
     locale,
     components,
     completionSearch,
+    triggers,
+    onCompletionSelect,
     runEntityAction,
     composerMentions,
     consumeComposerMentions,
@@ -47,9 +62,12 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     cancelPendingCommand,
     attachments: attachmentOptions,
     interactions,
-  } = useChatContext();
+  } = useComposerContext();
+  // A hand-built context without `canCompose` locks while loading, as before.
+  const canCompose = composable ?? !isLoading;
   const { onSubmit, initialValue } = options;
   const [value, setValue] = useState('');
+  const [completionOpen, setCompletionOpen] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentProblem, setAttachmentProblem] = useState<AttachmentProblem | null>(null);
   const attachmentsRef = useRef(attachments);
@@ -58,6 +76,9 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   const inputRef = useRef<RichMentionInputHandle | null>(null);
   const initialApplied = useRef(false);
   const ArgumentsForm = components.CommandArgumentsForm ?? DefaultCommandArgumentsForm;
+
+  // The open chat's unsent text: restored before queued composer operations run.
+  const draft = useComposerDraft(inputRef, value, setValue);
 
   // Pills and drafts from `useChatComposer` (e.g. a "Chat about this" menu entry).
   useChatComposerTarget(inputRef, { onChange: setValue });
@@ -72,10 +93,13 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   }, [composerMentions, consumeComposerMentions]);
 
   // Child effects run first, so the input's own `initialMentions` are already in the editor.
+  // Only the value at mount counts: a consumer that passes its live draft here must not
+  // have the first typed character re-applied as an "initial" value (and the caret reset).
   useEffect(() => {
     const handle = inputRef.current;
-    if (initialApplied.current || !initialValue || !handle) return;
+    if (initialApplied.current || !handle) return;
     initialApplied.current = true;
+    if (!initialValue || draft.restored()) return;
     const prefix = handle.getValue();
     handle.setValue(prefix ? `${prefix} ${initialValue}` : initialValue, handle.getMentions());
     setValue(handle.getValue());
@@ -109,7 +133,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
   const submitText = useCallback((text: string, mentions: MentionData[]) => {
     const trimmed = text.trim();
     const pending = attachmentsRef.current;
-    if ((!trimmed && pending.length === 0) || isLoading) return false;
+    if ((!trimmed && pending.length === 0) || !canCompose) return false;
     const files = pending.map(toFilePart);
     if (files.length > 0) {
       const plan = interactions?.planMessage(trimmed, mentions);
@@ -130,7 +154,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     }
     setAttachmentProblem(null);
     return true;
-  }, [isLoading, onSubmit, send, interactions]);
+  }, [canCompose, onSubmit, send, interactions]);
 
   const submit = useCallback(() => {
     const handle = inputRef.current;
@@ -156,12 +180,33 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
 
   const focus = useCallback(() => { inputRef.current?.focus(); }, []);
 
+  // Read at call time: a toolbar button may hold controls from before the turn started.
+  const canComposeRef = useRef(canCompose);
+  canComposeRef.current = canCompose;
+  const openCompletion = useCallback((completion: OpenCompletionOptions) => {
+    if (!canComposeRef.current) return;
+    inputRef.current?.openCompletion?.(completion);
+  }, []);
+
+  // The controls returned below, read when an entry is picked (after this render).
+  const controlsRef = useRef<ChatComposerInputControls | null>(null);
+
   const inputProps = useMemo<ChatComposerInput['inputProps']>(() => ({
     onChange: setValue,
+    onListOpenChange: setCompletionOpen,
     onSubmit: (text, mentions) => submitText(text, mentions),
     onSearch: completionSearch,
+    // Only a non-default list: a `triggers` prop the app sets on the input must not be overridden by the default.
+    ...(triggers && !isDefaultTriggers(triggers) ? { triggers } : {}),
+    ...(onCompletionSelect
+      ? {
+          onCompletionSelect: (item, context) => (controlsRef.current
+            ? onCompletionSelect(item, { ...context, controls: controlsRef.current })
+            : undefined),
+        }
+      : {}),
     placeholder: locale.placeholder,
-    disabled: isLoading,
+    disabled: !canCompose,
     onEntityAction: (result, actionId) => runEntityAction(
       { type: result.type, id: result.id, label: result.label },
       actionId,
@@ -177,7 +222,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
           allowEmptySubmit: attachments.length > 0,
         }
       : {}),
-  }), [completionSearch, isLoading, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
+  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length]);
 
   const attachmentInputProps = useMemo<ChatComposerInput['attachmentInputProps']>(() => ({
     ref: fileInputRef,
@@ -211,10 +256,11 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     />
   ) : null;
 
-  return {
+  const composer: ChatComposerInput = {
     value,
     isLoading,
-    canSend: (value.trim().length > 0 || attachments.length > 0) && !isLoading,
+    canCompose,
+    canSend: (value.trim().length > 0 || attachments.length > 0) && canCompose,
     attachments,
     attachmentError: attachmentProblem ? describeProblem(attachmentProblem, locale) : null,
     attachmentsEnabled: attachmentOptions !== null,
@@ -222,11 +268,13 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     removeAttachment,
     openFilePicker,
     attachmentInputProps,
+    completionOpen,
     submit,
     stop,
     setText,
     appendText,
     focus,
+    openCompletion,
     inputRef,
     inputProps,
     pendingCommand,
@@ -234,4 +282,6 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     cancelPendingCommand,
     argumentsForm,
   };
+  controlsRef.current = composer;
+  return composer;
 }

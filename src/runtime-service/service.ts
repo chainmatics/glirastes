@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
-import { Pool } from "pg";
+// Default import: pg below 8.15.0 is CommonJS only, and plain Node offers no
+// named `Pool` export from it (tests/pg-import.test.ts runs it at the floor).
+import pg from "pg";
 import { AppSetupArtifactSchema, type Principal } from "../contracts/index.js";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGlirastes } from "../runtime/glirastes.js";
@@ -11,8 +13,9 @@ import {
   createPostgresApprovalStore,
 } from "./approval-store.js";
 import { credentialHeaders, resolveBackendPrincipal } from "./identity.js";
-import { readSecret, type RuntimeServiceConfig } from "./config.js";
+import { readSecret, requestLocaleOf, type RuntimeServiceConfig } from "./config.js";
 import { createRuntimeHttpServer } from "./server.js";
+import { assertChatServerLocales } from "../server/adapters/nextjs/chat-texts.js";
 
 /** No business content or credential is included in service diagnostics. */
 function event(type: string) {
@@ -20,6 +23,8 @@ function event(type: string) {
 }
 
 export async function startRuntimeService(config: RuntimeServiceConfig) {
+  // Fails at start, not per turn: an unknown text key or an empty text.
+  assertChatServerLocales(config.chat?.locales, "Runtime configuration chat");
   const generated = await loadRuntimeArtifact(config.application.artifact);
   const [connectionString, approvalSecret, modelKey] = await Promise.all([
     readSecret(config.approvals.connectionStringFile),
@@ -28,7 +33,7 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
   ]);
   if (approvalSecret.length < 32)
     throw new Error("Approval secret must contain at least 32 characters");
-  const pool = new Pool({
+  const pool = new pg.Pool({
     connectionString,
     max: 8,
     connectionTimeoutMillis: 5000,
@@ -146,10 +151,18 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
           maxBodyBytes: config.server.maxBodyBytes,
           maxSteps: config.limits.maxModelSteps,
           maxOutputTokens: config.limits.maxOutputTokens,
+          ...(config.chat?.locale ? { locale: config.chat.locale } : {}),
+          ...(config.chat?.locales ? { locales: config.chat.locales } : {}),
+          ...(config.chat?.uiActionOutcomes ? { uiActionOutcomes: config.chat.uiActionOutcomes } : {}),
+          ...(config.chat?.history ? { history: config.chat.history } : {}),
+          ...(config.chat?.requestLocaleHeader
+            ? { requestLocale: (req: Request) => requestLocaleOf(req, config.chat!.requestLocaleHeader!) }
+            : {}),
           ...(config.application.maxResultChars !== undefined
             ? { maxResultChars: config.application.maxResultChars }
             : {}),
           ...(config.application.resultHandles === false ? { resultHandles: false } : {}),
+          ...(config.limits.approvalLookups !== undefined ? { approvalSubjects: config.limits.approvalLookups } : {}),
           endpointCaller: (req) =>
             createHttpEndpointCaller({
               defaultHeaders: pinnedPrincipal

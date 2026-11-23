@@ -22,6 +22,7 @@ describe('navigation bridge detection', () => {
   it.each([
     ["import { useGlirastesNavigationBridge as useBridge } from 'glirastes/react';\nexport function A() { useBridge({ push: () => {} }); }"],
     ["import * as browser from 'glirastes/browser';\nbrowser.registerNavigationBridge({ push: (href) => location.assign(href) });"],
+    ["import { registerDocumentNavigation } from 'glirastes/browser';\nregisterDocumentNavigation();"],
   ])('finds the bridge in %#', (source) => {
     expect(hasNavigationBridge([file('src/a.tsx', source)])).toBe(true);
   });

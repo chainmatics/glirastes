@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { defineEndpointTool, defineTool, type PiiDetector, type PiiEntity, type ToolContext } from '../../types.js';
 import { endpointToolToTool, toolToAiTool, type InternalApiResponse } from './index.js';
 import { createReadResultTool, readResultHandle, type ReadResultInput, type ReadResultMarker } from './read-result-tool.js';
-import { buildResultOverview, type ResultOverviewMarker } from './result-overview.js';
+import { buildResultOverview, identityFieldsOf, type ResultOverviewMarker } from './result-overview.js';
 import {
   formatResultPath, isSelectablePath, mixedArraySelections, parseResultPath, projectResult, type ParsedPath, type PathStep,
 } from './result-paths.js';
@@ -271,7 +271,8 @@ describe('read_result', () => {
   it('reads omitted fields of chosen entries with offset and limit', async () => {
     const { read, store } = await setup();
     const result = await read({ fields: ['data[].id', 'data[].tracks'], offset: 2, limit: 1 });
-    expect(result.data).toEqual([{ id: 'p2', tracks: 'x'.repeat(8_000) }]);
+    // The entry's own name comes with it (identity fields); id was selected anyway.
+    expect(result.data).toEqual([{ name: 'List 2', id: 'p2', tracks: 'x'.repeat(8_000) }]);
     expect(result._result).toMatchObject({ offset: 2, returned: 1, total: 20, nextOffset: 3 });
     expect(store.isIssued(result)).toBe(true);
     expect(result).not.toHaveProperty('uiAction');
@@ -280,7 +281,9 @@ describe('read_result', () => {
   it('reads nested paths and a paginated envelope', async () => {
     const { read } = await setup({ data: { items: playlists().data, page: 1 } });
     const result = await read({ fields: ['data.items[].owner.name', 'data.page'], limit: 2 });
-    expect(result.data).toEqual({ items: [{ owner: { name: 'Owner 0' } }, { owner: { name: 'Owner 1' } }], page: 1 });
+    expect(result.data).toEqual({
+      items: [{ id: 'p0', name: 'List 0', owner: { name: 'Owner 0' } }, { id: 'p1', name: 'List 1', owner: { name: 'Owner 1' } }], page: 1,
+    });
   });
 
   it('pages within the origin tool\'s limit and says where to continue', async () => {
@@ -765,7 +768,9 @@ describe('pilot feedback: one entry by index', () => {
     expect((entry.data as Record<string, { name: string; items: unknown[] }>)['3']).toMatchObject({ name: 'List 3', items: [lists().data[3]!.items[0]] });
     expect(entry._result).toMatchObject({ returned: 1, total: 13, nextOffset: 1 });
     const nested = await read({ fields: ['data[3].items[2].title'] });
-    expect(nested.data).toEqual({ 3: { items: { 2: { title: 't3-2' } } } });
+    // An indexed entry carries its identity fields too; nested arrays do not.
+    expect(nested.data).toEqual({ 3: { id: 'p3', name: 'List 3', items: { 2: { title: 't3-2' } } } });
+    expect(Object.keys((answer.data as Record<string, object>)['0']!)).toEqual(['id', 'name', 'items']);
     expect(nested._result).toEqual({ id: nested._result.id, offset: 0 });
   });
 
@@ -806,7 +811,7 @@ describe('pilot feedback: one entry by index', () => {
       .toEqual([1, 2, 3]);
     // Single entries of different arrays, or several single entries of one, combine.
     const several = await read({ fields: ['data[0].name', 'data[2].name'] });
-    expect(several.data).toEqual({ 0: { name: 'List 0' }, 2: { name: 'List 2' } });
+    expect(several.data).toEqual({ 0: { id: 'p0', name: 'List 0' }, 2: { id: 'p2', name: 'List 2' } });
   });
 
   it('names the accepted forms and offset/limit for an invalid path', async () => {
@@ -910,10 +915,10 @@ describe('pilot feedback: the overview keeps short labels and drops opaque ids f
     // `data[].extra` itself stays (entry 0 shows it), so its left-out fields are listed one by one.
     expect(overview._result.omitted?.map((entry) => entry.path)).toEqual(['data[].extra.blob', 'data[].extra.ref']);
     const read = await createReadResultTool(store).execute({ resultId: overview._result.id, fields: overview._result.omitted!.map((entry) => entry.path), limit: 2 }, {} as ToolContext) as Record<string, unknown>;
-    expect(read.data).toEqual([{}, { extra: value.data[1]!.extra }]);
+    expect(read.data).toEqual([{ id: 0 }, { id: 1, extra: value.data[1]!.extra }]);
     // Without the empty one, the parent is listed once.
     const whole = buildResultOverview({ data: value.data.slice(1) }, { id: 'ro_abcdefgh', maxChars: 2_000, readOnly: true }) as Overview;
-    expect(whole._result.omitted).toEqual([{ path: 'data[].extra', approxChars: expect.any(Number) }]);
+    expect(whole._result.omitted).toEqual([{ path: 'data[].extra', approxChars: expect.any(Number), keys: ['blob', 'ref'] }]);
     expect((whole.data as Array<Record<string, unknown>>)[0]).toEqual({ id: 1, status: 'on' });
   });
 
@@ -926,6 +931,77 @@ describe('pilot feedback: the overview keeps short labels and drops opaque ids f
     const overview = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: size(value) - 1_200, readOnly: true }) as Overview;
     expect(Object.keys((overview.items as Array<Record<string, unknown>>)[1]!)).toEqual(['id', 'kind', 'score']);
     expect(overview._result.omitted!.map((entry) => entry.path)).toEqual(['items[].link', 'items[].ownerId']);
+  });
+});
+
+describe('second pilot run: an entry\'s own labels outrank nested scalars, left-out parents name their keys', () => {
+  const uuid = (index: number) => `0b9d5c1e-7a3f-4c2b-9e1d-${String(index).padStart(12, '0')}`;
+  const body = 'v'.repeat(700);
+  const states = ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'NOT_REQUESTED'];
+  /** 45 designs (~102k characters) whose longest enum is the largest field of the last class. */
+  const designs = (pad: number) => ({
+    data: Array.from({ length: 45 }, (_, index) => ({
+      id: uuid(index), name: `Design number ${index} for the autumn campaign`, approvalStatus: states[index % 4]!,
+      reviewState: ['OPEN', 'DONE'][index % 2]!, contentType: ['IMAGE', 'VIDEO'][index % 2]!, isDraft: index % 2 === 0,
+      hasDraftChanges: index % 3 === 0, draftRevision: index % 7, brandKitId: uuid(index + 100), tenantId: uuid(1),
+      folderId: uuid(index % 5), createdAt: '2026-10-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z',
+      description: 'd'.repeat(pad), width: 1920, height: 1080, durationMs: 15_000, sortOrder: index, version: 3,
+      publishedVersion: { versionNumber: index % 4, status: 'LIVE', publishedAt: '2026-10-05T10:00:00.000Z', variants: [{ label: 'a', body }] },
+      draftVersion: { versionNumber: 1 + (index % 4), variants: [{ label: 'a', body }] },
+    })),
+  });
+
+  it.each([0, 40, 130])('keeps the own status, type and flag fields of all 45 entries at 16,000 (description %i)', (pad) => {
+    const value = designs(pad);
+    const overview = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: 16_000, readOnly: true }) as Overview;
+    expect(size(overview)).toBeLessThanOrEqual(16_000);
+    const data = overview.data as Array<Record<string, unknown>>;
+    expect(data).toHaveLength(45);
+    for (const [index, entry] of data.entries()) {
+      const { approvalStatus, reviewState, contentType, isDraft, hasDraftChanges } = value.data[index]!;
+      expect(entry).toMatchObject({ approvalStatus, reviewState, contentType, isDraft, hasDraftChanges });
+    }
+    const omitted = overview._result.omitted!.map((entry) => entry.path);
+    for (const key of ['approvalStatus', 'reviewState', 'contentType', 'isDraft', 'hasDraftChanges']) expect(omitted).not.toContain(`data[].${key}`);
+  });
+
+  /** 30 entries whose `extra` is always left out whole; its child keys differ in size. */
+  const keyed = () => ({
+    data: Array.from({ length: 30 }, (_, index) => ({
+      id: index,
+      extra: {
+        ...Object.fromEntries(Array.from({ length: 10 }, (_, key) => [`k${key}`, 'x'.repeat(10 * (key + 1))])),
+        'a.b': 'y'.repeat(500), ['l'.repeat(65)]: 'z'.repeat(400),
+      },
+    })),
+  });
+
+  it('names up to eight selectable child keys of a left-out parent, largest first, and counts the others', () => {
+    const overview = buildResultOverview(keyed(), { id: 'ro_abcdefgh', maxChars: 2_000, readOnly: true }) as Overview;
+    expect(size(overview)).toBeLessThanOrEqual(2_000);
+    expect(overview._result.omitted).toEqual([{
+      path: 'data[].extra', approxChars: expect.any(Number), keys: ['k9', 'k8', 'k7', 'k6', 'k5', 'k4', 'k3', 'k2'], keysMore: 4,
+    }]);
+    expect(overview._result.hint).toContain('fields as in omitted (path or path.key)');
+  });
+
+  it('gives up keys before any field when space is short', () => {
+    const value = designs(0);
+    const keyedOverview = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: 16_000, readOnly: true }) as Overview;
+    const parents = keyedOverview._result.omitted!.filter((entry) => entry.keys);
+    expect(parents.map((entry) => [entry.path, entry.keys])).toEqual([
+      ['data[].publishedVersion', ['variants', 'publishedAt', 'versionNumber', 'status']],
+      ['data[].draftVersion', ['variants', 'versionNumber']],
+    ]);
+    // The same overview without keys: exactly as large as a limit that leaves no room for them.
+    const bare = JSON.parse(JSON.stringify(keyedOverview)) as Overview;
+    for (const entry of bare._result.omitted!) {
+      delete entry.keys;
+      delete entry.keysMore;
+    }
+    bare._result.hint = bare._result.hint.replace(' (path or path.key)', '');
+    const tight = buildResultOverview(value, { id: 'ro_abcdefgh', maxChars: size(bare), readOnly: true }) as Overview;
+    expect(tight).toEqual(bare);
   });
 });
 
@@ -1132,6 +1208,33 @@ describe('review round: every listed omitted path reads exactly the left-out dat
     const inner = select((value as Record<string, unknown>)[step!.key], rest);
     return inner === undefined ? undefined : { [step!.key]: inner };
   };
+  /**
+   * The identity fields read_result adds: for a path that reads below the
+   * entries of its outermost array, each entry's `identityFieldsOf` that the
+   * path does not select itself and the entry does not already show.
+   */
+  const withIdentity = (expected: unknown, value: unknown, steps: ReadonlyArray<PathStep>): unknown => {
+    const at = steps.findIndex((step) => step.kind !== 'key');
+    if (at < 0 || at === steps.length - 1 || steps[at]!.kind !== 'each') return expected;
+    const route = steps.slice(0, at).map((step) => (step as { key: string }).key);
+    const selected = at + 2 === steps.length && steps[at + 1]!.kind === 'key' ? (steps[at + 1] as { key: string }).key : undefined;
+    const copy = JSON.parse(JSON.stringify(expected)) as Record<string, unknown>;
+    let holder: Record<string, unknown> = copy;
+    let original = value as Record<string, unknown>;
+    for (const key of route.slice(0, -1)) {
+      holder = holder[key] as Record<string, unknown>;
+      original = original[key] as Record<string, unknown>;
+    }
+    const last = route[route.length - 1]!;
+    const entries = original[last] as Array<Record<string, unknown>>;
+    holder[last] = (holder[last] as Array<Record<string, unknown>>).map((entry, index) => {
+      const own = entries[index];
+      if (typeof own !== 'object' || own === null || Array.isArray(own)) return entry;
+      const added = identityFieldsOf(own).filter(([key]) => key !== selected && !(key in entry));
+      return { ...Object.fromEntries(added), ...entry };
+    });
+    return copy;
+  };
   /** Pages joined: arrays concatenated, objects merged. */
   const merge = (left: unknown, right: unknown): unknown => {
     if (left === undefined) return right;
@@ -1155,16 +1258,18 @@ describe('review round: every listed omitted path reads exactly the left-out dat
     },
     { report: { sections: Array.from({ length: 8 }, (_, index) => ({ title: `S${index}`, body: 'b'.repeat(400), notes: { text: 'n'.repeat(200) } })) }, extra: 'e'.repeat(900) },
     { title: 'Report', body: 'r'.repeat(1_500), appendix: { notes: 'n'.repeat(1_200), author: 'A', 'odd key': 'o'.repeat(400) } },
+    { items: Array.from({ length: 30 }, (_, index) => ({ id: index, more: { body: 'b'.repeat(400), note: { text: `n${index}`.repeat(150) } } })) },
   ];
 
   it.each([2_000, 4_000, 8_000])('round-trips page by page at %i characters, and never lists an unselectable key', async (maxChars) => {
     let listedPaths = 0;
+    let keyPaths = 0;
     for (const value of shapes()) {
       if (JSON.stringify(value).length <= maxChars) continue;
       const store = createResultStore();
       const overview = await store.put({ toolName: 't', readOnly: true, maxChars, value }) as Overview;
       const tool = createReadResultTool(store);
-      for (const { path } of overview._result.omitted ?? []) {
+      const roundTrip = async (path: string) => {
         const parsed = parseResultPath(path)!;
         expect(formatResultPath(parsed.steps)).toBe(path);
         let joined: unknown;
@@ -1178,13 +1283,22 @@ describe('review round: every listed omitted path reads exactly the left-out dat
           joined = merge(joined, data);
           offset = marker.nextOffset;
         }
-        expect(joined).toEqual(select(value, parsed.steps));
+        expect(joined).toEqual(withIdentity(select(value, parsed.steps), value, parsed.steps));
+      };
+      for (const { path, keys } of overview._result.omitted ?? []) {
+        await roundTrip(path);
         listedPaths += 1;
+        // Every key named inside a left-out parent reads exactly that child as `path.key`.
+        for (const key of keys ?? []) {
+          await roundTrip(`${path}.${key}`);
+          keyPaths += 1;
+        }
       }
-      const listed = (overview._result.omitted ?? []).map((entry) => entry.path).join(' ');
+      const listed = (overview._result.omitted ?? []).map((entry) => [entry.path, ...(entry.keys ?? [])].join(' ')).join(' ');
       for (const odd of ['a.b', 'c[0]', 'kkkk', '[].)', 'odd key']) expect(listed).not.toContain(odd);
     }
     expect(listedPaths).toBeGreaterThan(0);
+    expect(keyPaths).toBeGreaterThan(0);
   });
 
   it('counts fields a path cannot name in omittedMore and says how to read them', () => {
@@ -1316,7 +1430,8 @@ describe('final check: an entry the answer does not show is never counted as ret
       { resultId: 'ro_abcdefgh', limit: 3 } as ReadResultInput,
       [parseResultPath('data[].published.label')!],
     );
-    expect(answer.data).toEqual([{}, {}, {}]);
+    // Each entry still says which one it is (its identity fields).
+    expect(answer.data).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }]);
     expect(answer._result).toMatchObject({ returned: 3, total: 6, nextOffset: 3 });
     expect((answer._result as ReadResultMarker).unknownFields).toBeUndefined();
   });

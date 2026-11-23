@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import { ConfirmDialog } from './confirm-dialog.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
@@ -11,6 +11,62 @@ export interface SessionSwitcherProps {
   /** Format the per-row subtitle. Default: `updatedAt` or `createdAt` as locale date. */
   formatTimestamp?: (value: string | number | undefined) => string;
   className?: string;
+  /** `dropdown` (default): the compact header switcher. `list`: an always visible list for a side column. */
+  variant?: 'dropdown' | 'list';
+  /** After a chat was picked or created, e.g. to close a drawer and focus the composer. */
+  onSelect?: () => void;
+  /** Replace the "+" of new chat and the rename and delete icons; unset keys keep the defaults. */
+  icons?: Partial<SessionSwitcherIcons>;
+}
+
+/**
+ * Icons of the session switcher. They are decorative: the buttons keep their
+ * names from the chat locale (`newChatLabel`, `renameSessionAriaLabel`,
+ * `deleteSessionAriaLabel`).
+ */
+export interface SessionSwitcherIcons {
+  /** Inside `[data-element="plus"]` of the new-chat button; `false` drops that element, other empty values (`null`, `''`, `true`, `[]`) keep the default text `+`. */
+  newChat: ReactNode;
+  /** Empty values (`false`, `null`, `''`, `true`, `[]`) keep the default: an action button always shows an icon. */
+  rename: ReactNode;
+  /** Empty values (`false`, `null`, `''`, `true`, `[]`) keep the default: an action button always shows an icon. */
+  delete: ReactNode;
+}
+
+/** State of the lock on changing the conversation, for an app's own session controls. */
+export interface SessionLockState {
+  /**
+   * Panel visibility: false while the surrounding `ChatWindow` (as in
+   * `FloatingChatUI`) is closed or collapsed. True outside a `ChatWindow`,
+   * also in `AssistantShell` (use `useAssistantLayout().open` there).
+   */
+  visible: boolean;
+  /**
+   * A reply streams, a UI action outcome is awaited or a session operation
+   * runs: `isSessionChangeBlocked` of the chat context, or `isLoading` from
+   * a context that does not set it.
+   */
+  sessionChangeBlocked: boolean;
+  /** `!visible || sessionChangeBlocked`: when the built-in `SessionSwitcher` disables its controls. */
+  locked: boolean;
+}
+
+/**
+ * Whether switching, creating, renaming or deleting a chat is allowed right
+ * now, the same rule the built-in `SessionSwitcher` follows. Needs an
+ * `AiChatProvider` (or a `ChatContext`) above it.
+ */
+export function useSessionLock(): SessionLockState {
+  const { isSessionChangeBlocked, isLoading } = useChatContext();
+  const visible = useContext(ChatWindowVisibilityContext);
+  const sessionChangeBlocked = isSessionChangeBlocked ?? isLoading;
+  return { visible, sessionChangeBlocked, locked: !visible || sessionChangeBlocked };
+}
+
+/** Renders nothing visible: `false`, `true`, `null`, `undefined`, `''` or a list of those. */
+function isEmptyNode(node: ReactNode): boolean {
+  if (node === null || node === undefined || typeof node === 'boolean' || node === '') return true;
+  return Array.isArray(node) && node.every(isEmptyNode);
 }
 
 function defaultFormatTimestamp(value: string | number | undefined): string {
@@ -36,22 +92,27 @@ export function SessionSwitcher({
   fallbackTitle,
   formatTimestamp = defaultFormatTimestamp,
   className,
+  variant = 'dropdown',
+  onSelect,
+  icons,
 }: SessionSwitcherProps = {}) {
   const {
     sessions,
     activeSessionId,
     sessionsSupported,
     isSessionsLoading,
-    isLoading,
-    isSessionChangeBlocked,
     switchSession,
     createSession,
     removeSession,
     renameSession,
     locale,
   } = useChatContext();
-  const visible = useContext(ChatWindowVisibilityContext);
-  const blocked = !visible || disabled || (isSessionChangeBlocked ?? isLoading);
+  const blocked = useSessionLock().locked || disabled;
+  const newChatIcon = icons?.newChat === false ? false
+    : isEmptyNode(icons?.newChat) ? DEFAULT_SESSION_SWITCHER_ICONS.newChat : icons!.newChat;
+  const renameIcon = isEmptyNode(icons?.rename) ? DEFAULT_SESSION_SWITCHER_ICONS.rename : icons!.rename;
+  const deleteIcon = isEmptyNode(icons?.delete) ? DEFAULT_SESSION_SWITCHER_ICONS.delete : icons!.delete;
+  const plus = newChatIcon === false ? null : <span data-element="plus" aria-hidden="true">{newChatIcon}</span>;
   const resolvedFallback = fallbackTitle ?? locale.newChatLabel;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -115,15 +176,17 @@ export function SessionSwitcher({
     if (blocked) return;
     setOpen(false);
     await createSession();
-  }, [createSession, blocked]);
+    onSelect?.();
+  }, [createSession, blocked, onSelect]);
 
   const onPick = useCallback(
     async (id: string) => {
       if (blocked) return;
       setOpen(false);
       await switchSession(id);
+      onSelect?.();
     },
-    [switchSession, blocked],
+    [switchSession, blocked, onSelect],
   );
 
   const onDelete = useCallback(
@@ -146,8 +209,11 @@ export function SessionSwitcher({
     setPendingDeleteId(null);
   }, []);
 
+  const idBase = `session-switcher-${useId().replace(/:/g, '')}`;
+  const listRef = useRef<HTMLElement>(null);
+
   if (!sessionsSupported) {
-    return <strong data-element="title">{resolvedFallback}</strong>;
+    return variant === 'list' ? null : <strong data-element="title">{resolvedFallback}</strong>;
   }
 
   const sorted = [...sessions].sort((a, b) => {
@@ -160,6 +226,151 @@ export function SessionSwitcher({
   const pendingDeleteTitle = sessions.find(
     (session) => session.id === pendingDeleteId,
   )?.title;
+
+  const confirmDialog = (
+    <ConfirmDialog
+      open={pendingDeleteId !== null && !blocked}
+      title={locale.confirmDeleteSessionPrompt}
+      message={
+        pendingDeleteTitle
+          ? locale.sessionArchiveMessage.replace(
+            '{title}',
+            () => pendingDeleteTitle,
+          )
+          : undefined
+      }
+      confirmLabel={locale.deleteSessionAriaLabel}
+      cancelLabel={locale.cancelButton}
+      destructive
+      onConfirm={() => void confirmDelete()}
+      onCancel={cancelDelete}
+    />
+  );
+
+  if (variant === 'list') {
+    // Arrow keys move between "new chat" and the chats; edit and delete are reached with Tab.
+    const onListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      // Keys from the portaled delete dialog bubble here through React; they are not ours.
+      if (!event.currentTarget.contains(event.target as Node)) return;
+      if ((event.target as HTMLElement).tagName === 'INPUT') return;
+      const stops = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[data-element="new-session"], [data-element="row-main"]',
+      ) ?? []).filter((button) => !button.disabled);
+      if (stops.length === 0) return;
+      event.preventDefault();
+      const index = stops.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === 'Home' ? 0
+        : event.key === 'End' ? stops.length - 1
+          : event.key === 'ArrowDown' ? (index + 1) % stops.length
+            : (index - 1 + stops.length) % stops.length;
+      stops[next]?.focus();
+    };
+    const labelId = `${idBase}-label`;
+    return (
+      <nav
+        ref={listRef}
+        className={className}
+        data-component="session-switcher"
+        data-variant="list"
+        aria-label={locale.chatHistoryLabel ?? 'Chats'}
+        onKeyDown={onListKeyDown}
+      >
+        <button
+          type="button"
+          data-element="new-session"
+          onClick={() => void onNew()}
+          disabled={blocked || isSessionsLoading}
+        >
+          {plus}
+          {locale.newChatLabel}
+        </button>
+        <div data-element="history-label" id={labelId}>
+          {locale.recentChatsLabel ?? 'Recent chats'}
+        </div>
+        <ul data-element="session-list" aria-labelledby={labelId}>
+          {sorted.length === 0 ? (
+            <li data-element="empty">
+              {isSessionsLoading ? locale.sessionsLoadingLabel : locale.noSessionsLabel}
+            </li>
+          ) : (
+            sorted.map((s, index) => {
+              const isActive = s.id === activeSessionId;
+              const isEditing = editingId === s.id;
+              const title = s.title || locale.untitledSessionLabel;
+              const rowId = `${idBase}-row-${index}`;
+              return (
+                <li
+                  key={s.id}
+                  data-element="session-row"
+                  data-active={isActive || undefined}
+                  data-editing={isEditing || undefined}
+                >
+                  {isEditing ? (
+                    <input
+                      ref={editInputRef}
+                      type="text"
+                      data-element="row-title-input"
+                      aria-label={locale.renameSessionAriaLabel}
+                      value={editDraft}
+                      placeholder={locale.renameSessionPlaceholder}
+                      onChange={(e) => setEditDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void commitEdit();
+                        } else if (e.key === 'Escape') {
+                          // The rename owns this Escape, not a surrounding drawer or full screen.
+                          e.preventDefault();
+                          e.stopPropagation();
+                          cancelEdit();
+                        }
+                      }}
+                      onBlur={() => void commitEdit()}
+                    />
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        data-element="row-main"
+                        aria-current={isActive ? 'page' : undefined}
+                        title={title}
+                        disabled={blocked}
+                        onClick={() => void onPick(s.id)}
+                      >
+                        <span data-element="row-title" id={rowId}>{title}</span>
+                      </button>
+                      <button
+                        type="button"
+                        data-element="row-edit"
+                        aria-label={locale.renameSessionAriaLabel}
+                        aria-describedby={rowId}
+                        disabled={blocked}
+                        onClick={(e) => beginEdit(e, s.id, s.title || '')}
+                      >
+                        {renameIcon}
+                      </button>
+                      <button
+                        type="button"
+                        data-element="row-delete"
+                        aria-label={locale.deleteSessionAriaLabel}
+                        aria-describedby={rowId}
+                        disabled={blocked}
+                        onClick={(e) => onDelete(e, s.id)}
+                      >
+                        {deleteIcon}
+                      </button>
+                    </>
+                  )}
+                </li>
+              );
+            })
+          )}
+        </ul>
+        {confirmDialog}
+      </nav>
+    );
+  }
 
   return (
     <div
@@ -205,7 +416,7 @@ export function SessionSwitcher({
             onClick={onNew}
             disabled={isSessionsLoading}
           >
-            <span data-element="plus" aria-hidden="true">+</span>
+            {plus}
             {locale.newChatLabel}
           </button>
 
@@ -273,20 +484,7 @@ export function SessionSwitcher({
                           onClick={(e) => beginEdit(e, s.id, s.title || '')}
                           onMouseDown={(e) => e.stopPropagation()}
                         >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <path d="M12 20h9" />
-                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                          </svg>
+                          {renameIcon}
                         </button>
                         <button
                           type="button"
@@ -296,20 +494,7 @@ export function SessionSwitcher({
                           onClick={(e) => void onDelete(e, s.id)}
                           onMouseDown={(e) => e.stopPropagation()}
                         >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                          </svg>
+                          {deleteIcon}
                         </button>
                       </>
                     )}
@@ -321,23 +506,28 @@ export function SessionSwitcher({
         </div>
       )}
 
-      <ConfirmDialog
-        open={pendingDeleteId !== null && !blocked}
-        title={locale.confirmDeleteSessionPrompt}
-        message={
-          pendingDeleteTitle
-            ? locale.sessionArchiveMessage.replace(
-              '{title}',
-              () => pendingDeleteTitle,
-            )
-            : undefined
-        }
-        confirmLabel={locale.deleteSessionAriaLabel}
-        cancelLabel={locale.cancelButton}
-        destructive
-        onConfirm={() => void confirmDelete()}
-        onCancel={cancelDelete}
-      />
+      {confirmDialog}
     </div>
   );
 }
+
+const EDIT_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+  </svg>
+);
+
+const DELETE_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+  </svg>
+);
+
+/** The shipped icons: the text `+`, a pencil and a bin. */
+export const DEFAULT_SESSION_SWITCHER_ICONS: SessionSwitcherIcons = Object.freeze({
+  newChat: '+',
+  rename: EDIT_ICON,
+  delete: DELETE_ICON,
+});

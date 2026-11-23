@@ -26,9 +26,11 @@ const commands = [
 ];
 
 const PILL = '[data-component="mention-chip"]';
+const REMOVE_SHOT = 'button[aria-label="Remove shot.png"]';
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const png = () => new File([PNG], 'shot.png', { type: 'image/png' });
-const pngPart = { type: 'file', mediaType: 'image/png', url: `data:image/png;base64,${btoa(String.fromCharCode(...PNG))}`, filename: 'shot.png' };
+const pngPart = { type: 'file', mediaType: 'image/png', url: `data:image/png;base64,${btoa(String.fromCharCode(...PNG))}`, filename: 'shot.png',
+  providerMetadata: { glirastes: { attachmentId: expect.stringMatching(/^att_/) } } };
 
 function transport(): ChatTransport & { sendMessage: ReturnType<typeof vi.fn> } {
   return {
@@ -101,7 +103,11 @@ describe('pills and attachments together', () => {
     await act(async () => { await composer.chatAbout({ type: 'task', id: '7', label: 'Release prüfen' }, { text: 'was fehlt hier?' }); });
     const picker = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     await act(async () => { pickFiles(picker, [png()]); });
-    await screen.findByRole('button', { name: 'Remove shot.png' });
+    // Wait with a plain selector, then check the role once. A *ByRole query computes styles for every
+    // element; polled on each DOM change it held the event loop so long under load that the file read
+    // it waited for missed the 1 s budget.
+    await waitFor(() => expect(container.querySelector(REMOVE_SHOT)).not.toBeNull());
+    screen.getByRole('button', { name: 'Remove shot.png' });
     const editor = screen.getByRole('textbox');
     expect(editor.querySelectorAll(PILL)).toHaveLength(1);
 
@@ -111,7 +117,8 @@ describe('pills and attachments together', () => {
     expect(sent.files).toEqual([pngPart]);
     expect(sent.text).toContain('was fehlt hier?');
     expect(sent.text).toContain('Release prüfen');
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove shot.png' })).toBeNull());
+    await waitFor(() => expect(container.querySelector(REMOVE_SHOT)).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Remove shot.png' })).toBeNull();
     expect(editor.querySelector(PILL)).toBeNull();
   });
 

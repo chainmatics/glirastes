@@ -15,9 +15,21 @@ export {
   createHideIdsTransform,
   redactIds,
   collectIdLabels,
+  collectDeclaredIdLabels,
   HIDE_IDS_PROMPT,
   type IdLabels,
 } from './hide-ids.js';
+export {
+  entityDeclarationsOfTools,
+  TOOL_ENTITIES_PART_TYPE,
+  type ToolEntitiesPart,
+} from './tool-entities.js';
+export {
+  DEFAULT_BUDGET_STOP_TEXTS,
+  type BudgetStopReason,
+  type BudgetStopTexts,
+} from './budget-stop-notice.js';
+export { type ChatServerLocales, type ChatServerTexts } from './chat-texts.js';
 export { sanitizeModelMessages } from './sanitize-model-messages.js';
 export {
   prepareModelMessages,
@@ -44,12 +56,27 @@ export {
   DEFAULT_RECORDING_LANGUAGES,
   isPrivateServiceUrl,
   wavDurationSeconds,
+  TranscriptionUnavailableError,
+  type LocalRecordingTranscriptionHandlerConfig,
+  type RecordingAudio,
+  type RecordingTranscriber,
   type RecordingTranscriptionHandlerConfig,
   type SpeechPrivacyPolicy,
 } from './recording-transcription-handler.js';
+export {
+  withModelFacingUiOutcomes,
+  type UiActionOutcomeMode,
+  type UiActionOutcomesOption,
+} from './ui-outcomes.js';
 export type { ApprovalStore, ApprovalDenialCode } from './approval-binding.js';
+export {
+  DEFAULT_APPROVAL_SUBJECT_LIMITS,
+  type ApprovalSubjectLimits,
+  type ApprovalSubjectRefusalCode,
+} from './approval-subject-lookup.js';
 export type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
-export type { HistoryOptions } from './prepare-model-messages.js';
+export type { HistoryOptions, HistoryTurnMode, ModelInputBreakdown } from './prepare-model-messages.js';
+export type { SeenObject, SeenObjectsOptions } from './seen-objects.js';
 export {
   contextWindowOf,
   type ChatCompactionOptions,
@@ -88,11 +115,13 @@ export {
 
 // Re-export from server-node for convenience
 export { createNextInternalApiCaller } from '../../core/index.js';
+export type { ToolMiddleware, ToolMiddlewareCall, ToolMiddlewareNext } from '../../core/tool-middleware.js';
 
 // Types
 export type {
   WithAiToolOptions,
   AiToolRouteHandler,
+  AiChatErrorInfo,
   AiChatHandlerConfig,
   ChatAttachmentsConfig,
   LoadTools,
@@ -103,6 +132,7 @@ export type {
   StepLimitSource,
   StepUsage,
   PipelineStepReport,
+  ModelInputEvent,
   PipelineStreamStatus,
   PipelineStreamState,
   ExecuteToolOptions,

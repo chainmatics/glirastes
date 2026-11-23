@@ -18,11 +18,13 @@ export function useDeepgramTranscription(
   const ownAdapter = options.adapter;
   const adapter = useMemo(() => ownAdapter ?? new DeepgramSttAdapter({
     baseUrl: options.baseUrl,
+    workletUrl: options.workletUrl,
     getToken: () => getTokenRef.current?.(),
-  }), [ownAdapter, options.baseUrl]);
+  }), [ownAdapter, options.baseUrl, options.workletUrl]);
   const stt = useStt({
     adapter,
     language: options.language ?? 'de',
+    workletUrl: options.workletUrl,
     onInterimTranscript: options.onInterimTranscript,
     onError: options.onError,
   });
@@ -32,6 +34,7 @@ export function useDeepgramTranscription(
     isRecording: stt.isRecording,
     isConnecting: stt.isConnecting,
     error: stt.error,
+    errorCode: stt.errorCode ?? null,
     transcript: stt.finalTranscript,
     interimTranscript: stt.interimTranscript,
     displayTranscript: stt.displayTranscript,

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatCompletionProvider } from '../../types.js';
-import { createCompletionSearch } from '../completion-search.js';
+import { createCompletionSearch, sourceSearchOf } from '../completion-search.js';
 
 const people: ChatCompletionProvider = {
   id: 'people',
@@ -169,5 +169,63 @@ describe('createCompletionSearch', () => {
       ] as never,
     }]);
     expect((await search('', '/')).map((result) => result.id)).toEqual(['ok']);
+  });
+});
+
+describe('createCompletionSearch source filter', () => {
+  it('limits the fan-out to the given provider ids of the trigger', async () => {
+    const tickets: ChatCompletionProvider = {
+      id: 'tickets',
+      trigger: '#',
+      search: vi.fn(() => [{ id: '7', type: 'ticket', label: 'Bug 7' }]),
+    };
+    const docs: ChatCompletionProvider = {
+      id: 'docs',
+      trigger: '#',
+      search: vi.fn(() => [{ id: '8', type: 'doc', label: 'Bug notes' }]),
+    };
+    const search = createCompletionSearch([tickets, docs, people]);
+    // Internal channel: the public search keeps `(query, trigger)`.
+    const narrowed = sourceSearchOf(search)!;
+
+    expect(search.length).toBe(2);
+    expect((await narrowed('bug', '#', 'tickets')).map((result) => result.key)).toEqual(['tickets:ticket:7']);
+    expect(docs.search).not.toHaveBeenCalled();
+    expect((await narrowed('bug', '#', ['docs', 'people'])).map((result) => result.key)).toEqual(['docs:doc:8']);
+    expect((await search('bug', '#')).map((result) => result.key)).toEqual(['tickets:ticket:7', 'docs:doc:8']);
+    expect((await narrowed('bug', '#', undefined)).map((result) => result.key)).toEqual(['tickets:ticket:7', 'docs:doc:8']);
+  });
+
+  it('has no source search for a function it did not make', () => {
+    expect(sourceSearchOf(async () => [])).toBeUndefined();
+    expect(sourceSearchOf(undefined)).toBeUndefined();
+  });
+});
+
+describe('createCompletionSearch pick fields', () => {
+  it('keeps select and insertText and strips only invalid ones, keeping the item', async () => {
+    const search = createCompletionSearch([{
+      id: 'prompts',
+      trigger: '/',
+      search: () => [
+        { id: 'text', type: 'prompt', label: 'Text', select: 'text', insertText: 'Fasse zusammen' },
+        { id: 'run', type: 'prompt', label: 'Run', select: 'run' },
+        { id: 'bad-select', type: 'prompt', label: 'Bad', select: 'open' as never },
+        { id: 'bad-text', type: 'prompt', label: 'Bad', select: 'text', insertText: '  ' },
+        // `list` is no pick kind: the item stays and picks with the trigger default.
+        { id: 'old-list', type: 'prompt', label: 'Old', select: 'list', listSource: 'templates' } as never,
+      ],
+    }]);
+
+    const results = await search('', '/');
+    expect(results.map((result) => result.id)).toEqual(['text', 'run', 'bad-select', 'bad-text', 'old-list']);
+    expect(results[0]).toMatchObject({ select: 'text', insertText: 'Fasse zusammen' });
+    expect(results[1]).toMatchObject({ select: 'run' });
+    // The invalid field goes; the item falls back to the trigger default (select) or its label (insertText).
+    expect('select' in results[2]!).toBe(false);
+    expect(results[3]).toMatchObject({ select: 'text' });
+    expect('insertText' in results[3]!).toBe(false);
+    expect('select' in results[4]!).toBe(false);
+    expect('listSource' in results[4]!).toBe(false);
   });
 });

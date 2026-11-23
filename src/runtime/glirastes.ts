@@ -60,6 +60,7 @@ import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
 import { SDK_VERSION } from './sdk-version.js';
 import { assertMaxResultChars } from './result-limit.js';
 import type { ToolSearchSemanticsMap } from './tool-discovery.js';
+import type { ToolTextsMap } from './tool-texts.js';
 import type { ToolFailureClassifier } from './tool-failure.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
 
@@ -69,6 +70,8 @@ const DEFAULT_RETRY_INTERVAL_MS = 30_000;
 /** The module `glirastes tools refresh` emits (`tools.generated.ts`). */
 export interface GlirastesGeneratedModule extends GeneratedToolModule {
   readonly toolSearchSemantics?: ToolSearchSemanticsMap;
+  /** Labels per language; emitted only when tools.json names `languages`. */
+  readonly toolTexts?: ToolTextsMap;
 }
 
 export interface CreateGlirastesOptions {
@@ -112,9 +115,9 @@ export interface CreateGlirastesOptions {
   /**
    * The protected-text profile of this runtime: the strict shield (persistent
    * mapping store and keyring), the provider registry and the local policy.
-   * With it, a signed privacy block is enforced (and reported) and, when
-   * connected to an environment, chat stays refused until a verified
-   * deployment arrived. Without it, a deployment with a protected block is
+   * Pseudonymization is off unless local.required is explicitly true or a
+   * verified signed policy requires it. managed:true explicitly opts into
+   * fail-closed Platform bootstrap before the first verified policy arrives. Without it, a deployment with a protected block is
    * refused and reported (`privacy_refused`).
    */
   privacy?: GlirastesPrivacyOptions;
@@ -126,8 +129,8 @@ export interface CreateGlirastesOptions {
    * Managed privacy requires it: connected with `privacy`, a protected
    * policy is enforced, confirmed and claimed as a capability only with a
    * durable store; without one it is refused (`accepted_state_missing`).
-   * Connected with `privacy`, a store, or privacy providers in the setup
-   * artifact, AI traffic stays blocked (`privacy_policy_unavailable`) until
+   * Explicit managed/local-required activation or retained signed privacy
+   * authority keeps traffic blocked (`privacy_policy_unavailable`) until
    * the store was read and the state came from a verified sync: a lost or
    * new state needs a sync of this process, an unreadable one is never
    * overwritten, and after a failed save until a verified state was saved.
@@ -167,6 +170,8 @@ export interface GlirastesChatTurn {
   };
   loadTools: (context: { turnSnapshot?: TurnSnapshot }) => ToolRegistry;
   toolSemantics?: ToolSearchSemanticsMap;
+  /** Present when the generated module has labels per language (tools.json `languages`). */
+  toolTexts?: ToolTextsMap;
   metrics?: RuntimeMetricsSink;
   classifyToolFailure?: ToolFailureClassifier;
   maxResultChars?: number;
@@ -368,6 +373,10 @@ class AcceptedStateStore implements RuntimeStateStore {
     return this.unreadable || this.saveFailed || !this.reconciled;
   }
 
+  hasPrivacyAuthority(): boolean {
+    return Boolean(this.state?.privacyFloor || this.heldFloor() || this.stable?.policyRevision.privacy);
+  }
+
   revocations(): SecurityRevocation[] {
     return this.state?.revocations ?? [];
   }
@@ -514,7 +523,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       }
     : options.generated;
   const bound = createContractBindings(generated);
-  if (options.privacy?.providers) {
+  if (options.privacy?.providers && (options.privacy.managed === true || options.privacy.local?.required === true)) {
     for (const message of privacyProviderDrift(bound.setupArtifact.privacyProviders ?? [], options.privacy.providers.bindings())) {
       onError(new Error(message));
     }
@@ -688,7 +697,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           store.persistsDurably(),
         ),
         // Only a runner that can enforce and durably keep a protected policy claims the capability.
-        privacyCapable: Boolean(options.privacy) && store.persistsDurably(),
+        privacyCapable: options.privacy?.shield?.profile === 'protected-text/v1' && store.persistsDurably(),
         // A deployment that names a tool this code lacks, or has changed, keeps running on the local tool.
         validateDeployment: (_deployment, revisions) => {
           validateLocalDeploymentBindings({ revisions, bindings: bound.bindings });
@@ -787,23 +796,23 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
    * optional `privacy` object alone. A state store or privacy providers in
    * the committed setup artifact mark the deployment as managed too, so a
    * missing `privacy` integration there is blocked, not treated as legacy.
-   * Standalone, and connected without any of the three, stays unchanged.
+   * Standalone and connected use without explicit activation or retained signed authority stays unchanged.
    */
-  const managedPrivacy = Boolean(config)
-    && Boolean(options.privacy || options.stateStore || (bound.setupArtifact.privacyProviders?.length ?? 0) > 0);
-  if (config && options.privacy && !options.stateStore) {
+  const managedPrivacy = () => Boolean(config)
+    && (options.privacy?.managed === true || options.privacy?.local?.required === true || store.hasPrivacyAuthority());
+  if (config && (options.privacy?.managed === true || options.privacy?.local?.required === true) && !options.stateStore) {
     onError(new Error('[glirastes] Managed privacy needs a durable stateStore; a protected privacy policy is refused (accepted_state_missing).'));
   }
   const privacyGate = (pinned: PinnedPrivacyPolicy | undefined) => {
     // Lost, unreadable or unsaved state: no verified, durable decision yet.
-    if (managedPrivacy && !withoutEnvironment() && store.unavailable()) {
+    if (managedPrivacy() && !withoutEnvironment() && store.unavailable()) {
       throw new PrivacyError('privacy_policy_unavailable');
     }
     // A refused protected revision blocks traffic; the old revision does not
     // keep running unprotected (K3).
     if (store.privacyRefused()) throw new PrivacyError('privacy_not_configured');
     if (store.privacyFloorUnmet(pinned)) throw new PrivacyError('privacy_not_configured');
-    if (managedPrivacy && awaitingPolicy()) throw new PrivacyError('privacy_policy_unavailable');
+    if (managedPrivacy() && awaitingPolicy()) throw new PrivacyError('privacy_policy_unavailable');
     assertPrivacyTurn({
       pinned,
       privacy: options.privacy,
@@ -886,6 +895,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         loadTools: ({ turnSnapshot }) => (turnSnapshot
           ? materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: bound.bindings })
           : {}),
+        ...(options.generated.toolTexts ? { toolTexts: options.generated.toolTexts } : {}),
         ...(options.generated.toolSearchSemantics
           ? { toolSemantics: options.generated.toolSearchSemantics }
           : {}),

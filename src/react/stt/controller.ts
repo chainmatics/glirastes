@@ -1,3 +1,4 @@
+import { AUDIO_WORKLET_UNAVAILABLE, isAudioWorkletLoadError } from './worklet-error.js';
 import {
   applySttSegment,
   createSttTranscript,
@@ -21,6 +22,11 @@ export interface SttSessionSnapshot {
   finalTranscript: string;
   interimTranscript: string;
   error: string | null;
+  /**
+   * Machine-readable kind of a failure: `'audio-worklet-unavailable'` when
+   * the audio worklet did not load. Absent for other failures.
+   */
+  errorCode?: typeof AUDIO_WORKLET_UNAVAILABLE | null;
 }
 
 export interface SttProviderEvents {
@@ -36,17 +42,27 @@ export interface SttProviderConnection {
 }
 
 export interface SttProviderAdapter {
+  /**
+   * True when `connect()` loads `input.workletUrl` (the chat's
+   * `voice.workletUrl`). Without it the chat warns once that the URL is
+   * ignored; pass the URL to the adapter's own constructor then.
+   */
+  readonly acceptsWorkletUrl?: boolean;
   connect(input: {
     stream: MediaStream;
     language: string;
     signal: AbortSignal;
     events: SttProviderEvents;
+    /** The chat's `voice.workletUrl`; an adapter's own setting wins. */
+    workletUrl?: string;
   }): Promise<SttProviderConnection>;
 }
 
 export interface SttSessionControllerOptions {
   adapter: SttProviderAdapter;
   language: string;
+  /** Passed to `adapter.connect()` as `workletUrl`. */
+  workletUrl?: string;
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
 }
 
@@ -124,6 +140,7 @@ export class SttSessionController {
         stream,
         language: this.options.language,
         signal: this.abortController.signal,
+        ...(this.options.workletUrl !== undefined ? { workletUrl: this.options.workletUrl } : {}),
         events: {
           onSegment: (segment) => {
             if (generation !== this.sessionGeneration) return;
@@ -282,6 +299,7 @@ export class SttSessionController {
       ...this.currentSnapshot,
       phase: 'failed',
       error: resolved.message,
+      errorCode: isAudioWorkletLoadError(error) ? AUDIO_WORKLET_UNAVAILABLE : null,
     });
   }
 

@@ -18,9 +18,10 @@ import {
   parseHoldCombo,
   usePushToTalkHotkey,
 } from '../hooks/use-push-to-talk-hotkey.js';
-import type { VoicePushToTalkConfig } from '../types.js';
+import type { MaybePromise, VoicePushToTalkConfig } from '../types.js';
 import { RecordingBar } from './recording-bar.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
+import { RetryIcon, VoiceError, VoiceStateIcon, voiceButtonLabel, voiceText } from './voice-ui.js';
 
 const DEFAULT_HOLD_THRESHOLD_MS = 350;
 
@@ -77,8 +78,13 @@ interface VoiceInputAddonProps {
   disabled: boolean;
   language: string;
   baseUrl?: string;
+  /**
+   * URL of the audio worklet file; default `/audio-worklet-processor.js`.
+   * Also reaches an own `adapter` that declares `acceptsWorkletUrl`.
+   */
+  workletUrl?: string;
   /** Returns the current auth token for WebSocket authentication */
-  getToken?: () => string | null | undefined;
+  getToken?: () => MaybePromise<string | null | undefined>;
   /** Speech provider; defaults to the Deepgram speech-stream adapter. */
   adapter?: SttProviderAdapter;
   onTranscript: (text: string) => void;
@@ -102,6 +108,7 @@ export function VoiceInputAddon({
   disabled,
   language,
   baseUrl,
+  workletUrl,
   getToken,
   adapter,
   onTranscript,
@@ -123,12 +130,14 @@ export function VoiceInputAddon({
   const resolvedAdapter = useMemo<SttProviderAdapter>(
     () => adapter ?? new DeepgramSttAdapter({
       baseUrl,
+      workletUrl,
       getToken: () => getTokenRef.current?.(),
     }),
-    [adapter, baseUrl],
+    [adapter, baseUrl, workletUrl],
   );
   const {
     phase,
+    errorCode,
     isRecording,
     isConnecting,
     displayTranscript,
@@ -137,7 +146,7 @@ export function VoiceInputAddon({
     stopRecording,
     cancelRecording,
     retry,
-  } = useStt({ adapter: resolvedAdapter, language, onError });
+  } = useStt({ adapter: resolvedAdapter, language, workletUrl, onError });
   const active = isRecording || isConnecting;
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -324,6 +333,9 @@ export function VoiceInputAddon({
       : isRecording
         ? 'recording'
         : 'idle';
+  const locale = chat?.locale;
+  const iconState = phase === 'finalizing' ? 'transcribing' : state;
+  const label = voiceButtonLabel(locale, iconState);
 
   return (
     <>
@@ -335,23 +347,29 @@ export function VoiceInputAddon({
         onTouchCancel={handleTouchCancel}
         onClick={handleClick}
         disabled={disabled}
-        aria-busy={isConnecting}
+        aria-busy={isConnecting || phase === 'finalizing'}
+        aria-label={label}
+        title={label}
         data-component="voice-input-addon"
         data-state={state}
       >
-        {isRecording ? 'stop' : 'mic'}
+        <VoiceStateIcon state={iconState} />
       </button>
 
       {phase === 'failed' && (
-        <button
-          type="button"
-          onClick={() => { void retry().catch(() => {}); }}
-          disabled={disabled}
-          aria-label={chat?.locale.retryRecordingAriaLabel ?? 'Retry recording'}
-          data-action="retry-recording"
-        >
-          retry
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => { void retry().catch(() => {}); }}
+            disabled={disabled}
+            aria-label={voiceText(locale, 'retryRecordingAriaLabel')}
+            title={voiceText(locale, 'retryRecordingAriaLabel')}
+            data-action="retry-recording"
+          >
+            <RetryIcon />
+          </button>
+          <VoiceError locale={locale} errorCode={errorCode} />
+        </>
       )}
 
       {showRecordingBar && active && (

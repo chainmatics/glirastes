@@ -16,10 +16,17 @@ import type {
 } from '../../../types.js';
 import type { Lancer } from '../../lancer/index.js';
 import type { ChatPrivacyConfig } from '../../pii-shield/chat-privacy.js';
+import type { ToolMiddleware } from '../../core/tool-middleware.js';
 import type { ApprovalStore } from './approval-binding.js';
+import type { ApprovalSubjectLimits } from './approval-subject-lookup.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
-import type { HistoryOptions } from './prepare-model-messages.js';
+import type { HistoryOptions, ModelInputBreakdown } from './prepare-model-messages.js';
 import type { ChatMemoryConfig } from './chat-memory.js';
+import type { BudgetStopTexts } from './budget-stop-notice.js';
+import type { ChatServerLocales } from './chat-texts.js';
+import type { UiActionOutcomesOption } from './ui-outcomes.js';
+import type { UiToolResultShapeOption } from '../../core/index.js';
+import type { ToolTextsMap } from '../../../runtime/tool-texts.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHandleLimits, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
@@ -168,6 +175,20 @@ export interface StepUsage {
   totalTokens: number;
 }
 
+/** What one model step receives (`AiChatHandlerConfig.onModelInput`). Carries content: local diagnostics only. */
+export interface ModelInputEvent {
+  /** The model step of the turn, from 0. */
+  stepNumber: number;
+  /** The messages of this step as the model gets them (with `promptCaching`, the system prompt is the first). */
+  messages: unknown[];
+  /** The system prompt, when it travels apart from the messages (`promptCaching: false`). */
+  system?: string;
+  /** What the history of the turn became; the same for every step of a turn. */
+  breakdown: ModelInputBreakdown;
+  /** Estimated tokens of `messages` and `system` (4 characters per token; tool definitions not counted). */
+  estimatedTokens: number;
+}
+
 export interface PipelineStepReport {
   stepNumber: number;
   finishReason: string;
@@ -195,6 +216,20 @@ export interface PipelineStreamState {
   stepLimitSource: StepLimitSource;
   updatedAt: string;
   message?: string;
+}
+
+/** Where a failure passed to `AiChatHandlerConfig.onError` happened. */
+export interface AiChatErrorInfo {
+  /** One tool call failed inside a running turn; the turn may go on. */
+  source: 'tool-call';
+  /**
+   * `denied`: the managed turn guard refused the call and the turn ends (a
+   * `ToolExecutionDeniedError`, e.g. `budget_exhausted`). `invalid-input`:
+   * the model's arguments do not match the tool's input schema; the error is
+   * a `ToolInputValidationError` with field paths and expectations, never the
+   * arguments. `failed`: anything else (a timeout, a thrown error).
+   */
+  kind: 'denied' | 'invalid-input' | 'failed';
 }
 
 export interface AiChatHandlerConfig {
@@ -252,11 +287,27 @@ export interface AiChatHandlerConfig {
   intentRouting?: boolean | DefaultIntentRoutingOptions;
 
   /**
-   * Search-only synonyms keyed by model-facing tool name (for example from
-   * generated tool semantics). They improve `find_tools` ranking and never
-   * make a tool eligible or reach the model.
+   * Search-only synonyms and example sentences keyed by model-facing tool
+   * name (for example `toolSearchSemantics` of the generated module). They
+   * rank `find_tools` and the default start set and never make a tool
+   * eligible or reach the model. Replaces the map `chatTurn()` hands on;
+   * it is not merged with it (to add your own, pass
+   * `mergeToolSearchSemantics(turn.toolSemantics, own)` from `glirastes/runtime`).
    */
   toolSemantics?: ToolSearchSemanticsMap;
+
+  /**
+   * Labels per language keyed by model-facing tool name (`toolTexts` of the
+   * generated module, written when tools.json names `languages`; `chatTurn()`
+   * hands it on). With it, the `data-tool-presentation` part of a managed
+   * turn words each tool in the turn's language (`requestLocale`, else an
+   * explicitly set `locale`, else the language the chat UI sent, see
+   * `clientLanguage`, else the manifest's locale as before): the
+   * manifest presentation where it is in that language, else these labels
+   * (the language, another region of it, English, the first one). Local
+   * data; never sent to the Platform.
+   */
+  toolTexts?: ToolTextsMap;
 
   /**
    * Dynamic tool loader. Used in legacy mode (without pipeline).
@@ -274,7 +325,8 @@ export interface AiChatHandlerConfig {
 
   /**
    * Followups configuration. Pro feature — requires pipeline from glirastes/server.
-   * Only used with pipeline mode.
+   * Only used with pipeline mode: without `pipeline` the model gets no
+   * `suggest_followups` tool and the handler warns once at creation.
    */
   followups?: FollowupsConfig;
 
@@ -317,10 +369,62 @@ export interface AiChatHandlerConfig {
          */
         turnSnapshot?: TurnSnapshot;
       }) => string);
+  /**
+   * Locale of the texts the handler writes itself, e.g. the budget stop
+   * notice (German for `de*`, else English; default `en-US`). Not derived
+   * from the chat or the model's answers: set it for a non-English chat.
+   */
   locale?: string;
+  /**
+   * The language of one request, e.g. from a header the app's chat
+   * transport sends (`x-app-language`), a cookie or the user's profile; a
+   * BCP-47 tag (`pl-PL`). Opt-in: without it every turn uses `locale`.
+   * It sets the turn's language for the handler's own texts (with
+   * `locales`) and the tool labels (with `toolTexts`). Must not read the
+   * body; a value that is no language tag, or a throw, falls back to `locale`.
+   */
+  requestLocale?: (request: Request) => string | undefined | Promise<string | undefined>;
+  /**
+   * The language the chat UI sends with each request (the React/Vercel
+   * transport and `<glirastes-chat>`: the `Content-Language` header, one
+   * BCP-47 tag; anything else is ignored). Default true: without
+   * `requestLocale` and without an explicit `locale` it is the turn's
+   * language (handler texts with `locales`, tool labels with `toolTexts`).
+   * Order: `requestLocale` > `locale` > this > the manifest's locale.
+   * `false` ignores it (the turn language of before).
+   */
+  clientLanguage?: boolean;
+  /**
+   * The handler's own texts per BCP-47 language tag, to add a language
+   * (`pl`) or change single texts of one: the keys of `budgetStopTexts`,
+   * `silentTurn` (the answer of a turn that produced nothing), `streamError`
+   * (any failure the SDK does not name itself) and `invalidToolInput` (a
+   * tool call whose arguments do not match the schema). Partial tables
+   * fall back per key: the language, another region of it, the built-in
+   * German or English texts, English. `budgetStopTexts` stays language-free
+   * and wins for every language. An unknown key, an empty text or a key
+   * that is no language tag throws.
+   */
+  locales?: ChatServerLocales;
+  /**
+   * Texts of the closing notice the built-in stream handler appends when it
+   * stops a turn at a limit (step cap or runtime budget) without a final
+   * answer of the model. Keys: `closing` and `closingWithoutAnswer` (with `{reason}`), and per reason
+   * (`maxSteps`, `maxModelSteps`, `maxToolCalls`, `totalTimeoutMs`,
+   * `maxInputTokens`, `maxOutputTokens`, `maxEstimatedCostUsd`,
+   * `maxRepeatedFingerprint`, `maxConsecutiveErrors`) a text with `{limit}`.
+   * Given keys replace the defaults of `locale` (German for `de*`, else
+   * English); an unknown key or an empty text throws.
+   */
+  budgetStopTexts?: Partial<BudgetStopTexts>;
   uiActionSchema?: SchemaLike;
   maxOutputTokens?: number;
-  temperature?: number;
+  /**
+   * Sampling temperature (default 0.2). `null` sends no `temperature` to the
+   * model, for models that reject it (reasoning models); this includes the
+   * memory summary calls.
+   */
+  temperature?: number | null;
   /**
    * Explicit hard cap for reasoning steps.
    *
@@ -342,10 +446,17 @@ export interface AiChatHandlerConfig {
   maxContextMessages?: number;
   /**
    * How earlier turns reach the model (default on): the current turn
-   * complete, the previous turn with compacted tool results (long arrays
-   * shortened to their first items plus a count, long strings cut), older
-   * turns as text only, at most `maxTurns` (6) within `maxTokens` (4000,
-   * estimated). `false` keeps the flat slice-and-prune of earlier versions.
+   * complete, the previous turn with compacted tool results (long strings
+   * cut, arrays to their first `maxItems` entries plus a count; the largest
+   * array's further entries reduced to their identity fields such as `id`
+   * and `name` under a `_history` marker unless `keepIdentity: false`),
+   * older turns as text only, at most `maxTurns` (6) within `maxTokens`
+   * (4000, estimated). `false` keeps the flat slice-and-prune of earlier versions.
+   * Defaults since 0.18.0: `toolTurnCounting: 'tool-turns'` counts only
+   * turns with tool calls against `toolTurns` (`'all-turns'` is the way
+   * back); `seenObjects` (on, `false` is the way back) adds a memo of
+   * declared records whose results left the history, nothing for an app
+   * without declarations (see `HistoryOptions`).
    */
   history?: HistoryOptions | false;
   /**
@@ -365,6 +476,33 @@ export interface AiChatHandlerConfig {
    * `createHideIdsTransform()` to `streamText` as `experimental_transform`.
    */
   hideIds?: boolean;
+  /**
+   * Outcome protocol of UI actions, for requests whose client reports
+   * outcomes (`glirastesUiOutcomes: 1` in the body; the bundled React
+   * provider and `<glirastes-chat>` send it). `'confirm'` (default): a UI
+   * tool result that hands a `glirastes.*` action to the browser carries
+   * `awaitsOutcome: true`, the request ends after that step, the browser
+   * writes `outcome` into the result and sends the history again, and the
+   * model answers with a fixed text per outcome (one more request, at most
+   * three per turn). `'report-only'`: `awaitsOutcome: false`, the model
+   * answers in the same request and reads the outcome in the next turn.
+   * `'off'`: no marker. A function decides per tool name. A client without
+   * the flag, and a custom `streamHandler`, always get no marker.
+   */
+  uiActionOutcomes?: UiActionOutcomesOption;
+  /**
+   * Shape of a UI tool result that hands a `uiAction` to the browser.
+   * `'auto'` (default), per request: a client that sends
+   * `glirastesUiOutcomes: 1` (glirastes 0.18 and later) gets
+   * `{ handedOff: true, message, uiAction }` without `success`, because the
+   * server does not know whether the app carried it out; every other
+   * request gets `{ success: true, message, uiAction }` exactly as 0.17.3
+   * sent it, since a 0.17 browser runs an action only with `success: true`.
+   * `'handoff'` and `'legacy'` force one of the two for every request (also
+   * direct commands and a custom `streamHandler`, which follow the flag
+   * under `'auto'` as well).
+   */
+  uiToolResultShape?: UiToolResultShapeOption;
   /**
    * Number of recent user/assistant text pairs to include as conversation
    * history for intent classification. Helps the classifier understand
@@ -415,8 +553,39 @@ export interface AiChatHandlerConfig {
   privacy?: ChatPrivacyConfig;
 
   wrapHandler?: <T>(callback: () => T | Promise<T>, req: Request) => Promise<T>;
-  onError?: (error: unknown, req: Request) => void;
+  /**
+   * Server-side diagnostics for a failure the chat only sees as a fixed text.
+   * Without `info` (as before): the request or the whole turn failed (the
+   * chat gets `AI request failed`, or a 500 before streaming). With
+   * `info.source === 'tool-call'`: one tool call failed inside a running turn
+   * and the chat got a fixed text in a `tool-output-error` /
+   * `tool-input-error`; `info.kind` tells a guard denial, invalid input and
+   * any other failure apart. Not reported: a recoverable denial and a call of
+   * a tool the model was not offered (the model gets them back). Called once
+   * per failure; a throw from it during streaming does not break the stream.
+   * A denial of the managed turn guard is a `ToolExecutionDeniedError`
+   * (`glirastes/runtime`) with `reason` and, for the budget, `budget`.
+   */
+  onError?: (error: unknown, req: Request, info?: AiChatErrorInfo) => void;
   onToolError?: (toolId: string, error: unknown) => void;
+  /**
+   * Wraps the execution of the app's own tools (model turns and direct
+   * commands): `(call, next)` onion, the first entry outermost. It runs after
+   * every identity, RBAC, approval, budget and revocation check and inside
+   * the tool timeout; output bounds, truncation and result handles apply to
+   * whatever it returns. `call.input` is a copy (the tool always runs with
+   * its validated input), `next` runs at most once, returning without it
+   * short-circuits, and a throw is a tool error (`onToolError`, the standard
+   * error result). Approval subject lookups run their source tool through
+   * the same chain, as a read call (`readOnly: true`, the `toolCallId` of
+   * the approval they serve), so tenant context and audit middleware see
+   * them too. The handler's built-ins (`find_tools`, `read_result`,
+   * clarification, plan, follow-ups, memory) bypass it. It runs in this
+   * process only; nothing is sent to the Platform. Tool input must be
+   * structured-cloneable. A value that is not an array of functions throws
+   * when the handler is created. See docs/chat-route-security.md#tool-middleware.
+   */
+  toolMiddleware?: ReadonlyArray<ToolMiddleware>;
   /**
    * Classifies a failed backend call of an endpoint tool (non-2xx response)
    * as `'error'` (the default) or `'expected'`, e.g. a 403 for a user
@@ -473,6 +642,19 @@ export interface AiChatHandlerConfig {
    */
   onPipelineResult?: (result: PipelineResult) => void;
   onStepReport?: (report: PipelineStepReport) => void;
+  /**
+   * Debug hook, opt-in: called by the built-in stream handler before every
+   * model step with the exact messages that step sends to the model and a
+   * breakdown of the history (which earlier turns kept their tool results,
+   * which went as text or were left out, the seen-objects memo, a token
+   * estimate). It CARRIES CONTENT: prompts, user text, tool results, ids and
+   * names, after the PII shield. It runs in this process only: nothing of it
+   * is sent to the browser, the stream or the Platform, and no request can
+   * turn it on. Keep it out of production logs, or redact first. A throw
+   * from it is ignored. Not called by a custom `streamHandler`, which can
+   * pass `onBreakdown` to `prepareModelMessages` itself.
+   */
+  onModelInput?: (event: ModelInputEvent) => void;
   onFinish?: (event: {
     totalSteps: number;
     finishReason: string;
@@ -489,6 +671,32 @@ export interface AiChatHandlerConfig {
      * classified as expected. Local only; never sent to the Platform.
      */
     expectedToolFailureCount: number;
+    /**
+     * Set when this request continued a turn instead of starting one:
+     * answered approvals (`'approval'`), reported UI outcomes
+     * (`'ui-outcome'`) or the user's "Continue" after a budget stop
+     * (`'budget'`, a fresh budget; the runtime metrics report it as a
+     * finished turn). `onFinish` fires once per request, so count turns
+     * by the requests without it. A UI tool turn with the outcome protocol
+     * takes at least two requests (one more with `'ui-outcome'` per reported
+     * step, at most `MAX_UI_OUTCOME_CONTINUATIONS`), and each answered
+     * approval adds one; tokens and steps of every request belong to the turn:
+     *
+     * ```ts
+     * onFinish: (event) => {
+     *   if (!event.continuation) metrics.turns += 1; // one logical turn
+     *   metrics.requests += 1;
+     *   metrics.totalTokens += event.usage.totalTokens; // every request costs
+     * }
+     * ```
+     */
+    continuation?: 'approval' | 'ui-outcome' | 'budget';
+    /**
+     * Set when the request ended to wait for the outcome of a UI action; a
+     * continuation with `continuation: 'ui-outcome'` follows (unless the
+     * browser never reports, e.g. the tab was closed).
+     */
+    awaitingUiOutcome?: true;
   }) => void;
 
   /**
@@ -640,6 +848,20 @@ export interface AiChatHandlerConfig {
    * approval to its user.
    */
   approvalScope?: (request: Request) => string | Promise<string>;
+
+  /**
+   * Local limits of the server lookups behind approval cards
+   * (docs/approval-subjects.md): `maxLookupsPerTurn` (32),
+   * `maxSubjectsPerCall` (4, a preview included), `lookupTimeoutMs` (3000,
+   * at most the managed tool timeout), `maxLookupTimePerTurnMs` (10 000).
+   * They apply only to tools with a declaration (`entityLookup` on a read
+   * tool, `inputEntities` or `approvalSubject` on the write tool); lookups
+   * never count against the signed `maxToolCalls`, which means calls made
+   * by the model. `false` turns the lookups off: every card then names
+   * records from the chat history, as without a declaration. A custom
+   * `streamHandler` gets no lookups either.
+   */
+  approvalSubjects?: Partial<ApprovalSubjectLimits> | false;
 
   /**
    * Origins, besides the request's own, whose pages may post to the handler

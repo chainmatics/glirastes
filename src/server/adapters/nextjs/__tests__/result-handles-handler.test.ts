@@ -136,7 +136,7 @@ describe('result handles in createAiChatHandler', () => {
       id = overview._result.id;
       expect(overview._result.omitted?.[0]?.path).toBe('tasks[].body');
       const read = await call('read_result', { resultId: id, fields: ['tasks[].body'], offset: 3, limit: 1 });
-      expect(read.tasks).toEqual([{ body: `b3-${'x'.repeat(8_000)}` }]);
+      expect(read.tasks).toEqual([{ id: 't3', title: 'Task 3', body: `b3-${'x'.repeat(8_000)}` }]);
     });
     expect(id).toMatch(/^ro_[0-9a-z]{8}$/);
     await turn.run(async (call) => {

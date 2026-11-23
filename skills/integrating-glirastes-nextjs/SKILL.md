@@ -31,8 +31,9 @@ second, hand-maintained catalogue.
    (`src/app/api` by default, `{ "kind": "next-app", "apiDir": "app/api" }`
    otherwise), `next-pages` for navigation, `url-filters` for nuqs or
    `searchParams` filters, `react-actions` for `useAiClientAction`. Keep the
-   `predev` (`glirastes tools refresh --keep-going`) and `prebuild`
-   (`glirastes tools refresh`) scripts; `glirastes tools refresh --watch` next
+   `predev` (`glirastes stt worklet && glirastes tools refresh --keep-going`)
+   and `prebuild` (`glirastes stt worklet && glirastes tools refresh`) scripts;
+   the worklet copy serves voice input's audio worklet. `glirastes tools refresh --watch` next
    to `next dev` keeps the tools current while you edit.
 2. Server-only `resolvePrincipal(request)` returns the verified `subjectId`,
    `tenantId`, roles and attributes from the real session, or `undefined` for
@@ -51,7 +52,8 @@ second, hand-maintained catalogue.
 
    // One instance per app and process, also when routes are bundled apart.
    const glirastes = createGlirastes({ generated });
-   // Budgets default to safe values; override with `localLimits: { maxToolCalls: 4 }`.
+   // Budgets default to safe values (8 tool calls per turn, `read_result` included);
+   // override with `localLimits: { maxToolCalls: 16 }`, capped by agent revision and policy.
    const openrouter = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY });
    const systemPrompt = 'Use the tools of this app. Ask one short question when the target is unclear.';
 
@@ -73,7 +75,7 @@ second, hand-maintained catalogue.
    Several routes share the runtime when the `createGlirastes` call moves to
    a server-only module such as `src/lib/glirastes.ts`.
    `chatTurn` brings the shared turn guard (`managedRuntime`), the tools of
-   the pinned snapshot, the checked synonyms for `find_tools` and, Connected,
+   the pinned snapshot, the checked synonyms and examples for the tool search and, Connected,
    the content-free metrics sink; Standalone it makes no network call. Use
    `.chat(model)`: `createOpenAI(...)(model)` talks to the Responses API,
    whose usage the handler does not read, so turn costs would stay unknown.
@@ -82,18 +84,23 @@ second, hand-maintained catalogue.
    chat's `@` and `/` list with a GET (`createChatInteractionsHandler`, see
    `building-glirastes-chat-ui`), give it `turn.managedRuntime` of the same
    principal, so the list and the turn decide alike. `toolDiscovery: true`
-   offers `find_tools`; it grants no tool. It also turns on the default
+   offers `find_tools`; it grants no tool, and a fixed note after the system
+   prompt tells the model to search before it says it cannot do something. It also turns on the default
    routing: each turn starts with the tools of the modules the request
    matches (derived from the generated metadata, German and English),
    `ui_navigate`, the tools the previous turn called, and `find_tools`, not
    with every tool. Tune it in the app, not in a routing list: better tool
    descriptions, usage hints and synonyms (`describing-glirastes-tools`),
    `intentRouting: { maxStartTools: 12, alwaysAvailable: ['ui_navigate'] }`,
-   or `examples` per tool in `toolSemantics`. A custom `intentRouter`
+   or `examples` per tool (`tool-semantics.json`, carried by the generated
+   `toolSearchSemantics`). Among equally relevant tools, read tools come
+   first. A custom `intentRouter`
    replaces it; `intentRouting: false` starts every turn with all tools.
    Further defaults, each with an opt-out: `history` sends earlier turns
-   compacted (`{ maxTurns, toolTurns, maxTokens, maxItems, maxStringLength }`,
-   `false` for the flat slice), `promptCaching` adds cache breakpoints for
+   compacted (`{ maxTurns, toolTurns, maxTokens, maxItems, maxStringLength,
+   keepIdentity }`, `false` for the flat slice; lists beyond `maxItems`
+   keep id and name per entry, so a tool that takes an id should say to look
+   it up by name when it is not visible), `promptCaching` adds cache breakpoints for
    `@ai-sdk/anthropic` and `@openrouter/ai-sdk-provider`, and `hideIds`
    keeps technical ids out of answers: the prompt forbids them and the stream
    replaces an id the model writes anyway with the label its tool result gave
@@ -102,12 +109,18 @@ second, hand-maintained catalogue.
    context and must apply it itself: append `HIDE_IDS_PROMPT`, fill an
    `IdLabels` map with `collectIdLabels(messages, labels)` and pass
    `createHideIdsTransform(labels)` to `streamText` as
-   `experimental_transform` (all from `glirastes/server/nextjs`). A turn
+   `experimental_transform` (all from `glirastes/server/nextjs`). `hideIds`
+   only rewrites answer text; the approval card names the ids of a call on
+   its own, in the browser (`building-glirastes-chat-ui`, Approvals). A turn
    without visible output shows a short fallback text and is reported as
    `model_error`. A tool result over `maxResultChars` reaches the model (and
    the browser) as an overview with a `_result` handle; the built-in
    `read_result` reads the rest within the same request, without calling
-   the backend again (`resultHandles: false` cuts it instead). With metrics, an endpoint that
+   the backend again (`resultHandles: false` cuts it instead). Per tool,
+   `outputAllowedFields`, `outputDeniedFields` (`**.key` at any depth) and
+   `outputDefaultFields` (on the endpoint tool, `defineTool` or the
+   `contract.ts` entry) bound what a result shows and pick the first answer;
+   see `references/handler-options.md`. With metrics, an endpoint that
    refuses a call its schema accepted (400 or 422) is reported as
    `tool_contract_rejected`, without content.
    Effective `privacy` protection disables result handles and SDK result-reader execution, even with `resultHandles: true`. Oversized protected output is visibly withheld (`outputWithheld`); narrow a read request instead of retrying a write. The ordinary off profile retains result retrieval.
@@ -122,6 +135,8 @@ second, hand-maintained catalogue.
    middleware or `proxy` on `/api/chat` buffers only 10 MB: raise
    `experimental.middlewareClientMaxBodySize` (Next.js 16:
    `experimental.proxyClientMaxBodySize`) or keep the route out of its matcher.
+   To keep chat files across reloads or hand them to an upload route, see
+   `docs/chat-attachments.md`, "Keeping attachments" and "Handing attachments to the app".
 4. Mount the navigation bridge once in the root layout, as a client component,
    so `ui.navigate` and the `ui.filter.*` tools can run:
 
@@ -143,7 +158,11 @@ second, hand-maintained catalogue.
    closed (`parseAsStringLiteral([...])`, `parseAsInteger`, `parseAsArrayOf`);
    `parseAsString` stays open and is reported as `filter-domain-open`.
 6. Client actions: `useAiClientAction('tasks.highlight', handler, contract)`
-   where the state lives, with a Zod payload contract as third argument. An
+   where the state lives, with a Zod payload contract as third argument. The
+   tool is `ui.tasks.highlight`; a single-segment id (`navigate`) or one
+   starting with `navigate.`, `filter.` or `action.` becomes
+   `ui.action.<id>`, so it never takes the generated `ui.navigate` or
+   `ui.filter.*` names. An
    action whose component lives on one page gets that page's path as fourth
    argument, in the page component itself:
 
@@ -157,7 +176,15 @@ second, hand-maintained catalogue.
    navigation bridge and runs the action once the page registered it. Never
    register an action in the app shell that only fires a window event for a
    listener on one page (`ui-action-indirect`). A handler returns `false`
-   when it could not do its work, so the chat does not report it as done. A
+   when it could not do its work, so the chat does not report it as done.
+   Export the zod contract from a module that imports only zod (e.g.
+   `src/lib/ai-actions.ts`) and pass that export: the tool then gets its
+   formats, descriptions, enums and bounds (`z.string().uuid()` is checked
+   on the server); an inline or unimportable contract is typed from
+   TypeScript as before (`ui-action-contract-unprobed`). Declare what a
+   handler does in the options, as a literal: `{ effect: 'write' }` for one
+   that changes data (the chat asks first), `'destructive'` for one that
+   deletes, `'read'` for one that only shows or selects. Undeclared, a
    handler that writes through a helper, a Server Action or a mutation hook is
    flagged (`ui-action-write-unproven`); the developer raises it with
    `glirastes tools policy raise <tool> write`.
@@ -170,6 +197,37 @@ second, hand-maintained catalogue.
    Connecting is optional and only in Platform mode (`setting-up-glirastes`):
    `glirastes connect`, then `glirastes sync` uploads the technical result.
 
+### Local speech recognition
+
+Experimental, only when the app asks for transcription inside its own Node
+server instead of a transcription service (`docs/local-stt.md`):
+
+1. `npm install sherpa-onnx-node@2.0.1`, exactly this version: linux-x64 2.0.2
+   does not load on Debian bookworm. glibc Linux (no Alpine) or macOS arm64.
+2. `glirastes stt pull` downloads the five sha256-pinned model files (670 MB)
+   into `GLIRASTES_MODEL_DIR` (default `~/.cache/glirastes/models`); in a
+   container run it at image build. Nothing is downloaded at runtime.
+3. The recording route passes `transcribe` instead of `url`:
+
+   ```ts
+   // src/app/api/ai/speech-recognize/route.ts
+   import { createRecordingTranscriptionHandler } from 'glirastes/server/nextjs';
+   import { createLocalTranscriber } from 'glirastes/server/stt-local';
+
+   export const runtime = 'nodejs';
+   const stt = createLocalTranscriber();
+   export const POST = createRecordingTranscriptionHandler({
+     authorize: async (request) => Boolean(await resolvePrincipal(request)),
+     transcribe: stt.transcribe,
+   });
+   ```
+
+4. `next.config.ts`: `serverExternalPackages: ['sherpa-onnx-node', 'glirastes']`,
+   both; without `glirastes` the bundled import fails as `peer_missing`. Call `stt.warmup()` from `instrumentation.ts` so the first request does not
+   wait for the model; plan 2 GB of memory per process.
+5. `checkLocalStt()` is the model-free deploy readiness check. A full queue
+   answers 503, a WAV that is not PCM16 mono 16 kHz answers 415.
+
 ## Commands
 
 ```bash
@@ -179,6 +237,7 @@ glirastes tools status
 glirastes tools check
 glirastes tools check --integrity-only
 glirastes doctor
+glirastes stt pull
 ```
 
 ## Verification

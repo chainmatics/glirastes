@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import type { AppSetupArtifact } from '../../contracts/index.js';
+import type { ToolSearchSemantics } from '../../runtime/tool-discovery.js';
 import { compareCodeUnits, sortKeysDeep } from './canonical.js';
 import { deriveChatInteractions } from './chat-interactions.js';
 import type { RuntimeSchemaSource, ToolContract, ToolContractsEntry } from './types.js';
@@ -47,6 +48,21 @@ function literal(value: unknown, indent = 0): string {
 
 type ArtifactTool = AppSetupArtifact['tools'][number];
 
+/**
+ * The search-only semantics of one tool contract (`search` of
+ * tool-contracts.json): synonyms and example sentences, `undefined` when it
+ * has neither. Shared by the generated module and the container artifact.
+ */
+export function toolSearchSemanticsOf(search: ToolContractsEntry['search']): ToolSearchSemantics | undefined {
+  const synonyms = search?.synonyms ?? [];
+  const examples = search?.examples ?? [];
+  if (synonyms.length === 0 && examples.length === 0) return undefined;
+  return {
+    ...(synonyms.length > 0 ? { synonyms: [...synonyms] } : {}),
+    ...(examples.length > 0 ? { examples: [...examples] } : {}),
+  };
+}
+
 function catalogEntry(tool: ArtifactTool): Record<string, unknown> {
   const common = {
     toolId: tool.toolId,
@@ -74,19 +90,41 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     .sort((left, right) => compareCodeUnits(left.toolId, right.toolId));
   const bound = tools.map((tool) => {
     const contract: ToolContract | null | undefined = contractsById.get(tool.toolId)?.contract;
-    const maxResultChars = contractsById.get(tool.toolId)?.maxResultChars;
+    const entry = contractsById.get(tool.toolId);
+    const maxResultChars = entry?.maxResultChars;
+    // Output fields bound endpoint results only; a UI tool has no backend answer.
+    const outputFields = tool.executionKind === 'endpoint'
+      ? ([['outputAllowedFields', entry?.outputAllowedFields], ['outputDeniedFields', entry?.outputDeniedFields],
+        ['outputDefaultFields', entry?.outputDefaultFields]] as const)
+        .filter((field): field is readonly [typeof field[0], string[]] => field[1] !== undefined)
+      : [];
+    // Declared identity and approval subjects (field, type and tool names only), endpoint tools only.
+    const entities = tool.executionKind === 'endpoint'
+      ? ([
+        ['outputEntities', entry?.outputEntities],
+        ['inputEntities', entry?.inputEntities],
+        ['entityLookup', entry?.entityLookup],
+        ['approvalSubject', entry?.approvalSubject],
+        ['lookupEffect', entry?.lookupEffect],
+      ] as Array<[string, unknown]>).filter((field) => field[1] !== undefined)
+      : [];
     if (!contract) throw new Error(`Enabled tool ${tool.name} has no contract to bind.`);
     if (tool.executionKind === 'ui' && !contract.uiAction) {
       throw new Error(`Enabled UI tool ${tool.name} has no UI action to bind.`);
     }
-    return { tool, contract, maxResultChars };
+    return { tool, contract, maxResultChars, outputFields, entities };
   });
-  // Search-only synonyms of the enabled tools, keyed like `toolSemantics` of createAiChatHandler.
+  // Search-only synonyms and examples of the enabled tools, keyed like `toolSemantics` of createAiChatHandler.
   const searchSemantics = Object.fromEntries(tools
-    .map((tool) => [catalogEntry(tool).modelName as string, contractsById.get(tool.toolId)?.search?.synonyms] as const)
-    .filter((entry): entry is readonly [string, string[]] => (entry[1]?.length ?? 0) > 0)
-    .sort(([left], [right]) => compareCodeUnits(left, right))
-    .map(([modelName, synonyms]) => [modelName, { synonyms }]));
+    .map((tool) => [catalogEntry(tool).modelName as string, toolSearchSemanticsOf(contractsById.get(tool.toolId)?.search)] as const)
+    .filter((entry): entry is readonly [string, ToolSearchSemantics] => entry[1] !== undefined)
+    .sort(([left], [right]) => compareCodeUnits(left, right)));
+  // Labels per language (tools.json languages, by default en, de and every declared one), keyed like toolSearchSemantics; absent with `languages: []`.
+  const toolTexts = Object.fromEntries(tools
+    .map((tool) => [catalogEntry(tool).modelName as string, contractsById.get(tool.toolId)?.labels] as const)
+    .filter((entry): entry is readonly [string, NonNullable<ToolContractsEntry['labels']>] => entry[1] !== undefined)
+    .map(([name, labels]) => [name, { labels }] as const)
+    .sort(([left], [right]) => compareCodeUnits(left, right)));
   const modules = [...new Set(bound
     .flatMap(({ contract }) => [contract.runtime.input, contract.runtime.output])
     .flatMap((source) => (source.kind === 'module-export' ? [source.module] : [])))]
@@ -128,11 +166,20 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
       ? tools.map((tool) => JSON.stringify(tool.toolId)).join(' | ')
       : 'never'};`, '');
   }
+  // The emitted comment stays as it was (examples now take part too), so a
+  // module of an app without examples stays byte-identical.
   lines.push(
     '/** Pass as `toolSemantics` to createAiChatHandler: synonyms help find_tools, they never grant a tool. */',
     `export const toolSearchSemantics = ${literal(searchSemantics)}${typescript ? ' as const' : ''};`,
     '',
   );
+  if (Object.keys(toolTexts).length > 0) {
+    lines.push(
+      '/** Labels per language for the chat (tools.json `languages`); `chatTurn()` passes them on as `toolTexts`. */',
+      `export const toolTexts = ${literal(toolTexts)}${typescript ? ' as const' : ''};`,
+      '',
+    );
+  }
   lines.push('export function createToolBindings() {');
   if (bound.length === 0) {
     lines.push('  return [];');
@@ -142,7 +189,7 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
       lines.push(`  const output${index} = ${expression(contract.runtime.output)};`);
     });
     lines.push('  return [');
-    bound.forEach(({ tool, contract, maxResultChars }, index) => {
+    bound.forEach(({ tool, contract, maxResultChars, outputFields, entities }, index) => {
       const entry = `toolCatalog[${index}]`;
       const shared = [
         `        id: ${entry}.definitionId,`,
@@ -159,6 +206,8 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
           ...(contract.runtime.output.kind === 'module-export' ? [`        outputSchema: output${index},`] : []),
           `        needsApproval: ${entry}.requiresApproval,`,
           ...(maxResultChars !== undefined ? [`        maxResultChars: ${maxResultChars},`] : []),
+          ...outputFields.map(([name, paths]) => `        ${name}: ${literal(paths, 8)},`),
+          ...entities.map(([name, list]) => `        ${name}: ${literal(list, 8)},`),
           '      }),',
         ]
         : [

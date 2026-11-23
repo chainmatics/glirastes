@@ -201,7 +201,7 @@ async function run(scenario: RestartScenario): Promise<RestartReport> {
     firstSyncTimeoutMs: scenario.firstSyncTimeoutMs,
     onError: (error) => { errors.push((error as Error).name); },
     ...(scenario.managed
-      ? { privacy: { shield, providers: registry, local }, stateStore: () => new FileRuntimeStateStore(scenario.statePath) }
+      ? { privacy: { managed: true, shield, providers: registry, local }, stateStore: () => new FileRuntimeStateStore(scenario.statePath) }
       : {}),
   });
   await glirastes.ready();

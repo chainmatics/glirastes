@@ -804,6 +804,7 @@ describe('createGlirastes with a privacy policy', () => {
     speech: { localOnly: true, maxDurationSeconds: 45 },
   };
   const privacy = (bindingDigest = digest('A')): GlirastesPrivacyOptions => ({
+    managed: true,
     shield: { profile: 'protected-text/v1' } as GlirastesPrivacyOptions['shield'],
     providers: { bindings: () => ({ main: bindingDigest }), defaultEntryId: 'main' } as GlirastesPrivacyOptions['providers'],
   });
@@ -826,6 +827,7 @@ describe('createGlirastes with a privacy policy', () => {
     track(createGlirastes({
       generated: module, env: {}, onError,
       privacy: {
+        managed: true,
         shield: { profile: 'protected-text/v1' } as GlirastesPrivacyOptions['shield'],
         providers: { bindings: () => ({ main: digest('B'), extra: digest('C') }), defaultEntryId: 'main' } as GlirastesPrivacyOptions['providers'],
       },
@@ -849,7 +851,7 @@ describe('createGlirastes with a privacy policy', () => {
 
   it('blocks managed bootstrap without infrastructure when live sync has no active deployment', async () => {
     const http = platform();
-    const instance = track(createGlirastes({ generated: generated(), env, fetchImpl: http.fetchImpl,
+    const instance = track(createGlirastes({ generated: generated(), privacy: { managed: true }, env, fetchImpl: http.fetchImpl,
       push: false, pollIntervalMs: 60_000, onError: vi.fn(), stateStore: () => new SharedDurableTestStore() }));
     await instance.ready();
     expect(codeOf(() => instance.speechPolicy())).toBe('privacy_policy_unavailable');
@@ -1036,9 +1038,8 @@ describe('createGlirastes with a privacy policy', () => {
       expect(glirastes.accepted()).toBeUndefined();
       expect((await stateStore.load())?.privacyFloor ?? null).toBeNull();
       expect((await stateStore.load())?.privacyRefusedDeploymentIds ?? []).toEqual([]);
-      // No attacker-controlled floor was persisted. A managed runner still
-      // awaits a verified active policy; missing infrastructure is no bypass.
-      expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_policy_unavailable');
+      // Without explicit opt-in or a verified policy, an attacker cannot activate protection.
+      expect(glirastes.privacyPolicy()).toBeNull();
     });
   });
 
@@ -1110,9 +1111,9 @@ describe('createGlirastes with a privacy policy', () => {
       ];
       const variants: Array<Parameters<typeof createGlirastes>[0]> = [
         { generated: generated(), privacy: privacy(), stateStore: () => new SharedDurableTestStore() },
-        // Without `privacy`: a store or privacy providers in the artifact mark the deployment as managed.
-        { generated: generated(), stateStore: () => new SharedDurableTestStore() },
-        { generated: providers },
+        // Bootstrap protection is explicit even before the runner has privacy infrastructure.
+        { generated: generated(), privacy: { managed: true }, stateStore: () => new SharedDurableTestStore() },
+        { generated: providers, privacy: { managed: true } },
       ];
       for (const variant of variants) {
         const fetchImpl = vi.fn(async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch;

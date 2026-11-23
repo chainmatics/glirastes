@@ -490,6 +490,59 @@ describe('runToolsPipeline (client actions)', () => {
     expect(tools.get('ui.tasks.select')).toMatchObject({ enabled: false, operationGroup: 'needs_attention' });
     expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
   }, 120_000);
+
+  it('confirms a client action that declares a write effect, whatever its handler shows', async () => {
+    const fixture = await createAppFixture({
+      'src/lib/api.ts': 'export function save(id: string) { console.log(id); }\n',
+      'src/components/task-list.tsx': "'use client';\nimport { useAiClientAction } from 'glirastes/react';\nimport { save } from '../lib/api';\n"
+        + 'export function TaskList() {\n'
+        + "  useAiClientAction('tasks.save', (payload: { taskId: string }) => save(payload.taskId), undefined, { effect: 'write' });\n"
+        + "  useAiClientAction('tasks.purge', (payload: { taskId: string }) => save(payload.taskId), undefined, { effect: 'destructive' });\n"
+        + "  useAiClientAction('tasks.peek', (payload: { taskId: string }) => save(payload.taskId), undefined, { effect: 'read' });\n"
+        + '  return null;\n}\n',
+    }, { toolsConfig: { sources: ['react-actions'] } });
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const tools = new Map((await artifactOf(fixture)).tools.map((tool) => [tool.name, tool] as const));
+    expect(tools.get('ui.tasks.save')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'write', requiresApproval: true, enabled: true,
+    });
+    expect(tools.get('ui.tasks.purge')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'delete', requiresApproval: true, enabled: true,
+    });
+    expect(tools.get('ui.tasks.peek')).toMatchObject({
+      operationGroup: 'ui', riskClass: 'safe-read', requiresApproval: false, enabled: true,
+    });
+    expect(result.findings.filter((finding) => finding.code === 'ui-action-write-unproven')).toEqual([]);
+  }, 120_000);
+
+  it('ranks the top-level .describe() of a probed client action contract as code: below a maintained entry, above an agent one', async () => {
+    const fixture = await createAppFixture({
+      'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, jsx: 'preserve' } }),
+      'src/lib/contracts.ts': "import { z } from 'zod';\n"
+        + "export const highlightTask = z.object({ taskId: z.string() }).describe('Highlight one task in the list.');\n",
+      'src/components/task-list.tsx': "'use client';\nimport { useAiClientAction } from 'glirastes/react';\n"
+        + "import { highlightTask } from '../lib/contracts';\n"
+        + 'export function TaskList() {\n'
+        + "  useAiClientAction('tasks.highlight', (payload) => console.log(payload.taskId), highlightTask);\n  return null;\n}\n",
+    }, { toolsConfig: { sources: ['react-actions'] } });
+    const describe = async (entry?: Record<string, unknown>) => {
+      if (entry) {
+        await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({ schemaVersion: 1, tools: [{ name: 'ui.tasks.highlight', ...entry }] })}\n`);
+      }
+      const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+      const tool = (await artifactOf(fixture)).tools.find((candidate) => candidate.name === 'ui.tasks.highlight');
+      return {
+        description: tool?.description,
+        origin: result.tools?.find((view) => view.definitionId === 'ui.tasks.highlight')?.descriptionOrigin,
+        overrides: result.findings.filter((finding) => finding.code === 'semantics-overrides-code').length,
+      };
+    };
+    expect(await describe()).toEqual({ description: 'Highlight one task in the list.', origin: 'code', overrides: 0 });
+    expect(await describe({ description: 'Agent text.', origin: { description: 'agent' } }))
+      .toEqual({ description: 'Highlight one task in the list.', origin: 'code', overrides: 0 });
+    expect(await describe({ description: 'Maintained text.' }))
+      .toEqual({ description: 'Maintained text.', origin: 'human', overrides: 1 });
+  }, 120_000);
 });
 
 describe('runToolsPipeline (stage-2 semantics)', () => {
@@ -523,7 +576,7 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
     expect(entry?.search).toEqual({ synonyms: ['my work', 'to-dos'], examples: [...EXAMPLES].sort() });
     expect(entry?.title).toEqual({ de: 'Aufgaben auflisten', en: 'List tasks' });
     const module = await fixture.read(DEFAULT_GENERATED_MODULE);
-    expect(module).toContain('export const toolSearchSemantics = {\n  "tasks_list": {\n    "synonyms": [\n      "my work",');
+    expect(module).toContain(`export const toolSearchSemantics = {\n  "tasks_list": {\n    "examples": ${JSON.stringify([...EXAMPLES].sort(), null, 2).replace(/\n/g, '\n    ')},\n    "synonyms": [\n      "my work",`);
     const view = result.tools?.find((tool) => tool.stableKey === 'GET /api/tasks');
     expect(view).toMatchObject({
       definitionId: 'tasks.list',
@@ -617,6 +670,84 @@ describe('runToolsPipeline (stage-2 semantics)', () => {
       expect(contracts.tools.find((candidate) => candidate.stableKey === stableKey)?.search).toEqual({ synonyms: [synonym] });
       expect(module).toContain(JSON.stringify(synonym));
     }
+  }, 120_000);
+});
+
+describe('runToolsPipeline (labels per language by default)', () => {
+  const SEMANTICS = `${JSON.stringify({
+    schemaVersion: 1,
+    tools: [{ stableKey: 'GET /api/tasks', title: { de: 'Aufgaben zeigen', pl: 'Pokaż zadania' } }],
+  })}\n`;
+  const label = (text: string) => ({ singular: text, plural: text, approval: text });
+
+  async function refreshed(languages?: string[]) {
+    const fixture = await app();
+    if (languages) {
+      const config = JSON.parse(await fixture.read(TOOLS_PATHS.config)) as Record<string, unknown>;
+      await fixture.write(TOOLS_PATHS.config, JSON.stringify({ ...config, languages }));
+    }
+    await fixture.write(TOOLS_PATHS.semantics, SEMANTICS);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const tools = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts))).tools;
+    return {
+      result,
+      list: tools.find((tool) => tool.stableKey === 'GET /api/tasks'),
+      create: tools.find((tool) => tool.stableKey === 'POST /api/tasks'),
+      module: await fixture.read(DEFAULT_GENERATED_MODULE),
+      artifact: await fixture.read(TOOLS_PATHS.setupArtifact),
+      fixture,
+    };
+  }
+
+  it('labels every tool in en, de and each declared language, English where a translation is missing, silently', async () => {
+    const { result, list, create, module, fixture } = await refreshed();
+    expect(list?.labels).toEqual({ de: label('Aufgaben zeigen'), en: label('List tasks'), pl: label('Pokaż zadania') });
+    // No Polish declaration: English (the template), reported nowhere since the app named no languages.
+    expect(Object.keys(create?.labels ?? {})).toEqual(['de', 'en', 'pl']);
+    expect(create?.labels?.pl).toEqual(create?.labels?.en);
+    expect(result.findings.filter((finding) => finding.code === 'label-translation-missing')).toEqual([]);
+    expect(module).toContain('export const toolTexts = {');
+    expect(module).toContain('"Pokaż zadania"');
+    expect((await runToolsPipeline({ root: fixture.root, mode: 'frozen' })).driftPaths).toEqual([]);
+  }, 120_000);
+
+  it('keeps the output of before 0.18.0 with languages: [] (one label in locale, no titles as labels)', async () => {
+    const { list, module, artifact } = await refreshed([]);
+    expect(list?.labels).toBeUndefined();
+    expect(module).not.toContain('toolTexts');
+    expect(artifact).not.toContain('Aufgaben zeigen');
+    const withDefault = await refreshed();
+    expect(withDefault.list?.title).toEqual(list?.title);
+  }, 120_000);
+
+  it('keeps en and de and reports the rest when the tools declare more languages than one table holds', async () => {
+    const fixture = await app();
+    const tags = Array.from({ length: 60 }, (_, index) => `q${String.fromCharCode(97 + Math.floor(index / 26))}${String.fromCharCode(97 + (index % 26))}`);
+    const titles = (part: string[]) => Object.fromEntries(part.map((tag) => [tag, `Title ${tag}`]));
+    await fixture.write(TOOLS_PATHS.semantics, `${JSON.stringify({
+      schemaVersion: 1,
+      tools: [
+        { stableKey: 'GET /api/tasks', title: titles(tags.slice(0, 30)) },
+        { stableKey: 'POST /api/tasks', title: titles(tags.slice(30)) },
+      ],
+    })}\n`);
+    const result = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    const list = ToolContractsFileSchema.parse(JSON.parse(await fixture.read(TOOLS_PATHS.contracts))).tools
+      .find((tool) => tool.stableKey === 'GET /api/tasks');
+    const emitted = Object.keys(list?.labels ?? {});
+    expect(emitted).toHaveLength(50);
+    expect(emitted).toEqual(expect.arrayContaining(['de', 'en', 'qaa']));
+    expect(emitted).not.toContain('qch');
+    const limited = result.findings.filter((finding) => finding.code === 'label-languages-limited');
+    expect(limited.map((finding) => [finding.severity, finding.subjectRef])).toEqual([['warning', '.glirastes/tools.json#languages']]);
+    expect(limited[0]!.message).toContain('qbw, qbx');
+  }, 120_000);
+
+  it('emits only the named languages and reports the missing ones with an explicit list', async () => {
+    const { list, result } = await refreshed(['en', 'pl']);
+    expect(list?.labels).toEqual({ en: label('List tasks'), pl: label('Pokaż zadania') });
+    expect(result.findings.filter((finding) => finding.code === 'label-translation-missing').map((finding) => finding.subjectRef))
+      .toEqual(['.glirastes/tools.json#languages.pl']);
   }, 120_000);
 });
 

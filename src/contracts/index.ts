@@ -67,11 +67,15 @@ export {
   ToolContractRejectedEventSchema,
   PRIVACY_DECISIONS_MAX_CODES,
   PrivacyDecisionsEventSchema,
+  TurnContinuationSchema,
+  TurnContinuedEventSchema,
 } from './events.js';
 export type {
   PrivacyDecisionsEvent,
   RuntimeCostSource,
   RuntimeMetricEvent,
+  TurnContinuation,
+  TurnContinuedEvent,
   ToolContractRejectedEvent,
   RuntimeTurnCost,
   RuntimeTurnErrorCode,
@@ -216,3 +220,72 @@ export type {
   ProtectedTextPolicyBlock,
   ProviderBinding,
 } from './privacy-policy.js';
+
+export {
+  isLanguageTag,
+  pickLanguage,
+  preferredLanguage,
+  resolveLocalizedText,
+} from './localized-text.js';
+export type { LanguageTag, LocalizedText } from './localized-text.js';
+
+export {
+  isUiOutcomeCode,
+  MAX_UI_OUTCOME_CONTINUATIONS,
+  readUiOutcomeCode,
+  UI_OUTCOME_CODES,
+  UI_OUTCOME_MODEL_TEXTS,
+  UI_OUTCOME_PROTOCOL_VERSION,
+  UI_OUTCOME_SYSTEM_NOTE,
+  UI_OUTCOMES_REQUEST_FIELD,
+  UiOutcomeCodeSchema,
+  UiOutcomeSchema,
+  uiOutcomeModelResult,
+} from './ui-outcome.js';
+export type {
+  UiOutcome,
+  UiOutcomeCode,
+} from './ui-outcome.js';
+
+export {
+  canonicalMentionLabel,
+  isMentionMarkerId,
+  isMentionMarkerType,
+  MENTION_MARKER_MAX_LABEL_LENGTH,
+  parseMentionMarkers,
+  serializeMentionMarker,
+} from './mention-marker.js';
+export type {
+  CanonicalMentionLabelOptions,
+  MentionMarker,
+  ParsedMentionMarker,
+  SerializeMentionMarkerOptions,
+} from './mention-marker.js';
+
+export {
+  isViewContextRoute,
+  resolveViewContextPolicy,
+  sanitizeViewContext,
+  VIEW_CONTEXT_DROP_REASONS,
+  VIEW_CONTEXT_HISTORY_MODES,
+  VIEW_CONTEXT_LIMITS,
+  ViewContextEntrySchema,
+  ViewContextSchema,
+} from './view-context.js';
+export type {
+  ResolvedViewContextPolicy,
+  ViewContextDropReason,
+  ViewContextEntity,
+  ViewContextEntityId,
+  ViewContextEntry,
+  ViewContextFactValue,
+  ViewContextFacts,
+  ViewContextFactsSchema,
+  ViewContextFactsSchemas,
+  ViewContextHistory,
+  ViewContextOption,
+  ViewContextPolicy,
+  ViewContextSanitizeOptions,
+  ViewContextSanitizeResult,
+  ViewContextSelection,
+} from './view-context.js';

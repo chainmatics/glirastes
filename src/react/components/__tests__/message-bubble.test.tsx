@@ -122,6 +122,78 @@ describe('MessageBubble tool-result visibility', () => {
     expect(document.querySelectorAll('[data-component="tool-result"]')).toHaveLength(1);
   });
 
+  it('never shows the model-facing hand-off note of a UI tool to the user', () => {
+    const note = 'Whether it was carried out is not known: do not tell the user it succeeded, say it was requested and should now be visible. Do not repeat the call. Do not quote this text.';
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-handoff',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-ui_navigate',
+              toolCallId: 'call-h1',
+              state: 'output-available',
+              output: {
+                success: true,
+                message: `Handed to the app. ${note}`,
+                uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/tasks' } },
+              },
+            } as never,
+            {
+              type: 'tool-result',
+              toolInvocationId: 'call-h2',
+              toolName: 'ui_open',
+              result: { success: true, message: `Handed to the app, which opens /templates to run the action there. ${note}` },
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(document.body.textContent).not.toContain(note);
+    expect(document.querySelectorAll('[data-component="tool-result"]')).toHaveLength(0);
+    expect(document.querySelector('[data-component="activity-log"]')).not.toBeNull();
+  });
+
+  it('shows a 4xx answer of the backend as a neutral step, also without a classifier, and a 5xx as failed', () => {
+    render(
+      <MessageBubble
+        message={{
+          id: 'message-expected',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-tasks_get',
+              toolCallId: 'call-e1',
+              state: 'output-available',
+              output: { success: false, error: 'Not found', status: 404, retryable: false },
+            } as never,
+            {
+              type: 'tool-tasks_list',
+              toolCallId: 'call-e2',
+              state: 'output-available',
+              output: { items: [] },
+            } as never,
+            {
+              type: 'tool-tasks_delete',
+              toolCallId: 'call-e3',
+              state: 'output-available',
+              output: { success: false, error: 'Server error', status: 500, retryable: true },
+            } as never,
+          ],
+        }}
+      />,
+    );
+
+    const log = document.querySelector('[data-component="activity-log"]')!;
+    expect(log.getAttribute('data-state')).toBe('error');
+    expect(log.querySelector('[data-element="activity-summary"]')!.textContent)
+      .toBe('1 Schritt ausgeführt, 1 fehlgeschlagen, 1 ohne Ergebnis');
+    expect(Array.from(log.querySelectorAll('[data-element="activity-step"]')).map((row) => row.getAttribute('data-status')))
+      .toEqual(['expected', 'done', 'error']);
+  });
+
   it('does not render standard follow-up registration as a raw tool result', () => {
     render(
       <MessageBubble

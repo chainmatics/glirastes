@@ -4,7 +4,7 @@ import { compareCodeUnits } from '../canonical.js';
 import { toolFinding } from '../findings.js';
 import { createAppProgram, type AppProgram } from '../program.js';
 import type { ExcludedTool, ToolFinding, ToolSource } from '../types.js';
-import { scanAppSources } from './app-files.js';
+import { defaultSourceDir, scanAppSources } from './app-files.js';
 import { pageStableKey, pathExclusion, type PageEntry, type PageTree } from './page-tree.js';
 import { importBindings, importedName, type ImportSpec } from './ui-tools.js';
 import { observeNavigation } from './next-pages.js';
@@ -59,6 +59,8 @@ const MAX_DEPTH = 32;
 export interface RouteConfigOptions {
   /** Where the route objects are searched; `src` when the app has one, else the app root. */
   srcDir?: string;
+  /** The tsconfig of those files; the nearest one from `srcDir` up to the app root by default. */
+  tsconfig?: string;
 }
 
 interface RoutePage {
@@ -361,7 +363,12 @@ export async function enumerateRouteConfigPages(
   });
   if (!scan.complete) return { complete: false, reason: scan.reason };
   if (scan.files.length === 0) return { complete: true, pages: [], excluded: [], findings: [] };
-  const app = createAppProgram({ root, rootNames: scan.files.map((file) => file.absolute) });
+  const app = createAppProgram({
+    root,
+    rootNames: scan.files.map((file) => file.absolute),
+    searchFrom: options.srcDir ?? defaultSourceDir(root),
+    ...(options.tsconfig ? { tsconfig: options.tsconfig } : {}),
+  });
   const read: RoutePage[] = [];
   for (const file of scan.files) {
     const source = app.sourceFile(file.absolute);

@@ -18,23 +18,52 @@ import type {
   TelemetrySink,
 } from '../../types.js';
 import { defineTool } from '../../types.js';
+import { assertToolEntities, validInputEntities, validOutputEntities } from '../../contracts/entity-declaration.js';
+import { assertApprovalSubjectDeclarations } from '../../contracts/approval-subject.js';
 import { zodToCompactDescription } from './zod-compact.js';
 import {
   AMBIGUOUS_HTTP_STATUS,
+  OUTCOME_UNKNOWN_HINT,
   errorLeavesOutcomeUnknown,
   isOutcomeUnknown,
   markOutcomeUnknown,
   ResponseUnreadableError,
 } from './tool-outcome.js';
-import type { ToolFailureClassifier } from '../../runtime/tool-failure.js';
+import {
+  ENDPOINT_PATH_NOT_ALLOWED_ERROR,
+  ENDPOINT_PATH_NOT_RELATIVE_ERROR,
+  type ToolFailureClassifier,
+} from '../../runtime/tool-failure.js';
 import {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
   isValidMaxResultChars,
 } from '../../runtime/result-limit.js';
 import { truncateToolResult } from './truncate-tool-result.js';
+import {
+  applyOutputBound,
+  type OutputBound,
+  assertOutputFields,
+  leftOutFields,
+  normalizeOutputFields,
+  outputBoundOf,
+  outputFieldTree,
+  toJsonRecord,
+} from './output-fields.js';
+import { applyDefaultViewWithoutStore } from './default-view.js';
+import { UI_ACTION_HANDOFF_MESSAGE } from '../../browser/ui-action-handoff.js';
+import {
+  boundedToolFailure,
+  ENDPOINT_FAILURE,
+  ENDPOINT_FAILURE_DATA,
+  endpointFailureFields,
+  notFoundHint,
+} from './tool-failure-result.js';
 import type { ResultStore } from './result-store.js';
+import { markPrivacyConversion } from './privacy-conversion.js';
 import { isResultReader, markResultReader, unsupportedPrivateResultRead } from './result-reader.js';
+import { cleanToolResult } from './clean-tool-result.js';
+import { assertToolMiddleware, composeToolMiddleware, type ToolMiddleware } from './tool-middleware.js';
 export {
   assertMaxResultChars,
   DEFAULT_MAX_RESULT_CHARS,
@@ -57,6 +86,19 @@ export {
   type ResultStoreOptions,
 } from './result-store.js';
 export { createReadResultTool, type ReadResultGuard } from './read-result-tool.js';
+export type { ToolMiddleware, ToolMiddlewareCall, ToolMiddlewareNext } from './tool-middleware.js';
+export {
+  applyOutputBound,
+  assertOutputFields,
+  isValidOutputFields,
+  MAX_OUTPUT_FIELD_CHARS,
+  MAX_OUTPUT_FIELDS,
+  normalizeOutputFields,
+  outputBoundOf,
+  type OutputBound,
+  type OutputFieldsName,
+} from './output-fields.js';
+export { type DefaultViewMarker } from './default-view.js';
 export { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 export { createLocalGuardrails } from './local-guardrails.js';
 export {
@@ -180,101 +222,6 @@ export interface EndpointToolContext extends ToolContext {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-const MAX_TOOL_ERROR_MESSAGE_CHARS = 1_000;
-const MAX_TOOL_ERROR_BODY_CHARS = 4_000;
-
-/**
- * Marks a failure result `endpointToolToTool` built from a backend response.
- * A non-enumerable symbol key: a backend body (or a 2xx answer with
- * `success: false`) is JSON and cannot set it, so only such a result keeps
- * its status, body and classification through `boundedToolFailure`. It is a
- * registry symbol (`Symbol.for`) so the ESM and the CJS build of this module
- * share it: a tool built by one copy and wrapped by the other keeps its
- * fields instead of silently losing them.
- */
-const ENDPOINT_FAILURE = Symbol.for('glirastes.endpointFailure');
-const OUTCOME_UNKNOWN_HINT = 'The outcome is unknown. Do not repeat the call before checking whether it took effect.';
-
-/** How far a cut may move back to end on a whole token. */
-const MAX_TOOL_ERROR_BACKTRACK_CHARS = 256;
-const TOOL_ERROR_TOKEN_DELIMITER = /[\s",:{}[\]]/;
-
-/**
- * Cuts a failure text (the body, or the `error` message taken from it) to at
- * most `limit` characters. A configured PII shield reads the text after this
- * cut, and a value split by it (an email reduced to `max.mueller@exa`) no
- * longer matches a detector. So the cut moves back to the last whitespace or
- * JSON delimiter and drops the partial token. That keeps a single-token value
- * whole; a value written with spaces (a grouped IBAN, a phone number) can
- * still be split. A text without a delimiter in the last
- * `MAX_TOOL_ERROR_BACKTRACK_CHARS` characters is cut hard. The window is the
- * same for both limits: it is sized by the longest token worth keeping whole
- * (an email address has at most 254 characters), not by the limit.
- */
-function cutToolErrorText(text: string, limit: number): string {
-  if (text.length <= limit) return text;
-  const cut = text.slice(0, limit);
-  // The cut already ends on a whole token.
-  if (TOOL_ERROR_TOKEN_DELIMITER.test(text.charAt(limit))) return cut;
-  const floor = Math.max(0, limit - MAX_TOOL_ERROR_BACKTRACK_CHARS);
-  for (let index = cut.length - 1; index >= floor; index -= 1) {
-    if (!TOOL_ERROR_TOKEN_DELIMITER.test(cut.charAt(index))) continue;
-    // Never cut a text down to nothing but whitespace.
-    return cut.slice(0, index).trim().length > 0 ? cut.slice(0, index) : cut;
-  }
-  return cut;
-}
-
-function endpointFailureBody(data: unknown): { body?: unknown; bodyTruncated?: true } {
-  if (data === undefined) return {};
-  if (typeof data === 'string') {
-    return data.length > MAX_TOOL_ERROR_BODY_CHARS
-      ? { body: cutToolErrorText(data, MAX_TOOL_ERROR_BODY_CHARS), bodyTruncated: true }
-      : { body: data };
-  }
-  let serialized: string | undefined;
-  try {
-    serialized = JSON.stringify(data);
-  } catch {
-    return {};
-  }
-  if (serialized === undefined) return {};
-  return serialized.length > MAX_TOOL_ERROR_BODY_CHARS
-    ? { body: cutToolErrorText(serialized, MAX_TOOL_ERROR_BODY_CHARS), bodyTruncated: true }
-    : { body: data };
-}
-
-function boundedToolFailure(
-  result: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  const rawError = result.error;
-  const cutError = typeof rawError === 'string'
-    ? cutToolErrorText(rawError, MAX_TOOL_ERROR_MESSAGE_CHARS)
-    : '';
-  // Also when the cut leaves nothing but whitespace.
-  const error = cutError.trim().length > 0 ? cutError : 'Tool execution failed.';
-
-  const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;
-  if (fromEndpoint && isOutcomeUnknown(result)) {
-    return markOutcomeUnknown({
-      success: false,
-      error,
-      outcome: 'unknown',
-      hint: OUTCOME_UNKNOWN_HINT,
-      ...(Number.isInteger(result.status) ? { status: result.status } : {}),
-    });
-  }
-  return {
-    success: false,
-    error,
-    retryable: result.retryable === true,
-    ...(fromEndpoint && Number.isInteger(result.status) ? { status: result.status } : {}),
-    ...(fromEndpoint && result.body !== undefined ? { body: result.body } : {}),
-    ...(fromEndpoint && result.bodyTruncated === true ? { bodyTruncated: true } : {}),
-    ...(fromEndpoint && result.expectedFailure === true ? { expectedFailure: true } : {}),
-  };
 }
 
 export function buildPath(
@@ -642,10 +589,29 @@ function withoutReservedUiActions(
 export function endpointToolToTool<TInput extends SchemaLike>(
   endpointTool: AiEndpointToolDefinition<TInput>,
 ): Tool {
-  assertMaxResultChars(endpointTool.maxResultChars, `endpointToolToTool(${endpointTool.id})`);
+  const label = `endpointToolToTool(${endpointTool.id})`;
+  assertMaxResultChars(endpointTool.maxResultChars, label);
+  assertOutputFields(endpointTool.outputAllowedFields, label, 'outputAllowedFields');
+  assertOutputFields(endpointTool.outputDeniedFields, label, 'outputDeniedFields');
+  assertOutputFields(endpointTool.outputDefaultFields, label, 'outputDefaultFields');
+  assertToolEntities(endpointTool, label);
+  assertApprovalSubjectDeclarations(endpointTool, label);
+  const outputAllowedFields = endpointTool.outputAllowedFields !== undefined
+    ? normalizeOutputFields(endpointTool.outputAllowedFields)!
+    : undefined;
+  const outputDeniedFields = endpointTool.outputDeniedFields !== undefined
+    ? normalizeOutputFields(endpointTool.outputDeniedFields, 'outputDeniedFields')!
+    : undefined;
+  const outputDefaultFields = endpointTool.outputDefaultFields !== undefined
+    ? normalizeOutputFields(endpointTool.outputDefaultFields, 'outputDefaultFields')!
+    : undefined;
+  const ownBound = outputBoundOf({ outputAllowedFields, outputDeniedFields });
+  // Fixed per route: only a route with path parameters addresses one record.
+  const pathNotFoundHint = notFoundHint(endpointTool.path);
   let description = endpointTool.description;
   if (endpointTool.outputSchema) {
-    description += `\n\nReturns: ${zodToCompactDescription(endpointTool.outputSchema)}`;
+    // The model is told only about the fields it can get.
+    description += `\n\nReturns: ${zodToCompactDescription(endpointTool.outputSchema, 3, ownBound)}`;
   }
 
   return defineTool({
@@ -655,6 +621,14 @@ export function endpointToolToTool<TInput extends SchemaLike>(
     outputSchema: endpointTool.outputSchema,
     method: endpointTool.method,
     ...(endpointTool.maxResultChars !== undefined ? { maxResultChars: endpointTool.maxResultChars } : {}),
+    ...(outputAllowedFields ? { outputAllowedFields } : {}),
+    ...(outputDeniedFields ? { outputDeniedFields } : {}),
+    ...(outputDefaultFields ? { outputDefaultFields } : {}),
+    ...(endpointTool.outputEntities ? { outputEntities: endpointTool.outputEntities } : {}),
+    ...(endpointTool.inputEntities ? { inputEntities: endpointTool.inputEntities } : {}),
+    ...(endpointTool.entityLookup ? { entityLookup: endpointTool.entityLookup } : {}),
+    ...(endpointTool.approvalSubject !== undefined ? { approvalSubject: endpointTool.approvalSubject } : {}),
+    ...(endpointTool.lookupEffect ? { lookupEffect: endpointTool.lookupEffect } : {}),
     needsApproval:
       endpointTool.needsApproval ??
       (endpointTool.method === 'GET' || endpointTool.method === 'HEAD' ? false : true),
@@ -706,9 +680,12 @@ export function endpointToolToTool<TInput extends SchemaLike>(
         }
         const fromBackend = response.refusedLocally !== true && Number.isInteger(response.status);
         let expected = false;
-        if (fromBackend && endpointContext.classifyToolFailure) {
+        // The app's classifier decided: its answer travels explicitly, also `'error'`,
+        // so the browser does not show a failure it counted as an error as neutral.
+        const classified = fromBackend && endpointContext.classifyToolFailure !== undefined;
+        if (classified) {
           try {
-            expected = endpointContext.classifyToolFailure({
+            expected = endpointContext.classifyToolFailure!({
               toolName: endpointTool.toolName,
               status: response.status,
               body: response.data,
@@ -721,8 +698,10 @@ export function endpointToolToTool<TInput extends SchemaLike>(
           success: false,
           error: response.error ?? `Endpoint failed (${response.status})`,
           ...(Number.isInteger(response.status) ? { status: response.status } : {}),
-          ...(fromBackend ? endpointFailureBody(response.data) : {}),
-          ...(expected ? { expectedFailure: true } : {}),
+          // Under the tool's bound the body is reduced before it is serialized and cut.
+          ...(fromBackend ? endpointFailureFields(response.data, ownBound) : {}),
+          ...(fromBackend && response.status === 404 && pathNotFoundHint ? { hint: pathNotFoundHint } : {}),
+          ...(classified ? { expectedFailure: expected } : {}),
         };
         Object.defineProperty(failure, ENDPOINT_FAILURE, { value: true });
         // A gateway error or timeout answer after a write was sent: the
@@ -730,6 +709,8 @@ export function endpointToolToTool<TInput extends SchemaLike>(
         if (fromBackend && AMBIGUOUS_HTTP_STATUS.has(response.status) && endpointTool.method !== 'GET') {
           markOutcomeUnknown(failure);
         }
+        // Kept unserialized (non-enumerable) so the bound of the tool that shows it can reduce it.
+        if (fromBackend) Object.defineProperty(failure, ENDPOINT_FAILURE_DATA, { value: response.data });
         return failure;
       }
 
@@ -848,7 +829,7 @@ export function uiToolToTool<TInput extends SchemaLike>(
     description += `\n\nReturns: ${zodToCompactDescription(uiTool.outputSchema)}`;
   }
 
-  return defineTool({
+  const tool = defineTool({
     id: uiTool.id,
     description,
     inputSchema: uiTool.inputSchema,
@@ -891,9 +872,14 @@ export function uiToolToTool<TInput extends SchemaLike>(
         }
       }
 
+      // The server only hands the action to the browser and does not learn
+      // whether the app carried it out; an app's own successMessage wins.
+      // Without a uiAction nothing is handed over, so the tool's run on the
+      // server is all there is and the earlier text still holds.
+      const fallback = uiAction ? UI_ACTION_HANDOFF_MESSAGE : 'Action executed.';
       const message = uiTool.successMessage
-        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || 'Action executed.'
-        : 'Action executed.';
+        ? (applyUiTemplateValue(uiTool.successMessage, inputPayload) as string) || fallback
+        : fallback;
 
       return {
         success: true,
@@ -902,6 +888,7 @@ export function uiToolToTool<TInput extends SchemaLike>(
       };
     },
   });
+  return { ...tool, uiTool: uiTool.outcome === 'confirm' ? { outcome: 'confirm' } : {} };
 }
 
 /**
@@ -972,7 +959,60 @@ export interface ToolToAiToolOptions {
    * creates one per turn (`resultHandles`); without it nothing changes.
    */
   resultStore?: ResultStore;
+  /**
+   * Shape of a UI tool result that hands a `uiAction` to the browser.
+   * `'legacy'` (default): `{ success: true, message, uiAction }`, exactly as
+   * up to 0.17.3, which every browser runs. `'handoff'`:
+   * `{ handedOff: true, message, uiAction }`, without `success`, because the
+   * server does not know whether the app carried it out; only a client that
+   * reads `handedOff` runs it (glirastes 0.18 and later, which say so with
+   * `glirastesUiOutcomes: 1`). `createAiChatHandler` picks it per request
+   * (its `uiToolResultShape`, default `'auto'`). A UI tool without a
+   * `uiAction` keeps `{ success: true, message }`.
+   */
+  uiToolResultShape?: UiToolResultShape;
+  /**
+   * Wraps only the execution of each tool call: `(call, next)` onion, the
+   * first entry outermost. Every guard (approval gate, managed
+   * `beforeToolCall` with principal, budget and revocation checks, input
+   * validation, tool timeout, PII rehydration) has already run before the
+   * chain starts, and output bounds, truncation, the result store and
+   * uiAction normalization run on whatever it returns, so a middleware
+   * cannot skip or loosen them. `call.input` is a structured clone and
+   * `next` takes no arguments: the tool always runs with its validated
+   * input. A throw is a tool error (`tool.failed`, `onError`, the standard
+   * error result); `next` runs at most once; returning without `next`
+   * short-circuits. The input must be structured-cloneable when
+   * `toolMiddleware` is set. Without it (or with `[]`) nothing changes.
+   * `createAiChatHandler` also runs its approval subject lookups through the
+   * same chain, as read calls of their source tool (`readOnly: true`, the
+   * `toolCallId` of the approval they serve).
+   */
+  toolMiddleware?: ReadonlyArray<ToolMiddleware>;
 }
+
+/** See `ToolToAiToolOptions.uiToolResultShape`. */
+export type UiToolResultShape = 'handoff' | 'legacy';
+
+/**
+ * `createAiChatHandler`'s `uiToolResultShape`: `'auto'` (default) gives the
+ * hand-off shape to a request with `glirastesUiOutcomes: 1` and the 0.17.3
+ * shape to every other; `'handoff'` and `'legacy'` force one for all.
+ */
+export type UiToolResultShapeOption = 'auto' | UiToolResultShape;
+
+/**
+ * A successful UI tool result that hands a `uiAction` to the browser, in
+ * the hand-off shape: `success` gives way to `handedOff: true`.
+ */
+function asHandedOff(result: unknown): unknown {
+  if (!isRecord(result) || Array.isArray(result) || result.success !== true) return result;
+  const action = result.uiAction;
+  if (action === undefined || action === null || (Array.isArray(action) && action.length === 0)) return result;
+  const { success: _success, ...rest } = result;
+  return { handedOff: true, ...rest };
+}
+
 
 /** Whether `value` serializes to more than `limit` characters (false when it cannot be serialized). */
 function exceedsLimit(value: unknown, limit: number): boolean {
@@ -982,6 +1022,7 @@ function exceedsLimit(value: unknown, limit: number): boolean {
     return false;
   }
 }
+
 
 /**
  * Convert a Tool to an AI SDK-compatible tool object.
@@ -1016,9 +1057,26 @@ export function toolToAiTool(
     ? method === 'GET' || method === 'HEAD'
     : !tool.needsApproval;
   const requiresApproval = !!needsApproval;
+  // Declared output fields. An invalid allow- or deny-list (a tool not built
+  // with defineTool) allows nothing: it fails closed. An invalid default view is ignored.
+  const bound = outputBoundOf(tool);
+  const defaultFields = tool.outputDefaultFields !== undefined
+    ? normalizeOutputFields(tool.outputDefaultFields, 'outputDefaultFields')
+    : undefined;
+  const defaultTree = defaultFields ? outputFieldTree(defaultFields) : undefined;
+  const outputEntities = validOutputEntities(tool.outputEntities);
+  const inputEntities = validInputEntities(tool.inputEntities);
 
   const converted = {
     _toolId: tool.id,
+    // Strictly read-only (a GET or HEAD call that needs no approval): a budget continuation may run it again.
+    ...(method !== undefined && readOnly && !requiresApproval ? { _readOnly: true as const } : {}),
+    // A UI tool whose own actions take part in the outcome protocol (`defineUiTool({ outcome: 'confirm' })`).
+    ...(tool.uiTool?.outcome === 'confirm' ? { _uiOutcome: 'confirm' as const } : {}),
+    // Declared identity, for history compaction, hideIds and the browser (field names only).
+    ...(outputEntities || inputEntities
+      ? { _entities: { ...(outputEntities ? { output: outputEntities } : {}), ...(inputEntities ? { input: inputEntities } : {}) } }
+      : {}),
     description: tool.description,
     parameters: tool.inputSchema,
     needsApproval: requiresApproval
@@ -1042,7 +1100,7 @@ export function toolToAiTool(
           return needed;
         }
       : undefined,
-    execute: async (input: unknown, executionOptions?: { abortSignal?: AbortSignal }) => {
+    execute: async (input: unknown, executionOptions?: { abortSignal?: AbortSignal; toolCallId?: string }) => {
       const signals = [context.abortSignal, executionOptions?.abortSignal].filter((value): value is AbortSignal => Boolean(value));
       const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
       signal?.throwIfAborted();
@@ -1061,7 +1119,20 @@ export function toolToAiTool(
         // A handle belongs to the principal the tool runs for: captured before it runs.
         const store = options?.protectedResults ? undefined : options?.resultStore;
         const capturedOwner = store && !isResultReader(tool) ? await store.captureOwner() : undefined;
-        const result = await tool.execute(input, executionContext);
+        // Guards have passed; the app's middleware wraps only the execution.
+        const middleware = options?.toolMiddleware;
+        const result = middleware && middleware.length > 0
+          ? await composeToolMiddleware(middleware, {
+              toolName: name, toolId: tool.id,
+              toolCallId: typeof executionOptions?.toolCallId === 'string' ? executionOptions.toolCallId : undefined,
+              input: structuredClone(input), method, readOnly,
+              context: executionContext, abortSignal: signal,
+            }, async () => {
+              // A middleware that calls next() late never starts an aborted or timed-out call.
+              signal?.throwIfAborted();
+              return tool.execute(input, executionContext);
+            })
+          : await tool.execute(input, executionContext);
 
         // Audit: tool executed successfully
         options?.onAudit?.({
@@ -1079,78 +1150,37 @@ export function toolToAiTool(
           },
         });
 
-        // Output schema: parse to strip extra fields, re-attach uiAction for client
-        let cleanResult: unknown = result;
-        if (isRecord(result) && result.success === false) {
-          cleanResult = boundedToolFailure(result);
-        } else if (
-          tool.outputSchema &&
-          isRecord(result)
-        ) {
-          const rec = result as Record<string, unknown>;
-          let parsed = tool.outputSchema.safeParse(result);
-          if (
-            !parsed.success
-            && rec.uiAction !== undefined
-          ) {
-            const {
-              uiAction: _transportUiAction,
-              ...payloadWithoutUiAction
-            } = rec;
-            parsed = tool.outputSchema.safeParse(payloadWithoutUiAction);
-          }
-          if (!parsed.success && rec.success !== undefined) {
-            const {
-              success: _transportSuccess,
-              uiAction: _transportUiAction,
-              ...declaredPayload
-            } = rec;
-            parsed = tool.outputSchema.safeParse(declaredPayload);
-          }
-          const carriedUnderData = !parsed.success
-            && rec.data !== undefined
-            && (!isRecord(rec.data) || Array.isArray(rec.data));
-          if (carriedUnderData) parsed = tool.outputSchema.safeParse(rec.data);
-          if (parsed.success) {
-            // Use parsed data (extra fields stripped by Zod)
-            cleanResult = {
-              ...(carriedUnderData ? { data: parsed.data } : parsed.data as Record<string, unknown>),
-              // Preserve success flag
-              ...(rec.success !== undefined ? { success: rec.success } : {}),
-              // Re-attach uiAction for client stream (stripped by schema parse)
-              ...(rec.uiAction ? { uiAction: rec.uiAction } : {}),
-            };
-          } else {
-            // Schema mismatch — retain bounded diagnostics locally, but never
-            // expose an undeclared backend payload to the model.
-            // Validation paths and messages may embed backend data (including
-            // object keys and custom validator messages). Keep diagnostics
-            // technical; never print those values from a runtime process.
-            console.warn(`[glirastes] Output schema mismatch for tool "${name}": ${parsed.error.issues.length} issue(s).`);
-            // The tool ran, and a write may already have happened: report it
-            // as done, so the model neither claims a failure nor calls again.
-            cleanResult = {
-              success: true,
-              outputWithheld: true,
-              message: 'The tool ran, but its result did not match its declared output, so the details are withheld. Do not call it again for the same request.',
-              ...(rec.uiAction ? { uiAction: rec.uiAction } : {}),
-            };
-          }
+        const cleaned = cleanToolResult(tool, result, bound, name, options?.protectedResults === true);
+        let cleanResult: unknown = cleaned.value;
+        const successful = cleaned.successful;
+        const fromStore = store?.isIssued(result) === true;
+        // The default view needs the record form: a list or scalar result travels
+        // under `data`, as it does under a bound (which has normalized it already).
+        if (defaultTree && successful && !fromStore && !bound
+          && !(isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success === false)) {
+          cleanResult = toJsonRecord(cleanResult) ?? cleanResult;
         }
+        const payloadRecord = isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false;
+        const viewed = defaultTree !== undefined && successful && payloadRecord && !fromStore
+          && leftOutFields(cleanResult as Record<string, unknown>, defaultTree).length > 0;
 
         // Bound the result so it cannot overflow the model context: with a
         // result store an oversized record result keeps its handle and the
         // model gets an overview, otherwise (or when the store refuses) it is cut.
-        const fromStore = store?.isIssued(result) === true;
-        const overview = store && !fromStore
-          && isRecord(cleanResult) && !Array.isArray(cleanResult) && cleanResult.success !== false
+        const overview = store && !fromStore && payloadRecord
           // A payload with its own `_result` keeps it: no overview would replace it.
           && !Object.prototype.hasOwnProperty.call(cleanResult, '_result')
-          && exceedsLimit(cleanResult, resultLimit)
+          && (viewed || exceedsLimit(cleanResult, resultLimit))
           ? await store.put({
-              toolName: name, readOnly, maxChars: resultLimit, value: cleanResult,
+              toolName: name, readOnly, maxChars: resultLimit, value: cleanResult as Record<string, unknown>,
+              ...(viewed ? { defaultFields: defaultFields! } : {}),
+              ...(outputEntities ? { entities: outputEntities } : {}),
               ...(capturedOwner ? { owner: capturedOwner } : {}),
             })
+          : undefined;
+        // Without a handle the default view still applies; the rest cannot be read.
+        const unreadableView = !options?.protectedResults && !overview && viewed
+          ? applyDefaultViewWithoutStore(cleanResult as Record<string, unknown>, defaultTree!, resultLimit, { readOnly, inputSchema: tool.inputSchema })
           : undefined;
         cleanResult = options?.protectedResults && (JSON.stringify(cleanResult)?.length ?? 0) > resultLimit
           ? {
@@ -1158,12 +1188,13 @@ export function toolToAiTool(
               outputWithheld: true,
               message: 'The tool ran, but its result exceeds the protected result limit. Details were withheld. Do not repeat a write; narrow a read request instead.',
             }
-          : overview ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
+          : overview ?? unreadableView ?? truncateToolResult(cleanResult, resultLimit, { inputSchema: tool.inputSchema, readOnly });
 
 
-        const output = options?.uiActionSchema
+        const normalized = options?.uiActionSchema
           ? normalizeResultUiAction(cleanResult, options.uiActionSchema)
           : cleanResult;
+        const output = tool.uiTool && options?.uiToolResultShape === 'handoff' ? asHandedOff(normalized) : normalized;
         // Cut from the sealed copy in the store: the PII shield must not seal it again.
         if (overview || fromStore) store!.markIssued(output);
         return output;
@@ -1193,14 +1224,15 @@ export function toolToAiTool(
         // effect, so it is not reported as failed.
         if (errorLeavesOutcomeUnknown(error)) {
           return markOutcomeUnknown({
-            error: `Error in ${tool.id}: ${options?.contentFreeErrors ? 'tool_outcome_unknown' : errorMessage}`,
+            error: `Error in ${name}: ${options?.contentFreeErrors ? 'tool_outcome_unknown' : errorMessage}`,
             outcome: 'unknown',
             hint: OUTCOME_UNKNOWN_HINT,
           });
         }
         return normalizeResultUiAction(
           {
-            error: `Error in ${tool.id}: ${errorMessage}`,
+            // The name the model calls the tool by, never its internal id (a managed tool's id is a UUID).
+            error: `Error in ${name}: ${errorMessage}`,
             hint: 'Check the parameters and try again.',
           },
           options?.uiActionSchema,
@@ -1208,7 +1240,17 @@ export function toolToAiTool(
       }
     },
   };
-  return isResultReader(tool) ? markResultReader(converted) : converted;
+  const result = isResultReader(tool) ? markResultReader(converted) : converted;
+  return markPrivacyConversion(result, (): object => {
+    if (options?.toolMiddleware?.length) return {
+      ...result, execute: async () => ({ success: false, error: 'privacy_tool_middleware_unsupported' }),
+    };
+    return toolToAiTool(tool, context, toolName, {
+      ...options, protectedResults: true, contentFreeErrors: true,
+      // A low-level caller's raw error callback must not bypass the boundary.
+      ...(options?.onError ? { onError: (id, _error) => options.onError!(id, new Error('tool_failed')) } : {}),
+    });
+  });
 }
 
 /**
@@ -1261,6 +1303,7 @@ export function toolsToAiTools(
   context: ToolContext,
   options?: ToolToAiToolOptions,
 ): Record<string, ReturnType<typeof toolToAiTool>> {
+  assertToolMiddleware(options?.toolMiddleware);
   const resolvedOptions = withTelemetryForwarding(options);
   const tools: Record<string, ReturnType<typeof toolToAiTool>> = {};
 
@@ -1515,7 +1558,7 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
   });
   return async (request) => {
     if (!staysOnOrigin(request.path, base.origin)) {
-      return { ok: false, status: 400, error: 'Endpoint path must be relative to the API', refusedLocally: true };
+      return { ok: false, status: 400, error: ENDPOINT_PATH_NOT_RELATIVE_ERROR, refusedLocally: true };
     }
     if (prefixes) {
       const rawPath = request.path.split(/[?#]/, 1)[0]!;
@@ -1523,7 +1566,7 @@ export function createHttpEndpointCaller(options: HttpEndpointCallerOptions): In
       // Do not let upstream double decoding or encoded separators escape a prefix.
       if (/%(?:2e|2f|5c|25)/i.test(rawPath) || rawPath !== pathname
         || !prefixes.some((prefix) => prefix === '/' || pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-        return { ok: false, status: 403, error: 'Endpoint path is not allowed', refusedLocally: true };
+        return { ok: false, status: 403, error: ENDPOINT_PATH_NOT_ALLOWED_ERROR, refusedLocally: true };
       }
     }
     return call(request);

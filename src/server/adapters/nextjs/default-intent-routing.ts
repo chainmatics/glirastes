@@ -145,8 +145,19 @@ export function createDefaultIntentRouter(
     ...(tool.synonyms ? { synonyms: tool.synonyms } : {}),
   })));
 
+  // Equal relevance puts a read tool first: "show my playlists" matches every
+  // playlist tool by the same word, and reading is the likely and safe intent.
+  const rankedNames = (text: string, limit: number): string[] => [...index.rank(text.slice(0, 200), domainTools.length)]
+    .sort((left, right) =>
+      Number(right.exact) - Number(left.exact)
+      || right.score - left.score
+      || Number(!isRead(byName.get(left.name)!)) - Number(!isRead(byName.get(right.name)!))
+      || left.name.localeCompare(right.name))
+    .slice(0, limit)
+    .map((hit) => hit.name);
+
   const match = (text: string) => {
-    const hits = text.trim() ? [...index.search(text.slice(0, 200), MAX_SEARCH_HITS)] : [];
+    const hits = text.trim() ? rankedNames(text, MAX_SEARCH_HITS) : [];
     const best = new Map<string, number>();
     for (const locale of ['de', 'en']) {
       for (const { moduleId, score } of rankModulesWithHeuristics(text, modules, locale)) {
@@ -164,7 +175,7 @@ export function createDefaultIntentRouter(
   };
 
   const moduleTools = (keys: ReadonlyArray<string>, text: string): string[] => {
-    const relevance = new Map(index.search(text.slice(0, 200), domainTools.length)
+    const relevance = new Map(rankedNames(text, domainTools.length)
       .map((name, position) => [name, position] as const));
     return keys.flatMap((key) => [...groups.get(key) ?? []]
       .sort((left, right) =>

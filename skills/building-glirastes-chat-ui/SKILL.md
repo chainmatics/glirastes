@@ -62,17 +62,17 @@ component; headless hooks and building blocks for an own chat:
 | `theme.colors.primary`, `theme.colors.primarySoft` | accent and gradient stop within a theme override |
 | `classNames` | per-slot class hooks |
 | `components` | replace a rendered component (see *Slots*) |
-| `locale` | override any user-facing string; omitted keys fall back to English |
+| `locale`, `locales` | `locale` overrides any string for every language; `locales` per BCP-47 tag (`{ pl: { sendButton: 'Wyślij' } }`, partial tables fall back per key; language = `language`, else the page `lang` (`<glirastes-chat>`: nearest `lang`), else the turn's tool labels, followed when the page changes it later; `languageSource: 'server'` = old order; sent per request as `Content-Language` unless `sendLanguage: false`, server side: `requestLocale` > `locale` > that > manifest, `clientLanguage: false`) |
 | `session` | `save` / `load` / `clear` for durable conversations |
 | `mentions` | mention sources and search |
-| `suggestions` | contextual suggestion chips |
+| `suggestions`, `messageFooter` | suggestion chips (`placement: 'message'` puts follow-ups under the answer); `messageFooter`: copy, sources, duration and stop per answer (references/hooks-and-building-blocks.md) |
 | `voice` | speech-to-text |
-| `attachments` | image and PDF attachments (section below) |
+| `attachments`, `queue` | image and PDF attachments (section below); opt-in message queue, messages sent while busy or during an approval go once idle (`references/composer-chips-attachments.md`, "Message queue") |
 | `chatInteractions` | derived `@` entities and `/` commands (section below) |
-| `entityLinks` | entity references in answers as chips |
+| `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames` (default `'text'`: a shared name stays text; `'first'` = before 0.18.0; markers with an id link by id), `resolveAmbiguous`, `scope`, `mentionMarkers: 'markdown'` + `verifyMentions`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
-| `onBeforeSend`, `onToolResult` | hooks around a turn |
-| `approvalDescription` | human-readable text for an approval request |
+| `onBeforeSend`, `onToolResult`, `onUiActionOutcome` | hooks around a turn; UI action outcomes in `references/hooks-and-building-blocks.md` |
+| `approvalDescription`, `approvalDisplay` | human-readable text for an approval request; `approvalDisplay` (`decided: 'entry'`, `open: 'inline'`) places approvals at their tool part (`MessageParts.parts`); do not set `decided: 'entry'` if the app draws its own entry from `parts[].approval` (both would show) |
 
 `locale` exists so the SDK never fights the product's i18n stack. Bind it to
 whatever the app already uses:
@@ -101,9 +101,9 @@ styles are variable-driven, inline overrides break under a strict CSP.
 ## Slots
 
 `components` replaces one rendered piece while the rest of the chat keeps
-working: `MessageBubble`, `ChatInput`, `ToolResultBlock`, `Markdown`,
-`InputExtra`, `ApprovalCard`, `BulkApprovalCard`, `PipelineTimeline`,
-`SuggestionChip`, `MentionChip`, `AttachmentTray`, `AttachmentButton`.
+working: `MessageBubble`, `MessageParts`, `TurnNotice` (message layout), `ChatInput`,
+`ToolResultBlock`, `Markdown`, `InputExtra`, `ApprovalCard`, `BulkApprovalCard`, `ApprovalEntry`,
+`PipelineTimeline`, `SuggestionChip`, `MentionChip`, `AttachmentTray`, `AttachmentButton`.
 
 Replace the narrowest slot: swapping `MessageBubble` to restyle one tool result
 costs the streaming, approval and mention behavior it carries.
@@ -127,16 +127,16 @@ dropped action looks exactly like a model that ignored the request.
 
 Generated navigation (`ui.navigate`) and filter (`ui.filter.<view>`) tools run
 through `useGlirastesNavigationBridge({ push })`; without the bridge they stay
-disabled. A client action becomes the tool `ui.<actionId>`; pass its payload
-contract as the third argument of `useAiClientAction` so the payload is typed
-and checked before the handler runs. An action that lives on one page takes
-that page's path as fourth argument, `{ route: '/templates' }`, in the page
-component: from another page the chat navigates there first and runs the
-action once it is registered. A handler returns `false` when it could not do
-its work, so the chat does not report it as done. Never register a global
-handler that only fires a window event for a listener on one page. A chat UI
-that does not use the SDK provider must pass each tool result to
-`dispatchToolResultUiActions` (`glirastes/browser`), or no UI tool runs.
+disabled. A client action becomes the tool `ui.<actionId>` (`task-details.open` is `ui.taskDetails.open`); a
+single-segment id or one starting with `navigate.`, `filter.` or `action.` moves under `ui.action.`
+(`navigate` is `ui.action.navigate`); the browser still dispatches the registered id. Pass its payload
+contract as the third argument of `useAiClientAction` so the payload is typed and checked before the
+handler runs. An action that lives on one page takes that page's path as fourth argument,
+`{ route: '/templates' }`, in the page component: from another page the chat navigates there first and
+runs the action once it is registered. A handler returns `false` if it could not work
+(the dispatch fails; the model is only told "handed to the app"). Never register a global handler that
+only fires a window event for a listener on one page. A chat UI that does not use the SDK provider must
+pass each tool result to `runToolResultUiActions` (`glirastes/browser`), or no UI tool runs.
 
 ## `@` entities and `/` commands
 
@@ -207,13 +207,13 @@ repository, not shipped in the package) has the table and override format.
 
 `chatInteractions` makes the default `ChatInput` show `/` and `@` pills (`theme.colors.pill*`, `--cm-pill-*`, `glirastes/react/pills.css` when unstyled); keep it.
 `useChatComposer().chatAbout({ type, id, label })` opens the chat with the pills in it (composers on `useChatComposerInput` get them; other own composers: `useChatComposerTarget`); `useOptionalChatComposer()` is `null` outside the provider, and `onOpenRequest` on the provider shows a chat the app opens itself.
-`entityLinks={{ matchers, open }}` makes references in answers clickable chips; a replaced `Markdown` slot keeps them only through `useChatEntityLinks()`.
+`entityLinks={{ matchers, open }}` makes references in answers clickable chips; a replaced `Markdown` slot keeps them only through `useChatEntityLinks()`. Markdown: lists are styled by default; tables need `bun add remark-gfm` and `markdown={{ remarkPlugins: [remarkGfm] }}` (`ChatMarkdownOptions`, memoized). While react-markdown loads and no turn runs, a text Markdown would render differently shows skeleton lines (`[data-element="markdown-skeleton"][data-state="loading"]`); the provider loads it on mount (`markdown={{ preload: false }}` turns that off), `preloadMarkdown()` starts earlier; after `markdown.loadingTimeoutMs` (default 4000, counted from the import start; `false`: no limit, `0`: no skeleton) a message still waiting shows its raw text, then Markdown if it arrives.
 Methods, chip options and gotchas: [references/composer-chips-attachments.md](references/composer-chips-attachments.md).
 
 ## Commands, mentions and clarification
 
 `completionProviders` turns the composer into provider search. Each provider
-has a stable `id`, a `trigger` (`/` or `@`) and an async `search` that gets
+has a stable `id`, a `trigger` (`@`, `/` or another char, see [triggers](references/composer-triggers-toolbar.md#triggers)) and an async `search` that gets
 the query, an abort `signal`, a `limit` and the `completionContext` (roles and
 attributes the UI knows). Arrow keys, Tab/Enter and Escape work in the list,
 and the selected item's own id reaches the model in the mention marker.
@@ -268,8 +268,8 @@ those capabilities.
 `mentions` supplies the sources; `MentionInput` and `RichMentionInput` render
 them, `MentionChip` and `MentionChipList` show them. Assert that structured
 mention ids survive submission: a mention degraded to plain text looks right
-and no longer resolves. `suggestions` drives `SuggestionBar` and
-`SuggestionChip`; a failing source may not take the composer down.
+and no longer resolves. `suggestions` drives `SuggestionBar` and `SuggestionChip`; a failing source may not take the composer down.
+Opt-in `composer.starters`, `composer.hint`, `composer.clarificationChips`; per-chat drafts are on by default: [references/composer-starters-drafts.md](references/composer-starters-drafts.md).
 
 ## Attachments
 
@@ -289,7 +289,7 @@ transport refuses files. Limits, error codes and the composer API:
 
 `session.save`, `.load` and `.clear` make conversations durable; `load` takes
 SDK `ChatMessage`s or flat `WireChatMessage`s. `SessionSwitcher` renders list,
-create, switch and rename.
+create, switch and rename (`variant="list"` for a side column).
 
 Corrupted stored sessions fail closed; clearing history needs a confirmation.
 
@@ -298,8 +298,8 @@ For several chats per user without a backend, pass
 (from `glirastes/react`; memoize by that complete identity key): the chats
 stay in the browser's `localStorage`, are named after their first question,
 and the assistant header lists them in place of its title, with new, rename
-and delete. Include app, environment, business tenant and verified user in
-`storageKey`; remount the React chat with that key when identity changes. This keeps chat
+and delete; it also keeps each chat's unsent draft (`drafts: false` turns it off). Include app, environment, business tenant and verified user in
+`storageKey`; remount `AiChatProvider` with that key when identity changes (drafts live in it). This keeps chat
 content on the device, so decide it with the developer; an app that needs
 chats on every device supplies `list`, `create`, `remove`, `rename`, `save`
 and `load` from its own server instead.
@@ -317,8 +317,8 @@ The default for an app with its own layout: an "Ask AI" button where the app
 wants it (usually the top bar), and the chat docked on the right or detached
 as a window. `AssistantWorkspace` inside `VercelAiChat` is that whole
 integration; `AssistantToggle` and `useAssistantLayout()` control it from any
-depth, and the parent needs a height. Example, shortcuts, look options and the
-own-layout parts: [references/placing-the-assistant.md](references/placing-the-assistant.md).
+depth, the parent needs a height, `modes` adds full screen with a chat column.
+Example, width, shortcuts, look, own layout: [references/placing-the-assistant.md](references/placing-the-assistant.md).
 
 ## Approvals
 
@@ -328,7 +328,7 @@ denial, expiry, replay, cross-app and cross-tenant cases.
 
 `ApprovalCard` handles one request; `BulkApprovalCard` groups same-tool requests
 but keeps each approval independent (no bulk authorization). A failed approval
-is retryable without losing the request.
+is retryable without losing the request. Both name the call's ids and warn about unknown ones ([hooks and building blocks](references/hooks-and-building-blocks.md)).
 
 ## Speech-to-text gate
 
@@ -344,18 +344,18 @@ Use the SDK STT controller as the only recording state machine:
 - retry permission, provider, and reconnect failures explicitly;
 - close MediaStream tracks, sockets, timers, and audio resources on every exit.
 
-`voice.pushToTalk` adds hold-to-talk on the mic button and a hold hotkey
-(default `mod+shift+space`) next to tap-to-toggle. Pass `voice.routeKey` (for
-example the pathname) so navigation stops recording and keeps the speech as
-draft; back/forward, session switches and unmount release the microphone as
-well. `voice.adapter` plugs in another provider (an `SttProviderAdapter`;
-`DeepgramSttAdapter` and `RecordedSttAdapter` ship in `glirastes/stt`); keep
-its identity stable.
+`voice.getToken` and chat `headers` may be async. `voice.pushToTalk` adds
+hold-to-talk on the mic button and a hotkey (default `mod+shift+space`) next to
+tap-to-toggle. Pass `voice.routeKey` (for example the pathname) so navigation
+stops recording and keeps the speech as draft; back/forward, session switches and
+unmount release the microphone as well. `voice.adapter` plugs in another provider
+(an `SttProviderAdapter`; `DeepgramSttAdapter` and `RecordedSttAdapter` ship in
+`glirastes/stt`); keep its identity stable. Every voice input (`RecordedSttAdapter` too) needs the audio worklet served: chain `glirastes stt worklet` into `predev`/`prebuild`, see [speech worklet](references/hooks-and-building-blocks.md#speech-worklet).
 
-A finished recording (`RecordedSttAdapter`, `audio/wav` to
-`/api/ai/speech-recognize`) needs one server route with
-`createRecordingTranscriptionHandler`; route, limits and the local-only
-rule: [references/recording-transcription.md](references/recording-transcription.md).
+A finished recording needs an authenticated app route. See
+[local speech](references/local-speech.md) for in-process transcription and
+[recording transcription](references/recording-transcription.md) for service
+routing, limits and protected-policy checks. Keep provider keys server-side.
 
 `useStt` is the hook, `VoiceInputButton` and `RecordingBar` the surface. Speech
 traffic goes directly between the target app's local provider adapter and its

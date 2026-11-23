@@ -174,4 +174,19 @@ describe('useChatComposerInput', () => {
     expect(chat.sendMessage).not.toHaveBeenCalled();
     expect(screen.getByRole('textbox').textContent).toBe('Hallo');
   });
+
+  it('leaves triggers out of inputProps with the default @ and /, so the app\'s own triggers prop still wins', () => {
+    render(<App chat={transport()} />);
+    expect('triggers' in composer!.inputProps).toBe(false);
+  });
+
+  it('carries the resolved triggers in inputProps when the provider defines its own', () => {
+    function WithTriggers() {
+      const interactions = useMemo(() => ({ entities: [task], commands }), []);
+      const triggers = useMemo(() => [{ char: '#', label: 'Tickets' }], []);
+      return <AiChatProvider transport={transport()} chatInteractions={interactions} triggers={triggers}><Custom /></AiChatProvider>;
+    }
+    render(<WithTriggers />);
+    expect(composer!.inputProps.triggers?.map((trigger) => (typeof trigger === 'string' ? trigger : trigger.char))).toEqual(['@', '/', '#']);
+  });
 });

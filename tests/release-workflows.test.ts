@@ -44,6 +44,37 @@ function jobRuns(workflow: string, job: string): string[] {
   return runs;
 }
 
+function jobLines(workflow: string, job: string): string[] {
+  const lines = workflow.split('\n');
+  const start = lines.findIndex((line) => line === `  ${job}:`);
+  expect(start, `job ${job}`).toBeGreaterThan(-1);
+  const end = lines.findIndex((line, i) => i > start && /^ {2}\S/.test(line));
+  return lines.slice(start + 1, end === -1 ? undefined : end);
+}
+
+/** The `- name:` of each step of one job, in order. */
+function jobStepNames(workflow: string, job: string): string[] {
+  return jobLines(workflow, job)
+    .map((line) => /^ {6}- name: (.+)$/.exec(line)?.[1]?.trim())
+    .filter((name): name is string => name !== undefined);
+}
+
+/** The text of one named step of one job. */
+function jobStep(workflow: string, job: string, name: string): string {
+  const lines = jobLines(workflow, job);
+  const start = lines.findIndex((line) => line === `      - name: ${name}`);
+  expect(start, `step ${name}`).toBeGreaterThan(-1);
+  const end = lines.findIndex((line, i) => i > start && /^ {6}- /.test(line));
+  return lines.slice(start, end === -1 ? undefined : end).join('\n');
+}
+
+/** A job's `needs:` as a list (`needs: a` or `needs: [a, b]`). */
+function jobNeeds(workflow: string, job: string): string[] {
+  const line = jobLines(workflow, job).find((l) => /^ {4}needs: /.test(l));
+  if (!line) return [];
+  return line.replace(/^ {4}needs: /, '').replace(/[[\]]/g, '').split(',').map((n) => n.trim());
+}
+
 describe('release workflows', () => {
   it('type-checks the tests against the sources, not a built dist', () => {
     const config = JSON.parse(read('tsconfig.test.json')) as {
@@ -71,9 +102,36 @@ describe('release workflows', () => {
       'bun run build',
       'bun install --frozen-lockfile --cwd examples/react-nest-separate/api',
       'bun run check:egress',
+      'bun install --frozen-lockfile --cwd tests/fixtures/pg-floor',
       'bun run test',
       `npm publish --access public --provenance --tag "$(node -p "['latest', 'next'][Number(require('./package.json').version.includes('-'))]")"`,
     ]);
+  });
+
+  it('checks the upgrade notes in a preflight job before the image push and the npm publish', () => {
+    const workflow = read('.github/workflows/publish.yml');
+    expect(jobStepNames(workflow, 'release-preflight')).toEqual([
+      'Checkout',
+      'Verify upgrade notes are released for this version',
+      'Setup Bun',
+      'Install dependencies',
+      'Verify the api-surface snapshot matches the source',
+    ]);
+    // The image is pushed inside runtime-container, so it must wait for the preflight too.
+    expect(jobNeeds(workflow, 'runtime-container')).toEqual(['release-preflight']);
+    // Local STT stage 1 is a release gate as well; stage 2 (the model) is not.
+    expect(jobNeeds(workflow, 'stt-local-addon')).toEqual(['release-preflight']);
+    expect(workflow).toContain('uses: ./.github/workflows/stt-local-addon.yml');
+    expect(jobNeeds(workflow, 'publish')).toEqual(['release-preflight', 'runtime-container', 'stt-local-addon']);
+    expect(workflow).toContain("needs.stt-local-addon.result == 'success'");
+    expect(workflow).not.toContain('stt-local-smoke.yml');
+    const step = jobStep(workflow, 'release-preflight', 'Verify upgrade notes are released for this version');
+    expect(step).toContain('ls upgrade-notes/unreleased/*.json');
+    expect(step).toContain('[ ! -f "upgrade-notes/$PKG_VERSION.json" ]');
+    expect(step.match(/exit 1/g)).toHaveLength(2);
+    expect(jobStep(workflow, 'release-preflight', 'Install dependencies')).toContain('bun install --frozen-lockfile');
+    expect(jobStep(workflow, 'release-preflight', 'Verify the api-surface snapshot matches the source'))
+      .toContain('bun scripts/api-surface.ts --check');
   });
 });
 
@@ -102,5 +160,30 @@ describe('release notes', () => {
     const readme = read('README.md');
     expect(readme).not.toContain('in-development Foundation branch');
     expect(readme).toContain('`0.5.0` is the first Foundation release');
+  });
+});
+
+describe('local STT smoke workflows', () => {
+  const addon = read('.github/workflows/stt-local-addon.yml');
+  const smoke = read('.github/workflows/stt-local-smoke.yml');
+  const consumer = read('scripts/stt-local-consumer.sh');
+
+  it('lets only the latest job relax the exact peer pin', () => {
+    // npm refuses sherpa-onnx-node@latest next to the exact optional peer without it (ERESOLVE).
+    expect(jobLines(smoke, 'latest').join('\n')).toContain("stt-local-consumer.sh /t/glirastes.tgz /t/consumer '$SHERPA_VERSION' --legacy-peer-deps");
+    expect(jobLines(smoke, 'transcribe').join('\n')).not.toContain('--legacy-peer-deps');
+    expect(addon).not.toContain('--legacy-peer-deps');
+  });
+
+  it('installs exactly the sherpa-onnx-node version it was asked for', () => {
+    expect(consumer).toContain('npm view "sherpa-onnx-node@$sherpa" version');
+    expect(consumer).toMatch(/installed .* != requested|is not the requested/);
+  });
+
+  it('runs stage 2 on every source the pull and the handler path load', () => {
+    const paths = smoke.split('paths:')[1]!.split('workflow_dispatch')[0]!;
+    for (const path of ['src/contracts/url.ts', 'src/diagnostics/**', 'src/server/adapters/nextjs/index.ts', 'src/cli/index.ts']) {
+      expect(paths).toContain(`'${path}'`);
+    }
   });
 });

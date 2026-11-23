@@ -1,3 +1,19 @@
+# November 23 port: current delivery boundary
+
+The November 17 release candidate below is historical and superseded. The authorized port uses fixed SDK main `f29b3607` (0.24.1) and preserves the earlier privacy branch as a merge parent. Target the next available minor when preparing the release; no release, deployment or protected-branch merge is authorized.
+
+Pseudonymization is explicit opt-in: infrastructure alone, absent `required`, and `required: false` do not activate it. `privacy.local.required: true` / handler `privacy.policy.required: true` activate self-managed enforcement. `privacy.managed: true` explicitly requires authenticated fresh Platform bootstrap with durable state. Verified protected policy and retained authority still fail closed. The Apache-2.0 SDK's self-managed option is distinct from the Business/Enterprise managed PII Shield.
+
+At this port, protected turns refuse mention markers, direct commands, tool middleware and declared approval-subject/list/preview lookups before model/backend work. Memory and result handles remain unsupported. The Node bridge uses the same handler boundary; view-context declarations are contract-only on this fixed base and arbitrary request fields never become model context. Normal unprotected functionality remains available. Do not remove approval requirements to work around a protected limitation.
+
+Protected tool failures withhold raw detail before truncation. Low-level SDK-converted tools are rebuilt with protected output handling when passed to `wrapToolsForPrivacy`, including ordinary copies; a replaced execution function is refused instead of dropping its added guard. Complete protected history bypasses lossy memo/compaction, and model-input debug hooks are disabled. Screenshots remain blocked unless the effective policy explicitly allows original images, visibly without image PII protection.
+
+GID's Whisper deployment is removed from this release and preserved on `followup/privacy-local-stt-20261123`; SDK upstream local STT support remains available unchanged for ordinary consumers. GID retains Deepgram only while protection is off and must visibly block speech when protected. Earlier local STT performance acceptance is not promoted to this delivery.
+
+New tests and review/gates must name the port SHA and new consumer archive. All older SHAs, test totals and provider/hardware evidence below apply only to their historical candidates. The public package, fresh registry install, actual Platform/GID staging, second live provider and deployed operational acceptance remain separate gates.
+
+---
+
 # Privacy Stage 1 — SDK delivery checkpoint
 
 Fixed implementation basis: `a25ef568c65c8260d749475cb2ae955448112e31`, including upstream main `866abec` and the earlier reviewed privacy commits. Later main changes are evaluated for release compatibility/security, not silently folded into this acceptance. This is an implemented/local-tested checkpoint, not a completed deployment or release.

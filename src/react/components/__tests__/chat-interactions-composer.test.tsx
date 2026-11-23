@@ -191,6 +191,27 @@ describe('composer keyboard and ARIA for chat interactions', () => {
     }
   });
 
+  it('closes the list for a mouse press outside it that comes right after the list appeared', async () => {
+    // The press lands in the first moment the list is in the DOM, before React runs passive effects.
+    // A listener attached in a passive effect missed it and left the list open.
+    const chat = transport();
+    const { container } = render(<Composer chat={chat} />);
+    let pressed = false;
+    const observer = new MutationObserver(() => {
+      if (pressed || !container.querySelector('[role="listbox"]')) return;
+      pressed = true;
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, composed: true }));
+    });
+    observer.observe(container, { childList: true, subtree: true });
+    try {
+      typeInto(screen.getByRole('textbox'), '@rel');
+      await waitFor(() => expect(pressed).toBe(true));
+      await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
+    } finally {
+      observer.disconnect();
+    }
+  });
+
   it('inserts a picked entity as a structured reference the model receives', async () => {
     const { chat, editor } = await open('@rel');
     fireEvent.keyDown(editor, { key: 'Enter' });

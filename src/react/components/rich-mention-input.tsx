@@ -1,9 +1,11 @@
 import {
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,9 +17,14 @@ import type {
   MentionDropdownItemProps,
   MentionDropdownOptionProps,
   MentionResult,
+  OpenCompletionOptions,
   RichMentionInputHandle,
   RichMentionInputProps,
 } from '../types.js';
+import { normalizeTrigger } from '../completions/triggers.js';
+import { ChatContext } from '../provider/chat-context.js';
+import { composerContextOf } from '../provider/composer-context.js';
+import { sourceSearchOf } from '../completions/completion-search.js';
 import {
   inferMentionPrefix,
   mentionDataFromResult,
@@ -25,8 +32,9 @@ import {
   toolReferenceFromDataset,
   toolReferenceToDataset,
 } from '../utils/mention-markup.js';
+import { fillTemplate } from '../utils/fill-template.js';
 
-const DEFAULT_TRIGGERS = ['@', '/'];
+const DEFAULT_TRIGGERS: ReadonlyArray<string> = ['@', '/'];
 const SEARCH_DEBOUNCE_MS = 100;
 
 /**
@@ -71,6 +79,103 @@ function isSpace(char: string | undefined): boolean {
 /** `command` pills and `entity` pills are styled apart (`data-mention-kind`). */
 function mentionKind(type: string): 'command' | 'entity' {
   return type === 'command' ? 'command' : 'entity';
+}
+
+/**
+ * What `openCompletion` inserted and nobody touched since: closing the list
+ * removes exactly this range again. `created`: the text node was made for it.
+ */
+interface ArmedCompletion {
+  node: Text;
+  start: number;
+  text: string;
+  created: boolean;
+}
+
+/**
+ * Internal: the handle `RichMentionInput` really has. `pickCompletion` applies
+ * an entry as if it was picked from the `trigger` list at the caret
+ * (`onCompletionSelect` first, then its `select` behavior); the composer's "+"
+ * menu uses it. Not part of the public `RichMentionInputHandle`.
+ */
+export interface InternalRichMentionInputHandle extends RichMentionInputHandle {
+  pickCompletion: (item: MentionResult, options: { trigger: string }) => void;
+}
+
+/** `pickCompletion` of a handle when it is the built-in editor's. */
+export function pickCompletionOf(handle: RichMentionInputHandle | null | undefined): InternalRichMentionInputHandle['pickCompletion'] | undefined {
+  const pick = (handle as Partial<InternalRichMentionInputHandle> | null | undefined)?.pickCompletion;
+  return typeof pick === 'function' ? pick : undefined;
+}
+
+/**
+ * The typed trigger and query, so they can be found again after an app
+ * handler rebuilt the nodes (`setText`, `appendText`) or split them
+ * (`insertMention`).
+ */
+interface TextSnapshot {
+  text: string;
+  /** A live range over the text: it follows text a handler inserts before it. */
+  range?: Range;
+}
+
+function textNodesOf(editor: HTMLElement): Text[] {
+  const walker = editor.ownerDocument.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
+  return nodes;
+}
+
+function inChip(node: Node): boolean {
+  return !!node.parentElement?.closest('[data-component="mention-chip"]');
+}
+
+/** Deletes `length` characters at `local` and one of two spaces that then meet. */
+function deleteTextAt(node: Text, local: number, length: number): { node: Text; offset: number } {
+  node.deleteData(local, length);
+  if (local > 0 && isSpace(node.data[local - 1]) && isSpace(node.data[local])) node.deleteData(local, 1);
+  return { node, offset: local };
+}
+
+/**
+ * Removes the typed trigger and query after a handled pick, wherever the
+ * app's handler moved them: (1) the live range when it still spans exactly
+ * the text (handlers that insert before it), else (2) the text when it occurs
+ * exactly once outside pills as a whole word (a space, the start or the end
+ * of a text node on both sides). Zero or several matches delete nothing, so
+ * text the handler put in (`#bug-7` for `#bu`) is never cut.
+ */
+function removeTypedTrigger(editor: HTMLElement, snapshot: TextSnapshot): { node: Text; offset: number } | null {
+  const { range } = snapshot;
+  if (
+    range && !range.collapsed
+    && range.startContainer === range.endContainer
+    && range.startContainer.nodeType === Node.TEXT_NODE
+    && editor.contains(range.startContainer)
+    && range.toString() === snapshot.text
+    && !inChip(range.startContainer)
+  ) {
+    return deleteTextAt(range.startContainer as Text, range.startOffset, snapshot.text.length);
+  }
+  let found: { node: Text; local: number } | null = null;
+  for (const node of textNodesOf(editor)) {
+    if (inChip(node)) continue;
+    for (let local = node.data.indexOf(snapshot.text); local >= 0; local = node.data.indexOf(snapshot.text, local + 1)) {
+      const end = local + snapshot.text.length;
+      if (local > 0 && !isSpace(node.data[local - 1])) continue;
+      if (end < node.length && !isSpace(node.data[end])) continue;
+      if (found) return null;
+      found = { node, local };
+    }
+  }
+  return found ? deleteTextAt(found.node, found.local, snapshot.text.length) : null;
+}
+
+function liveRange(node: Text, start: number, end: number): Range {
+  const range = node.ownerDocument.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, end);
+  return range;
 }
 
 function isChip(node: Node | null | undefined): node is HTMLElement {
@@ -130,6 +235,9 @@ function charAfter(range: Range, editor: HTMLElement): string {
 
 function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: MentionDropdownItemProps) {
   const itemRef = useRef<HTMLButtonElement>(null);
+  // Standalone (outside a provider) there is no `composer.renderIcon`: no icon, as before.
+  const renderIcon = composerContextOf(useContext(ChatContext)).composer?.renderIcon;
+  const icon = result.icon && renderIcon ? renderIcon(result.icon, { type: result.type }) : null;
 
   useEffect(() => {
     if (isSelected && itemRef.current) {
@@ -147,6 +255,7 @@ function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: Menti
       data-mention-type={result.type}
       data-selected={isSelected ? 'true' : 'false'}
     >
+      {icon !== null && icon !== undefined && <span data-element="icon" aria-hidden="true">{icon}</span>}
       <span data-element="label">{result.label}</span>
       {result.description && (
         <span data-element="description">{result.description}</span>
@@ -172,9 +281,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onSubmit,
       onSearch,
       initialMentions,
-      triggers = DEFAULT_TRIGGERS,
+      triggers: triggerConfig = DEFAULT_TRIGGERS,
       components,
       onEntityAction,
+      onCompletionSelect,
       listLabel = 'Suggestions',
       resultsLabel = '{count} suggestions',
       commandPills = true,
@@ -183,10 +293,20 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onFiles,
       onBackspaceEmpty,
       allowEmptySubmit = false,
+      onListOpenChange,
     },
     ref,
   ) {
     const [dragOver, setDragOver] = useState(false);
+    // Each trigger char with its pill prefix; `select` is kept for the pick behavior.
+    // An invalid entry throws, as on the provider.
+    const triggers = useMemo(
+      () => new Map(triggerConfig.map((trigger) => {
+        const resolved = normalizeTrigger(trigger);
+        return [resolved.char, resolved] as const;
+      })),
+      [triggerConfig],
+    );
     const hasMentionSupport = typeof onSearch === 'function';
     const isControlled = value !== undefined;
     const [internalValue, setInternalValue] = useState(defaultValue);
@@ -202,12 +322,32 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // -1: the result itself; 0..n: one of its entity actions.
     const [selectedAction, setSelectedAction] = useState(-1);
     const [isSearching, setIsSearching] = useState(false);
+
+    // `onListOpenChange` on every change of the shown list, not on mount (closed).
+    const listShown = hasMentionSupport && dropdownOpen && searchResults.length > 0;
+    const listShownRef = useRef(false);
+    const onListOpenChangeRef = useRef(onListOpenChange);
+    onListOpenChangeRef.current = onListOpenChange;
+    useEffect(() => {
+      if (listShownRef.current === listShown) return;
+      listShownRef.current = listShown;
+      onListOpenChangeRef.current?.(listShown);
+    }, [listShown]);
     const listboxId = useId();
     const [isFocused, setIsFocused] = useState(false);
 
     // Refs for stale-closure avoidance and debounce
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const searchVersionRef = useRef(0);
+    // Set by `openCompletion({ source })`: the providers searched until the list closes.
+    const sourceRef = useRef<string | ReadonlyArray<string> | undefined>(undefined);
+    const lastSearchRef = useRef<{ query: string; trigger: string }>({ query: '', trigger: '' });
+    // Set by `openCompletion` until the user types or picks.
+    const armedRef = useRef<ArmedCompletion | null>(null);
+    // Set while `onCompletionSelect` runs: `openCompletion` calls wait here until the pick cleaned up.
+    const pickQueueRef = useRef<OpenCompletionOptions[] | null>(null);
+    const openCompletionRef = useRef<((options: OpenCompletionOptions) => void) | null>(null);
+    const warnedTriggersRef = useRef(new Set<string>());
     const isInitializedRef = useRef(false);
 
     const DropdownItem = components?.DropdownItem ?? DefaultDropdownItem;
@@ -353,7 +493,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       removeBtn.dataset.action = 'remove-mention';
       removeBtn.dataset.mentionId = mention.id;
       removeBtn.setAttribute('role', 'button');
-      removeBtn.setAttribute('aria-label', removeMentionLabel.replace('{label}', displayName));
+      removeBtn.setAttribute('aria-label', fillTemplate(removeMentionLabel, { label: displayName }));
       removeBtn.textContent = '\u00D7';
       removeBtn.style.cursor = 'pointer';
 
@@ -369,7 +509,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // -----------------------------------------------------------------------
 
     const closeDropdown = useCallback(() => {
+      // A debounced search still pending must not reopen the list.
+      clearTimeout(searchTimeoutRef.current);
       searchVersionRef.current++;
+      sourceRef.current = undefined;
       setDropdownOpen(false);
       setSearchResults([]);
       setNoMatches(false);
@@ -377,21 +520,69 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       setSelectedAction(-1);
     }, []);
 
+    /**
+     * Removes the untouched text of `openCompletion` and puts the caret back
+     * where it was (only while the editor has focus). True when removed.
+     */
+    const removeArmed = useCallback((): boolean => {
+      const armed = armedRef.current;
+      armedRef.current = null;
+      const editor = editableRef.current;
+      if (!armed || !editor || !editor.contains(armed.node)) return false;
+      const { node, start, text, created } = armed;
+      if (node.data.slice(start, start + text.length) !== text) return false;
+      node.deleteData(start, text.length);
+      const caret = document.createRange();
+      const parent = node.parentNode!;
+      if (created && node.length === 0) {
+        caret.setStart(parent, Array.prototype.indexOf.call(parent.childNodes, node));
+        node.remove();
+      } else {
+        caret.setStart(node, start);
+      }
+      caret.collapse(true);
+      const root = editor.getRootNode() as Document | ShadowRoot;
+      if (root.activeElement === editor) {
+        const selection = editorSelection(editor);
+        selection?.removeAllRanges();
+        selection?.addRange(caret);
+      }
+      onChange?.(getFullValue());
+      return true;
+    }, [onChange, getFullValue]);
+
+    /** Closing the list without a pick (Escape, outside click, blur) also removes untouched `openCompletion` text. */
+    const dismissDropdown = useCallback(() => {
+      removeArmed();
+      closeDropdown();
+    }, [removeArmed, closeDropdown]);
+
     const performSearch = useCallback(
-      async (query: string, trigger: string) => {
+      async (query: string, trigger: string, source?: string | ReadonlyArray<string>) => {
         if (!onSearch) return;
         const version = ++searchVersionRef.current;
+        lastSearchRef.current = { query, trigger };
         setIsSearching(true);
         try {
-          const results = await onSearch(query, trigger);
+          // A source narrows only a search from `createCompletionSearch` (the composer's); any other `onSearch` gets all entries.
+          const narrowed = source === undefined ? undefined : sourceSearchOf(onSearch);
+          if (source !== undefined && !narrowed && !warnedTriggersRef.current.has('\u0000source')) {
+            warnedTriggersRef.current.add('\u0000source');
+            console.warn('[glirastes] openCompletion: source narrows only a search from createCompletionSearch; listing all entries.');
+          }
+          const results = await (narrowed ? narrowed(query, trigger, source) : onSearch(query, trigger));
           if (searchVersionRef.current !== version) return;
+          // A list opened by `openCompletion` that finds nothing goes away with its text.
+          const removed = results.length === 0 && removeArmed();
+          if (removed) sourceRef.current = undefined;
           setSearchResults(results);
           setSelectedIndex(0);
           setSelectedAction(-1);
           setDropdownOpen(results.length > 0);
-          setNoMatches(results.length === 0);
+          setNoMatches(results.length === 0 && !removed);
         } catch {
           if (searchVersionRef.current !== version) return;
+          if (removeArmed()) sourceRef.current = undefined;
           setSearchResults([]);
           setDropdownOpen(false);
           setNoMatches(false);
@@ -401,7 +592,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           }
         }
       },
-      [onSearch],
+      [onSearch, removeArmed],
     );
 
     /**
@@ -427,7 +618,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       for (let i = before.length - 1; i >= 0; i--) {
         const char = before[i];
         if (isSpace(char)) break;
-        if (triggers.includes(char)) {
+        if (triggers.has(char)) {
           if (i === 0 || isSpace(before[i - 1])) {
             return { trigger: char, query: before.slice(i + 1), triggerPos: i };
           }
@@ -441,14 +632,14 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // -----------------------------------------------------------------------
 
     const insertMention = useCallback(
-      (result: MentionResult) => {
-        if (!editableRef.current) return;
+      (result: MentionResult): MentionData | null => {
+        if (!editableRef.current) return null;
 
         const selection = editorSelection(editableRef.current);
-        if (!selection || selection.rangeCount === 0) return;
+        if (!selection || selection.rangeCount === 0) return null;
 
         const range = selection.getRangeAt(0);
-        if (range.startContainer.nodeType !== Node.TEXT_NODE) return;
+        if (range.startContainer.nodeType !== Node.TEXT_NODE) return null;
 
         const textNode = range.startContainer as Text;
         const text = textNode.textContent || '';
@@ -459,17 +650,18 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         for (let i = cursorPos - 1; i >= 0; i--) {
           const char = text[i];
           if (isSpace(char)) break;
-          if (triggers.includes(char)) {
+          if (triggers.has(char)) {
             if (i === 0 || isSpace(text[i - 1])) {
               triggerPos = i;
               break;
             }
           }
         }
-        if (triggerPos === -1) return;
+        if (triggerPos === -1) return null;
 
         // The trigger the user typed: an entity found with `@` stays `@` whatever its type.
-        const prefix = result.type === 'command' ? '/' : text[triggerPos]!;
+        const char = text[triggerPos]!;
+        const prefix = result.type === 'command' ? '/' : triggers.get(char)?.prefix ?? char;
         const slug = typeof result.slug === 'string' && result.slug.trim().length > 0
           ? normalizeMentionSlug(result.slug)
           : normalizeMentionSlug(result.label);
@@ -495,7 +687,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           requestAnimationFrame(() => {
             onChange?.(getFullValue());
           });
-          return;
+          return mentionData;
         }
 
         // Non-command: insert chip element
@@ -505,7 +697,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         const afterText = text.slice(cursorPos);
 
         const parent = textNode.parentNode;
-        if (!parent) return;
+        if (!parent) return null;
 
         const beforeNode = document.createTextNode(beforeText);
         const afterNode = document.createTextNode(' ' + afterText);
@@ -527,9 +719,39 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         requestAnimationFrame(() => {
           onChange?.(getFullValue());
         });
+        return mentionData;
       },
       [triggers, commandPills, createChipElement, closeDropdown, onChange, getFullValue],
     );
+
+    /**
+     * The trigger and query before the caret are replaced by `replacement`
+     * (plain text); the caret lands behind it. Null when no trigger is active.
+     */
+    const replaceQuery = useCallback((replacement: (char: string) => string): string | null => {
+      const selection = editorSelection(editableRef.current);
+      if (!selection || selection.rangeCount === 0) return null;
+      const range = selection.getRangeAt(0);
+      if (range.startContainer.nodeType !== Node.TEXT_NODE) return null;
+      const textNode = range.startContainer as Text;
+      const text = textNode.textContent || '';
+      const cursorPos = range.startOffset;
+      for (let i = cursorPos - 1; i >= 0; i--) {
+        const char = text[i]!;
+        if (isSpace(char)) break;
+        if (triggers.has(char) && (i === 0 || isSpace(text[i - 1]))) {
+          const inserted = replacement(char);
+          textNode.textContent = text.slice(0, i) + inserted + text.slice(cursorPos);
+          const caret = document.createRange();
+          caret.setStart(textNode, i + inserted.length);
+          caret.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(caret);
+          return char;
+        }
+      }
+      return null;
+    }, [triggers]);
 
     /**
      * Puts a pill at the caret (or at the end when the caret is elsewhere),
@@ -538,6 +760,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const insertPill = useCallback((mention: MentionData) => {
       const editor = editableRef.current;
       if (!editor) return;
+      // An `openCompletion` trigger nobody typed after gives way to the pill (else blur or send would act on it later).
+      removeArmed();
       const selection = editorSelection(editor);
       let range: Range | null = null;
       if (selection && selection.rangeCount > 0 && editor.contains(selection.getRangeAt(0).startContainer)) {
@@ -571,11 +795,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       setMentions((prev) => [...prev, mention]);
       closeDropdown();
       onChange?.(getFullValue());
-    }, [createChipElement, closeDropdown, onChange, getFullValue]);
+    }, [createChipElement, closeDropdown, onChange, getFullValue, removeArmed]);
 
     /** Removes the `@query` being typed and runs one of the result's entity actions instead. */
     const runAction = useCallback(
       (result: MentionResult, actionId: string) => {
+        armedRef.current = null;
         const selection = editorSelection(editableRef.current);
         const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
         if (range && range.startContainer.nodeType === Node.TEXT_NODE) {
@@ -585,7 +810,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           for (let i = cursorPos - 1; i >= 0; i--) {
             const char = text[i];
             if (isSpace(char)) break;
-            if (triggers.includes(char) && (i === 0 || isSpace(text[i - 1]))) {
+            if (triggers.has(char) && (i === 0 || isSpace(text[i - 1]))) {
               textNode.textContent = text.slice(0, i) + text.slice(cursorPos);
               // Replacing the data pulls the live range to offset 0: put the caret back where the `@query` was.
               range.setStart(textNode, i);
@@ -614,12 +839,13 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         return;
       }
 
-      // Mention mode: detect trigger and schedule search
+      // Mention mode: what the user types keeps `openCompletion` text.
+      armedRef.current = null;
       const triggerState = detectTrigger();
       if (triggerState) {
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = setTimeout(() => {
-          void performSearch(triggerState.query, triggerState.trigger);
+          void performSearch(triggerState.query, triggerState.trigger, sourceRef.current);
         }, SEARCH_DEBOUNCE_MS);
       } else {
         clearTimeout(searchTimeoutRef.current);
@@ -634,12 +860,12 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
      * present. A command that was restored as a chip (setValue) is still in
      * the state too; the chip is its entry, so it is not listed twice.
      */
-    const collectMentions = useCallback((text: string): MentionData[] => {
+    const collectMentions = useCallback((text: string, inserted: ReadonlyArray<MentionData> = []): MentionData[] => {
       if (!hasMentionSupport) return [];
       const chips = getMentionsFromDOM();
       const chipped = new Set(chips.map((chip) => `${chip.type}\u0000${chip.id}`));
       const tokens = new Set(text.split(/\s+/));
-      const commands = mentions.filter((mention) =>
+      const commands = [...mentions, ...inserted].filter((mention) =>
         mention.type === 'command'
         && !chipped.has(`${mention.type}\u0000${mention.id}`)
         && typeof mention.prefix === 'string'
@@ -648,7 +874,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       return [...chips, ...commands];
     }, [hasMentionSupport, mentions, getMentionsFromDOM]);
 
-    const submit = useCallback(() => {
+    /** `inserted`: mentions added in this tick, not yet in the `mentions` state (a `run` pick). */
+    const submit = useCallback((inserted: ReadonlyArray<MentionData> = []) => {
       if (disabled) return;
 
       const text = hasMentionSupport
@@ -657,7 +884,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
       if (!text && !allowEmptySubmit) return;
 
-      if (onSubmit?.(text, text ? collectMentions(text) : []) === false) return;
+      if (onSubmit?.(text, text ? collectMentions(text, inserted) : []) === false) return;
+      armedRef.current = null;
       setValue('');
       if (hasMentionSupport) {
         setMentions([]);
@@ -666,6 +894,97 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         editableRef.current.innerHTML = '';
       }
     }, [disabled, hasMentionSupport, getFullValue, onSubmit, setValue, collectMentions, allowEmptySubmit]);
+
+    /**
+     * The trigger and query before the caret (or the untouched `openCompletion`
+     * text) as a snapshot, taken before the app's handler can change the editor.
+     */
+    const snapshotTrigger = useCallback((armed: ArmedCompletion | null): TextSnapshot | null => {
+      const editor = editableRef.current;
+      if (!editor) return null;
+      if (armed && editor.contains(armed.node) && armed.node.data.slice(armed.start, armed.start + armed.text.length) === armed.text) {
+        return { text: armed.text, range: liveRange(armed.node, armed.start, armed.start + armed.text.length) };
+      }
+      const selection = editorSelection(editor);
+      if (!selection || selection.rangeCount === 0) return null;
+      const range = selection.getRangeAt(0);
+      if (range.startContainer.nodeType !== Node.TEXT_NODE || !editor.contains(range.startContainer)) return null;
+      const node = range.startContainer as Text;
+      const text = node.data;
+      for (let i = range.startOffset - 1; i >= 0; i--) {
+        const char = text[i]!;
+        if (isSpace(char)) break;
+        if (triggers.has(char) && (i === 0 || isSpace(text[i - 1]))) {
+          return { text: text.slice(i, range.startOffset), range: liveRange(node, i, range.startOffset) };
+        }
+      }
+      return null;
+    }, [triggers]);
+
+    /**
+     * One entry of the list was picked: the app's handler first, then the
+     * entry's `select` behavior. `fromCode` (`pickCompletion`): the trigger was
+     * inserted armed for this pick; when nothing replaces it, it goes again.
+     */
+    const pickResult = useCallback((result: MentionResult, fromCode = false) => {
+      const armed = armedRef.current;
+      armedRef.current = null;
+      const dropArmed = () => {
+        if (!fromCode) return;
+        armedRef.current = armed;
+        removeArmed();
+      };
+      const active = detectTrigger() ?? lastSearchRef.current;
+      const typed = onCompletionSelect ? snapshotTrigger(armed) : null;
+      let handled = false;
+      let deferred: OpenCompletionOptions[] = [];
+      if (onCompletionSelect) {
+        // `openCompletion` called inside the handler (a sub-list) runs once the pick has cleaned up.
+        pickQueueRef.current = deferred;
+        try {
+          handled = onCompletionSelect(result, { trigger: active.trigger, query: active.query }) === true;
+        } finally {
+          deferred = pickQueueRef.current ?? [];
+          pickQueueRef.current = null;
+        }
+      }
+      const openDeferred = () => {
+        for (const options of deferred) openCompletionRef.current?.(options);
+      };
+      if (handled) {
+        // The app handled it: trigger and query (or the untouched `openCompletion` text) leave the
+        // editor, found by the snapshot from before the handler (it may have rebuilt the text).
+        const editor = editableRef.current;
+        const removed = editor && typed ? removeTypedTrigger(editor, typed) : null;
+        if (removed) {
+          const selection = editorSelection(editor);
+          const caret = document.createRange();
+          caret.setStart(removed.node, removed.offset);
+          caret.collapse(true);
+          selection?.removeAllRanges();
+          selection?.addRange(caret);
+          onChange?.(getFullValue());
+        }
+        closeDropdown();
+        openDeferred();
+        return;
+      }
+      // Any other value (an own `onSearch` may return one) picks as `chip`.
+      const kind = result.select ?? triggers.get(active.trigger)?.select ?? 'chip';
+      if (kind === 'text') {
+        if (replaceQuery(() => result.insertText ?? result.label) === null) dropArmed();
+        else {
+          closeDropdown();
+          onChange?.(getFullValue());
+        }
+      } else {
+        // `run` sends through the same path as Enter, so a disabled (streaming) composer sends nothing.
+        const inserted = insertMention(result);
+        if (!inserted) dropArmed();
+        else if (kind === 'run') submit([inserted]);
+      }
+      openDeferred();
+    }, [detectTrigger, snapshotTrigger, onCompletionSelect, closeDropdown, triggers, replaceQuery, onChange, getFullValue, insertMention, submit, removeArmed]);
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
@@ -704,26 +1023,32 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             if (selected && action) {
               runAction(selected, action.id);
             } else if (selected) {
-              insertMention(selected);
+              pickResult(selected);
             }
             return;
           }
           if (event.key === 'Escape') {
             event.preventDefault();
-            closeDropdown();
+            dismissDropdown();
             return;
           }
         }
 
-        if (event.key === 'Escape' && noMatches) {
+        if (event.key === 'Escape' && (noMatches || armedRef.current)) {
           event.preventDefault();
-          closeDropdown();
+          dismissDropdown();
           return;
         }
 
         // Submit on Enter (both modes)
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
+          // A list opened by `openCompletion` whose results are not there yet: Enter
+          // dismisses the untouched trigger instead of sending it bare.
+          if (armedRef.current && removeArmed()) {
+            closeDropdown();
+            return;
+          }
           submit();
           return;
         }
@@ -772,7 +1097,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         selectedAction,
         onEntityAction,
         runAction,
-        insertMention,
+        pickResult,
+        dismissDropdown,
+        removeArmed,
         closeDropdown,
         noMatches,
         submit,
@@ -833,8 +1160,9 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // Side effects (mention mode)
     // -----------------------------------------------------------------------
 
-    // Close dropdown on outside click
-    useEffect(() => {
+    // Close dropdown on outside click. A layout effect, so the listener is in place in the same commit
+    // that shows the list: a passive effect can run a frame later, and a press outside in between was lost.
+    useLayoutEffect(() => {
       if (!dropdownOpen) return;
 
       const handleClickOutside = (e: MouseEvent) => {
@@ -847,13 +1175,13 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           editableRef.current &&
           !path.includes(editableRef.current)
         ) {
-          closeDropdown();
+          dismissDropdown();
         }
       };
 
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [dropdownOpen, closeDropdown]);
+    }, [dropdownOpen, dismissDropdown]);
 
     // Chip removal via click delegation on the editable
     useEffect(() => {
@@ -923,13 +1251,126 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       [],
     );
 
+    /**
+     * Inserts `trigger` + `query` like typed (caret kept when the editor has
+     * focus, else at the end; a space first after a non-space) and searches
+     * at once. The text stays armed until the user types or picks.
+     */
+    const armTrigger = useCallback((trigger: unknown, query: string, caller: 'open' | 'pick'): string | null => {
+      const editor = editableRef.current;
+      // A locked editor (e.g. a turn without queue) takes no trigger text from code either.
+      if (!hasMentionSupport || !editor || disabled) return null;
+      if (typeof trigger !== 'string' || !triggers.has(trigger)) {
+        const key = String(trigger);
+        if (!warnedTriggersRef.current.has(key)) {
+          warnedTriggersRef.current.add(key);
+          // Static text only: the argument may come from app data (React diagnostics rule).
+          if (caller === 'pick') console.warn('[glirastes] pickCompletion: the trigger is not one of this composer; nothing was picked.');
+          else console.warn('[glirastes] openCompletion: the trigger is not one of this composer; nothing was opened.');
+        }
+        return null;
+      }
+      // A second call replaces the text of the first.
+      removeArmed();
+      const root = editor.getRootNode() as Document | ShadowRoot;
+      const hadFocus = root.activeElement === editor;
+      if (!hadFocus) editor.focus();
+      const selection = editorSelection(editor);
+      let range: Range | null = null;
+      if (hadFocus && selection && selection.rangeCount > 0 && editor.contains(selection.getRangeAt(0).startContainer)) {
+        range = selection.getRangeAt(0).cloneRange();
+        range.collapse(false);
+      }
+      if (!range) {
+        range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+      }
+      const container = range.startContainer;
+      const inChip = (container instanceof Element ? container : container.parentElement)?.closest('[data-component="mention-chip"]');
+      if (inChip && editor.contains(inChip)) {
+        range.setStartAfter(inChip);
+        range.collapse(true);
+      }
+      const before = charBefore(range, editor);
+      const text = `${before && !isSpace(before) ? ' ' : ''}${trigger}${query}`;
+
+      // Into a text node, so typing on and trigger detection work as if typed.
+      let node: Text;
+      let offset: number;
+      let created = false;
+      if (range.startContainer.nodeType === Node.TEXT_NODE) {
+        node = range.startContainer as Text;
+        offset = range.startOffset;
+      } else {
+        const parent = range.startContainer;
+        const previous = parent.childNodes[range.startOffset - 1];
+        const next = parent.childNodes[range.startOffset] ?? null;
+        if (previous?.nodeType === Node.TEXT_NODE) {
+          node = previous as Text;
+          offset = node.length;
+        } else if (next?.nodeType === Node.TEXT_NODE) {
+          node = next as Text;
+          offset = 0;
+        } else {
+          node = document.createTextNode('');
+          parent.insertBefore(node, next);
+          offset = 0;
+          created = true;
+        }
+      }
+      node.insertData(offset, text);
+      const caret = document.createRange();
+      caret.setStart(node, offset + text.length);
+      caret.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(caret);
+      armedRef.current = { node, start: offset, text, created };
+      return trigger;
+    }, [hasMentionSupport, disabled, triggers, removeArmed]);
+
+    const openCompletion = useCallback((options: OpenCompletionOptions) => {
+      if (pickQueueRef.current) {
+        pickQueueRef.current.push(options);
+        return;
+      }
+      const trigger = armTrigger(
+        options?.trigger,
+        options?.query ?? '',
+        'open',
+      );
+      if (trigger === null) return;
+      clearTimeout(searchTimeoutRef.current);
+      sourceRef.current = options.source;
+      setSelectedIndex(0);
+      setSelectedAction(-1);
+      onChange?.(getFullValue());
+      void performSearch(options.query ?? '', trigger, options.source);
+    }, [armTrigger, onChange, getFullValue, performSearch]);
+
+    openCompletionRef.current = openCompletion;
+
+    /** A pick from outside the list (the "+" menu): the trigger goes in at the caret, then the normal pick runs. */
+    const pickCompletion = useCallback((item: MentionResult, options: { trigger: string }) => {
+      const trigger = armTrigger(
+        options?.trigger,
+        '',
+        'pick',
+      );
+      if (trigger === null) return;
+      clearTimeout(searchTimeoutRef.current);
+      closeDropdown();
+      lastSearchRef.current = { query: '', trigger };
+      pickResult(item, true);
+    }, [armTrigger, closeDropdown, pickResult]);
+
     // -----------------------------------------------------------------------
     // Imperative handle
     // -----------------------------------------------------------------------
 
     useImperativeHandle(
       ref,
-      () => ({
+      (): InternalRichMentionInputHandle => ({
         focus: () => {
           const editor = editableRef.current;
           if (!editor) return;
@@ -944,6 +1385,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           }
         },
         clear: () => {
+          armedRef.current = null;
           if (editableRef.current) {
             editableRef.current.innerHTML = '';
           }
@@ -960,6 +1402,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         setValue: (nextValue: string, draftMentions: MentionData[] = []) => {
           if (!editableRef.current) return;
           const editor = editableRef.current;
+          armedRef.current = null;
           editor.textContent = '';
           if (hasMentionSupport) {
             const remaining = [...draftMentions];
@@ -1009,8 +1452,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           chip.after(space);
           setMentions((prev) => [...prev, mention]);
         },
+        openCompletion,
+        pickCompletion,
       }),
-      [hasMentionSupport, setValue, getFullValue, collectMentions, createChipElement, closeDropdown, insertPill],
+      [hasMentionSupport, setValue, getFullValue, collectMentions, createChipElement, closeDropdown, insertPill, openCompletion, pickCompletion],
     );
 
     // -----------------------------------------------------------------------
@@ -1067,7 +1512,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           key={key}
           result={result}
           isSelected={index === selectedIndex && selectedAction === -1}
-          onClick={() => insertMention(result)}
+          onClick={() => pickResult(result)}
           optionProps={optionProps(index)}
         />
       );
@@ -1127,7 +1572,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
+          onBlur={() => {
+            setIsFocused(false);
+            if (armedRef.current) dismissDropdown();
+          }}
           suppressContentEditableWarning
         />
 

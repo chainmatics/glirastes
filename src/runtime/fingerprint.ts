@@ -32,3 +32,12 @@ export function createExecutionFingerprint(input: {
   const serialized = JSON.stringify(normalize(input, new WeakSet()));
   return `sha256:${createHash('sha256').update(serialized).digest('base64url')}`;
 }
+
+/**
+ * Fingerprint of a call before it runs: tool name and normalized arguments
+ * (key order does not matter). Used to recognize a call that already ran.
+ */
+export function createCallFingerprint(input: { toolName: string; arguments: unknown }): string {
+  const serialized = JSON.stringify(normalize({ toolName: input.toolName, arguments: input.arguments }, new WeakSet()));
+  return `sha256:${createHash('sha256').update(serialized).digest('base64url')}`;
+}

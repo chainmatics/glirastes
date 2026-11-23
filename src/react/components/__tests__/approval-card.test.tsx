@@ -82,3 +82,129 @@ describe('createApprovalDescriptionGenerator detailItems', () => {
     expect(result.detailItems).toBeUndefined();
   });
 });
+
+describe('ApprovalCard ids of the call', () => {
+  const PLAYLIST = '14f1e041-4609-4b24-a723-631b133115cc';
+  const UNSEEN = '9e8d7c6b-5a49-4382-a1b0-c9d8e7f6a5b4';
+
+  it('renders a card without ids exactly as before', () => {
+    const { container } = renderCard(approval({
+      toolName: 'tasks_update', args: { title: 'Bericht' }, description: 'Aufgabe ändern', details: ['Titel: Bericht', 'Priorität: Hoch'],
+    }));
+    expect(container.innerHTML).toBe(
+      '<div data-component="approval-card" data-tool="tasks_update" data-state="pending"><div data-element="header"><span data-element="description">Aufgabe ändern</span></div><div data-element="details"><div data-element="detail-line"><span data-element="detail-label">Titel</span><span data-element="detail-value">Bericht</span></div><div data-element="detail-line"><span data-element="detail-label">Priorität</span><span data-element="detail-value">Hoch</span></div></div><div data-element="actions"><button data-action="reject">✕ Abbrechen</button><button data-action="approve">✓ Bestätigen</button></div></div>',
+    );
+  });
+
+  it('shows the name of a seen id instead of the id, without a warning', () => {
+    const { container } = renderCard(approval({
+      args: { id: PLAYLIST },
+      details: [],
+      subjects: [{ path: 'id', id: PLAYLIST, status: 'named', name: 'Abend-Promos', label: 'Playlist' }],
+    }));
+    const line = container.querySelector('[data-subject]')!;
+    expect(line.querySelector('[data-element="detail-label"]')!.textContent).toBe('Playlist');
+    expect(line.querySelector('[data-element="detail-value"]')!.textContent).toBe('Abend-Promos');
+    expect(container.textContent).not.toContain(PLAYLIST);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(container.querySelector('[data-warning]')).toBeNull();
+  });
+
+  it('labels a bare id of unknown type with the German target label', () => {
+    const { container } = renderCard(approval({ subjects: [{ path: 'id', id: PLAYLIST, status: 'named', name: 'Abend-Promos' }] }));
+    expect(container.querySelector('[data-subject] [data-element="detail-label"]')!.textContent).toBe('Ziel');
+  });
+
+  it('does not repeat a name a detail line already shows', () => {
+    const { container } = renderCard(approval({
+      details: ['Ziel: Abend-Promos'],
+      subjects: [{ path: 'id', id: PLAYLIST, status: 'named', name: 'Abend-Promos' }],
+    }));
+    expect(container.querySelectorAll('[data-subject]').length).toBe(0);
+    expect(container.querySelectorAll('[data-element="detail-line"]').length).toBe(1);
+  });
+
+  it('warns about an unseen id, shows it and points the approve button to the warning', () => {
+    const { container } = renderCard(approval({ subjects: [{ path: 'playlistId', id: UNSEEN, status: 'unknown', label: 'Playlist' }] }));
+    const warning = screen.getByRole('alert');
+    expect(warning.textContent).toContain('Zu dieser ID ist in dieser Unterhaltung kein Name bekannt. Prüfe sie, bevor du bestätigst.');
+    expect(warning.querySelector('[data-element="subject-id"]')!.textContent).toBe(UNSEEN);
+    expect(warning.querySelector('[data-element="detail-label"]')!.textContent).toBe('Playlist');
+    expect(warning.querySelector('[data-element="warning-icon"]')!.getAttribute('aria-hidden')).toBe('true');
+    expect(container.querySelector('[data-component="approval-card"]')!.hasAttribute('data-warning')).toBe(true);
+    const approve = screen.getByRole('button', { name: /Bestätigen/ });
+    expect(approve.getAttribute('aria-describedby')).toBe(warning.id);
+    expect(warning.id).not.toBe('');
+  });
+
+  it('handles several ids and an id array: names the seen ones, warns about the others in plural', () => {
+    const { container } = renderCard(approval({
+      subjects: [
+        { path: 'playlistId', id: PLAYLIST, status: 'named', name: 'Abend-Promos', label: 'Playlist' },
+        { path: 'trackIds', id: 't-1', status: 'named', name: 'Intro', label: 'Tracks' },
+        { path: 'trackIds', id: 't-2', status: 'named', name: 'Outro', label: 'Tracks' },
+        { path: 'trackIds', id: 't-3', status: 'unknown', label: 'Tracks' },
+        { path: 'folderId', id: 'f-9', status: 'unknown', label: 'Folder' },
+      ],
+    }));
+    const lines = [...container.querySelectorAll('[data-subject]')].map((line) => line.textContent);
+    expect(lines).toEqual(['PlaylistAbend-Promos', 'TracksIntro, Outro']);
+    const warning = screen.getByRole('alert');
+    expect(warning.textContent).toContain('Zu diesen IDs sind in dieser Unterhaltung keine Namen bekannt.');
+    expect([...warning.querySelectorAll('[data-element="subject-id"]')].map((id) => id.textContent)).toEqual(['t-3', 'f-9']);
+  });
+
+  it('shows an id seen in a tool result without a name neutrally: fallback or id, a note, no warning', () => {
+    const { container } = renderCard(approval({
+      subjects: [
+        { path: 'versionId', id: 'v-3', status: 'seen', label: 'Version', fallback: 'Version number 3' },
+        { path: 'baseVersionId', id: 'v-2', status: 'seen', label: 'Base version' },
+      ],
+    }));
+    const lines = [...container.querySelectorAll('[data-subject][data-status="seen"]')];
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'VersionVersion number 3kam in dieser Unterhaltung vor',
+      'Base versionv-2kam in dieser Unterhaltung vor',
+    ]);
+    expect(lines[1]!.querySelector('[data-element="subject-id"]')!.textContent).toBe('v-2');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(container.querySelector('[data-warning]')).toBeNull();
+  });
+
+  it('still warns about an unknown id next to a seen one', () => {
+    const { container } = renderCard(approval({
+      subjects: [
+        { path: 'versionId', id: 'v-3', status: 'seen', label: 'Version' },
+        { path: 'folderId', id: 'f-9', status: 'unknown', label: 'Folder' },
+      ],
+    }));
+    const warning = screen.getByRole('alert');
+    expect([...warning.querySelectorAll('[data-element="subject-id"]')].map((id) => id.textContent)).toEqual(['f-9']);
+    expect(container.querySelector('[data-warning]')).not.toBeNull();
+  });
+
+  it('flags an id shown with different names, with the latest name and the id', () => {
+    renderCard(approval({
+      subjects: [{ path: 'userId', id: '7', status: 'ambiguous', name: 'Vertrieb', names: ['Vertrieb', 'Ada'], label: 'User' }],
+    }));
+    const warning = screen.getByRole('alert');
+    expect(warning.textContent).toContain('Diese ID kam mit verschiedenen Namen vor: Vertrieb, Ada. Prüfe sie, bevor du bestätigst.');
+    expect(warning.querySelector('[data-element="detail-value"]')!.textContent).toBe('Vertrieb');
+    expect(warning.querySelector('[data-element="subject-id"]')!.textContent).toBe('7');
+  });
+
+  it('names no record for an id of different kinds and lists every candidate with its kind', () => {
+    const { container } = renderCard(approval({
+      subjects: [{
+        path: 'id', id: '3', status: 'ambiguous', names: ['Lobby Loop', 'Linus Torvalds'],
+        candidates: [{ label: 'Playlist', name: 'Lobby Loop' }, { label: 'User', name: 'Linus Torvalds' }, { label: 'Version' }],
+      }],
+    }));
+    const warning = screen.getByRole('alert');
+    expect(warning.textContent).toContain('Diese ID kam bei verschiedenen Arten von Datensätzen vor: Lobby Loop (Playlist), Linus Torvalds (User), Version. Prüfe, welcher gemeint ist, bevor du bestätigst.');
+    expect(warning.querySelector('[data-element="detail-value"]')).toBeNull();
+    expect(warning.querySelector('[data-element="subject-id"]')!.textContent).toBe('3');
+    // No name line in the details either.
+    expect(container.querySelector('[data-subject]')).toBeNull();
+  });
+});

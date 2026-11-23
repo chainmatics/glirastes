@@ -124,7 +124,11 @@ describe('entity chips in answers', () => {
     const resolve = vi.fn((key: string) => (key === 'MAR-2' ? { id: 'task-2', label: 'Release prüfen' } : undefined));
     const links: ChatEntityLinksConfig = { matchers: [{ type: 'task', pattern: TASK_KEY, resolve }], open };
     render(<Chat messages={[answer('Erledigt: **MAR-2** ist zu, MAR-404 gibt es nicht.')]} entityLinks={links} bus={new UiActionBus()} />);
-    const chip = await screen.findByRole('button', { name: 'Open Release prüfen' });
+    // Wait with a plain selector, then check the role once. A *ByRole query computes styles for every
+    // element of the panel; polled on each DOM change it held the event loop so long under load that
+    // the key resolution it waited for missed the 1 s budget.
+    await waitFor(() => expect(document.querySelector('button[aria-label="Open Release prüfen"]')).not.toBeNull());
+    const chip = screen.getByRole('button', { name: 'Open Release prüfen' });
     expect(chip.textContent).toBe('MAR-2');
     expect(chip.closest('[data-component="mention-chip"]')?.getAttribute('data-mention-type')).toBe('task');
     await waitFor(() => expect(resolve).toHaveBeenCalledWith('MAR-404'));

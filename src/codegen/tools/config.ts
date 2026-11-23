@@ -3,7 +3,9 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
 import { PrivacyEntryIdSchema, ProviderBindingSchema } from '../../contracts/privacy-policy.js';
+import { LANGUAGE_TAG_PATTERN, MAX_TEXT_LANGUAGES } from '../../contracts/localized-text.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
+import { MAX_OUTPUT_FIELDS, normalizeOutputFields, parseAnyDepthKey } from '../../server/core/output-fields.js';
 
 /** Every file the tools generator reads (inputs) or owns (outputs), app-relative. */
 export const TOOLS_PATHS = {
@@ -27,6 +29,8 @@ export const TOOLS_PATHS = {
 
 export const DEFAULT_GENERATED_MODULE = 'src/generated/glirastes/tools.generated.ts';
 
+const APP_DENIED_MESSAGE = 'output.deniedFields takes only any-depth patterns such as "**.fileUrl" (at most 200, one field name after "**.", no whitespace); an exact path belongs to one tool';
+
 function insideApp(value: string): boolean {
   return !value.startsWith('/') && !/^[A-Za-z]:/.test(value)
     && !value.split(/[\\/]/).includes('..');
@@ -34,6 +38,11 @@ function insideApp(value: string): boolean {
 
 const appPath = z.string().trim().min(1).max(512)
   .refine(insideApp, 'Path must stay inside the app');
+/**
+ * The tsconfig of a source's files, app-relative. Optional: by default the
+ * nearest tsconfig.json from the scanned folder up to the app root is used.
+ */
+const tsconfigPath = appPath.regex(/\.json$/, 'The tsconfig must be a .json file');
 const modulePath = z.string().trim().min(1).max(512)
   .regex(/\.(?:ts|js|mjs)$/, 'The generated module must end in .ts, .js or .mjs')
   .refine(insideApp, 'Path must stay inside the app');
@@ -48,8 +57,8 @@ const folderName = z.string().trim().min(1).max(200)
 
 const SourceSchema = z.union([
   ToolSourceKindSchema,
-  z.object({ kind: z.literal('next-app'), apiDir: appPath.optional() }).strict(),
-  z.object({ kind: z.literal('nest'), srcDir: appPath.optional() }).strict(),
+  z.object({ kind: z.literal('next-app'), apiDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
+  z.object({ kind: z.literal('nest'), srcDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
   z.object({
     kind: z.literal('openapi'),
     /** The exported OpenAPI 3.0 or 3.1 JSON document, app-relative; `openapi.json` by default. */
@@ -72,11 +81,12 @@ const SourceSchema = z.union([
     kind: z.literal('url-filters'),
     appDir: appPath.optional(),
     srcDir: appPath.optional(),
+    tsconfig: tsconfigPath.optional(),
     stripSegments: z.array(folderName).max(20).optional(),
   }).strict(),
-  z.object({ kind: z.literal('react-router'), srcDir: appPath.optional() }).strict(),
-  z.object({ kind: z.literal('vue-router'), srcDir: appPath.optional() }).strict(),
-  z.object({ kind: z.literal('react-actions'), srcDir: appPath.optional() }).strict(),
+  z.object({ kind: z.literal('react-router'), srcDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
+  z.object({ kind: z.literal('vue-router'), srcDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
+  z.object({ kind: z.literal('react-actions'), srcDir: appPath.optional(), tsconfig: tsconfigPath.optional() }).strict(),
 ]);
 
 /** Sources that each produce app-wide UI tools; a second copy would duplicate them. */
@@ -90,6 +100,20 @@ export const ToolsConfigSchema = z.object({
   targetAppKey: z.string().trim().min(1).max(200),
   locale: z.string().trim().min(2).max(35)
     .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/),
+  /**
+   * The languages of the app's UI as BCP-47 tags (e.g. `["en", "de", "pl"]`).
+   * Every tool gets its chat labels per language (from its presentation,
+   * else its title, else the English or German template, else English) in
+   * the generated module. Optional: without it the labels cover `en`, `de`
+   * and every language a tool's presentation or title is declared in. With
+   * it, `describe` asks for texts in these languages and a language without
+   * an own label is reported. `[]` turns labels per language off: one label
+   * in `locale`, titles not used as labels (the output before 0.18.0).
+   * Local only: the setup artifact keeps one presentation in `locale`.
+   */
+  languages: z.array(z.string().regex(LANGUAGE_TAG_PATTERN).max(35)).max(MAX_TEXT_LANGUAGES)
+    .refine((tags) => new Set(tags.map((tag) => tag.toLowerCase())).size === tags.length, { message: 'Each language once' })
+    .optional(),
   sources: z.array(SourceSchema).min(1).max(20),
   emit: z.object({
     module: modulePath.optional(),
@@ -140,6 +164,52 @@ export const ToolsConfigSchema = z.object({
   connection: z.object({
     envFile: z.string().trim().min(1).max(512).optional(),
   }).strict().optional(),
+  /**
+   * Output fields for every generated endpoint tool. `deniedFields`: only
+   * any-depth patterns `**.<key>` (e.g. `**.fileUrl`), joined with each
+   * tool's own `outputDeniedFields`. Local: written into the generated tool
+   * contracts, never sent to the Platform. Not for hand-written tools.
+   */
+  /**
+   * App-wide object identity: `entities` by type (`{ "channel": { "id":
+   * "key", "name": "title", "idKind": "speaking" } }`, applied to the
+   * response schemas of that type, else to the read routes of that
+   * resource), `tools` by definition id or model name (`{ output, input }`
+   * lists as `outputEntities` / `inputEntities`). The lowest level: code,
+   * OpenAPI operation and schema win. Entries are checked by the refresh
+   * (a finding, never a failure). Local only, never sent to the Platform.
+   */
+  identity: z.object({
+    entities: z.record(z.string().min(1).max(64), z.unknown()).optional(),
+    tools: z.record(z.string().min(1).max(200), z.object({
+      output: z.array(z.unknown()).max(20).optional(),
+      input: z.array(z.unknown()).max(20).optional(),
+    }).strict()).optional(),
+    /**
+     * Server lookups of approval subjects by entity type: `{ "playlist": {
+     * "tool": "playlists_get", "params": { "playlist_id": "playlist_id" } } }`
+     * attaches an `entityLookup` (`params`, `const?`, `result?`, `complete?`)
+     * to the named read tool (definition id or model name). The lowest level.
+     */
+    lookups: z.record(z.string().min(1).max(64), z.unknown())
+      .refine((lookups) => Object.keys(lookups).length <= 200, { message: 'At most 200 lookups' }).optional(),
+  }).strict().optional(),
+  /**
+   * `approvalSubject` per write tool (definition id or model name): an
+   * `ApprovalSubjectDeclaration` (`refs`, `preview`, `onUnavailable`,
+   * `onForbidden`, `recheck`) or `false` to turn the server lookup off. The
+   * lowest level: code and OpenAPI operation win. Entries are checked by the
+   * refresh (a finding, never a failure). Local only.
+   */
+  approvalSubjects: z.object({
+    tools: z.record(z.string().min(1).max(200), z.unknown())
+      .refine((tools) => Object.keys(tools).length <= 1_000, { message: 'At most 1000 tools' }).optional(),
+  }).strict().optional(),
+  output: z.object({
+    deniedFields: z.array(z.string()).max(MAX_OUTPUT_FIELDS)
+      .refine((paths) => paths.every((path) => parseAnyDepthKey(path) !== undefined)
+        && normalizeOutputFields(paths, 'outputDeniedFields') !== undefined, { message: APP_DENIED_MESSAGE }),
+  }).strict().optional(),
 }).strict().superRefine((config, context) => {
   const kinds = config.sources.map((source) => (typeof source === 'string' ? source : source.kind));
   for (const kind of SINGLETON_SOURCES) {
@@ -173,17 +243,18 @@ export const ToolsConfigSchema = z.object({
 
 export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type ToolSourceConfig =
-  | { kind: 'next-app'; apiDir?: string }
-  | { kind: 'nest'; srcDir?: string }
+  | { kind: 'next-app'; apiDir?: string; tsconfig?: string }
+  | { kind: 'nest'; srcDir?: string; tsconfig?: string }
   | { kind: 'openapi'; document?: string; fastapi?: string; selection?: 'all' | 'opt-in' }
-  | { kind: 'next-pages' | 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[] }
-  | { kind: 'react-router' | 'vue-router' | 'react-actions'; srcDir?: string };
+  | { kind: 'next-pages'; appDir?: string; srcDir?: string; stripSegments?: string[] }
+  | { kind: 'url-filters'; appDir?: string; srcDir?: string; stripSegments?: string[]; tsconfig?: string }
+  | { kind: 'react-router' | 'vue-router' | 'react-actions'; srcDir?: string; tsconfig?: string };
 
-function invalidConfig(): FoundationDiagnosticError {
+function invalidConfig(detail?: string): FoundationDiagnosticError {
   return new FoundationDiagnosticError({
     code: 'E-TOOLS-002',
     operation: 'tools.config',
-    message: 'The Glirastes tools configuration is invalid.',
+    message: detail ? `The Glirastes tools configuration is invalid: ${detail}.` : 'The Glirastes tools configuration is invalid.',
     remediation: 'repair-tools-config',
     path: TOOLS_PATHS.config,
   });
@@ -212,7 +283,11 @@ export function loadToolsConfig(root: string): ToolsConfig {
     throw invalidConfig();
   }
   const parsed = ToolsConfigSchema.safeParse(json);
-  if (!parsed.success) throw invalidConfig();
+  if (!parsed.success) {
+    // An app-wide deny-list that cannot be read fails closed: no tools are generated without it.
+    if (parsed.error.issues.some((issue) => issue.path[0] === 'output')) throw invalidConfig(APP_DENIED_MESSAGE);
+    throw invalidConfig();
+  }
   return parsed.data;
 }
 
