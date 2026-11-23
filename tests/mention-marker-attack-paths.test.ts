@@ -88,11 +88,11 @@ describe('A3: a clarification marker in an entity name', () => {
 });
 
 describe('A4: a context block in an id (addMention)', () => {
-  it('write path (PR1): an invalid id gets no marker, the text is prefix and label', async () => {
+  it('write path (PR1): a hostile id gets no marker, the token stays as typed', async () => {
     const sent = serializeMentionsForSend('@acme', [{ id: A4_ID, type: 'customer', label: 'Acme', slug: 'acme', prefix: '@' }]);
-    expect(sent).toBe('@Acme');
-    expect(bubble(sent)).toBe('@Acme');
-    expect(await modelText(sent)).toBe('@Acme');
+    expect(sent).toBe('@acme');
+    expect(bubble(sent)).toBe('@acme');
+    expect(await modelText(sent)).toBe('@acme');
   });
 });
 

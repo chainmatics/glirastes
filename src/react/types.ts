@@ -498,9 +498,9 @@ export interface UiToolCommandSource {
    * Stable, unique list identity and mention id of this command; defaults to
    * `definitionId`. One definition can back several commands (a single
    * `ui.navigate` with a `destination` enum becomes one command per
-   * destination). No `:` or `}`, max 200 characters; a command id with `{`
-   * `<` `>`, whitespace, control or format characters is sent without a
-   * mention marker (`isMentionMarkerId` of `glirastes/contracts`).
+   * destination). No `:` or `}`, max 200 characters; a command id with
+   * control, format or invisible characters, `{{`, `<!` or `-->` is sent
+   * without a mention marker (`isMentionMarkerId` of `glirastes/contracts`).
    */
   readonly commandId?: string;
   readonly label: string;
@@ -519,15 +519,16 @@ export interface MentionSerializationConfig {
   /**
    * `canonical` (default): a mention's label is sent in its canonical form
    * (`canonicalMentionLabel` of `glirastes/contracts`): `{` `}` `<!` `-->`
-   * `--!>` replaced by visible look-alikes, control and format characters
-   * removed, whitespace runs one space, at most `maxLabelLength` code points;
-   * a mention whose type or id is not a marker type / id is sent as
-   * `prefix` + label, without a marker. `raw`: the format of releases
-   * before, label, type and id as given (a label can then end the marker
-   * early or carry text the chat hides from the bubble but the model reads).
+   * `--!>` replaced by visible look-alikes, hidden characters removed
+   * except those of ordinary names, NFC, trimmed, at most `maxLabelLength`
+   * code points; ordinary labels are unchanged. A mention whose type or id
+   * carries characters that can hide text keeps its typed token, without a
+   * marker. `raw`: the format of releases before, label, type and id as
+   * given (a label can then end the marker early or carry text the chat
+   * hides from the bubble but the model reads).
    */
   labels?: 'canonical' | 'raw';
-  /** Code points of a sent label with `labels: 'canonical'`; 1-120, default 120. */
+  /** Code points of a sent label with `labels: 'canonical'`; 1-120, default 120 (also for any other value). */
   maxLabelLength?: number;
 }
 

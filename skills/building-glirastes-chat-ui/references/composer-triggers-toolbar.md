@@ -84,18 +84,18 @@ base.save!(id, messages, options)`).
 ### Mention markers
 
 A sent mention carries its canonical label (`mentions.serialize.labels`,
-default `'canonical'`): ordinary labels, also emoji, flags, Persian and
-Devanagari names, are byte-identical; `{` `}` `<!` `-->` `--!>` become `｛`
-`｝` `‹!` `--›` `--!›`; hidden characters go (bidi, zero-width, soft hyphen,
-variation selectors, tag runs, private use, Hangul fillers) except one ZWJ
-between emoji, one ZWJ/ZWNJ between letters, the England/Scotland/Wales
-flag tags and one VS15/VS16 after an emoji; whitespace runs become one
-space, NFC, at most `maxLabelLength` (1-120, default 120) code points (`…`,
-cut before a joined sequence). A type outside `[a-z][a-z0-9_.-]{0,63}` or an
-id with `:` `{` `}` `<` `>`, whitespace, control, format or invisible
-characters gets no marker: the text is prefix and label and the model loses
-the id. `labels: 'raw'` sends the old format. Reading is unchanged so far
-(stored text shows as before).
+default `'canonical'`): ordinary labels, ids and types are byte-identical
+(also emoji, flags, Persian, Devanagari, Japanese names); `{` `}` `<!`
+`-->` `--!>` become `｛` `｝` `‹!` `--›` `--!›`; hidden characters go
+(bidi, zero-width, soft hyphen, default ignorables, tag runs, private use)
+except the joiners, flag tags and selectors of ordinary names; NFC; edge
+whitespace trimmed, control runs one space; at most `maxLabelLength`
+(1-120, default 120) code points, cut at a grapheme boundary (`…`). A type
+or id with control, format, invisible, private-use or unassigned
+characters, `}`, `{{`, `<!`, `-->` or `--!>` gets no marker: the typed
+token stays and the model loses the id (console warning once per type).
+`labels: 'raw'` sends the old format. Reading is unchanged so far (stored
+text shows as before).
 
 From `glirastes/contracts`, for own parsers and server code:
 `canonicalMentionLabel(label, { id?, maxLength? })` (`CanonicalMentionLabelOptions`),
@@ -103,9 +103,8 @@ From `glirastes/contracts`, for own parsers and server code:
 `canonical`, `span`; same matches as the old regex, linear),
 `serializeMentionMarker({ type, id, label }, { labels?, maxLabelLength? })`
 (`MentionMarker`, `SerializeMentionMarkerOptions`; `undefined` for an
-invalid type or id), `isMentionMarkerType`, `isMentionMarkerId`,
-`MENTION_MARKER_TYPE_PATTERN`, `MENTION_MARKER_MAX_LABEL_LENGTH` (120),
-`MENTION_MARKER_MAX_ID_LENGTH` (200).
+hostile type or id), `isMentionMarkerType`, `isMentionMarkerId`,
+`MENTION_MARKER_MAX_LABEL_LENGTH` (120).
 
 ## What a pick does
 

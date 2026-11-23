@@ -236,37 +236,52 @@ marker carries nothing the bubble hides from the user but the model reads:
 | In the label | Sent as |
 | --- | --- |
 | `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (a `}}` can no longer end the marker, a `<!--context:…-->` is visible text of the chip) |
-| control characters, line and paragraph separators, whitespace runs | one space; trimmed |
-| format characters: bidi controls (RLO …), zero-width space, word joiner, BOM, soft hyphen (a typesetting hint, invisible unless a line breaks there) and all others | removed |
-| ZWJ / ZWNJ | kept once between two emoji (family and profession emoji, 🏳️‍🌈) or between two letters or marks (Persian and Arabic ZWNJ, Indic conjuncts); a run becomes one joiner; every other joiner is removed |
+| each run of control characters (also tab and line breaks), line and paragraph separators | one space |
+| whitespace at the start and end | trimmed; NBSP, U+202F, U+3000 and runs of spaces inside stay |
+| format characters and default ignorables: bidi controls (RLO …), zero-width space, word joiner, BOM, soft hyphen (a typesetting hint, invisible unless a line breaks there), U+034F, Hangul fillers, Khmer U+17B4/17B5, variation selectors, tag characters | removed, except below |
+| ZWJ / ZWNJ | kept once between two emoji (family and profession emoji, 🏳️‍🌈) or between two letters of a joining script (Arabic, Persian, Syriac, Devanagari and other Indic scripts, Sinhala, Khmer, Myanmar, Mongolian …); not between Latin, Greek, Cyrillic, Han, Kana or Hangul letters |
 | tag characters | only the tags of the 🏴 England, Scotland and Wales flags; any other tag run is removed (a 🏴 with other tags stays a bare 🏴) |
-| variation selectors | one VS15/VS16 right after an emoji-capable character (❤️, ☺︎, keycaps); all others removed, also the supplement U+E0100-E01EF |
-| U+034F, Hangul fillers (U+115F, U+1160, U+3164, U+FFA0), U+2800, private use (icon fonts), unassigned and noncharacters, lone surrogates | removed |
-| more than `maxLabelLength` code points (1-120, default 120) | at most the first 119 and `…`, cut before a joined emoji, flag, conjunct or combining sequence |
+| variation selectors | one VS15/VS16 right after an emoji-capable character (❤️, ☺︎, ©️; after a digit, `#` or `*` only in a keycap such as 1️⃣), one IVS right after a Han ideograph (葛󠄀), one Mongolian FVS after a Mongolian letter |
+| private use (icon fonts), noncharacters, U+2800, lone surrogates | removed |
+| unassigned code points | kept (what is unassigned depends on the engine's Unicode version; removing it would remove new emoji in older browsers) |
+| more than `maxLabelLength` code points (1-120, default 120; anything else means the default) | at most the first 119 and `…`, cut at a grapheme boundary (`Intl.Segmenter`, else before joined sequences), never inside an emoji, flag, keycap, conjunct or Thai cluster; a bare `…` becomes the id |
 | nothing visible left | the id |
 
-The text is NFC. Ordinary labels (`ACME <Süd> & Co. -> a/b`, emoji, flags,
-Persian, Arabic and Devanagari names) are sent byte-identical; a single `<`
-or `>` stays.
+The text is NFC. No NFKC: look-alikes such as `｛` stay, and they are
+visible in the chip. Ordinary labels, also emoji, flags, Persian, Arabic,
+Devanagari and Japanese names, are sent byte-identical; a single `<` or `>`
+stays.
 
-**An invalid type or id sends no marker.** A mention whose type is not
-`[a-z][a-z0-9_.-]{0,63}` (the entity type pattern; capitals or non-ASCII
-are invalid) or whose id has `:` `{` `}` `<` `>`, whitespace, control,
-format or any invisible character of the table, or more than 200 UTF-16
-units, is sent as the prefix and the canonical label (`@Acme`): the model
-loses the id, and the context block does not list it. An id is never
-cleaned. Completion items already require a valid type, so an invalid type
-comes only from the legacy `mentions` config (`search` / `resolve`
-results), `addActiveMention`, `RichMentionInput` `addMention` /
-`insertMention` / `setValue` with app-built mentions, or drafts and queued
-messages stored with such mentions; an invalid id can come from all of
-these and from completion items. `labels: 'raw'` sends the format of
+**A hostile type or id sends no marker.** A mention whose type or id has
+control characters (also tab and newline), line or paragraph separators,
+format characters, default ignorables, private use, unassigned or
+noncharacters, U+2800, lone surrogates, `}`, `{{`, `<!`, `-->` or `--!>`
+(or a type with `:` or over 200 UTF-16 units) keeps the token the user saw
+(`@acme`) without a marker: the model loses the id, no label or id of it
+enters the text, and the context block does not list it. The chat warns
+once per type in the console (outside production), without the type, id or
+label. Spaces, single `<` `>` `{`, `/`, `@`, `+`, non-ASCII letters,
+capitals and `:` are fine, as before. Such a mention can come from the
+legacy `mentions` config (`search` / `resolve` results), completion items,
+`addActiveMention`, `RichMentionInput` `addMention` / `insertMention` /
+`setValue` with app-built mentions, and drafts or queued messages stored
+with such a mention. Known limit, as before: an id with `:` is written as
+it is, and every reader splits it at its first colon
+(`{{mention:customer:tenant:42:Acme}}` shows a chip for id `tenant` with
+the label `42:Acme`, the model gets the whole text); the read path will
+handle it.
+
+Each token occurrence is replaced once, in one pass over the typed text:
+a label that contains another mention's token (`x @bob y`) no longer gets
+a second marker nested inside it. A token belongs to the first mention in
+the list with that token, as before. `labels: 'raw'` sends the format of
 releases before. Queued messages and restored drafts keep the structured
 mention and are serialized the same way when they are sent.
 `glirastes/contracts` exports the grammar for own parsers and server code:
 `canonicalMentionLabel`, `parseMentionMarkers` (`type`, `id`, `label`,
-`canonical`, `span`; the same matches as the reader before, linear in the
-text), `serializeMentionMarker`, `isMentionMarkerType`, `isMentionMarkerId`.
+`canonical` (computed on first read), `span`; the same matches as the
+reader before, linear in the text), `serializeMentionMarker`,
+`isMentionMarkerType`, `isMentionMarkerId`.
 
 Known limits (planned): reading is unchanged so far. Text stored by an
 older release, by `labels: 'raw'`, by an own client or added in

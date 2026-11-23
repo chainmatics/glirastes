@@ -15,10 +15,6 @@ const CONTEXT_OPEN_RE = /<!--\s*context:/iy;
 const DEFINITION_ID_RE = /^[A-Za-z0-9_.-]{1,200}$/;
 const MAX_TOOL_ARGS_LENGTH = 2_000;
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
  * Removes `<!-- context: … -->` blocks and the whitespace after them. Scans with
  * indexOf instead of one lazy regex, which is quadratic on many unclosed openers.
@@ -213,6 +209,44 @@ function buildContextBlock(
   return `<!--context:[${label}: ${summary}]--> `;
 }
 
+const refusedTypes = new Set<string>();
+const MAX_REFUSED_TYPES = 100;
+
+// Static text only: the type, id and label are content or app data (see the sensitive-diagnostics test).
+function warnRefusedMention(type: string): void {
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') return;
+  if (refusedTypes.has(type) || refusedTypes.size >= MAX_REFUSED_TYPES) return;
+  refusedTypes.add(type);
+  console.warn('[glirastes] A mention was sent without a {{mention:…}} marker: its type or id has characters that can hide text (control, format or invisible characters, }, {{, <!, -->). The model gets the typed text, not the id.');
+}
+
+/** Each `(^|\s)token(?=\s|$)` occurrence in `text`, left to right, without overlaps. */
+function tokenOccurrences(text: string, token: string): Array<{ start: number; end: number }> {
+  const found: Array<{ start: number; end: number }> = [];
+  let from = 0;
+  for (;;) {
+    const start = text.indexOf(token, from);
+    if (start < 0) return found;
+    const end = start + token.length;
+    if ((start === 0 || /\s/.test(text[start - 1]!)) && (end === text.length || /\s/.test(text[end]!))) {
+      found.push({ start, end });
+      from = end;
+    } else {
+      from = start + 1;
+    }
+  }
+}
+
+/**
+ * The text a send gives the model: each mention's token (`prefix` + `slug`,
+ * whitespace around it) becomes its `{{mention:type:id:label}}` marker,
+ * and tool-backed commands (every mention with `includeContextBlock`) are
+ * listed in a leading context block. One pass over the original text: a
+ * token occurrence is replaced once, and what is written is never scanned
+ * again. A token belongs to the first mention in the list with that token
+ * (as before); a mention whose type or id carries characters that can hide
+ * text keeps its token as typed, without a marker.
+ */
 export function serializeMentionsForSend(
   text: string,
   mentions: MentionData[],
@@ -224,10 +258,8 @@ export function serializeMentionsForSend(
   }
 
   const cleaned = stripContextBlocks(text);
-  let nextText = cleaned;
   const labels = options?.labels === 'raw' ? 'raw' : 'canonical';
   const markerOptions = { labels, maxLabelLength: options?.maxLabelLength } as const;
-  const serializedMentions: SerializableMention[] = [];
 
   // One command can arrive twice: as a chip read back from the editor DOM
   // (dataset only, so without definition id and arguments) and as the state
@@ -243,10 +275,15 @@ export function serializeMentionsForSend(
     if (reference) toolReferences.set(key, reference);
   }
 
-  for (const mention of mentions) {
+  interface Claim { mention: SerializableMention; marker: string | undefined; start: number; end: number; order: number }
+  const claimedTokens = new Set<string>();
+  const taken: Claim[] = [];
+  const overlaps = (start: number, end: number) => taken.some((claim) => start < claim.end && claim.start < end);
+
+  mentions.forEach((mention, order) => {
     const id = typeof mention.id === 'string' ? mention.id : '';
     const type = typeof mention.type === 'string' ? mention.type : '';
-    if (!id || !type) continue;
+    if (!id || !type) return;
 
     const label = typeof mention.label === 'string'
       ? mention.label
@@ -263,31 +300,43 @@ export function serializeMentionsForSend(
       : inferMentionPrefix(type);
 
     const token = `${prefix}${slug}`;
-    const marker = serializeMentionMarker({ type, id, label }, markerOptions);
-    // Without a valid type or id there is no marker, only what the user saw: prefix and label.
-    const sentLabel = labels === 'raw'
-      ? label
-      : canonicalMentionLabel(label, { ...(marker ? { id } : {}), maxLength: options?.maxLabelLength });
-    const replacement = marker ?? (sentLabel ? `${prefix}${sentLabel}` : token);
-    const tokenPattern = new RegExp(`(^|\\s)${escapeRegex(token)}(?=\\s|$)`, 'g');
-    let wasInserted = false;
-
-    nextText = nextText.replace(tokenPattern, (fullMatch, leading: string) => {
-      wasInserted = true;
-      return `${leading}${replacement}`;
-    });
-
-    if (wasInserted && marker) {
-      serializedMentions.push({
-        id,
-        type,
-        label: sentLabel,
-        displayName: sentLabel,
-        slug,
-        prefix,
-        toolReference: toolReferences.get(`${type}\u0000${id}`),
-      });
+    // The first mention in the list with this token takes every occurrence, as before.
+    if (claimedTokens.has(token)) return;
+    claimedTokens.add(token);
+    // Canonical once: the marker's own canonicalisation of a canonical label is cheap (idempotent).
+    const sentLabel = labels === 'raw' ? label : canonicalMentionLabel(label, { id, maxLength: options?.maxLabelLength });
+    const marker = serializeMentionMarker({ type, id, label: sentLabel }, markerOptions);
+    if (marker === undefined) warnRefusedMention(type);
+    const serializable: SerializableMention = {
+      id,
+      type,
+      label: sentLabel,
+      displayName: sentLabel,
+      slug,
+      prefix,
+      toolReference: toolReferences.get(`${type}\u0000${id}`),
+    };
+    for (const { start, end } of tokenOccurrences(cleaned, token)) {
+      // An earlier mention's occurrence wins, as when it replaced its token first.
+      if (!overlaps(start, end)) taken.push({ mention: serializable, marker, start, end, order });
     }
+  });
+
+  taken.sort((a, b) => a.start - b.start);
+  let nextText = '';
+  let cursor = 0;
+  const listed = new Set<number>();
+  const serializedMentions: SerializableMention[] = [];
+  for (const claim of taken) {
+    // A refused mention keeps the token the user saw: no label or id of it enters the text.
+    nextText += cleaned.slice(cursor, claim.start) + (claim.marker ?? cleaned.slice(claim.start, claim.end));
+    cursor = claim.end;
+  }
+  nextText += cleaned.slice(cursor);
+  for (const claim of [...taken].sort((a, b) => a.order - b.order)) {
+    if (claim.marker === undefined || listed.has(claim.order)) continue;
+    listed.add(claim.order);
+    serializedMentions.push(claim.mention);
   }
 
   // A tool-backed command is only meaningful with its definition and

@@ -1,18 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MENTION_MARKER_MAX_ID_LENGTH,
   MENTION_MARKER_MAX_LABEL_LENGTH,
-  MENTION_MARKER_TYPE_PATTERN,
   canonicalMentionLabel,
   cleanDisplayText,
   isMentionMarkerId,
   isMentionMarkerType,
   parseMentionMarkers,
   serializeMentionMarker,
+  type ParsedMentionMarker,
 } from './mention-marker.js';
 import * as contracts from './index.js';
-import { CHAT_ENTITY_TYPE_PATTERN } from './chat-interactions.js';
-import { ENTITY_TYPE_PATTERN } from './entity-declaration.js';
 
 /** The reader every SDK version before this module used (React and server). */
 const LEGACY_MARKER = /\{\{mention:([^:}]{1,200}):([^:}]{1,200}):([^}]{1,1000})\}\}/g;
@@ -41,6 +38,7 @@ const HOSTILE_ALPHABET = [
   '\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}', '\u{1f3f4}\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}',
   '\u{e0067}', '\u{e0062}',
   '\ufe0e', '\u{e0100}', '\u034f', '\u3164', '\u115f', '\u1160', '\uffa0', '\u2800', '\ue000', '\ufdd0', '\uffff',
+  '\u180b', '\u180e', '\u1824', '\u1828', '\u17b4', '\u845b', '\u{e0101}', '\u0378', '\u00a9', 'م', 'b', '\u0e01', '\u0e49', '\u0e33',
   'e\u200b\u0301', '\u1100\u00ad\u1161', '\u0301\u200d\u0302', '\u1100\u200c\u1161', '\u0915\u094d\u200d', '\u2764\ufe0f', '#',
 ];
 
@@ -52,6 +50,7 @@ function randomLabel(next: () => number, maxParts: number): string {
 }
 
 const codePoints = (value: string) => Array.from(value).length;
+const plain = ({ type, id, label, canonical, span }: ParsedMentionMarker) => ({ type, id, label, canonical, span });
 const RGI_FLAG_RE = /\u{1f3f4}(?:\u{e0067}\u{e0062}(?:\u{e0065}\u{e006e}\u{e0067}|\u{e0073}\u{e0063}\u{e0074}|\u{e0077}\u{e006c}\u{e0073})\u{e007f})/gu;
 
 describe('canonicalMentionLabel: ordinary labels stay byte-identical', () => {
@@ -69,6 +68,14 @@ describe('canonicalMentionLabel: ordinary labels stay byte-identical', () => {
     'Ünïcödé ✓ 50 %',
     '‹! already shown',
     'x'.repeat(120),
+    'Acme\u00a0GmbH',
+    '10\u202f000 \u20ac',
+    '\u682a\u5f0f\u4f1a\u793e\u3000\u5c71\u7530',
+    'Acme  GmbH   AG',
+    '\u845b\u{e0100}\u98fe\u533a',
+    'Unassigned \u0378 stays',
+    '\u00a9\ufe0f Brand',
+    '\u1824\u180b\u1828',
   ])('%s', (label) => {
     expect(canonicalMentionLabel(label)).toBe(label);
   });
@@ -87,12 +94,13 @@ describe('canonicalMentionLabel: hostile labels', () => {
     ['RLO', 'Invoice \u202efdp.exe', 'Invoice fdp.exe'],
     ['NUL', 'a\u0000b', 'a b'],
     ['CRLF', 'a\r\n\r\nb', 'a b'],
+    ['control run next to spaces keeps the spaces', 'a \n b', 'a   b'],
     ['U+2028 / U+2029', 'a\u2028b\u2029c', 'a b c'],
-    ['whitespace run and edges', ' \t a \u00a0\u3000 b \n', 'a b'],
+    ['whitespace edges are trimmed, Zs inside stay', ' \t a \u00a0\u3000 b \n', 'a \u00a0\u3000 b'],
     ['--!> and <!', 'a--!>b <!x', 'a--!›b ‹!x'],
     ['<!--> overlap', '<!-->', '‹!--›'],
     ['---> overlap', 'a--->', 'a---›'],
-    ['Cf between whitespace', 'a \u200b b', 'a b'],
+    ['Cf between whitespace', 'a \u200b b', 'a  b'],
     ['Cf inside <!', '<\u200b!-\u200b->', '‹!--›'],
     ['decomposed umlaut (NFC)', 'Mu\u0308ller', 'Müller'],
     ['lone surrogate', 'a\ud800b', 'ab'],
@@ -117,7 +125,18 @@ describe('canonicalMentionLabel: hostile labels', () => {
   it('cuts at a lower maxLength, and never above 120', () => {
     expect(canonicalMentionLabel('abcdefghij', { maxLength: 5 })).toBe('abcd…');
     expect(canonicalMentionLabel('x'.repeat(300), { maxLength: 500 })).toBe(`${'x'.repeat(119)}…`);
-    expect(canonicalMentionLabel('abc', { maxLength: 0 })).toBe('…');
+  });
+
+  it('a maxLength that is not a positive integer means the default', () => {
+    for (const maxLength of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(canonicalMentionLabel('x'.repeat(130), { maxLength })).toBe(`${'x'.repeat(119)}…`);
+    }
+    expect(canonicalMentionLabel('abc', { maxLength: 1 })).toBe('…');
+  });
+
+  it('a label that would be a bare ellipsis falls back to the id', () => {
+    expect(canonicalMentionLabel(`a${'\u0301'.repeat(130)}`, { id: '42' })).toBe('42');
+    expect(canonicalMentionLabel('abc', { maxLength: 1, id: '42' })).toBe('…');
   });
 
   it('falls back to the canonical id when nothing visible is left', () => {
@@ -148,18 +167,21 @@ describe('canonicalMentionLabel: hostile labels', () => {
       expect(canonicalMentionLabel(once), context).toBe(once);
       expect(once.length > 0, context).toBe(true);
       expect(codePoints(once) <= MENTION_MARKER_MAX_LABEL_LENGTH, context).toBe(true);
-      expect(once, context).not.toMatch(/[{}\p{Cc}\p{Zl}\p{Zp}\p{Cs}]|<!|--!?>|^\s|\s$|\s\s/u);
+      expect(once, context).not.toMatch(/[{}\p{Cc}\p{Zl}\p{Zp}\p{Cs}]|<!|--!?>|^\s|\s$/u);
       // Format characters left: single joiners between their kinds, and the three RGI flag tag sequences.
       const rest = once.replace(RGI_FLAG_RE, '\u{1f3f4}');
       expect(rest, context).not.toMatch(/[\u{e0000}-\u{e007f}]|[\u200c\u200d]{2}|^[\u200c\u200d]|[\u200c\u200d]$/u);
-      expect(rest.replace(/[\u200c\u200d]/gu, ''), context).not.toMatch(/\p{Cf}/u);
-      expect(once, context).not.toMatch(/[\p{Co}\p{Cn}\u034f\u115f\u1160\u3164\uffa0\u2800\ufe00-\ufe0d\u{e0100}-\u{e01ef}]/u);
-      expect(once, context).not.toMatch(/(?<!\p{Emoji})[\ufe0e\ufe0f]/u);
+      expect(rest.replace(/[\u200c\u200d]|(?<=\p{scx=Mong})\u180e(?=\p{scx=Mong})/gu, ''), context).not.toMatch(/\p{Cf}/u);
+      expect(once, context).not.toMatch(/[\p{Co}\p{Noncharacter_Code_Point}\u2800]/u);
+      // Default ignorables left: joiners, flag tags, VS15/VS16 after an emoji, one IVS after Han, one FVS after Mongolian.
+      expect(rest.replace(/[\u200c\u200d]|(?<=\p{Emoji})[\ufe0e\ufe0f]|(?<=\p{Ideographic})[\u{e0100}-\u{e01ef}]|(?<=\p{scx=Mong})[\u180b-\u180f]/gu, ''), context)
+        .not.toMatch(/\p{Default_Ignorable_Code_Point}/u);
+      expect(once, context).not.toMatch(/(?<=[0-9#*])[\ufe0e\ufe0f](?!\u20e3)/u);
       expect(cleanDisplayText(cleanDisplayText(label)), context).toBe(cleanDisplayText(label));
       expect(cleanDisplayText(label).normalize('NFC'), context).toBe(cleanDisplayText(label));
       expect(once.normalize('NFC'), context).toBe(once);
     }
-  });
+  }, 30_000);
 });
 
 const tags = (code: string) => Array.from(code, (char) => String.fromCodePoint(0xe0000 + char.charCodeAt(0))).join('');
@@ -204,9 +226,21 @@ describe('canonicalMentionLabel: hidden text in format characters is cleaned', (
     ['ZWJ between letter and emoji', 'a\u200d\u{1f468}', 'a\u{1f468}'],
     ['ZWJ after VS16 before a letter', '❤\ufe0f\u200da', '❤\ufe0fa'],
     ['ZWNJ between emoji', '\u{1f468}\u200c\u{1f469}', '\u{1f468}\u{1f469}'],
-    ['joiner chain between letters (invisible channel) bounded to one', 'a\u200c\u200d\u200d\u200cb\u200d\u200dc', 'a\u200cb\u200dc'],
+    ['joiner chain between Arabic letters (invisible channel) bounded to one', '\u0645\u200c\u200d\u200d\u200c\u06cc\u200d\u200d\u062e', '\u0645\u200c\u06cc\u200d\u062e'],
+    ['joiners between Latin letters', 'a\u200cb\u200dc', 'abc'],
+    ['joiners between Greek, Cyrillic, Han, Kana and Hangul letters', '\u03b1\u200c\u03b2 \u0434\u200d\u0436 \u5c71\u200c\u7530 \u30a2\u200d\u30a4 \uac00\u200c\uac01', '\u03b1\u03b2 \u0434\u0436 \u5c71\u7530 \u30a2\u30a4 \uac00\uac01'],
+    ['joiner between Arabic and Latin', '\u0645\u200cb', '\u0645b'],
+    ['Mongolian FVS after a non-Mongolian letter', 'a\u180bb', 'ab'],
+    ['two Mongolian FVS keep one', '\u1824\u180b\u180c\u1828', '\u1824\u180b\u1828'],
+    ['Khmer inherent vowels (default ignorable)', '\u1780\u17b4\u17b5', '\u1780'],
+    ['VS16 after an ASCII digit without keycap', '1\ufe0f 2', '1 2'],
+    ['VS16 after # and * without keycap', '#\ufe0f*\ufe0e', '#*'],
+    ['IVS after a Latin letter', 'a\u{e0100}', 'a'],
+    ['two IVS after Han keep one', '\u845b\u{e0100}\u{e0101}', '\u845b\u{e0100}'],
+    ['standardized variation selector after Han', '\u845b\ufe00', '\u845b'],
+    ['other default ignorables', 'a\u115fb\u2065c\ufff0d\u{e0fff}e', 'abcde'],
     ['joiner next to another format character', 'a\u200b\u200cb \u{1f468}\u200d\u2060\u{1f469}', 'ab \u{1f468}\u{1f469}'],
-    ['joiner next to a space', 'a \u200d b', 'a b'],
+    ['joiner next to a space', 'a \u200d b', 'a  b'],
     ['ZWJ around a digit', '1\u200d2', '12'],
     ['joiner whose mark neighbour NFC composes into a symbol', '<\u0338\u200dÅ', '≮Å'],
     ['bidi, zero-width space, word joiner, BOM, soft hyphen', 'a\u202eb\u200bc\u2060d\ufeffe\u00adf', 'abcdef'],
@@ -226,7 +260,7 @@ describe('canonicalMentionLabel: invisible characters outside Cc/Cf', () => {
     ['Hangul fillers', 'a\u115f\u1160\u3164\uffa0b', 'ab'],
     ['braille blank', 'a\u2800b', 'ab'],
     ['private use (icon fonts)', '\ue000 Acme\u{f0001}', 'Acme'],
-    ['noncharacters', 'a\ufdd0b\uffff', 'ab'],
+    ['noncharacters', 'a\ufdd0b\uffff\u{1fffe}', 'ab'],
     ['soft hyphen between Hangul jamo', '\u1100\u00ad\u1161', '\uac00'],
     ['zero-width space between base and mark', 'e\u200b\u0301', '\u00e9'],
   ])('%s', (_name, label, expected) => {
@@ -237,6 +271,9 @@ describe('canonicalMentionLabel: invisible characters outside Cc/Cf', () => {
     ['heart with VS16', '\u2764\ufe0f Team'],
     ['text presentation VS15', '\u263a\ufe0e Smile'],
     ['keycap', '1\ufe0f\u20e3 #\ufe0f\u20e3'],
+    ['IVS after Han (Japanese name variant)', '\u845b\u{e0100}\u98fe'],
+    ['Mongolian with FVS and MVS', '\u182a\u1820\u180b\u1822\u180e\u1820'],
+    ['unassigned code point (newer Unicode than the engine)', 'New \u0378 emoji'],
   ])('%s stays byte-identical', (_name, label) => {
     expect(canonicalMentionLabel(label)).toBe(label);
   });
@@ -255,6 +292,8 @@ describe('canonicalMentionLabel: a cut never splits a joined sequence', () => {
     ['country flags in a row', `${'x'.repeat(116)}\u{1f1e9}\u{1f1ea}\u{1f1e9}\u{1f1ea}y`, `${'x'.repeat(116)}\u{1f1e9}\u{1f1ea}…`],
     ['Persian word', `${'x'.repeat(116)} می\u200cخواهم`, `${'x'.repeat(116)} م…`],
     ['keycap', `${'x'.repeat(118)}1\ufe0f\u20e3`, `${'x'.repeat(118)}…`],
+    ['Devanagari conjunct (grapheme)', `${'x'.repeat(117)}\u0915\u094d\u0937y`, `${'x'.repeat(117)}…`],
+    ['Thai cluster (grapheme)', `${'x'.repeat(118)}\u0e01\u0e49\u0e33`, `${'x'.repeat(118)}…`],
   ])('%s', (_name, label, expected) => {
     expect(canonicalMentionLabel(label)).toBe(expected);
     expect(canonicalMentionLabel(expected)).toBe(expected);
@@ -262,24 +301,27 @@ describe('canonicalMentionLabel: a cut never splits a joined sequence', () => {
 });
 
 describe('isMentionMarkerType / isMentionMarkerId', () => {
-  it.each(['customer', 'command', 'task', 'playlist-version', 'a', 'a_b9', 'crm.contact', 'x'.repeat(64)])('type %s is valid', (type) => {
+  // Valid: everything the reader before read, unless it carries characters that can hide text.
+  it.each(['customer', 'command', 'Customer', 'salesOrder', '_x', '1a', 't\u00e2che', 'crm.contact', 'my type', 'a<b', '{x', 't'.repeat(200)])('type %j is valid', (type) => {
     expect(isMentionMarkerType(type)).toBe(true);
   });
 
-  it.each(['', 'Customer', '9task', 'a:b', 'a}', 'a{', 'a b', 'a\n', 'x'.repeat(65), 'tä'])('type %j is invalid', (type) => {
+  it.each(['', 'a:b', 'a}', 'a\n', 'a\tb', 't'.repeat(201), 'a{{b', 'a<!b', 'a-->b', 'a\u200bb', 'a\u202e', 'a\u2028', 'a\ue000'])('type %j is invalid', (type) => {
     expect(isMentionMarkerType(type)).toBe(false);
   });
 
-  it.each(['42', 'lobby/4', 'ui.navigate.admin', 'task-7', 'Ä-1', 'a!b', 'x'.repeat(MENTION_MARKER_MAX_ID_LENGTH)])('id %s is valid', (id) => {
+  it.each([
+    '42', 'lobby/4', 'ui.navigate.admin', 'task-7', '\u00c4-1', 'a!b', 'AB 123', 'My File.pdf', 'a<b', 'a>b', '{x',
+    'tenant:42', 'https://example.com/x?y=1', 'gid://shopify/Product/123', 'user+tag@example.com',
+    '550e8400-e29b-41d4-a716-446655440000', 'x'.repeat(250), '\u{1f600}'.repeat(101),
+  ])('id %j is valid', (id) => {
     expect(isMentionMarkerId(id)).toBe(true);
   });
 
   it.each([
-    '', 'a:b', 'a{b', 'a}b', 'a<b', 'a>b', 'a b', 'a\tb', 'a\u00a0b', 'a\u0000b', 'a\u200bb', 'a\u202eb',
-    'x<!--context:[evil]-->', 'x'.repeat(MENTION_MARKER_MAX_ID_LENGTH + 1),
-    // 101 astral code points are 202 UTF-16 units, more than any marker reader accepts.
-    '😀'.repeat(101), 'a\ud800',
-    'a\ufe0fb', 'a\u{e0100}', 'a\u034fb', 'a\u3164b', 'a\u2800b', 'a\ue000b', 'a\ufdd0b',
+    '', 'a}b', 'a{{b', 'a<!b', 'a-->b', 'a--!>b', 'x<!--context:[evil]-->', 'a\tb', 'a\nb', 'a\u2028b', 'a\u2029b',
+    'a\u0000b', 'a\u200bb', 'a\u202eb', 'a\u00adb', 'a\ud800', 'a\ufe0fb', 'a\u{e0100}', 'a\u034fb', 'a\u3164b',
+    'a\u2800b', 'a\ue000b', 'a\ufdd0b', 'a\u0378b', 'a\u180bb',
   ])('id %j is invalid', (id) => {
     expect(isMentionMarkerId(id)).toBe(false);
   });
@@ -302,10 +344,24 @@ describe('serializeMentionMarker', () => {
     expect(serializeMentionMarker({ type: 'customer', id: '42', label: '  ' })).toBe('{{mention:customer:42:42}}');
   });
 
-  it('writes no marker for an invalid type or id', () => {
+  it('writes no marker for a hostile type or id', () => {
     expect(serializeMentionMarker({ type: 'customer', id: 'x<!--context:[evil]-->', label: 'Acme' })).toBeUndefined();
-    expect(serializeMentionMarker({ type: 'Customer', id: '42', label: 'Acme' })).toBeUndefined();
+    expect(serializeMentionMarker({ type: 'cus\u202etomer', id: '42', label: 'Acme' })).toBeUndefined();
     expect(serializeMentionMarker({ type: 'customer', id: '', label: 'Acme' })).toBeUndefined();
+  });
+
+  it('writes ids and types the reader before accepted as before', () => {
+    expect(serializeMentionMarker({ type: 'Customer', id: 'AB 123', label: 'Acme' })).toBe('{{mention:Customer:AB 123:Acme}}');
+    expect(serializeMentionMarker({ type: 'customer', id: 'a<b>{c', label: 'Acme' })).toBe('{{mention:customer:a<b>{c:Acme}}');
+  });
+
+  it('an id with a colon is written as before; the reader splits it at the colon (known limit)', () => {
+    const marker = serializeMentionMarker({ type: 'customer', id: 'tenant:42', label: 'Acme' })!;
+    expect(marker).toBe('{{mention:customer:tenant:42:Acme}}');
+    const [parsed] = parseMentionMarkers(marker);
+    expect([parsed!.type, parsed!.id, parsed!.label]).toEqual(['customer', 'tenant', '42:Acme']);
+    const [legacy] = [...marker.matchAll(LEGACY_MARKER)];
+    expect([legacy![1], legacy![2], legacy![3]]).toEqual(['customer', 'tenant', '42:Acme']);
   });
 
   it('labels: raw writes the label, type and id unchanged, as before', () => {
@@ -323,7 +379,7 @@ describe('serializeMentionMarker', () => {
     for (let run = 0; run < 500; run += 1) {
       const label = randomLabel(next, 60);
       const marker = serializeMentionMarker({ type: 'customer', id: 'c-1', label })!;
-      const [parsed, ...rest] = parseMentionMarkers(`x ${marker} y`);
+      const [parsed, ...rest] = parseMentionMarkers(`x ${marker} y`).map(plain);
       expect(rest, JSON.stringify(label)).toEqual([]);
       expect(parsed, JSON.stringify(label)).toEqual({
         type: 'customer', id: 'c-1', label: canonicalMentionLabel(label, { id: 'c-1' }), canonical: true,
@@ -336,10 +392,14 @@ describe('serializeMentionMarker', () => {
 describe('parseMentionMarkers', () => {
   it('returns type, id, label, canonical and span', () => {
     const text = 'a {{mention:task:t1:Erste Aufgabe}} b {{mention:Customer:9:x}}';
-    expect(parseMentionMarkers(text)).toEqual([
+    expect(parseMentionMarkers(text).map(plain)).toEqual([
       { type: 'task', id: 't1', label: 'Erste Aufgabe', canonical: true, span: { start: 2, end: 35 } },
-      { type: 'Customer', id: '9', label: 'x', canonical: false, span: { start: 38, end: 62 } },
+      { type: 'Customer', id: '9', label: 'x', canonical: true, span: { start: 38, end: 62 } },
     ]);
+  });
+
+  it('marks a hostile type or id not canonical', () => {
+    expect(parseMentionMarkers('{{mention:a\u202eb:1:x}} {{mention:t:a\u200bb:x}}').map((m) => m.canonical)).toEqual([false, false]);
   });
 
   it('reads a legacy hostile label as it is, marked not canonical', () => {
@@ -386,16 +446,6 @@ describe('parseMentionMarkers', () => {
       }
       // About 10 ms here; the bounded legacy pattern needs about 1000 steps per opener instead.
       expect(fastest).toBeLessThan(400);
-    }
-  });
-});
-
-describe('marker types are the entity declaration types', () => {
-  it('reuses ENTITY_TYPE_PATTERN, which chat entity types and command satisfy', () => {
-    expect(MENTION_MARKER_TYPE_PATTERN).toBe(ENTITY_TYPE_PATTERN);
-    expect(isMentionMarkerType('command')).toBe(true);
-    for (const type of ['a', 'task', 'playlist-version', 'a_b', 'x'.repeat(40)]) {
-      expect(CHAT_ENTITY_TYPE_PATTERN.test(type) && isMentionMarkerType(type)).toBe(true);
     }
   });
 });

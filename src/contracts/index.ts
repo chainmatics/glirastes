@@ -206,9 +206,7 @@ export {
   canonicalMentionLabel,
   isMentionMarkerId,
   isMentionMarkerType,
-  MENTION_MARKER_MAX_ID_LENGTH,
   MENTION_MARKER_MAX_LABEL_LENGTH,
-  MENTION_MARKER_TYPE_PATTERN,
   parseMentionMarkers,
   serializeMentionMarker,
 } from './mention-marker.js';
