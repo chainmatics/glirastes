@@ -391,16 +391,88 @@ component keeps the chips with `useChatEntityLinks().markdownComponents`
 against the ids the conversation showed by declaration (`verifyMentions`,
 default on); see [entity identity](entity-identity.md#entity-link-options).
 
+## Mention markers
+
 A picked mention reaches the model as `{{mention:type:id:label}}`; a
 tool-backed command (and every mention with `includeContextBlock`) is also
 listed in a leading `<!--context:[…]-->` block. Inside that block a `-->`,
 `--!>` or `<!--` in a label or id is sent with `\u003e` / `\u003c` (since the release
 after 0.20.0), so the block the SDK writes cannot be closed early or nested
-by its own entries. Known limits (a format change is planned): the label goes
-unescaped into the marker, so a label can end it early (`}}`) or carry a whole
-forged `<!--context:…-->` block that reaches the model and is hidden from the
-bubble; and a label can forge sibling entries (`Bob (ID: 9), Admin (ID: 1, …)`)
-inside the block.
+by its own entries.
+
+Since the release after 0.23.0 the label is sent in its canonical form
+(`mentions: { serialize: { labels: 'canonical' } }`, the default), so the
+label carries nothing the chip hides from the user but the model reads.
+This is about the label, the part the chip shows: the type and id come
+from the app and are not shown in the chip, as before; a hostile one is
+refused (below). The exceptions for emoji, flags and joining scripts apply
+to labels only.
+
+| In the label | Sent as |
+| --- | --- |
+| `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (a `}}` can no longer end the marker, a `<!--context:…-->` is visible text of the chip) |
+| each run of control characters (also tab and line breaks), line and paragraph separators | one space |
+| whitespace at the start and end | trimmed; NBSP, U+202F, U+3000 and runs of spaces inside stay |
+| format characters and default ignorables: bidi controls (RLO …), zero-width space, word joiner, BOM, soft hyphen (a typesetting hint, invisible unless a line breaks there), U+034F, Hangul fillers, Khmer U+17B4/17B5, variation selectors, tag characters | removed, except below |
+| ZWJ / ZWNJ | kept once between two emoji (family and profession emoji, 🏳️‍🌈) or between two letters of a joining script (Arabic, Persian, Syriac, Thaana, Devanagari and other Indic scripts, Sinhala, Khmer, Myanmar, Mongolian, Meetei Mayek, Chakma, Tai Tham, Sundanese, Newa, Limbu, Kayah Li …), and the ZWJ of a legacy Malayalam chillu at word end (മോഹന്‍); not between Latin, Greek, Cyrillic, Han, Kana or Hangul letters |
+| tag characters | only the tags of the 🏴 England, Scotland and Wales flags; any other tag run is removed (a 🏴 with other tags stays a bare 🏴) |
+| variation selectors | one VS15/VS16 right after an emoji-capable character (❤️, ☺︎, ©️; after a digit, `#` or `*` only in a keycap such as 1️⃣), one IVS right after a Han ideograph (葛󠄀), one Mongolian FVS after a Mongolian letter |
+| private use (icon fonts), noncharacters, U+2800, lone surrogates | removed |
+| unassigned code points | kept (what is unassigned depends on the engine's Unicode version; removing it would remove new emoji in older browsers) |
+| more than `maxLabelLength` code points (8-120, default 120; 1-7 means 8, anything else the default) | at most the first 119 and `…`, cut at a grapheme boundary with `Intl.Segmenter`, never inside an emoji, flag, keycap, conjunct or Thai cluster; without `Intl.Segmenter` the cut avoids marks, joiners, viramas, flags and keycaps but can split other clusters such as Thai Sara Am; a bare `…` becomes the id, and the label is never empty |
+| nothing visible left | the id |
+
+The text is NFC. No NFKC: look-alikes such as `｛` stay, and they are
+visible in the chip. Ordinary labels, also emoji, flags, Persian, Arabic,
+Devanagari and Japanese names, are sent byte-identical; a single `<` or `>`
+stays.
+
+**A hostile type or id sends no marker.** A mention whose type or id has
+control characters (also tab and newline), line or paragraph separators,
+format characters, default ignorables, private use, unassigned or
+noncharacters, U+2800, lone surrogates, `}`, `{{`, `<!`, `-->` or `--!>`
+(or a type with `:` or over 200 UTF-16 units) keeps the token the user saw
+(`@acme`) without a marker: the model loses the id, no label or id of it
+enters the text, and the context block does not list it. The chat warns
+once per type in the console (only when `NODE_ENV === 'development'`), without the type, id or
+label. Spaces, single `<` `>` `{`, `/`, `@`, `+`, non-ASCII letters and
+capitals are fine in types and ids, and `:` in ids, as before; a type with
+`:` is refused. An id with the emoji or
+joining-script characters a label keeps is refused, and whether a code
+point is unassigned depends on the engine's Unicode version (an older
+browser refuses an id with a code point it does not know). Such a mention can come from the
+legacy `mentions` config (`search` / `resolve` results), completion items,
+`addActiveMention`, `RichMentionInput` `addMention` / `insertMention` /
+`setValue` with app-built mentions, and drafts or queued messages stored
+with such a mention. Known limit, as before: an id with `:` is written as
+it is, and every reader splits it at its first colon
+(`{{mention:customer:tenant:42:Acme}}` shows a chip for id `tenant` with
+the label `42:Acme`, the model gets the whole text); the read path will
+handle it.
+
+Each token occurrence is replaced once, in one pass over the typed text:
+a label that contains another mention's token (`x @bob y`) no longer gets
+a second marker nested inside it. A token belongs to the first mention in
+the list with that token, as before. `labels: 'raw'` sends labels, types and ids as
+given, without validation; the one-pass replacement applies there too (no
+nested markers). Queued messages and restored drafts keep the structured
+mention and are serialized the same way when they are sent.
+`glirastes/contracts` exports the grammar for own parsers and server code:
+`canonicalMentionLabel`, `parseMentionMarkers` (`type`, `id`, `label`,
+`canonical`, `span`; `canonical` is a getter computed on first read, so
+`{ ...marker }` and `structuredClone` drop it: read it before copying; the same matches as the
+reader before, linear in the text), `serializeMentionMarker`,
+`isMentionMarkerType`, `isMentionMarkerId`.
+
+Known limits (planned): reading is unchanged so far. Text stored by an
+older release, by `labels: 'raw'`, by an own client or added in
+`onBeforeSend` can still carry a raw marker whose label ends it early
+(`}}`) or holds a whole `<!--context:…-->` block: the bubble hides it, the
+model reads it, and a `<!--glirastes:clarification …-->` inside it still
+parses as a clarification answer. And a label can forge sibling entries
+(`Bob (ID: 9), Admin (ID: 1, …)`) inside the free-text context block. The
+default `react-markdown` renderer shows other HTML comments as text; a
+custom `Markdown` with `rehype-raw` hides them, while the model reads them.
 
 ## Custom composers
 

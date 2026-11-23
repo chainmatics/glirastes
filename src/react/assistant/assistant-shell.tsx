@@ -92,6 +92,8 @@ export interface AssistantShellClassNames {
   windowHandle: string;
   /** The chat column in full screen (`[data-element="history"]`). */
   history?: string;
+  /** The backdrop behind the open drawer below 900 px (`[data-element="history-backdrop"]`). */
+  historyBackdrop?: string;
 }
 
 /** One entry of the layout menu. */
@@ -756,7 +758,7 @@ export function AssistantShell({
         {historyHeading}
         {pane}
       </div>}
-      {drawer && drawerOpen && <div data-element="history-backdrop" aria-hidden="true"
+      {drawer && drawerOpen && <div data-element="history-backdrop" aria-hidden="true" className={classNames.historyBackdrop}
         style={{ position: 'absolute', inset: 0, zIndex: 3 }} onClick={() => closeDrawer('toggle')} />}
       <div ref={frameRef} data-element="frame" style={{ display: sidebar && ui.collapsed ? 'none' : 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: 0, ...(hasPane ? { minWidth: 0 } : {}) }}>
         <header data-element="header" className={classNames.header}

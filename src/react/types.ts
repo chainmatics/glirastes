@@ -502,7 +502,9 @@ export interface UiToolCommandSource {
    * Stable, unique list identity and mention id of this command; defaults to
    * `definitionId`. One definition can back several commands (a single
    * `ui.navigate` with a `destination` enum becomes one command per
-   * destination). No `:` or `}`, max 200 characters.
+   * destination). No `:` or `}`, max 200 characters; a command id with
+   * control, format or invisible characters, `{{`, `<!` or `-->` is sent
+   * without a mention marker (`isMentionMarkerId` of `glirastes/contracts`).
    */
   readonly commandId?: string;
   readonly label: string;
@@ -518,6 +520,21 @@ export interface MentionSerializationConfig {
   enabled?: boolean;
   includeContextBlock?: boolean;
   contextLabel?: string;
+  /**
+   * `canonical` (default): a mention's label is sent in its canonical form
+   * (`canonicalMentionLabel` of `glirastes/contracts`): `{` `}` `<!` `-->`
+   * `--!>` replaced by visible look-alikes, hidden characters removed
+   * except those of ordinary names, NFC, trimmed, at most `maxLabelLength`
+   * code points; ordinary labels are unchanged. A mention whose type or id
+   * carries characters that can hide text keeps its typed token, without a
+   * marker. `raw`: label, type and id as given, without validation (a
+   * label can then end the marker early or carry text the chat hides from
+   * the bubble but the model reads); the one-pass replacement applies in
+   * both modes (each token occurrence once, no nested markers).
+   */
+  labels?: 'canonical' | 'raw';
+  /** Code points of a sent label with `labels: 'canonical'`; 8-120 (1-7 means 8), default 120 (also for any other value). */
+  maxLabelLength?: number;
 }
 
 // ============================================================================
@@ -2780,4 +2797,17 @@ export interface ChatMarkdownOptions {
    * first renders: call `preloadMarkdown()` yourself to avoid the wait.
    */
   preload?: boolean;
+  /**
+   * How long a message shows the loading skeleton while react-markdown has
+   * not arrived, counted from the start of the import (default `4000`): then
+   * it shows its raw text, and Markdown once the import still arrives. The
+   * clock starts at every start of the import, also an own `preloadMarkdown()`
+   * at app start: the limit may have passed before the chat appears, and its
+   * messages then show the raw text directly.
+   * `false`, `Infinity` or more than 2^31 - 1 ms: no limit (the skeleton
+   * stays until react-markdown loads or fails). `0`: no skeleton at all (the
+   * raw text while loading, as before 0.24.0). A negative number, `NaN` or
+   * a non-number: the default. Each provider's bubbles use its own value.
+   */
+  loadingTimeoutMs?: number | false;
 }

@@ -336,17 +336,19 @@ describe('shipped note detection', () => {
     })).status).toBe('affected');
   });
 
-  it('markdown-loading-skeleton flags every app that renders the React chat or the embed', async () => {
-    const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === 'markdown-loading-skeleton')!;
-    for (const [file, source] of [
-      ['app/chat.tsx', "import { VercelAiChat } from 'glirastes/react/vercel';\nexport const c = <VercelAiChat endpoint=\"/api/chat\" />;\n"],
-      ['app/chat.tsx', "import { FloatingChatUI } from 'glirastes/react';\nexport const c = <FloatingChatUI />;\n"],
-      ['src/chat.ts', "import { defineGlirastesChatElement } from 'glirastes/embed';\ndefineGlirastesChatElement();\n"],
-    ] as const) {
-      expect(evaluateNote(note, scanOf({ [file]: source })).status, source).toBe('affected');
+  it('markdown-loading-skeleton and markdown-loading-timeout flag every app that renders the React chat or the embed', async () => {
+    for (const id of ['markdown-loading-skeleton', 'markdown-loading-timeout']) {
+      const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === id)!;
+      for (const [file, source] of [
+        ['app/chat.tsx', "import { VercelAiChat } from 'glirastes/react/vercel';\nexport const c = <VercelAiChat endpoint=\"/api/chat\" />;\n"],
+        ['app/chat.tsx', "import { FloatingChatUI } from 'glirastes/react';\nexport const c = <FloatingChatUI />;\n"],
+        ['src/chat.ts', "import { defineGlirastesChatElement } from 'glirastes/embed';\ndefineGlirastesChatElement();\n"],
+      ] as const) {
+        expect(evaluateNote(note, scanOf({ [file]: source })).status, source).toBe('affected');
+      }
+      expect(evaluateNote(note, scanOf({
+        'server/handler.ts': "import { createAiChatHandler } from 'glirastes/server/nextjs';\nexport const h = createAiChatHandler({});\n",
+      })).status).toBe('not-affected');
     }
-    expect(evaluateNote(note, scanOf({
-      'server/handler.ts': "import { createAiChatHandler } from 'glirastes/server/nextjs';\nexport const h = createAiChatHandler({});\n",
-    })).status).toBe('not-affected');
   });
 });

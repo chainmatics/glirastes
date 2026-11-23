@@ -6,6 +6,7 @@ All names below come from `glirastes/react` unless noted.
 
 - Triggers
   - Sent mentions and `types`
+  - Mention markers
 - What a pick does
   - Sub-lists
 - Opening a list from a button
@@ -87,6 +88,32 @@ provider calls `session.save(id, messages, { mentionPrefix })`. A custom
 store may use that third argument for its titles or ignore it; a store
 that wraps `createLocalSessionStore` forwards it (`save: (id, messages, options) =>
 base.save!(id, messages, options)`).
+
+### Mention markers
+
+A sent mention carries its canonical label (`mentions.serialize.labels`,
+default `'canonical'`): ordinary labels, ids and types are byte-identical
+(also emoji, flags, Persian, Devanagari, Japanese names); `{` `}` `<!`
+`-->` `--!>` become `｛` `｝` `‹!` `--›` `--!›`; hidden characters go
+(bidi, zero-width, soft hyphen, default ignorables, tag runs, private use)
+except the joiners, flag tags and selectors of ordinary names; NFC; edge
+whitespace trimmed, control runs one space; at most `maxLabelLength`
+(8-120, default 120) code points, cut at a grapheme boundary (`…`). A type
+or id with control, format, invisible, private-use or unassigned
+characters, `}`, `{{`, `<!`, `-->` or `--!>` gets no marker: the typed
+token stays and the model loses the id (console warning once per type,
+only in development).
+`labels: 'raw'` sends the old format. Reading is unchanged so far (stored
+text shows as before).
+
+From `glirastes/contracts`, for own parsers and server code:
+`canonicalMentionLabel(label, { id?, maxLength? })` (`CanonicalMentionLabelOptions`),
+`parseMentionMarkers(text)` (`ParsedMentionMarker`: `type`, `id`, `label`,
+`canonical`, `span`; same matches as the old regex, linear),
+`serializeMentionMarker({ type, id, label }, { labels?, maxLabelLength? })`
+(`MentionMarker`, `SerializeMentionMarkerOptions`; `undefined` for an
+hostile type or id), `isMentionMarkerType`, `isMentionMarkerId`,
+`MENTION_MARKER_MAX_LABEL_LENGTH` (120).
 
 ## What a pick does
 

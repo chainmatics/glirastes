@@ -9,9 +9,12 @@ type LoadedModule = { default: MarkdownModule['default'] };
 let markdownModule: Promise<LoadedModule> | undefined;
 let loaded: LoadedModule | undefined;
 let preloaded: Promise<void> | undefined;
+/** `Date.now()` when the import started. */
+let startedAt: number | undefined;
 
 /** The cached import (started on the first call); never rejects. */
 export function loadMarkdownModule(): Promise<LoadedModule> {
+  startedAt ??= Date.now();
   markdownModule ??= (async (): Promise<LoadedModule> => {
     try {
       const mod = await import('react-markdown');
@@ -27,8 +30,79 @@ export function loadMarkdownModule(): Promise<LoadedModule> {
       )) as MarkdownModule['default'];
       return { default: Fallback };
     }
-  })().then((module) => (loaded = module));
+  })().then((module) => {
+    loaded = module;
+    for (const waiter of waiters.values()) stopTimer(waiter);
+    return module;
+  });
   return markdownModule;
+}
+
+/**
+ * Time limit for the skeleton: per limit (in ms) one shared timer, counted
+ * from the start of the import, running only while a bubble shows the
+ * skeleton and the import is pending. Browser only (started on subscribe).
+ */
+interface Waiter { fired: boolean; timer?: ReturnType<typeof setTimeout>; listeners: Set<() => void> }
+const waiters = new Map<number, Waiter>();
+
+function stopTimer(waiter: Waiter): void {
+  if (waiter.timer !== undefined) clearTimeout(waiter.timer);
+  waiter.timer = undefined;
+}
+
+/** Default `markdown.loadingTimeoutMs`. */
+const DEFAULT_LOADING_TIMEOUT_MS = 4_000;
+/** The longest delay `setTimeout` takes (2^31 - 1 ms); longer means no limit. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * `markdown.loadingTimeoutMs` as used: a finite number >= 0 as given (`0`: no
+ * skeleton); `false`, `Infinity` or more than 2^31 - 1 ms: no limit; anything
+ * else (`undefined`, `null`, a negative number, `NaN`, a string): the default
+ * 4000. A negative value is no valid duration, so it gets the default rather
+ * than `0`, which would silently turn the skeleton off.
+ */
+export function markdownLoadingLimit(value: unknown): number | false {
+  if (value === false) return false;
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) return DEFAULT_LOADING_TIMEOUT_MS;
+  return value > MAX_TIMER_MS ? false : value;
+}
+
+/** Whether the import is still pending `ms` after it started (decided when a bubble first renders). */
+export function markdownOverdue(ms: number): boolean {
+  return !loaded && startedAt !== undefined && Date.now() - startedAt >= ms;
+}
+
+/** Whether the shared timer for `ms` has fired. */
+export function markdownTimedOut(ms: number): boolean {
+  return waiters.get(ms)?.fired === true;
+}
+
+/** Calls `listener` once the import is still pending `ms` after it started. */
+export function subscribeMarkdownTimeout(ms: number, listener: () => void): () => void {
+  if (loaded) return () => {};
+  let waiter = waiters.get(ms);
+  if (!waiter) {
+    waiter = { fired: false, listeners: new Set() };
+    waiters.set(ms, waiter);
+  }
+  const current = waiter;
+  current.listeners.add(listener);
+  if (!current.fired && current.timer === undefined) {
+    const delay = Math.max(0, (startedAt ?? Date.now()) + ms - Date.now());
+    current.timer = setTimeout(() => {
+      current.timer = undefined;
+      current.fired = true;
+      for (const notify of [...current.listeners]) notify();
+    }, delay);
+    // Never keeps a Node process alive.
+    (current.timer as { unref?: () => void }).unref?.();
+  }
+  return () => {
+    current.listeners.delete(listener);
+    if (current.listeners.size === 0) stopTimer(current);
+  };
 }
 
 /**
