@@ -92,27 +92,40 @@ function active(root: Document | ShadowRoot): string {
 }
 
 describe('a pick in the built-in list focuses exactly as on base', () => {
-  // Every expectation is a snapshot recorded on the base code (before the shell slots).
-  const scenarios: Array<[string, ReactNode, { shadow?: boolean; props?: Record<string, unknown> }?]> = [
-    ['textarea', <textarea aria-label="Draft" />],
-    ['textarea in a shadow root', <textarea aria-label="Draft" />, { shadow: true }],
-    ['disabled textarea', <textarea aria-label="Draft" disabled />],
-    ['disabled textarea under a clarification input', <><input aria-label="Clarification answer" /><textarea aria-label="Draft" disabled /></>],
-    ['editor in the header', <textarea aria-label="Draft" />, { props: { headerActions: <textarea aria-label="Header note" /> } }],
-    ['no composer', <p>No composer</p>],
-    ['input only', <input aria-label="Draft" />],
-    ['marked input', <input aria-label="Draft" data-glirastes-composer />],
-    ['marked input in a shadow root', <input aria-label="Draft" data-glirastes-composer />, { shadow: true }],
-    ['contenteditable="false" editor (a disabled RichMentionInput)', <div role="textbox" tabIndex={0} aria-label="Draft" contentEditable={false} />],
-    ['plaintext-only editor', <div role="textbox" tabIndex={0} aria-label="Draft" contentEditable="plaintext-only" suppressContentEditableWarning />],
+  // `base`: what had focus after the pick on the base code (0.24.1), recorded there; the same in
+  // the wide column and in the drawer. Options sit before it.
+  type Options = { shadow?: boolean; props?: Record<string, unknown> };
+  const scenarios: Array<[string, ReactNode, Options, string] | [string, ReactNode, string]> = [
+    ['textarea', <textarea aria-label="Draft" />, 'textarea:Draft'],
+    ['textarea in a shadow root', <textarea aria-label="Draft" />, { shadow: true }, 'textarea:Draft'],
+    ['disabled textarea', <textarea aria-label="Draft" disabled />, 'button:Customers'],
+    ['disabled textarea under a clarification input', <><input aria-label="Clarification answer" /><textarea aria-label="Draft" disabled /></>, 'button:Customers'],
+    ['editor in the header', <textarea aria-label="Draft" />, { props: { headerActions: <textarea aria-label="Header note" /> } }, 'textarea:Header note'],
+    ['no composer', <p>No composer</p>, 'button:+New chat'],
+    ['input only', <input aria-label="Draft" />, 'button:+New chat'],
+    ['marked input', <input aria-label="Draft" data-glirastes-composer />, 'button:+New chat'],
+    ['marked input in a shadow root', <input aria-label="Draft" data-glirastes-composer />, { shadow: true }, 'button:+New chat'],
+    ['contenteditable="false" editor (a disabled RichMentionInput)', <div role="textbox" tabIndex={0} aria-label="Draft" contentEditable={false} />, 'button:+New chat'],
+    ['plaintext-only editor', <div role="textbox" tabIndex={0} aria-label="Draft" contentEditable="plaintext-only" suppressContentEditableWarning />, 'button:+New chat'],
+    ['input in a marked wrapper', <div data-glirastes-composer><input type="checkbox" aria-label="Option" /><input aria-label="Draft" /></div>, 'button:+New chat'],
+    ['marked focusable host', <div role="textbox" tabIndex={0} aria-label="Draft" data-glirastes-composer />, 'button:+New chat'],
+    ['marked input under a clarification input', <><input aria-label="Clarification answer" /><input aria-label="Draft" data-glirastes-composer /></>, 'button:+New chat'],
+    ['marked input with a disabled textarea', <><textarea aria-label="Note" disabled /><input aria-label="Draft" data-glirastes-composer /></>, 'button:Customers'],
+    ['unmarked input above a textarea', <><input aria-label="Clarification answer" /><textarea aria-label="Draft" /></>, 'textarea:Draft'],
+    ['queued message editor above the composer', <><textarea aria-label="Queued edit" /><textarea aria-label="Draft" /></>, 'textarea:Queued edit'],
+    ['editor in the header, no composer', <p>No composer</p>, { props: { headerActions: <textarea aria-label="Header note" /> } }, 'textarea:Header note'],
+    ['editor (contenteditable) composer', <div role="textbox" tabIndex={0} aria-label="Draft" contentEditable suppressContentEditableWarning />, 'div:Draft'],
   ];
   for (const narrowView of [false, true]) {
-    for (const [kind, composer, options] of scenarios) {
+    for (const scenario of scenarios) {
+      const [kind, composer] = scenario;
+      const options = scenario.length === 4 ? scenario[2] : undefined;
+      const base = scenario[scenario.length - 1] as string;
       it(`${kind} (${narrowView ? 'drawer' : 'wide column'})`, async () => {
         narrow = narrowView;
         const view = await mount(composer, options);
         await pick(view);
-        expect(active(view.root)).toMatchSnapshot();
+        expect(active(view.root)).toBe(base);
       });
     }
   }
