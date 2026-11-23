@@ -1,0 +1,18 @@
+{
+  "id": "history-pick-focus",
+  "kind": "recommended",
+  "summary": "Behaviour change: after a pick in the built-in full-screen chat list, a shell without an editor or textarea outside the column now focuses a data-glirastes-composer element or the chats toggle instead of the list's \"New chat\" button.",
+  "howTo": "Nothing to do for a textarea or editor composer (focus unchanged). An <input> or own composer gets focus after a pick when it (or a wrapper around its input) carries data-glirastes-composer; without the mark focus goes to the chats toggle. A disabled RichMentionInput (contenteditable=\"false\") and a contenteditable=\"plaintext-only\" editor also lead to the chats toggle. Tests that expected focus on \"New chat\" after a pick expect the composer or the toggle (button[data-action=\"history\"]). Opening the assistant and alt+shift+I are unchanged. See placing-the-assistant.md, Replacing shell parts.",
+  "skill": "building-glirastes-chat-ui#replacing-shell-parts",
+  "affectedWhen": {
+    "symbols": [
+      "AssistantShell",
+      "AssistantWorkspace"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "data-glirastes-composer"
+    ]
+  }
+}

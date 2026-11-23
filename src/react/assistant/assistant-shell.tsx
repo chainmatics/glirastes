@@ -587,10 +587,9 @@ export function AssistantShell({
     shell.current?.querySelector<HTMLElement>(`[aria-controls="${historyId}"], [data-action="history"]`)?.focus();
   }, [shell, historyId]);
   // Focus moves once the drawer is closed and the conversation is no longer inert.
-  // `'pane-composer'`: `close()` of an app's render-function column, which uses its own lookup.
-  const focusAfterHistory = useRef<'toggle' | 'composer' | 'pane-composer' | null>(null);
+  const focusAfterHistory = useRef<'toggle' | 'composer' | null>(null);
   const [, setFocusRequest] = useState(0);
-  const closeDrawer = useCallback((refocus: 'toggle' | 'composer' | 'pane-composer') => {
+  const closeDrawer = useCallback((refocus: 'toggle' | 'composer') => {
     focusAfterHistory.current = refocus;
     setDrawerOpen(false);
     setFocusRequest(n => n + 1);
@@ -598,10 +597,10 @@ export function AssistantShell({
   const pickedFromHistory = useCallback(() => closeDrawer('composer'), [closeDrawer]);
   // A stale `close()` (the column is gone, e.g. full screen was left) does nothing.
   const closeHistory = useCallback((focus: 'composer' | 'toggle' = 'composer') => {
-    if (historyRef.current?.isConnected) closeDrawer(focus === 'toggle' ? 'toggle' : 'pane-composer');
+    if (historyRef.current?.isConnected) closeDrawer(focus === 'toggle' ? 'toggle' : 'composer');
   }, [closeDrawer]);
-  // Only after `close()` of an app's render-function column; the built-in list keeps `focusComposer`.
-  // The first editor or textarea of the shell outside the column gets a plain `focus()` (also when
+  // After a pick in the built-in chat list and after `close()` of an app's render-function column
+  // (opening the shell and the focus-input shortcut keep `focusComposer`). The first editor or textarea of the shell outside the column gets a plain `focus()` (also when
   // disabled); without one: an element marked `data-glirastes-composer` or a text input inside it,
   // else the chats toggle, else focus stays.
   const focusComposerAfterHistory = useCallback(() => {
@@ -650,8 +649,7 @@ export function AssistantShell({
     if (!target || drawerOpen) return;
     focusAfterHistory.current = null;
     if (target === 'toggle') focusHistoryToggle();
-    else if (target === 'pane-composer') focusComposerAfterHistory();
-    else focusComposer();
+    else focusComposerAfterHistory();
   });
   const activeChatTitle = chat?.sessions?.find(session => session.id === chat.activeSessionId)?.title || chat?.locale?.newChatLabel || labels.title;
 

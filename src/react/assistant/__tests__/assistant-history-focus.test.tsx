@@ -91,7 +91,7 @@ function active(root: Document | ShadowRoot): string {
   return `${element.tagName.toLowerCase()}:${element.getAttribute('aria-label') ?? element.textContent}`;
 }
 
-describe('a pick in the built-in list focuses exactly as on base', () => {
+describe('a pick in the built-in list: base, except the declared cases', () => {
   // `base`: what had focus after the pick on the base code (0.24.1), recorded there; the same in
   // the wide column and in the drawer. Options sit before it.
   type Options = { shadow?: boolean; props?: Record<string, unknown> };
@@ -116,6 +116,27 @@ describe('a pick in the built-in list focuses exactly as on base', () => {
     ['editor in the header, no composer', <p>No composer</p>, { props: { headerActions: <textarea aria-label="Header note" /> } }, 'textarea:Header note'],
     ['editor (contenteditable) composer', <div role="textbox" tabIndex={0} aria-label="Draft" contentEditable suppressContentEditableWarning />, 'div:Draft'],
   ];
+  // The declared change: where the base found no editor or textarea outside the column it focused
+  // the first button of the shell ("New chat" in the column). Only these scenarios differ.
+  const TOGGLE = '{toggle}';
+  const declared: Record<string, string> = {
+    'no composer': TOGGLE,
+    'input only': TOGGLE,
+    'contenteditable="false" editor (a disabled RichMentionInput)': TOGGLE,
+    'plaintext-only editor': TOGGLE,
+    'marked input': 'input:Draft',
+    'marked input in a shadow root': 'input:Draft',
+    'input in a marked wrapper': 'input:Draft',
+    'marked focusable host': 'div:Draft',
+    'marked input under a clarification input': 'input:Draft',
+  };
+  it('every declared case is a scenario whose base focused the first shell button', () => {
+    for (const kind of Object.keys(declared)) {
+      expect(scenarios.find(scenario => scenario[0] === kind)?.at(-1), kind).toBe('button:+New chat');
+    }
+    // And every such scenario is declared: nothing changes silently.
+    expect(scenarios.filter(scenario => scenario.at(-1) === 'button:+New chat').map(scenario => scenario[0]).sort()).toEqual(Object.keys(declared).sort());
+  });
   for (const narrowView of [false, true]) {
     for (const scenario of scenarios) {
       const [kind, composer] = scenario;
@@ -125,7 +146,8 @@ describe('a pick in the built-in list focuses exactly as on base', () => {
         narrow = narrowView;
         const view = await mount(composer, options);
         await pick(view);
-        expect(active(view.root)).toBe(base);
+        const toggle = `button:${narrowView ? 'Show chats' : 'Hide chats'}`;
+        expect(active(view.root)).toBe(declared[kind]?.replace(TOGGLE, toggle) ?? base);
       });
     }
   }

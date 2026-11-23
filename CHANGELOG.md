@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Full-screen chat column: a pick or a new chat in the built-in chat list now moves focus with the lookup `close()` of an own column already uses. Behaviour change, only where the shell found no editor (`contenteditable="true"`/`""`) or `textarea` outside the column: before, focus went to the first button of the shell, which is the list's "New chat" in the column (below 900 px inside the closed, inert drawer). Now it goes to an element marked `data-glirastes-composer` (a text input or focusable element) or the first enabled, editable text input inside it, else to the chats toggle, else focus stays. Affected: no composer, an `<input>` composer (unmarked: chats toggle; marked: the input), a marked own composer, a `contenteditable="plaintext-only"` editor and a disabled `RichMentionInput` (`contenteditable="false"`, chats toggle). Unchanged: an editor or `textarea` outside the column is focused exactly as before, the first in DOM order, header included, also a disabled `textarea` (focus then stays on the picked row) and a queued message's edit field above the composer. Opening the assistant and the focus-input shortcut (alt+shift+I) keep their lookup. Shadow-root safe.
+
 ## [0.24.1] - 2026-11-23
 
 0.24.0 was tagged but never published (its release preflight found an unreleased note); 0.24.1 is the first published 0.24 and contains everything listed under 0.24.0.

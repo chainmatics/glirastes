@@ -90,8 +90,8 @@ left of the conversation with `SessionSwitcher variant="list"`; the header
 then names the open chat. A header button hides and shows the column. Below
 900 px viewport width it is a drawer (`role="dialog"`, named after
 `labels.history`): focus moves into it, the conversation is
-inert, and Escape, the backdrop or a pick close it (a pick focuses the
-composer). `historyPane={false}` removes the column, `null` keeps the default
+inert, and Escape, the backdrop or a pick close it (a pick moves focus to
+the composer, see "Focus after a pick or `close()`" below). `historyPane={false}` removes the column, `null` keeps the default
 list, any other node replaces it:
 
 ```tsx
@@ -145,7 +145,8 @@ behaviour and styles as before.
   `labels.showHistory` and `labels.hideHistory` ("Chats", "Show chats", "Hide
   chats"); an app whose column shows something else (projects, folders) sets
   those labels too.
-- Focus after `close()` of a function `historyPane` / `historyTitle`: the
+- Focus after a pick or `close()` (a pick or new chat in the built-in list,
+  `close()` of a function `historyPane` / `historyTitle`): the
   first editor (`contenteditable`) or `textarea` of the shell in DOM order,
   header included but never one in the column, gets `focus()`, also a disabled
   one (then focus stays where it was). Only when there is none: an element in
@@ -158,11 +159,10 @@ behaviour and styles as before.
   DOM order, which can be a queued message's edit field above the composer.
   The shell does not look into a shadow root of
   its own inside the marked element: mark the focusable host (`tabIndex`,
-  `delegatesFocus`). This lookup belongs to `close()` only: a pick in the
-  built-in chat list, opening the assistant and the focus-input shortcut
-  (alt+shift+I) look only for an editor or a `textarea` in the shell and
-  otherwise focus the first button of the shell; the mark does not change
-  them.
+  `delegatesFocus`). Opening the assistant and the focus-input shortcut
+  (alt+shift+I) do not use this lookup: they look only for an editor or a
+  `textarea` in the shell and otherwise focus the first button of the shell;
+  the mark does not change them.
 - Render functions (`historyPane`, `historyTitle`, `renderModeMenu`) are
   rendered as components of their own, so hooks inside them belong to that
   part, and they run while their part is rendered: the column functions
