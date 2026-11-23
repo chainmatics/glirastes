@@ -460,7 +460,12 @@ describe('serializeMentionsForSend: one pass over the original text', () => {
 });
 
 describe('serializeMentionsForSend is linear', () => {
-  // Counted steps, not time: the count is deterministic, so the bound cannot flake under load.
+  // Counted steps, not time: every loop of serializeMentionsForSend (and of stripContextBlocks,
+  // claimOccurrences, the sort comparators and the context block it builds) adds to
+  // `serializeWork.steps`, so quadratic work in any of them shows in a deterministic count that
+  // cannot flake under load. Known gap: the counter only sees code that counts; a NEW loop added
+  // without counting (e.g. an overlap check over the found list) is invisible to it. The wall-clock
+  // cap below is the secondary guard for that case only, generous so it cannot flake.
   const work = (text: string, mentions: MentionData[]) => {
     serializeMentionsForSend(text, mentions);
     return serializeWork.steps;
@@ -470,11 +475,13 @@ describe('serializeMentionsForSend is linear', () => {
     const mention: MentionData = { id: '1', type: 'user', label: 'A', slug: 'a', prefix: '@' };
     const small = work('@a '.repeat(40_000), [mention]);
     const large = work('@a '.repeat(160_000), [mention]);
-    expect(large).toBeLessThanOrEqual(4 * small + 16);
-    expect(large).toBeLessThanOrEqual(10 * 160_000);
+    // Every per-occurrence loop counts: candidate, overlap check, claim, collect, sort, write, list.
+    expect(large).toBeGreaterThanOrEqual(8 * 160_000);
+    expect(large).toBeLessThanOrEqual(4 * small + 64);
+    expect(large).toBeLessThanOrEqual(16 * 160_000);
     const started = performance.now();
     const sent = serializeMentionsForSend('@a '.repeat(160_000), [mention]);
-    // A generous cap on top of the count: about 30 ms here, the quadratic version took 14 s.
+    // Secondary guard only (see above): about 30 ms here, the quadratic version took 14 s.
     expect(performance.now() - started).toBeLessThan(5_000);
     expect(sent.split('{{mention:user:1:A}}')).toHaveLength(160_001);
   });
@@ -483,8 +490,17 @@ describe('serializeMentionsForSend is linear', () => {
     const mentions: MentionData[] = Array.from({ length: 1_000 }, (_, i) => ({ id: `${i}`, type: 'user', label: `U${i}`, slug: `u${i}`, prefix: '@' }));
     const text = Array.from({ length: 10 }, () => mentions.map((m) => `@${m.slug}`).join(' ')).join(' ');
     const steps = work(text, mentions);
-    expect(steps).toBeLessThanOrEqual(10 * 10_000 * 8);
+    // Sorting 10,000 claims from 1000 mentions: n log n comparisons, about 14 per claim.
+    expect(steps).toBeLessThanOrEqual(10_000 * 40);
     const sent = serializeMentionsForSend(text, mentions);
     expect(parseMentionMarkers(sent)).toHaveLength(10_000);
+  });
+
+  it('many context blocks to strip count too', () => {
+    const absent: MentionData = { id: '1', type: 'user', label: 'Z', slug: 'zz', prefix: '@' };
+    const small = work('<!--context:[x]--> a '.repeat(10_000), [absent]);
+    const large = work('<!--context:[x]--> a '.repeat(40_000), [absent]);
+    expect(large).toBeGreaterThanOrEqual(40_000);
+    expect(large).toBeLessThanOrEqual(4 * small + 64);
   });
 });

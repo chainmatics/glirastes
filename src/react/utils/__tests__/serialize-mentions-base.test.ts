@@ -70,3 +70,34 @@ describe('tokens with whitespace, overlaps and repeats: as base, recorded from b
     }
   });
 });
+
+const whitespaceCases = JSON.parse(
+  readFileSync(new URL('./__fixtures__/serialize-mentions-whitespace-base.json', import.meta.url), 'utf8'),
+) as OverlapCase[];
+
+describe('prefixes and slugs with whitespace: boundaries as base, recorded from base code', () => {
+  it('a space base consumed for a match is no boundary for the next one', () => {
+    expect(serializeMentionsForSend('a    b', [{ id: '1', type: 'u', label: '!', prefix: ' ' }]))
+      .toBe('a {{mention:u:1:!}}  b');
+  });
+
+  it('a space an earlier mention claimed is no boundary', () => {
+    expect(serializeMentionsForSend('a   x', [
+      { id: '1', type: 'u', label: '!', prefix: ' ' },
+      { id: '2', type: 'u', label: 'X', slug: 'x', prefix: ' ' },
+    ])).toBe('a {{mention:u:1:!}} x');
+  });
+
+  it('has the recorded fuzz corpus (canonical and raw)', () => {
+    expect(whitespaceCases.length).toBeGreaterThanOrEqual(800);
+    expect(whitespaceCases.some((entry) => entry.options?.labels === 'raw')).toBe(true);
+  });
+
+  it('is byte-identical to base wherever base wrote well-formed markers', () => {
+    const differences = whitespaceCases
+      .filter((entry) => entry.baseWellFormed)
+      .filter((entry) => serializeMentionsForSend(entry.text, entry.mentions, entry.options) !== entry.expected)
+      .map((entry) => entry.name);
+    expect(differences).toEqual([]);
+  });
+});

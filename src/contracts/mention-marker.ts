@@ -283,7 +283,8 @@ function graphemeSegmenter(): GraphemeSegmenter | null {
 /**
  * The first at most `budget` code points of `visible`, ending at a grapheme
  * boundary (`Intl.Segmenter`; without it, before any joined sequence by the
- * code point rule of `splitsSequence`), never after a joiner.
+ * code point rule of `splitsSequence`), never after a joiner or a Mongolian
+ * vowel separator.
  */
 function cutAtBoundary(visible: string, budget: number): string {
   const segmenter = graphemeSegmenter();
@@ -300,7 +301,9 @@ function cutAtBoundary(visible: string, budget: number): string {
     while (keep > 0 && splitsSequence(points, keep)) keep -= 1;
     prefix = points.slice(0, keep);
   }
-  while (prefix.length > 0 && (prefix[prefix.length - 1] === ZWJ || prefix[prefix.length - 1] === ZWNJ)) prefix.pop();
+  // A joiner or Mongolian vowel separator is kept only before a letter: never leave one before `…`.
+  const needsNext = (cp: string | undefined) => cp === ZWJ || cp === ZWNJ || cp === MONGOLIAN_VOWEL_SEPARATOR;
+  while (prefix.length > 0 && needsNext(prefix[prefix.length - 1])) prefix.pop();
   return prefix.join('');
 }
 

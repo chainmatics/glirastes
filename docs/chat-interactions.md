@@ -264,8 +264,9 @@ noncharacters, U+2800, lone surrogates, `}`, `{{`, `<!`, `-->` or `--!>`
 (`@acme`) without a marker: the model loses the id, no label or id of it
 enters the text, and the context block does not list it. The chat warns
 once per type in the console (outside production), without the type, id or
-label. Spaces, single `<` `>` `{`, `/`, `@`, `+`, non-ASCII letters,
-capitals and `:` are fine, as before. An id with the emoji or
+label. Spaces, single `<` `>` `{`, `/`, `@`, `+`, non-ASCII letters and
+capitals are fine in types and ids, and `:` in ids, as before; a type with
+`:` is refused. An id with the emoji or
 joining-script characters a label keeps is refused, and whether a code
 point is unassigned depends on the engine's Unicode version (an older
 browser refuses an id with a code point it does not know). Such a mention can come from the

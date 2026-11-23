@@ -316,6 +316,54 @@ describe('canonicalMentionLabel: a cut never splits a joined sequence', () => {
   });
 });
 
+describe('a cut right after a kept invisible character is stable', () => {
+  it('a Mongolian vowel separator is not left before the ellipsis', () => {
+    const label = 'ᠠᠠᠠᠠᠠᠠ\u180eᠠᠠ';
+    const once = canonicalMentionLabel(label, { id: '1', maxLength: 8 });
+    expect(canonicalMentionLabel(once, { id: '1', maxLength: 8 })).toBe(once);
+    expect(once).not.toContain('\u180e');
+  });
+
+  it.each<[string, string]>([
+    ['ZWNJ (Persian)', 'می\u200cخ'],
+    ['ZWJ (Devanagari)', 'क\u094d\u200dष'],
+    ['Malayalam chillu', 'ന\u0d4d\u200d '],
+    ['emoji ZWJ', '\u{1f468}\u200d\u{1f469}'],
+    ['Mongolian FVS', 'ᠤ\u180bᠨ'],
+    ['Mongolian MVS', 'ᠢ\u180eᠠ'],
+    ['IVS after Han', '葛\u{e0100}飾'],
+    ['VS16 after an emoji', '❤\ufe0f!'],
+    ['keycap', '1\ufe0f\u20e3!'],
+    ['flag tags', `${'\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}'}!`],
+  ])('%s at every cut position', (_name, piece) => {
+    for (const maxLength of [8, 9, 10, 11, 12, 13, 14, 20]) {
+      for (let pad = 0; pad < 16; pad += 1) {
+        const label = `${'x'.repeat(pad)}${piece.repeat(6)}`;
+        const once = canonicalMentionLabel(label, { id: '1', maxLength });
+        const context = JSON.stringify({ label, maxLength });
+        expect(canonicalMentionLabel(once, { id: '1', maxLength }), context).toBe(once);
+        expect(canonicalMentionLabel(once), context).toBe(once);
+      }
+    }
+  });
+
+  it('is idempotent on labels over the limit made of kept invisible classes (property)', () => {
+    const next = random(0x6375);
+    const pieces = ['ᠠ', '\u180e', '\u180b', 'م', '\u200c', '\u200d', 'क', '\u094d', 'ന', '\u0d4d',
+      '\u{1f468}', '❤', '\ufe0f', '1', '\u20e3', '葛', '\u{e0100}', '\u{1f3f4}', '\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}', ' ', 'x'];
+    for (let run = 0; run < 3_000; run += 1) {
+      let label = '';
+      const parts = 10 + Math.floor(next() * 140);
+      for (let i = 0; i < parts; i += 1) label += pieces[Math.floor(next() * pieces.length)];
+      const maxLength = 8 + Math.floor(next() * 113);
+      const once = canonicalMentionLabel(label, { id: '1', maxLength });
+      const context = JSON.stringify({ label, maxLength });
+      expect(canonicalMentionLabel(once, { id: '1', maxLength }), context).toBe(once);
+      expect(canonicalMentionLabel(once), context).toBe(once);
+    }
+  }, 30_000);
+});
+
 describe('truncation without Intl.Segmenter', () => {
   const withoutSegmenter = <T,>(run: () => T): T => {
     const intl = Intl as unknown as { Segmenter?: unknown };

@@ -19,6 +19,14 @@ const MAX_TOOL_ARGS_LENGTH = 2_000;
  * Removes `<!-- context: … -->` blocks and the whitespace after them. Scans with
  * indexOf instead of one lazy regex, which is quadratic on many unclosed openers.
  */
+/**
+ * Steps of the last `serializeMentionsForSend` call, for the linearity
+ * test: every loop it runs adds one per iteration (context blocks
+ * stripped, token candidates, text positions checked or claimed, sort
+ * comparisons, claims written and listed, context entries). Internal.
+ */
+export const serializeWork = { steps: 0 };
+
 export function stripContextBlocks(text: string): string {
   let kept = '';
   let cursor = 0;
@@ -26,6 +34,7 @@ export function stripContextBlocks(text: string): string {
   for (;;) {
     const open = text.indexOf('<!--', from);
     if (open < 0) break;
+    serializeWork.steps += 1;
     CONTEXT_OPEN_RE.lastIndex = open;
     if (!CONTEXT_OPEN_RE.test(text)) {
       from = open + 4;
@@ -35,7 +44,10 @@ export function stripContextBlocks(text: string): string {
     if (close < 0) break;
     kept += text.slice(cursor, open);
     let end = close + 3;
-    while (end < text.length && /\s/.test(text[end]!)) end += 1;
+    while (end < text.length && /\s/.test(text[end]!)) {
+      end += 1;
+      serializeWork.steps += 1;
+    }
     cursor = end;
     from = end;
   }
@@ -200,6 +212,7 @@ function buildContextBlock(
   if (mentions.length === 0) return null;
   const summary = mentions
     .map((m) => {
+      serializeWork.steps += 1;
       // A label or id cannot close this block early or nest a comment in it. Not covered (format
       // change needed): the raw label in the marker, and sibling entries forged in this free text.
       const displayName = escapeCommentDelimiters(m.displayName ?? m.label ?? m.id);
@@ -230,28 +243,31 @@ function warnRefusedMention(type: string): void {
   console.warn('[glirastes] A mention was sent without a {{mention:…}} marker: its type or id has characters that can hide text (control, format or invisible characters, }, {{, <!, -->). The model gets the typed text, not the id.');
 }
 
-/**
- * Steps of the last `serializeMentionsForSend` call (token candidates looked
- * at, text positions checked or claimed), for the linearity test. Internal.
- */
-export const serializeWork = { steps: 0 };
 
 /**
  * The occurrences base's `(^|\s)token(?=\s|$)` replacement of this token
  * found, left to right: a candidate must not overlap a position an earlier
- * mention claimed (`claimed`), and the next one starts after it. Claims the
+ * mention claimed (`claimed`); a boundary character counts only if it is
+ * not claimed and, before the token, lies at or after the end of this
+ * token's previous match (base consumed it), and the next one starts after it. Claims the
  * accepted occurrences. Steps: one per candidate and per position checked
  * or claimed, so linear in the text for one token.
  */
 function claimOccurrences(text: string, token: string, claimed: Uint8Array): Array<{ start: number; end: number }> {
   const found: Array<{ start: number; end: number }> = [];
   let from = 0;
+  /** End of this token's previous match: base's regex consumed the whitespace before a match. */
+  let previousEnd = 0;
+  // In base's text a claimed position is marker text, never whitespace.
+  const isBoundary = (index: number) => !claimed[index] && /\s/.test(text[index]!);
   for (;;) {
     const start = text.indexOf(token, from);
     if (start < 0) return found;
     serializeWork.steps += 1;
     const end = start + token.length;
-    if ((start > 0 && !/\s/.test(text[start - 1]!)) || (end < text.length && !/\s/.test(text[end]!))) {
+    const before = start === 0 || (start - 1 >= previousEnd && isBoundary(start - 1));
+    const after = end === text.length || isBoundary(end);
+    if (!before || !after) {
       from = start + 1;
       continue;
     }
@@ -268,6 +284,7 @@ function claimOccurrences(text: string, token: string, claimed: Uint8Array): Arr
     serializeWork.steps += end - start;
     found.push({ start, end });
     from = end;
+    previousEnd = end;
   }
 }
 
@@ -286,6 +303,7 @@ export function serializeMentionsForSend(
   mentions: MentionData[],
   options?: MentionSerializationConfig,
 ): string {
+  serializeWork.steps = 0;
   const enabled = options?.enabled ?? true;
   if (!enabled || mentions.length === 0) {
     return stripContextBlocks(text);
@@ -301,6 +319,7 @@ export function serializeMentionsForSend(
   // token, so the reference is looked up per mention, not per entry.
   const toolReferences = new Map<string, string>();
   for (const mention of mentions) {
+    serializeWork.steps += 1;
     if (typeof mention.id !== 'string' || typeof mention.type !== 'string') continue;
     if (mention.definitionId === undefined) continue;
     const key = `${mention.type}\u0000${mention.id}`;
@@ -313,9 +332,9 @@ export function serializeMentionsForSend(
   const claimedTokens = new Set<string>();
   const taken: Claim[] = [];
   const claimed = new Uint8Array(cleaned.length);
-  serializeWork.steps = 0;
 
   mentions.forEach((mention, order) => {
+    serializeWork.steps += 1;
     const id = typeof mention.id === 'string' ? mention.id : '';
     const type = typeof mention.type === 'string' ? mention.type : '';
     if (!id || !type) return;
@@ -353,22 +372,32 @@ export function serializeMentionsForSend(
     };
     // An earlier mention's occurrence wins, as when it replaced its token first.
     for (const { start, end } of claimOccurrences(cleaned, token, claimed)) {
+      serializeWork.steps += 1;
       taken.push({ mention: serializable, marker, start, end, order });
     }
   });
 
-  taken.sort((a, b) => a.start - b.start);
+  taken.sort((a, b) => {
+    serializeWork.steps += 1;
+    return a.start - b.start;
+  });
   let nextText = '';
   let cursor = 0;
   const listed = new Set<number>();
   const serializedMentions: SerializableMention[] = [];
   for (const claim of taken) {
+    serializeWork.steps += 1;
     // A refused mention keeps the token the user saw: no label or id of it enters the text.
     nextText += cleaned.slice(cursor, claim.start) + (claim.marker ?? cleaned.slice(claim.start, claim.end));
     cursor = claim.end;
   }
   nextText += cleaned.slice(cursor);
-  for (const claim of [...taken].sort((a, b) => a.order - b.order)) {
+  const byOrder = [...taken].sort((a, b) => {
+    serializeWork.steps += 1;
+    return a.order - b.order;
+  });
+  for (const claim of byOrder) {
+    serializeWork.steps += 1;
     if (claim.marker === undefined || listed.has(claim.order)) continue;
     listed.add(claim.order);
     serializedMentions.push(claim.mention);
@@ -378,7 +407,10 @@ export function serializeMentionsForSend(
   // arguments, so those always reach the model; other mentions need the option.
   const contextMentions = options?.includeContextBlock
     ? serializedMentions
-    : serializedMentions.filter((m) => m.toolReference);
+    : serializedMentions.filter((m) => {
+      serializeWork.steps += 1;
+      return m.toolReference;
+    });
   const contextBlock = buildContextBlock(
     contextMentions,
     options?.contextLabel ?? 'Referenced entities',
