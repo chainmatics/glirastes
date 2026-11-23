@@ -998,6 +998,33 @@ describe('createGlirastes with a privacy policy', () => {
       expect(response.status).toBe(503);await response.text();expect(adapter.requests).toHaveLength(0);
     }finally{release();await runtime.stop();}
   });
+  it('temporal review: a verified off revocation blocks while its durable save is pending', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const revocations: SecurityRevocation[] = [];
+    const http = platform({ deployments: [activeDeployment(privateKey, [], {schemaVersion: 1, profile: 'off'})], publicKey, revocations });
+    const stateStore = new SharedDurableTestStore();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let waiting = false;
+    const save = stateStore.saveAtomic.bind(stateStore);
+    stateStore.saveAtomic = async state => { if (state.revocations.length) { waiting = true; await held; } await save(state); };
+    const runtime = track(createGlirastes({generated: generated(), env, stateStore: () => stateStore, fetchImpl: http.fetchImpl, push: false, pollIntervalMs: 10, onError: vi.fn()}));
+    try {
+      await runtime.ready();
+      const turn = await runtime.chatTurn(principal);
+      const unsigned = {revocationId: id('3996'), environmentId: ENVIRONMENT_ID, effectiveAt: '2026-07-29T00:02:00.000Z', reasonCode: 'privacy-off-revoked', toolIds: [], agentRevisionIds: [], policyRevisionIds: [runtime.accepted()!.policyRevision.revisionId]};
+      revocations.push({...unsigned, signature: {algorithm: 'Ed25519', keyId: 'runtime-key', value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url')}});
+      await vi.waitFor(() => expect(waiting).toBe(true));
+      const adapter = providerAdapters().openrouter;
+      const handler = createAiChatHandler({tools: {}, model: adapter.model, systemPrompt: 'Assistant', managedRuntime: turn.managedRuntime, onError: () => {}});
+      const response = await handler(new Request('https://app.example/chat', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({messages: [{id: 'u1', role: 'user', parts: [{type: 'text', text: 'pending.canary@example.invalid'}]}]})}));
+      await response.text();
+      expect(adapter.requests).toHaveLength(0);
+      expect(response.status).toBe(503);
+      expect(codeOf(() => runtime.privacyPolicy())).toBe('privacy_policy_revoked');
+    } finally { release(); await runtime.stop(); }
+  });
+
   it('temporal review: bound-only off cannot report applied from volatile state',async()=>{
     const {privateKey,publicKey}=generateKeyPairSync('ed25519');const http=platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey});
     const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>new MemoryRuntimeStateStore(),fetchImpl:http.fetchImpl,push:false,pollIntervalMs:60000,onError:vi.fn()}));

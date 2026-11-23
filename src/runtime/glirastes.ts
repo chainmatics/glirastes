@@ -271,6 +271,8 @@ class AcceptedStateStore implements RuntimeStateStore {
   /** The state came from a verified sync: a persisted one with a cursor, or one saved in this process. */
   private reconciled = false;
   private pendingPrivacyRefusal = false;
+  /** Verified revocations take effect before a potentially slow durable write. */
+  private readonly heldRevocations = new Map<string, Map<string, SecurityRevocation>>();
   private storageEpoch = 0;
   private writes: Promise<void> = Promise.resolve();
 
@@ -317,11 +319,11 @@ class AcceptedStateStore implements RuntimeStateStore {
   async load(): Promise<RuntimeSyncState | null> {
     if (this.unreadable) throw new Error('[glirastes] The persisted runtime state is unreadable');
     const held = this.environmentId ? this.held.get(this.environmentId) ?? null : null;
-    if (!this.state && !held) return null;
+    if (!this.state && !held && this.revocations().length === 0) return null;
     const state: RuntimeSyncState = this.state
       ? structuredClone(this.state)
       : { cursor: null, stable: null, canary: null, pending: [], revocations: [], updatedAt: new Date(0).toISOString() };
-    return { ...state, privacyFloor: stricterFloor(state.privacyFloor, held) };
+    return { ...state, privacyFloor: stricterFloor(state.privacyFloor, held), revocations: this.revocations() };
   }
 
   private hold(floor: RuntimePrivacyFloor | null | undefined): void {
@@ -340,6 +342,11 @@ class AcceptedStateStore implements RuntimeStateStore {
   saveAtomic(state: RuntimeSyncState): Promise<void> {
     const epoch = this.storageEpoch;
     this.hold(state.privacyFloor);
+    if (this.environmentId) {
+      const held = this.heldRevocations.get(this.environmentId) ?? new Map<string, SecurityRevocation>();
+      for (const revocation of state.revocations) held.set(revocation.revocationId, revocation);
+      this.heldRevocations.set(this.environmentId, held);
+    }
     if (state.privacyRefusedDeploymentIds?.length) this.pendingPrivacyRefusal = true;
     const persistent = this.persistent;
     const run = this.writes.then(async () => {
@@ -412,7 +419,9 @@ class AcceptedStateStore implements RuntimeStateStore {
   }
 
   revocations(): SecurityRevocation[] {
-    return this.state?.revocations ?? [];
+    const revocations = new Map((this.state?.revocations ?? []).map(value => [value.revocationId, value]));
+    if (this.environmentId) for (const [id, value] of this.heldRevocations.get(this.environmentId) ?? []) revocations.set(id, value);
+    return [...revocations.values()];
   }
 
   /** A verified deployment's protected block this runner cannot enforce is outstanding. */

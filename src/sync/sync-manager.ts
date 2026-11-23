@@ -195,27 +195,21 @@ export class RuntimeSyncManager {
       }
       try {
         await this.options.verifier.verifyRevocation(parsed.data);
-        acceptedRevocations.push(parsed.data);
       } catch {
         rejectedRevocationIds.push(parsed.data.revocationId);
+        continue;
       }
+      acceptedRevocations.push(parsed.data);
+      const byId = new Map(state.revocations.map(revocation => [revocation.revocationId, revocation]));
+      byId.set(parsed.data.revocationId, parsed.data);
+      state = { ...state, revocations: [...byId.values()], updatedAt: wire.cursor };
+      // Each known revocation closes the gate before another verification or
+      // telemetry await. Persistence errors must propagate, not be classified
+      // as an invalid signature and silently ignored.
+      await this.options.store.saveAtomic(state);
     }
 
     if (acceptedRevocations.length > 0) {
-      const byId = new Map(
-        state.revocations.map((revocation) => [revocation.revocationId, revocation]),
-      );
-      for (const revocation of acceptedRevocations) {
-        byId.set(revocation.revocationId, revocation);
-      }
-      state = {
-        ...state,
-        revocations: [...byId.values()],
-        updatedAt: wire.cursor,
-      };
-      // Persist revocations before candidate processing. A crash may replay the
-      // same cursor, but revocation IDs make that replay idempotent.
-      await this.options.store.saveAtomic(state);
       await this.options.onRevocations?.(acceptedRevocations);
     }
 
