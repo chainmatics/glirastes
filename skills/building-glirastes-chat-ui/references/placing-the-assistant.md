@@ -5,6 +5,7 @@
 - Workspace
 - Layouts and full screen
 - History column
+- Replacing shell parts
 - Width
 - Shortcuts and look
 - Own layout
@@ -103,6 +104,55 @@ column elsewhere render `<SessionSwitcher variant="list" onSelect={close} />`
 (new chat, recent chats newest first, rename, delete, arrow keys); `onSelect`
 runs after a pick or a new chat. Texts come from the chat locale:
 `chatHistoryLabel` (navigation name) and `recentChatsLabel` (heading).
+
+## Replacing shell parts
+
+Every part below is opt-in; an app that sets none of them gets the same DOM,
+behaviour and styles as before.
+
+- Layout menu (only with `'fullscreen'` among several `modes`):
+  `showModeMenu={false}` drops the menu and its key handling (Enter, Space,
+  arrow keys on `[data-element="mode-picker"]`); full screen stays a layout
+  (`setMode`, alt+shift+D, Escape), detach/dock do not come back.
+  `renderModeMenu` draws the app's own control in its place, also without the
+  built-in key handling. It gets `{ modes, current, setMode, label, title,
+  entries }` (`AssistantModeMenuRenderProps`; `entries[mode]` is an
+  `AssistantModeMenuEntry` with `label` and `icon`, `title` carries the layout shortcut). The app's control owns its
+  keyboard and a11y (e.g. `aria-haspopup`, Escape closes only its menu); a
+  menu it portals out of the shell needs `data-cm-keep-interactive` to stay
+  usable in full screen.
+- Own chat column that closes the drawer: pass `historyPane` as a function.
+  It gets `{ open, drawer, close }` (`AssistantHistoryPaneProps`): `open` is
+  whether the column is shown, `drawer` whether it is the drawer below 900 px,
+  `close()` closes the drawer like a pick in the built-in list and focuses the
+  composer, `close('toggle')` gives focus back to the chats toggle (as Escape
+  does). In the wide column `close()` only moves focus. A function always gives
+  a column, also when the chat keeps only one conversation.
+
+  ```tsx
+  <AssistantWorkspace chat={<AiChatPanel />} modes={['sidebar', 'floating', 'fullscreen']}
+    historyPane={({ close }) => <MyProjectsPane onPick={close} />}>
+  ```
+- Heading of the column: `historyTitle` replaces
+  `[data-element="history-title"]` with a node, or a function with the same
+  argument (e.g. a close button in the drawer); `false` drops it, `null` keeps
+  the default. `classNames.history` sets a class on the column.
+- Session icons: `icons.newChat`, `icons.rename` and `icons.delete` replace
+  the "+" of new chat and the rename and delete icons in the shell's own
+  session switchers (header and chat column). The default "+" stays the text
+  character. Outside the shell pass `icons` (`SessionSwitcherIcons`) to `SessionSwitcher` directly;
+  `DEFAULT_SESSION_SWITCHER_ICONS` has the shipped ones. The icons are
+  decorative: the buttons keep their names from the chat locale
+  (`newChatLabel`, `renameSessionAriaLabel`, `deleteSessionAriaLabel`).
+  `newChat: false` drops the "+" element.
+- Own session controls: `useSessionLock()` gives `{ visible, sessionChangeBlocked,
+  locked }` (`SessionLockState`), the rule the built-in `SessionSwitcher`
+  follows. `sessionChangeBlocked` is true while a reply streams, a UI action
+  outcome is awaited or a session operation runs (`isSessionChangeBlocked` of
+  the chat context; `isLoading` only for a context without it). `visible` is
+  false while a surrounding `ChatWindow` is closed or collapsed; inside
+  `AssistantShell` it is always true, use `useAssistantLayout().open` there.
+  Disable switch, new, rename and delete while `locked`.
 
 ## Width
 

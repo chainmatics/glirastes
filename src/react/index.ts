@@ -273,6 +273,9 @@ export {
   DEFAULT_ASSISTANT_SHELL_LABELS,
   DE_ASSISTANT_SHELL_LABELS,
   type AssistantShellAction,
+  type AssistantHistoryPaneProps,
+  type AssistantModeMenuEntry,
+  type AssistantModeMenuRenderProps,
   type AssistantShellButtonProps,
   type AssistantShellClassNames,
   type AssistantShellIcons,
@@ -314,7 +317,14 @@ export { MentionChip, MentionChipList } from './components/mention-chip.js';
 export { VoiceInputButton } from './components/voice-input-button.js';
 export { RecordingBar } from './components/recording-bar.js';
 export { AiTriggerButton } from './components/ai-trigger-button.js';
-export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
+export {
+  SessionSwitcher,
+  DEFAULT_SESSION_SWITCHER_ICONS,
+  useSessionLock,
+  type SessionLockState,
+  type SessionSwitcherIcons,
+  type SessionSwitcherProps,
+} from './components/session-switcher.js';
 export { ClarificationCard } from './components/clarification-card.js';
 export { AttachmentTray, AttachmentButton } from './components/attachments.js';
 

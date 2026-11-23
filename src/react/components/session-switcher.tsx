@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import { ConfirmDialog } from './confirm-dialog.js';
 import { ChatWindowVisibilityContext } from './chat-window-visibility.js';
@@ -15,6 +15,50 @@ export interface SessionSwitcherProps {
   variant?: 'dropdown' | 'list';
   /** After a chat was picked or created, e.g. to close a drawer and focus the composer. */
   onSelect?: () => void;
+  /** Replace the "+" of new chat and the rename and delete icons; unset keys keep the defaults. */
+  icons?: Partial<SessionSwitcherIcons>;
+}
+
+/**
+ * Icons of the session switcher. They are decorative: the buttons keep their
+ * names from the chat locale (`newChatLabel`, `renameSessionAriaLabel`,
+ * `deleteSessionAriaLabel`).
+ */
+export interface SessionSwitcherIcons {
+  /** Inside `[data-element="plus"]` of the new-chat button; `false` drops that element. Default: the text `+`. */
+  newChat: ReactNode;
+  rename: ReactNode;
+  delete: ReactNode;
+}
+
+/** State of the lock on changing the conversation, for an app's own session controls. */
+export interface SessionLockState {
+  /**
+   * Panel visibility: false while the surrounding `ChatWindow` (as in
+   * `FloatingChatUI`) is closed or collapsed. True outside a `ChatWindow`,
+   * also in `AssistantShell` (use `useAssistantLayout().open` there).
+   */
+  visible: boolean;
+  /**
+   * A reply streams, a UI action outcome is awaited or a session operation
+   * runs: `isSessionChangeBlocked` of the chat context, or `isLoading` from
+   * a context that does not set it.
+   */
+  sessionChangeBlocked: boolean;
+  /** `!visible || sessionChangeBlocked`: when the built-in `SessionSwitcher` disables its controls. */
+  locked: boolean;
+}
+
+/**
+ * Whether switching, creating, renaming or deleting a chat is allowed right
+ * now, the same rule the built-in `SessionSwitcher` follows. Needs an
+ * `AiChatProvider` (or a `ChatContext`) above it.
+ */
+export function useSessionLock(): SessionLockState {
+  const { isSessionChangeBlocked, isLoading } = useChatContext();
+  const visible = useContext(ChatWindowVisibilityContext);
+  const sessionChangeBlocked = isSessionChangeBlocked ?? isLoading;
+  return { visible, sessionChangeBlocked, locked: !visible || sessionChangeBlocked };
 }
 
 function defaultFormatTimestamp(value: string | number | undefined): string {
@@ -42,22 +86,24 @@ export function SessionSwitcher({
   className,
   variant = 'dropdown',
   onSelect,
+  icons,
 }: SessionSwitcherProps = {}) {
   const {
     sessions,
     activeSessionId,
     sessionsSupported,
     isSessionsLoading,
-    isLoading,
-    isSessionChangeBlocked,
     switchSession,
     createSession,
     removeSession,
     renameSession,
     locale,
   } = useChatContext();
-  const visible = useContext(ChatWindowVisibilityContext);
-  const blocked = !visible || disabled || (isSessionChangeBlocked ?? isLoading);
+  const blocked = useSessionLock().locked || disabled;
+  const newChatIcon = icons?.newChat ?? DEFAULT_SESSION_SWITCHER_ICONS.newChat;
+  const renameIcon = icons?.rename ?? DEFAULT_SESSION_SWITCHER_ICONS.rename;
+  const deleteIcon = icons?.delete ?? DEFAULT_SESSION_SWITCHER_ICONS.delete;
+  const plus = newChatIcon === false ? null : <span data-element="plus" aria-hidden="true">{newChatIcon}</span>;
   const resolvedFallback = fallbackTitle ?? locale.newChatLabel;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -227,7 +273,7 @@ export function SessionSwitcher({
           onClick={() => void onNew()}
           disabled={blocked || isSessionsLoading}
         >
-          <span data-element="plus" aria-hidden="true">+</span>
+          {plus}
           {locale.newChatLabel}
         </button>
         <div data-element="history-label" id={labelId}>
@@ -293,7 +339,7 @@ export function SessionSwitcher({
                         disabled={blocked}
                         onClick={(e) => beginEdit(e, s.id, s.title || '')}
                       >
-                        {EDIT_ICON}
+                        {renameIcon}
                       </button>
                       <button
                         type="button"
@@ -303,7 +349,7 @@ export function SessionSwitcher({
                         disabled={blocked}
                         onClick={(e) => onDelete(e, s.id)}
                       >
-                        {DELETE_ICON}
+                        {deleteIcon}
                       </button>
                     </>
                   )}
@@ -361,7 +407,7 @@ export function SessionSwitcher({
             onClick={onNew}
             disabled={isSessionsLoading}
           >
-            <span data-element="plus" aria-hidden="true">+</span>
+            {plus}
             {locale.newChatLabel}
           </button>
 
@@ -429,20 +475,7 @@ export function SessionSwitcher({
                           onClick={(e) => beginEdit(e, s.id, s.title || '')}
                           onMouseDown={(e) => e.stopPropagation()}
                         >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <path d="M12 20h9" />
-                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                          </svg>
+                          {renameIcon}
                         </button>
                         <button
                           type="button"
@@ -452,20 +485,7 @@ export function SessionSwitcher({
                           onClick={(e) => void onDelete(e, s.id)}
                           onMouseDown={(e) => e.stopPropagation()}
                         >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                          </svg>
+                          {deleteIcon}
                         </button>
                       </>
                     )}
@@ -495,3 +515,10 @@ const DELETE_ICON = (
     <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
   </svg>
 );
+
+/** The shipped icons: the text `+`, a pencil and a bin. */
+export const DEFAULT_SESSION_SWITCHER_ICONS: SessionSwitcherIcons = Object.freeze({
+  newChat: '+',
+  rename: EDIT_ICON,
+  delete: DELETE_ICON,
+});

@@ -42,6 +42,11 @@ export interface AssistantShellIcons {
   fullscreen?: ReactNode;
   /** Toggle of the chat column in full screen. */
   history?: ReactNode;
+  /** The "+" of new chat in the shell's own session switchers (header and chat column). `false` drops it. */
+  newChat?: ReactNode;
+  /** Rename and delete in the shell's own session switchers. */
+  rename?: ReactNode;
+  delete?: ReactNode;
 }
 
 export interface AssistantShellLabels {
@@ -85,6 +90,43 @@ export interface AssistantShellClassNames {
   railExpand: string;
   resizeHandle: string;
   windowHandle: string;
+  /** The chat column in full screen (`[data-element="history"]`). */
+  history?: string;
+}
+
+/** One entry of the layout menu. */
+export interface AssistantModeMenuEntry {
+  label: string;
+  icon: ReactNode;
+}
+
+/** What `renderModeMenu` gets: what the built-in layout menu uses. */
+export interface AssistantModeMenuRenderProps {
+  /** The layouts of `modes`, in their order. */
+  modes: ReadonlyArray<AssistantLayoutMode>;
+  current: AssistantLayoutMode;
+  /** `useAssistantLayout().setMode`. */
+  setMode(mode: AssistantLayoutMode): void;
+  /** Name of the menu (`labels.layout`). */
+  label: string;
+  /** Tooltip of the trigger, with the layout shortcut where there is one. */
+  title: string;
+  /** Label and icon per layout (`labels.sidebar` / `icons.dock`, …). */
+  entries: Readonly<Record<AssistantLayoutMode, AssistantModeMenuEntry>>;
+}
+
+/** What a `historyPane` or `historyTitle` render function gets. */
+export interface AssistantHistoryPaneProps {
+  /** The column is shown: the open drawer below 900 px, otherwise the column not hidden by its toggle. */
+  open: boolean;
+  /** Below 900 px viewport width the column is a drawer over the conversation. */
+  drawer: boolean;
+  /**
+   * Closes the drawer, as a pick in the built-in chat list does, and moves
+   * focus to the composer (default) or back to the chats toggle. The wide
+   * column stays; focus still moves.
+   */
+  close(focus?: 'composer' | 'toggle'): void;
 }
 
 export const DEFAULT_ASSISTANT_SHELL_LABELS: AssistantShellLabels = Object.freeze({
@@ -216,12 +258,31 @@ export interface AssistantShellProps {
    */
   modes?: ReadonlyArray<AssistantLayoutMode>;
   /**
+   * The built-in layout menu shown when `modes` include full screen. Default
+   * true. `false` drops it together with its key handling; full screen stays
+   * a layout (shortcut, `setMode`), detach and dock do not come back.
+   */
+  showModeMenu?: boolean;
+  /**
+   * Draws the app's own layout control in place of the built-in menu, when
+   * `modes` include full screen and `showModeMenu` is not false. The
+   * built-in menu and its key handling are then not rendered.
+   */
+  renderModeMenu?: (props: AssistantModeMenuRenderProps) => ReactNode;
+  /**
    * Left column in full screen. Default: the chat list (`SessionSwitcher
    * variant="list"`) when the chat keeps several, also for `null`; `false`
-   * shows none; any other node replaces it. 260 px wide; below 900 px viewport width a drawer
-   * opened from the header.
+   * shows none; any other node replaces it. A function gets `open`, `drawer`
+   * and `close()` and always gives a column. 260 px wide; below 900 px
+   * viewport width a drawer opened from the header.
    */
-  historyPane?: ReactNode | false;
+  historyPane?: ReactNode | false | ((pane: AssistantHistoryPaneProps) => ReactNode);
+  /**
+   * Heading of the chat column. Default (also `null`): `labels.history` in
+   * `[data-element="history-title"]`; `false` shows none; a node or a
+   * function (same argument as `historyPane`) replaces the element.
+   */
+  historyTitle?: ReactNode | false | ((pane: AssistantHistoryPaneProps) => ReactNode);
 }
 
 const NARROW_SCREEN = '(max-width: 899.98px)';
@@ -390,7 +451,10 @@ export function AssistantShell({
   minPageWidth = 0,
   railWidth = 44,
   modes: modesProp,
+  showModeMenu = true,
+  renderModeMenu,
   historyPane,
+  historyTitle,
 }: AssistantShellProps) {
   const ui = useAssistantLayout();
   const chat = useContext(ChatContext);
@@ -408,6 +472,7 @@ export function AssistantShell({
   const fullscreen = ui.mode === 'fullscreen';
   const modeKey = modesOf(modesProp).join(',');
   const modes = modeKey.split(',') as AssistantLayoutMode[];
+  // Full screen among several layouts: the layout control is a menu (built-in, the app's own, or none).
   const layoutMenu = modes.includes('fullscreen') && modes.length > 1;
   const switchesDock = !layoutMenu && modes.includes('sidebar') && modes.includes('floating');
   const width = Math.min(ui.width, available);
@@ -501,11 +566,19 @@ export function AssistantShell({
     setFocusRequest(n => n + 1);
   }, []);
   const pickedFromHistory = useCallback(() => closeDrawer('composer'), [closeDrawer]);
-  const pane = !fullscreen || historyPane === false ? null
-    : historyPane ?? (sessionsSupported ? <SessionSwitcher variant="list" onSelect={pickedFromHistory} /> : null);
-  const hasPane = pane !== null && pane !== undefined;
+  const sessionIcons = icons.newChat === undefined && icons.rename === undefined && icons.delete === undefined ? undefined
+    : { newChat: icons.newChat, rename: icons.rename, delete: icons.delete };
+  const paneSlot = !fullscreen || historyPane === false ? null
+    : typeof historyPane === 'function' ? historyPane
+    : historyPane ?? (sessionsSupported ? <SessionSwitcher variant="list" onSelect={pickedFromHistory} icons={sessionIcons} /> : null);
+  const hasPane = paneSlot !== null && paneSlot !== undefined;
   const drawer = hasPane && narrowScreen;
   const historyShown = hasPane && (narrowScreen ? drawerOpen : !historyHidden);
+  const paneProps: AssistantHistoryPaneProps = { open: historyShown, drawer, close: (focus = 'composer') => closeDrawer(focus) };
+  const pane = typeof paneSlot === 'function' ? paneSlot(paneProps) : paneSlot;
+  const historyHeading = historyTitle === false ? null
+    : typeof historyTitle === 'function' ? historyTitle(paneProps)
+    : historyTitle ?? <div data-element="history-title" aria-hidden="true">{labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history}</div>;
   // Leaving full screen or growing past the breakpoint closes the drawer.
   useEffect(() => { if (!fullscreen || !narrowScreen) setDrawerOpen(false); }, [fullscreen, narrowScreen]);
   useEffect(() => {
@@ -608,6 +681,7 @@ export function AssistantShell({
         {button({ action: 'close', label: labels.close, title: labels.close, onClick: ui.closeChat, children: icons.close })}
       </div>}
       {hasPane && <div ref={historyRef} data-element="history" data-drawer={drawer || undefined} id={historyId} hidden={!historyShown} tabIndex={-1}
+        className={classNames.history}
         {...(drawer && drawerOpen ? { role: 'dialog', 'aria-modal': true, 'aria-label': labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history } : {})}
         style={{
           display: historyShown ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, minWidth: 0, overflowY: 'auto', boxSizing: 'border-box',
@@ -621,7 +695,7 @@ export function AssistantShell({
           event.preventDefault();
           closeDrawer('toggle');
         }}>
-        <div data-element="history-title" aria-hidden="true">{labels.history ?? DEFAULT_ASSISTANT_SHELL_LABELS.history}</div>
+        {historyHeading}
         {pane}
       </div>}
       {drawer && drawerOpen && <div data-element="history-backdrop" aria-hidden="true"
@@ -644,10 +718,13 @@ export function AssistantShell({
             ? <span data-element="title" title={activeChatTitle}>{activeChatTitle}</span>
             : sessionsSupported
             // A chat that keeps several conversations lists them where the title would be.
-            ? <SessionSwitcher fallbackTitle={labels.title} />
+            ? <SessionSwitcher fallbackTitle={labels.title} icons={sessionIcons} />
             : <span data-element="title">{labels.title}</span>)}
           {headerActions}
-          {layoutMenu && <AssistantModeMenu modes={modes} current={ui.mode} label={layoutLabel} entries={modeEntries} onPick={ui.setMode}
+          {layoutMenu && showModeMenu && renderModeMenu?.({
+            modes, current: ui.mode, setMode: ui.setMode, label: layoutLabel, title: withShortcut(layoutLabel, shortcuts.toggleLayout), entries: modeEntries,
+          })}
+          {layoutMenu && showModeMenu && !renderModeMenu && <AssistantModeMenu modes={modes} current={ui.mode} label={layoutLabel} entries={modeEntries} onPick={ui.setMode}
             renderTrigger={({ expanded, controls, onClick }) => button({
               action: 'mode', label: `${layoutLabel}: ${modeEntries[ui.mode].label}`, title: withShortcut(layoutLabel, shortcuts.toggleLayout),
               expanded, controls, onClick, children: modeEntries[ui.mode].icon,
