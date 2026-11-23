@@ -1139,6 +1139,21 @@ describe('createGlirastes with a privacy policy', () => {
     }
   });
 
+  it('keeps stopped unbound signed-off authority refused instead of reopening ordinary transport', async () => {
+    const {privateKey, publicKey} = generateKeyPairSync('ed25519');
+    const runtime = track(createGlirastes({generated: generated(), env: {...env, GLIRASTES_STATE_ENVIRONMENT_ID: undefined},
+      fetchImpl: platform({deployments: [activeDeployment(privateKey, [], {schemaVersion: 1, profile: 'off'})], publicKey}).fetchImpl,
+      push: false, pollIntervalMs: 60000, onError: vi.fn()}));
+    await runtime.ready(); const turn = await runtime.chatTurn(principal);
+    expect(codeOf(() => runtime.privacyPolicy())).toBe('privacy_policy_unavailable');
+    await runtime.stop();
+    expect.soft(codeOf(() => runtime.privacyPolicy())).toBe('privacy_policy_unavailable');
+    const adapter = providerAdapters().openrouter;
+    const handler = createAiChatHandler({tools: {}, model: adapter.model, systemPrompt: 'Assistant', managedRuntime: turn.managedRuntime, onError: () => {}});
+    const response = await handler(new Request('https://app.example/chat', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({messages: [{id: 'u1', role: 'user', parts: [{type: 'text', text: 'unbound.stopped@example.invalid'}]}]})}));
+    await response.text(); expect.soft(response.status).toBe(503); expect(adapter.requests).toHaveLength(0);
+  });
+
   it('temporal review: bound-only off cannot report applied from volatile state',async()=>{
     const {privateKey,publicKey}=generateKeyPairSync('ed25519');const http=platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey});
     const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>new MemoryRuntimeStateStore(),fetchImpl:http.fetchImpl,push:false,pollIntervalMs:60000,onError:vi.fn()}));

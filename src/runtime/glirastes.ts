@@ -1022,7 +1022,9 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         await store.drain();
         try { await metrics?.close(); }
         finally {
-          store.clear(); // Retain restrictions, release the backend and deployment graph.
+          // Only bound stores live in the process registry. Private stores must
+          // retain signed authority while callers still hold the stopped handle.
+          if (validStateBinding) store.clear();
           if (instances().get(appId) === instance) instances().delete(appId);
         }
       });
