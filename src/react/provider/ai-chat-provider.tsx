@@ -737,6 +737,7 @@ export function AiChatProvider({
   entityDeclarations,
   continueMessage = 'Please continue.',
   queue: userQueue,
+  sendWhileBusy = 'refuse',
   toolLabels: userToolLabels,
   pipelineMessageTranslator,
   stepSummaryFormatter,
@@ -2067,6 +2068,30 @@ export function AiChatProvider({
     await deliver(prepared.text, prepared.files, deliverOptions);
   }, [prepareSend, deliver]);
 
+  // Without the queue a message sent while a request runs is refused (`sendWhileBusy: 'refuse'`, the default).
+  // Running: what holds a message back in the queue's sense (the transport's request, or a UI action outcome
+  // holding the turn open), plus a direct send of this tick that the transport has not shown as loading yet.
+  const refusesWhileBusy = !queueEnabled && sendWhileBusy !== 'parallel';
+  const directSendPendingRef = useRef(false);
+  const awaitedOutcomesRef = useRef(awaitedOutcomes);
+  awaitedOutcomesRef.current = awaitedOutcomes;
+  const busyForDirectSend = useCallback(
+    () => streamActiveRef.current || awaitedOutcomesRef.current > 0 || directSendPendingRef.current,
+    [],
+  );
+  const sendDirectly = useCallback((go: () => Promise<unknown>) => {
+    if (!refusesWhileBusy) {
+      void go();
+      return;
+    }
+    directSendPendingRef.current = true;
+    void go().finally(() => { directSendPendingRef.current = false; });
+  }, [refusesWhileBusy]);
+  // The transport shows the request as loading: from here its loading state holds the next message back.
+  useEffect(() => {
+    if (isLoading) directSendPendingRef.current = false;
+  }, [isLoading]);
+
   // Decides synchronously whether the message is taken, so any composer can
   // keep the typed text when it is not.
   // Null when taken, else why not.
@@ -2075,6 +2100,7 @@ export function AiChatProvider({
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
   ): ChatSubmitRejectionReason | null => {
     if (sessionNotReady || sessionMutationRef.current) return 'session';
+    if (refusesWhileBusy && busyForDirectSend()) return 'busy';
     if (pendingApprovalsMap.size > 0) {
       setApprovalReminder(true);
       return 'approval-open';
@@ -2085,9 +2111,12 @@ export function AiChatProvider({
       const plan = interactionRegistry?.planMessage(message, sendOptions.mentions ?? activeMentions);
       if (plan?.status === 'send' || plan?.status === 'needs-args') return 'files-with-command';
     }
-    void dispatchSend(message, sendOptions);
+    sendDirectly(() => dispatchSend(message, sendOptions));
     return null;
-  }, [sessionNotReady, pendingApprovalsMap, dispatchSend, attachmentOptions, interactionRegistry, activeMentions]);
+  }, [
+    sessionNotReady, pendingApprovalsMap, dispatchSend, attachmentOptions, interactionRegistry, activeMentions,
+    refusesWhileBusy, busyForDirectSend, sendDirectly,
+  ]);
 
   // ---------------------------------------------------------------------------
   // Message queue (`queue.enabled`): what keeps a message from being sent now.
@@ -2203,15 +2232,17 @@ export function AiChatProvider({
     if (!pendingCommand || !interactionRegistry || sessionNotReady || sessionMutationRef.current) return false;
     // With the queue the composer stays usable during a run; a command still waits for it.
     if (queueEnabled && (queueBusy || sendInFlightRef.current)) return false;
+    // Without the queue, as any message: not while a request runs (`sendWhileBusy`).
+    if (refusesWhileBusy && busyForDirectSend()) return false;
     const plan = interactionRegistry.completeCommand(pendingCommand, values, valueLabels);
     if (plan.status !== 'send') {
       setPendingCommand(plan.status === 'needs-args' ? plan.request : null);
       return plan.status !== 'needs-args';
     }
     setPendingCommand(null);
-    void deliver(plan.text, undefined, queueEnabled ? { keepComposer: true } : undefined);
+    sendDirectly(() => deliver(plan.text, undefined, queueEnabled ? { keepComposer: true } : undefined));
     return true;
-  }, [pendingCommand, interactionRegistry, sessionNotReady, deliver, queueEnabled, queueBusy]);
+  }, [pendingCommand, interactionRegistry, sessionNotReady, deliver, queueEnabled, queueBusy, refusesWhileBusy, busyForDirectSend, sendDirectly]);
 
   const cancelPendingCommand = useCallback(() => setPendingCommand(null), []);
 
@@ -2221,6 +2252,7 @@ export function AiChatProvider({
   ) => {
     if (sessionNotReady || sessionMutationRef.current) return;
     if (queueEnabled && (queueBusy || sendInFlightRef.current)) return;
+    if (refusesWhileBusy && busyForDirectSend()) return;
     const plan = interactionRegistry?.planAction(entity, actionId);
     if (!plan) return;
     if (plan.status === 'needs-args') {
@@ -2228,8 +2260,8 @@ export function AiChatProvider({
       return;
     }
     setPendingCommand(null);
-    void deliver(plan.text, undefined, queueEnabled ? { keepComposer: true } : undefined);
-  }, [interactionRegistry, sessionNotReady, deliver, queueEnabled, queueBusy]);
+    sendDirectly(() => deliver(plan.text, undefined, queueEnabled ? { keepComposer: true } : undefined));
+  }, [interactionRegistry, sessionNotReady, deliver, queueEnabled, queueBusy, refusesWhileBusy, busyForDirectSend, sendDirectly]);
 
   const mentionEntity = useCallback(async (type: string, id: string): Promise<boolean> => {
     const entity = interactionRegistry?.entity(type);

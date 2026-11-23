@@ -1707,13 +1707,17 @@ export type ChatSubmitResult = 'sent' | 'queued' | 'rejected';
 
 /**
  * Why a message was not taken. `session`: the conversation is not loaded or
- * is changing. `approval-open`: an approval waits (only without the queue;
- * with it the message is queued). `attachments-off`: files while attachments
- * are off. `files-with-command`: files with a direct `/` command. `queue-full`:
- * the queue holds `maxSize` messages.
+ * is changing. `busy`: a request runs or a UI action outcome holds the turn
+ * open (only without the queue and with `sendWhileBusy: 'refuse'`, the
+ * default; with the queue the message is queued). `approval-open`: an
+ * approval waits (only without the queue; with it the message is queued).
+ * `attachments-off`: files while attachments are off. `files-with-command`:
+ * files with a direct `/` command. `queue-full`: the queue holds `maxSize`
+ * messages.
  */
 export type ChatSubmitRejectionReason =
   | 'session'
+  | 'busy'
   | 'approval-open'
   | 'attachments-off'
   | 'files-with-command'
@@ -1849,6 +1853,16 @@ export interface AiChatProviderConfig {
    * the composer stays usable. See `docs/chat-queue.md`.
    */
   queue?: ChatQueueConfig;
+  /**
+   * Without the queue: what a message sent while a request runs (or a UI
+   * action outcome holds the turn open) does. `'refuse'` (default): it is not
+   * taken, `submitWithResult` reports `{ status: 'rejected', reason: 'busy' }`
+   * and `lastRejection` is set. `'parallel'`: it goes to the transport at once
+   * as a second request beside the running one (the behaviour before 0.25.0;
+   * with the bundled Vercel transport both write into one history). With
+   * `queue.enabled` it does nothing: the message is queued.
+   */
+  sendWhileBusy?: 'refuse' | 'parallel';
   /**
    * File and image attachments in the composer (paste, drop, picker); off by
    * default. The server handler needs `attachments.enabled` too.
