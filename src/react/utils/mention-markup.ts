@@ -247,93 +247,48 @@ function warnRefusedMention(type: string): void {
 }
 
 
-const isSpace = (char: string | undefined) => char !== undefined && /\s/.test(char);
-
-/**
- * The positions where base's `(^|\s)` lets a token start (the start of the
- * text and every position after whitespace), grouped by the run of
- * non-whitespace starting there (empty at whitespace). One pass, one step
- * per character.
- */
-function tokenStarts(text: string): Map<string, number[]> {
-  const starts = new Map<string, number[]>();
-  const add = (word: string, start: number) => {
-    const list = starts.get(word);
-    if (list) list.push(start);
-    else starts.set(word, [start]);
-  };
-  let index = 0;
-  while (index <= text.length) {
-    serializeWork.steps += 1;
-    if (index === text.length || isSpace(text[index])) {
-      add('', index);
-      index += 1;
-      continue;
-    }
-    let end = index;
-    while (end < text.length && !isSpace(text[end])) {
-      end += 1;
-      serializeWork.steps += 1;
-    }
-    add(text.slice(index, end), index);
-    index = end + 1;
-  }
-  return starts;
-}
-
 /**
  * The occurrences base's `(^|\s)token(?=\s|$)` replacement of this token
  * found, left to right: a candidate must not overlap a position an earlier
  * mention claimed (`claimed`); a boundary character counts only if it is
  * not claimed and, before the token, lies at or after the end of this
  * token's previous match (base consumed it), and the next one starts after it. Claims the
- * accepted occurrences. Only token starts whose word is the token's first
- * word are compared (base tried a match only after whitespace), character
- * by character and counted, so the search is linear in the text and the
- * counted steps are all the work it does.
+ * accepted occurrences. Steps: one per candidate and per position checked
+ * or claimed, so linear in the text for one token.
  */
-function claimOccurrences(
-  text: string,
-  token: string,
-  claimed: Uint8Array,
-  starts: Map<string, number[]>,
-): Array<{ start: number; end: number }> {
+function claimOccurrences(text: string, token: string, claimed: Uint8Array): Array<{ start: number; end: number }> {
   const found: Array<{ start: number; end: number }> = [];
-  let firstWordEnd = 0;
-  while (firstWordEnd < token.length && !isSpace(token[firstWordEnd])) firstWordEnd += 1;
-  const candidates = starts.get(token.slice(0, firstWordEnd)) ?? [];
   let from = 0;
   /** End of this token's previous match: base's regex consumed the whitespace before a match. */
   let previousEnd = 0;
   // In base's text a claimed position is marker text, never whitespace.
-  const isBoundary = (index: number) => !claimed[index] && isSpace(text[index]);
-  for (const start of candidates) {
-    if (start < from) continue;
+  const isBoundary = (index: number) => !claimed[index] && /\s/.test(text[index]!);
+  for (;;) {
+    const start = text.indexOf(token, from);
+    if (start < 0) return found;
     serializeWork.steps += 1;
     const end = start + token.length;
-    if (end > text.length) break;
-    let matches = true;
-    for (let i = firstWordEnd; i < token.length; i += 1) {
-      serializeWork.steps += 1;
-      if (text[start + i] !== token[i]) { matches = false; break; }
-    }
-    if (!matches) continue;
     const before = start === 0 || (start - 1 >= previousEnd && isBoundary(start - 1));
     const after = end === text.length || isBoundary(end);
-    if (!before || !after) continue;
+    if (!before || !after) {
+      from = start + 1;
+      continue;
+    }
     let free = true;
     for (let i = start; i < end; i += 1) {
       serializeWork.steps += 1;
       if (claimed[i]) { free = false; break; }
     }
-    if (!free) continue;
+    if (!free) {
+      from = start + 1;
+      continue;
+    }
     claimed.fill(1, start, end);
     serializeWork.steps += end - start;
     found.push({ start, end });
     from = end;
     previousEnd = end;
   }
-  return found;
 }
 
 /**
@@ -380,7 +335,6 @@ export function serializeMentionsForSend(
   const claimedTokens = new Set<string>();
   const taken: Claim[] = [];
   const claimed = new Uint8Array(cleaned.length);
-  const starts = tokenStarts(cleaned);
 
   mentions.forEach((mention, order) => {
     serializeWork.steps += 1;
@@ -420,7 +374,7 @@ export function serializeMentionsForSend(
       toolReference: toolReferences.get(`${type}\u0000${id}`),
     };
     // An earlier mention's occurrence wins, as when it replaced its token first.
-    for (const { start, end } of claimOccurrences(cleaned, token, claimed, starts)) {
+    for (const { start, end } of claimOccurrences(cleaned, token, claimed)) {
       serializeWork.steps += 1;
       taken.push({ mention: serializable, marker, start, end, order });
     }
