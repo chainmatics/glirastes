@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deChatLocale } from '../../locale-de.js';
 import { DEFAULT_LOCALE } from '../../provider/ai-chat-provider.js';
 import type { ApprovalSubject, ChatLocale, PendingApproval } from '../../types.js';
-import { ApprovalCard } from '../approval-card.js';
+import { ApprovalCard, approvalSubjectLines, flaggedApprovalSubjects } from '../approval-card.js';
+import { describeApprovalCall } from '../../utils/describe-approval.js';
+import { APPROVAL_SUBJECTS_PART_TYPE } from '../../../contracts/approval-subject.js';
+import type { EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
 import { BulkApprovalCard } from '../bulk-approval-card.js';
 
 const context: { locale: ChatLocale; language?: string } = { locale: DEFAULT_LOCALE };
@@ -138,6 +141,53 @@ describe('ApprovalCard with server subjects', () => {
     const { container } = renderCard(approval({ subjects: [named], previewCheck: 'unchecked' }));
     expect(container.querySelector('[data-preview="unchecked"]')!.textContent).toBe('The preview could not be loaded.');
     expect(container.querySelector('[data-preview=""]')).toBeNull();
+  });
+});
+
+describe('a list argument the server looked up', () => {
+  const declarations: EntityDeclarationsByTool = {
+    get_user: { output: [{ type: 'user', id: 'user_id', name: 'displayName', path: '' }] },
+    create_team: { input: [{ type: 'user', args: 'leaderId', role: 'reference' }, { type: 'user', args: 'memberIds', role: 'reference' }] },
+  };
+  const subject = (path: string, id: string, name?: string) => ({
+    type: 'user', role: 'reference', id, ids: { user_id: id }, path, idKind: 'opaque',
+    ...(name ? { status: 'named', check: 'found', name } : { status: 'unknown', check: 'unchecked', reason: 'limit' }),
+  });
+  const describeCall = (subjects: unknown[] | undefined) => describeApprovalCall({
+    toolName: 'create_team', approvalId: 'a1', toolCallId: 'call-1', withSubjects: true, declarations,
+    input: { name: 'Ops', leaderId: 'u1', memberIds: ['u2', 'u3', 'u4'] },
+    // The conversation never showed these users: only the system prompt knows the own id.
+    messages: [
+      { role: 'user', parts: [{ type: 'text', text: 'Create the Ops team with me and the two others' }] },
+      { role: 'assistant', parts: subjects ? [{ type: APPROVAL_SUBJECTS_PART_TYPE, id: 'call-1', data: { v: 1, toolCallId: 'call-1', subjects } }] : [] },
+    ],
+    describe: (toolName, id, args) => ({ id, toolName, args: args as Record<string, unknown>, messageId: 'm', description: 'Create team' }),
+  });
+
+  it('groups the members under one line and warns only about the one the server could not check', () => {
+    const described = describeCall([
+      subject('leaderId', 'u1', 'Ann Admin'), subject('memberIds', 'u2', 'Bob Builder'), subject('memberIds', 'u3', 'Cy Coder'),
+      subject('memberIds', 'u4'),
+    ]);
+    expect(approvalSubjectLines(described, DEFAULT_LOCALE)).toEqual([
+      { label: 'User', names: ['Ann Admin'] },
+      { label: 'User', names: ['Bob Builder', 'Cy Coder'] },
+    ]);
+    expect(flaggedApprovalSubjects([described]).map((entry) => [entry.id, entry.check])).toEqual([['u4', 'unchecked']]);
+    const { container } = renderCard(described);
+    expect([...container.querySelectorAll('[data-subject]')].map((line) => line.textContent)).toEqual(['UserAnn Admin', 'UserBob Builder, Cy Coder']);
+    const warning = screen.getByRole('alert');
+    expect(warning.textContent).toContain('User u4 could not be checked right now.');
+    expect(warning.textContent).not.toContain(DEFAULT_LOCALE.approvalUnknownIdWarning);
+  });
+
+  it('warns about each unknown member, typed by the declaration, when the server sent nothing', () => {
+    const described = describeCall(undefined);
+    expect(described.subjects?.map((entry) => [entry.path, entry.id, entry.type, entry.status])).toEqual([
+      ['leaderId', 'u1', 'user', 'unknown'], ['memberIds', 'u2', 'user', 'unknown'], ['memberIds', 'u3', 'user', 'unknown'], ['memberIds', 'u4', 'user', 'unknown'],
+    ]);
+    renderCard(described);
+    expect(screen.getByRole('alert').textContent).toContain(DEFAULT_LOCALE.approvalUnknownIdsWarning);
   });
 });
 

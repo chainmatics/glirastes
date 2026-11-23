@@ -390,6 +390,36 @@ describe('server approval subjects in the chat handler', () => {
     expect(backend.calls).toHaveLength(1);
   });
 
+  it('names every id of a list argument, the own id from the system prompt included, and binds them to the approval', async () => {
+    const backend = fakeBackend({
+      'GET /users/me-1': () => ok({ user_id: 'me-1', displayName: 'Philippa Self' }),
+      'GET /users/u2': () => ok({ user_id: 'u2', displayName: 'Bob Builder' }),
+      'POST /teams': () => ok({ team_id: 't1' }),
+    });
+    const tools = referenceTools({ extra: [
+      defineEndpointTool({
+        id: 'users.byId', toolName: 'get_user_by_id', description: 'Get a user.', method: 'GET', path: '/users/:user_id',
+        inputSchema: z.object({ user_id: z.string() }).strict(),
+        outputEntities: [{ type: 'user', id: 'user_id', name: 'displayName', path: '' }],
+        entityLookup: { type: 'user', params: { user_id: 'user_id' } },
+      }),
+      defineEndpointTool({
+        id: 'teams.create', toolName: 'create_team', description: 'Create a team.', method: 'POST', path: '/teams',
+        inputSchema: z.object({ name: z.string(), leaderId: z.string(), memberIds: z.array(z.string()) }).strict(),
+        inputEntities: [{ type: 'user', args: 'leaderId', role: 'reference' }, { type: 'user', args: 'memberIds', role: 'reference' }],
+        approvalSubject: { refs: ['leaderId', 'memberIds'], recheck: 'unchanged' },
+      }),
+    ] });
+    const { model } = callingModel([{ toolName: 'create_team', input: { name: 'Ops', leaderId: 'u2', memberIds: ['me-1', 'u2'] } }]);
+    const first = await turn({ tools, model, systemPrompt: 'Your user id is me-1.', approvalSecret: SECRET, endpointCaller: backend.endpointCaller });
+    expect(subjectsPart(first.chunks)!.data.subjects.map((subject) => [subject.path, subject.id, subject.name])).toEqual([
+      ['leaderId', 'u2', 'Bob Builder'], ['memberIds', 'me-1', 'Philippa Self'], ['memberIds', 'u2', 'Bob Builder'],
+    ]);
+    expect(first.chunks.find((chunk) => chunk.type === 'tool-approval-request')!.approvalId).toMatch(/^glirastes-approval\.v2\./);
+    await streamChunks(await first.handler(post([user, answered(first.message, true)])));
+    expect(writes(backend.calls)).toHaveLength(1);
+  });
+
   it('treats a read source that itself needs approval as not available', async () => {
     const { config, backend } = deletePlaylist(() => ok({ playlist_id: 7, displayName: 'Lobby Loop' }), { getPlaylist: { needsApproval: true } });
     const { chunks } = await turn(config);

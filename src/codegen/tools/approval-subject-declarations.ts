@@ -42,7 +42,7 @@ import { compareCodeUnits } from './canonical.js';
 import { TOOLS_PATHS } from './config.js';
 import { outputFieldDenial } from './entity-declarations.js';
 import { toolFinding } from './findings.js';
-import type { ToolContract, ToolFinding } from './types.js';
+import type { JsonSchemaLike, ToolContract, ToolFinding } from './types.js';
 
 export const ENTITY_LOOKUP_EXTENSION = 'x-glirastes-entity-lookup';
 export const APPROVAL_SUBJECT_EXTENSION = 'x-glirastes-approval-subject';
@@ -205,6 +205,8 @@ export interface ApprovalResolutionTool {
   method?: string;
   path?: string;
   params?: ToolContract['params'];
+  /** The tool's input schema, to tell a list argument apart. */
+  input?: JsonSchemaLike;
   /** Whether the tool asks for approval when the model calls it (the effective policy). */
   requiresApproval: boolean;
   declarations?: ObservedApprovalDeclarations;
@@ -231,6 +233,24 @@ function notReadOnly(tool: ApprovalResolutionTool, effect: LookupEffect | undefi
   }
   if (tool.requiresApproval) return `requires approval, so it is not provably read-only without lookupEffect: 'read'`;
   return undefined;
+}
+
+function isSchemaNode(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Whether the input schema says an argument path holds a list (also as one branch of anyOf/oneOf). */
+function holdsList(schema: JsonSchemaLike | undefined, path: string): boolean {
+  let nodes: Record<string, unknown>[] = schema ? [schema] : [];
+  const branches = (node: Record<string, unknown>) => [node, ...['anyOf', 'oneOf', 'allOf']
+    .flatMap((keyword) => (Array.isArray(node[keyword]) ? (node[keyword] as unknown[]).filter(isSchemaNode) : []))];
+  for (const step of path.split('.')) {
+    nodes = nodes.flatMap(branches).flatMap((node) => {
+      const child = isSchemaNode(node.properties) ? node.properties[step] : undefined;
+      return isSchemaNode(child) ? [child] : [];
+    });
+  }
+  return nodes.flatMap(branches).some((node) => node.type === 'array' || (Array.isArray(node.type) && node.type.includes('array')));
 }
 
 function paramNames(params: ToolContract['params'] | undefined): Set<string> | undefined {
@@ -434,6 +454,13 @@ export function resolveApprovalSubjects(input: {
     if (isWrite && declared.approvalSubject !== false) {
       for (const ref of tool.inputEntities ?? []) {
         const args = inputRefArgs(ref);
+        const lists = args.length > 1 ? args.filter((arg) => holdsList(tool.input, arg)) : [];
+        if (lists.length > 0) {
+          invalid(tool.stableKey, `The reference ${args.join(',')} of type ${ref.type} is a composite key with the list argument `
+            + `${lists.join(', ')}; a list of ids is looked up only as a reference of its own, so the server does not look this one up `
+            + '(a call with a list there is never a passed check). Declare the list as a reference of its own.');
+          continue;
+        }
         const sources = (lookupIds.get(ref.type) ?? []).filter((ids) => ids.length === args.length);
         if (sources.length > 0 && !sources.some((ids) => fieldArgsOf(args, ids) !== undefined)) {
           invalid(tool.stableKey, `The reference ${args.join(',')} of type ${ref.type} names its key parts other than the id fields `
