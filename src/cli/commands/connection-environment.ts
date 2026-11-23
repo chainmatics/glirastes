@@ -34,6 +34,7 @@ const realpathNative = promisify(realpathCallback.native);
 const writtenVariableNames = [
   'GLIRASTES_CONTROL_PLANE_URL',
   'GLIRASTES_API_KEY',
+  'GLIRASTES_STATE_ENVIRONMENT_ID',
 ] as const;
 // Written by older `connect` runs; the runtime now asks the Platform for them.
 export const OBSOLETE_CONNECTION_VARIABLES = [
@@ -747,7 +748,7 @@ function closesQuote(text: string, quote: string): boolean {
  */
 function renderEnvironment(
   existing: string,
-  options: { kind: ConnectionEnvironmentKind; baseUrl: string; apiKey: string },
+  options: { kind: ConnectionEnvironmentKind; baseUrl: string; apiKey: string; stateEnvironmentId?: string },
 ): string {
   const newline = existing.includes('\r\n') ? '\r\n' : '\n';
   const hadFinalNewline = existing === '' || /\r?\n$/.test(existing);
@@ -814,6 +815,7 @@ function renderEnvironment(
   const values: Partial<Record<ConnectionVariable, string>> = {
     ...(selfHosted ? { GLIRASTES_CONTROL_PLANE_URL: options.baseUrl } : {}),
     GLIRASTES_API_KEY: options.apiKey,
+    ...(options.stateEnvironmentId ? { GLIRASTES_STATE_ENVIRONMENT_ID: options.stateEnvironmentId } : {}),
   };
   const urlIndex = found.get('GLIRASTES_CONTROL_PLANE_URL');
   if (options.kind === 'custom' && !selfHosted && urlIndex !== undefined) {
@@ -835,6 +837,8 @@ function renderEnvironment(
     const value = values[name];
     const index = found.get(name);
     if (value === undefined) {
+      // An app-wide re-pairing must not silently erase retained privacy authority.
+      if (name === 'GLIRASTES_STATE_ENVIRONMENT_ID') continue;
       // Not needed (any more): drop the line an older connect wrote.
       if (index !== undefined && options.kind === 'nextjs-local') lines[index] = undefined;
       continue;
@@ -889,6 +893,7 @@ export async function materializeConnectionEnvironment(
     kind: targets.environmentKind,
     baseUrl: connection.baseUrl,
     apiKey: options.apiKey,
+    ...(connection.environmentId ? {stateEnvironmentId: connection.environmentId} : {}),
   }));
   // Staged copy and backup of the secret live in a private 0700 directory
   // (git dir or temporary directory) or, only when Git ignores the name,

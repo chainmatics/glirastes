@@ -794,7 +794,7 @@ describe('createGlirastes connected', () => {
 });
 
 describe('createGlirastes with a privacy policy', () => {
-  const env = { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: BASE_URL };
+  const env = { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: BASE_URL, GLIRASTES_STATE_ENVIRONMENT_ID: ENVIRONMENT_ID };
   const block: PrivacyPolicyBlock = {
     schemaVersion: 1,
     profile: 'protected-text/v1',
@@ -844,8 +844,37 @@ describe('createGlirastes with a privacy policy', () => {
     expect(glirastes.privacyPolicy()).toBeNull();
   });
 
+  it('does not fall open with explicit managed activation but no connection configuration', () => {
+    const instance = track(createGlirastes({generated: generated(), env: {}, privacy: {managed: true}, onError: vi.fn()}));
+    expect(codeOf(() => instance.privacyPolicy())).toBe('privacy_policy_unavailable');
+    expect(codeOf(() => instance.speechPolicy())).toBe('privacy_policy_unavailable');
+  });
+
+  it('blocks a managed connection with no authenticated reference environment', async () => {
+    const http = platform({lookup:[() => json({schemaVersion:1,appId:APP_ID,environmentId:null,runnerKey:'runner-1',mode:'development'})]});
+    const instance = track(createGlirastes({generated:generated(),env,privacy:{managed:true},stateStore:()=>new SharedDurableTestStore(),fetchImpl:http.fetchImpl,push:false,onError:vi.fn(),pollIntervalMs:60000}));
+    await instance.ready(); expect(codeOf(()=>instance.privacyPolicy())).toBe('privacy_state_binding_mismatch');
+    expect(instance.accepted()).toBeUndefined();
+  });
+  it('blocks a managed signed off policy with memory-only state', async () => {
+    const {privateKey,publicKey}=generateKeyPairSync('ed25519');
+    const http=platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey});
+    const instance=track(createGlirastes({generated:generated(),env,privacy:{managed:true},stateStore:()=>new MemoryRuntimeStateStore(),fetchImpl:http.fetchImpl,push:false,onError:vi.fn(),pollIntervalMs:60000}));
+    await instance.ready();expect(codeOf(()=>instance.privacyPolicy())).toBe('privacy_policy_unavailable');expect(instance.accepted()).toBeUndefined();
+  });
+  it('does not adopt a live environment differing from the fixed persisted binding', async () => {
+    const http=platform();
+    const instance=track(createGlirastes({generated:generated(),env,privacy:{managed:true},stateEnvironmentId:id('3999'),stateStore:()=>new SharedDurableTestStore(),fetchImpl:http.fetchImpl,push:false,onError:vi.fn(),pollIntervalMs:60000}));
+    await instance.ready();expect(codeOf(()=>instance.privacyPolicy())).toBe('privacy_state_binding_mismatch');
+    expect(http.calls.some(({url})=>url.includes('/sync?'))).toBe(false);
+  });
+  it('keeps a fresh inactive store ordinary when discovery is offline', async () => {
+    const instance=track(createGlirastes({generated:generated(),env,stateStore:()=>new SharedDurableTestStore(),fetchImpl:(async()=>{throw new Error('offline')}) as typeof fetch,push:false,onError:vi.fn(),pollIntervalMs:60000}));
+    await instance.ready();expect(instance.privacyPolicy()).toBeNull();
+  });
+
   it('enforces the local profile in standalone when required', () => {
-    const glirastes = track(createGlirastes({ generated: generated(), env: {}, privacy: { ...privacy(), local: { required: true } } }));
+    const glirastes = track(createGlirastes({ generated: generated(), env: {}, privacy: { ...privacy(), managed: false, local: { required: true } } }));
     expect(glirastes.privacyPolicy()).toMatchObject({ source: 'local', profile: 'protected-text/v1' });
   });
 
@@ -1074,8 +1103,8 @@ describe('createGlirastes with a privacy policy', () => {
           technicalMetadata: expect.objectContaining({ privacy: expect.objectContaining({ state: 'refused', reasons: ['accepted_state_missing'] }) }),
         })]);
         expect(heartbeats(http).some((beat) => 'lastAppliedDeploymentId' in beat)).toBe(false);
-        expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_not_configured');
-        expect(await gateCode(glirastes)).toBe('privacy_not_configured');
+        expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_policy_unavailable');
+        expect(await gateCode(glirastes)).toBe('privacy_policy_unavailable');
         await glirastes.stop();
       }
     });
@@ -1222,10 +1251,10 @@ describe('createGlirastes with a privacy policy', () => {
         generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
       }));
       await glirastes.ready();
-      expect(await gateCode(glirastes)).toBe('privacy_not_configured');
+      expect(await gateCode(glirastes)).toBe('privacy_policy_unavailable');
       await vi.waitFor(() => expect(glirastes.connection()?.environmentId).toBeNull());
-      expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_not_configured');
-      expect(await gateCode(glirastes)).toBe('privacy_not_configured');
+      expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_policy_unavailable');
+      expect(await gateCode(glirastes)).toBe('privacy_policy_unavailable');
     });
   });
 
@@ -1239,12 +1268,12 @@ describe('createGlirastes with a privacy policy', () => {
     await glirastes.ready();
     expect(glirastes.accepted()).toBeUndefined();
     // The refused revision blocks traffic; nothing runs unprotected on the local code.
-    expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_not_configured');
+    expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_policy_unavailable');
     const turn = await glirastes.chatTurn(principal);
     expect(codeOf(() => turn.managedRuntime.privacyGate({
       request: new Request('https://app.example/api/chat'),
       snapshot: { policyRevision: { revisionId: id('3908') } } as never,
-    }))).toBe('privacy_not_configured');
+    }))).toBe('privacy_policy_unavailable');
     const beat = http.calls.find(({ url }) => url.includes('/heartbeat'));
     expect(JSON.parse(String(beat?.init.body))).toMatchObject({
       technicalMetadata: { privacy: { state: 'refused', reasons: ['store_missing'] } },

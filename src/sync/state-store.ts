@@ -23,6 +23,7 @@ export interface RuntimePrivacyFloor {
 }
 
 export interface RuntimeSyncState {
+  scope?: { targetAppId: string; environmentId: string; tenantId?: string };
   cursor: string | null;
   stable: RuntimeDeploymentBundle | null;
   canary: RuntimeDeploymentBundle | null;
@@ -48,6 +49,7 @@ const RuntimePrivacyFloorSchema = z.object({
 }).strict();
 
 const RuntimeSyncStateSchema: z.ZodType<RuntimeSyncState> = z.object({
+  scope: z.object({ targetAppId: z.uuid(), environmentId: z.uuid(), tenantId: z.uuid().optional() }).strict().optional(),
   cursor: z.iso.datetime({ offset: true }).nullable(),
   stable: RuntimeDeploymentBundleSchema.nullable(),
   canary: RuntimeDeploymentBundleSchema.nullable(),

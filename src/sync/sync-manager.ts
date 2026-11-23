@@ -125,6 +125,8 @@ function raisedByRejection(
 export class RuntimeSyncManager {
   constructor(private readonly options: {
     environmentId: string;
+    targetAppId?: string;
+    tenantId?: string;
     store: RuntimeStateStore;
     verifier: RuntimeRevisionVerifier;
     validateDeployment?: (
@@ -139,6 +141,7 @@ export class RuntimeSyncManager {
   }) {}
 
   private applying: Promise<unknown> = Promise.resolve();
+  private restoredValidated = false;
 
   /**
    * Applies one sync bundle. Calls run one after another (poll and push may
@@ -153,6 +156,28 @@ export class RuntimeSyncManager {
   private async applyOne(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
     const wire = WireSyncBundleSchema.parse(rawBundle);
     let state = await this.options.store.load() ?? this.emptyState();
+    // Cached material cannot establish authority for a different configured app.
+    if ((state.scope && (state.scope.environmentId !== this.options.environmentId
+      || (this.options.targetAppId && state.scope.targetAppId !== this.options.targetAppId)
+      || (this.options.tenantId && state.scope.tenantId !== this.options.tenantId)))
+      || [state.stable, state.canary, ...state.pending].some(deployment => deployment && !this.deploymentScopeMatches(deployment))
+      || state.revocations.some(revocation => !this.revocationScopeMatches(revocation))) {
+      throw new Error('runtime_state_scope_mismatch');
+    }
+    if (!this.restoredValidated) {
+      for (const deployment of [state.stable, state.canary, ...state.pending]) {
+        if (!deployment) continue;
+        for (const revision of [deployment.agentRevision, deployment.manifestRevision, deployment.policyRevision,
+          ...(deployment.configRevision ? [deployment.configRevision] : [])]) await this.options.verifier.verifyRevision(revision);
+        if (deployment.promptBinding) await this.options.verifier.verifyPromptBinding(deployment.promptBinding);
+      }
+      for (const revocation of state.revocations) await this.options.verifier.verifyRevocation(revocation);
+      this.restoredValidated = true;
+    }
+    if (this.options.targetAppId) state = { ...state, scope: {
+      targetAppId: this.options.targetAppId, environmentId: this.options.environmentId,
+      ...(this.options.tenantId ? {tenantId: this.options.tenantId} : {}),
+    } };
     const rejectedRevocationIds: string[] = [];
     const acceptedRevocations: SecurityRevocation[] = [];
 
@@ -161,7 +186,7 @@ export class RuntimeSyncManager {
       const id = this.objectId(rawRevocation, 'revocationId');
       if (
         !parsed.success
-        || parsed.data.environmentId !== this.options.environmentId
+        || !this.revocationScopeMatches(parsed.data)
       ) {
         rejectedRevocationIds.push(id);
         continue;
@@ -312,14 +337,23 @@ export class RuntimeSyncManager {
     };
   }
 
+  private revocationScopeMatches(revocation: SecurityRevocation): boolean {
+    // The signed revocation contract scopes by globally unique environment UUID.
+    return revocation.environmentId === this.options.environmentId;
+  }
+
   private deploymentScopeMatches(deployment: RuntimeDeploymentBundle): boolean {
     const revisions = [
       deployment.agentRevision,
       deployment.manifestRevision,
       deployment.policyRevision,
+      ...(deployment.configRevision ? [deployment.configRevision] : []),
     ];
     const first = revisions[0];
-    return deployment.environmentId === this.options.environmentId
+    return (!this.options.targetAppId || first.targetAppId === this.options.targetAppId)
+      && (!this.options.tenantId || first.tenantId === this.options.tenantId)
+      && (!deployment.promptBinding || deployment.promptBinding.appId === first.targetAppId)
+      && deployment.environmentId === this.options.environmentId
       && deployment.manifestRevision.environmentId === this.options.environmentId
       && deployment.policyRevision.environmentId === this.options.environmentId
       && revisions.every((revision) => (

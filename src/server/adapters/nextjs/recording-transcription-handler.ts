@@ -341,28 +341,42 @@ export function createRecordingTranscriptionHandler(
     const declared = Number(request.headers.get('content-length'));
     if (Number.isFinite(declared) && declared > maxBytes) return failed(413, 'Recording too long');
 
-    // One deadline for the wait for a slot, the upload and the service call.
+    // Ordinary local transcription retains upstream concurrency and starts its
+    // timer only after upload. Privacy or explicit limits opt into the bounded gate.
+    const constrained = policy !== null || config.maxConcurrent !== undefined || config.maxQueued !== undefined
+      || config.maxDurationSeconds !== undefined;
+    // Protected calls have one deadline for queue, upload and transcription.
     const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(new DOMException('Transcription timed out', 'TimeoutError')), timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const startDeadline = () => { timer = setTimeout(() => deadline.abort(new DOMException('Transcription timed out', 'TimeoutError')), timeoutMs); };
+    if (constrained || !transcribe) startDeadline();
     const timeout = deadline.signal;
     const signal = AbortSignal.any([request.signal, timeout]);
     let release: (() => void) | undefined;
     try {
-      release = await gate.acquire(signal);
-      if (!release) return failed(429, 'Speech service busy', { 'retry-after': '5' });
+      if (constrained) {
+        release = await gate.acquire(signal);
+        if (!release) return failed(429, 'Speech service busy', { 'retry-after': '5' });
+      }
 
       // Only a request that holds a slot has its body read, and the read is
       // bounded by size and by the deadline.
       const audio = await readCapped(request, maxBytes, signal, () => timeout.aborted);
       if (!audio) return failed(413, 'Recording too long');
       if (audio.byteLength === 0) return failed(400, 'Empty recording');
-      const duration = wavDurationSeconds(audio);
-      if (duration === undefined) return failed(415, 'Unsupported audio format');
-      if (duration > maxDuration) return failed(413, 'Recording too long');
+      // Policy may change while queued or uploading: never dispatch under the old decision.
+      const dispatchPolicy = speechPolicy(config.policy);
+      if (JSON.stringify(dispatchPolicy) !== JSON.stringify(policy)) return failed(503, 'Speech policy changed');
+      if (constrained) {
+        const duration = wavDurationSeconds(audio);
+        if (duration === undefined) return failed(415, 'Unsupported audio format');
+        if (duration > maxDuration) return failed(413, 'Recording too long');
+      }
 
       if (transcribe) {
         const samples = decodeRecordingWav(new Uint8Array(audio).buffer);
         if (!samples) return failed(415, 'Unsupported audio format');
+        if (!constrained) startDeadline();
         const result = await transcribe({ samples, sampleRate: 16000 }, { language: language.slice(0, 2), signal });
         return Response.json({ text: typeof result?.text === 'string' ? result.text.trim() : '' });
       }

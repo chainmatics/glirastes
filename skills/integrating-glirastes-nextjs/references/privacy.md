@@ -324,6 +324,8 @@ app tightened as `PrivacyLocalRestrictionCode`).
 ```ts
 const glirastes = createGlirastes({
   generated,
+  stateEnvironmentId: process.env.GLIRASTES_STATE_ENVIRONMENT_ID,
+  stateStore: environmentId => new FileRuntimeStateStore(`/persistent/runtime-${environmentId}.json`),
   // GlirastesPrivacyOptions: lets the runner enforce and report a signed block.
   privacy: { managed: true, shield, providers: registry, local: { mapping: { idleTtlSeconds: 1800 } } },
 });
@@ -397,7 +399,16 @@ export const POST = createAiChatHandler({
   or `privacy.local.required: true` opts into fail-closed bootstrap.
   A verified signed privacy block or retained authority also binds the runner;
   a generic state store or provider metadata alone does not activate protection. Pass `stateStore: (environmentId) => new FileRuntimeStateStore(path)`
-  (`glirastes/sync`, one file per environment, on a persistent volume).
+  (`glirastes/sync`, one file per environment, on a persistent volume) and
+  `stateEnvironmentId` (or `GLIRASTES_STATE_ENVIRONMENT_ID`). This nonsecret UUID
+  comes from the selected environment's Citadel connection block; environment-bound
+  CLI pairing writes it too. App-wide pairing preserves an existing binding.
+  The SDK reads this store before network discovery. Keep both the binding and
+  store when removing local activation: retained signed authority still applies.
+  A live connection mismatch fails with `privacy_state_binding_mismatch`; align
+  the intended environment through Connect rather than deleting the store.
+  Removing/changing both store and binding erases local authority and is an
+  explicit administrator/DR trust boundary, not a supported privacy downgrade.
   Without a durable store (none, or `MemoryRuntimeStateStore`) the runner
   claims no `privacyPolicyVersions` capability and refuses a protected block
   with the reason `accepted_state_missing`; it never reports it as applied.
@@ -405,7 +416,7 @@ export const POST = createAiChatHandler({
   `privacy_policy_unavailable` to chat turns, `privacyPolicy()` and
   `speechPolicy()`. That covers a new or lost state, a Platform that is
   unreachable at start (the `ready()` timeout releases nothing: the
-  connection and its state are only known after the lookup), an unreadable
+  fixed store is loaded before the lookup; live freshness still needs sync), an unreadable
   state file (reported as `RuntimeStateUnreadable`, retried, never
   overwritten with defaults) and a failed save (blocked until a later
   verified state was saved). A lost state has no local floor: the first

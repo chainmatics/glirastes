@@ -92,33 +92,36 @@ describe('release workflows', () => {
     ]);
   });
 
-  it('publishes only after the CI gates, with the build before the tests', () => {
-    expect(jobRuns(read('.github/workflows/publish.yml'), 'publish')).toEqual([
-      'npm install -g npm@11',
-      '|',
-      'bun install --frozen-lockfile',
-      'bun run typecheck',
-      'bun run typecheck:tests',
-      'bun run build',
-      'bun install --frozen-lockfile --cwd examples/react-nest-separate/api',
-      'bun run check:egress',
-      'bun install --frozen-lockfile --cwd tests/fixtures/pg-floor',
-      'bun run test',
+  it('runs privacy gates before either publication, then rebuilds the npm artifact from the same checkout', () => {
+    const workflow=read('.github/workflows/publish.yml');
+    expect(jobRuns(workflow,'release-preflight')).toEqual([
+      '|','|','bun install --frozen-lockfile','bun scripts/api-surface.ts --check',
+      'bun run typecheck','bun run typecheck:tests','bun run build',
+      'bun install --frozen-lockfile --cwd examples/react-nest-separate/api','bun run check:egress',
+      'bun install --frozen-lockfile --cwd tests/fixtures/pg-floor','bun run test',
+    ]);
+    expect(jobRuns(workflow,'publish')).toEqual([
+      'npm install -g npm@11','bun install --frozen-lockfile','bun run build',
       `npm publish --access public --provenance --tag "$(node -p "['latest', 'next'][Number(require('./package.json').version.includes('-'))]")"`,
     ]);
+    expect(jobStep(workflow,'release-preflight','Test')).toContain("GLIRASTES_REQUIRE_POSTGRES: '1'");
   });
 
   it('checks the upgrade notes in a preflight job before the image push and the npm publish', () => {
     const workflow = read('.github/workflows/publish.yml');
     expect(jobStepNames(workflow, 'release-preflight')).toEqual([
       'Checkout',
+      'Verify tag matches package.json version',
+      'Setup Node',
       'Verify upgrade notes are released for this version',
       'Setup Bun',
       'Install dependencies',
       'Verify the api-surface snapshot matches the source',
+      'Typecheck', 'Typecheck tests', 'Build', 'Install the NestJS fixture API',
+      'Model egress inventory', 'Install the pg floor fixture', 'Test',
     ]);
     // The image is pushed inside runtime-container, so it must wait for the preflight too.
-    expect(jobNeeds(workflow, 'runtime-container')).toEqual(['release-preflight']);
+    expect(jobNeeds(workflow, 'runtime-container')).toEqual(['release-preflight', 'stt-local-addon']);
     // Local STT stage 1 is a release gate as well; stage 2 (the model) is not.
     expect(jobNeeds(workflow, 'stt-local-addon')).toEqual(['release-preflight']);
     expect(workflow).toContain('uses: ./.github/workflows/stt-local-addon.yml');

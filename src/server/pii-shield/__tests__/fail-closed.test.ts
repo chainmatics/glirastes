@@ -159,3 +159,13 @@ describe('safe error summaries', () => {
     expect(JSON.parse(JSON.stringify(error))).toEqual({ name: 'PrivacyError', code: 'privacy_detector_unavailable' });
   });
 });
+
+it('never echoes identity-shaped names or extra properties from duck-typed privacy diagnostics', async () => {
+  const {privacySafeError} = await import('../chat-privacy.js');
+  const named = {name: 'IdentifiableCustomerName', message: CANARY.email};
+  expect(toSafeError(named)).toEqual({name:'Error',code:'unknown_error'});
+  const raw = {name:'PrivacyError',code:'privacy_output_leak',customer:CANARY.email,message:CANARY.email,cause:named};
+  const safe = privacySafeError(raw);
+  expect(safe).not.toBe(raw); expect(safe.name).toBe('PrivacyError'); expect(safe.code).toBe('privacy_output_leak');
+  expect(JSON.stringify(safe)).not.toMatch(CANARY_PATTERN); expect(safe).not.toHaveProperty('customer'); expect(safe.stack).toBeUndefined();
+});

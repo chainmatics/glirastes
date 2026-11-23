@@ -71,6 +71,34 @@ describe('authorized tool rehydration', () => {
     expect(JSON.stringify(adapter.requests)).not.toContain('ConvertedIdentityCanary');
   });
 
+  it.each(['added', 'strengthened'])('preserves a consumer %s approval requirement and descriptor schema', async mode => {
+    const { boundary, fakeEmail } = await setup();
+    const converted = toolToAiTool(defineTool({ id: 'read', description: 'Read', inputSchema: z.object({}),
+      ...(mode === 'strengthened' ? { approval: 'always' as const } : {}), execute: async () => ({ok: true}) }), {currentDate: new Date(), locale: 'en'});
+    const needsApproval = vi.fn(async (_input: unknown) => true);
+    const inputSchema = z.object({ to: z.string() });
+    const wrapped = wrapToolsForPrivacy({read: {...converted, needsApproval, inputSchema, description: 'Consumer guard'}}, boundary);
+    expect(wrapped.read.inputSchema).toBe(inputSchema); expect(wrapped.read.description).toBe('Consumer guard');
+    expect(await wrapped.read.needsApproval({to: fakeEmail})).toBe(true);
+    expect(needsApproval).toHaveBeenCalledWith({to: CANARY.colleagueEmail});
+  });
+
+  it.each(['converted', 'native'])('withholds error-only failure data on serialized transport for %s tools', async mode => {
+    const { boundary } = await setup();
+    const canary = 'FailureOnlyCanary' + 'X'.repeat(1600);
+    const execute = async () => ({error: canary, body: { secret: canary }});
+    const tool = mode === 'converted' ? toolToAiTool(defineTool({id: 'read', description: 'Read', inputSchema: z.object({}), execute}), {currentDate: new Date(), locale: 'en'}) : {execute};
+    const wrapped = wrapToolsForPrivacy({read: tool}, boundary);
+    const result = await wrapped.read.execute({});
+    expect(result).toMatchObject({success: false, error: 'tool_execution_failed'});
+    const adapter = providerAdapters().openrouter;
+    await generateText({model: boundary.wrapModel(adapter.model), messages: [
+      {role:'user',content:'Read'}, {role:'assistant',content:[{type:'tool-call',toolCallId:'c',toolName:'read',input:{}}]},
+      {role:'tool',content:[{type:'tool-result',toolCallId:'c',toolName:'read',output:{type:'json',value:result as never}}]},
+    ]});
+    expect(adapter.requests).toHaveLength(1); expect(JSON.stringify(adapter.requests)).not.toContain('FailureOnlyCanary');
+  });
+
   it('does not bypass an added execution guard when rebuilding a converted tool', async () => {
     const { boundary } = await setup();
     const execute = vi.fn(async () => ({ value: 'private' }));
@@ -207,7 +235,7 @@ describe('idempotent writes with receipts', () => {
       const receipts = memoryReceipts();
       const execute = vi.fn(async (_input: unknown, _options?: unknown) => answer);
       const tools = wrapToolsForPrivacy({ send: { execute } }, boundary, { receipts });
-      expect(await tools.send.execute!({ n: i }, { toolCallId: 'call-f' })).toEqual(answer);
+      expect(await tools.send.execute!({ n: i }, { toolCallId: 'call-f' })).toMatchObject({success: false, error: 'tool_execution_failed'});
       expect([...receipts.rows.values()].map((row) => row.status)).toEqual(['failed']);
       await expect(tools.send.execute!({ n: i }, { toolCallId: 'call-f' })).rejects.toMatchObject({ code: 'privacy_tool_failed' });
       expect(execute).toHaveBeenCalledTimes(1);

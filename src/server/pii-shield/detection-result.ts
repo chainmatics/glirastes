@@ -26,6 +26,7 @@ export type PrivacyErrorCode =
   | 'privacy_tool_failed'
   | 'privacy_tool_outcome_unknown'
   | 'privacy_not_configured'
+  | 'privacy_state_binding_mismatch'
   | 'privacy_policy_unavailable'
   | 'privacy_policy_revoked'
   | 'privacy_policy_downgrade'
@@ -54,6 +55,7 @@ const MESSAGES: Record<PrivacyErrorCode, string> = {
   privacy_tool_failed: 'The tool failed.',
   privacy_tool_outcome_unknown: 'The tool outcome is unknown; reconcile before retrying.',
   privacy_not_configured: 'The privacy policy requires protection this server is not configured for.',
+  privacy_state_binding_mismatch: 'The persisted runtime environment binding does not match the authenticated connection.',
   privacy_policy_unavailable: 'No verified privacy policy is available yet.',
   privacy_policy_revoked: 'The privacy policy of this turn was revoked.',
   privacy_policy_downgrade: 'A weaker privacy policy than the accepted one was refused.',
@@ -98,7 +100,7 @@ export function toSafeError(error: unknown): SafeErrorSummary {
   const name = typeof error === 'object' && error !== null && typeof (error as { name?: unknown }).name === 'string'
     ? (error as { name: string }).name
     : 'Error';
-  const safeName = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name) ? name : 'Error';
+  const safeName = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'AbortError', 'TimeoutError', 'APICallError'].includes(name) ? name : 'Error';
   if (safeName === 'AbortError') return { name: safeName, code: 'aborted' };
   return { name: safeName, code: 'unknown_error' };
 }

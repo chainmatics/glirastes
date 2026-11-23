@@ -62,6 +62,15 @@ function expectNoEgress(report: RestartReport) {
 }
 
 describe('managed privacy across a process restart (FileRuntimeStateStore)', { timeout: 180_000 }, () => {
+  it('retains protection across an offline restart after activation and privacy infrastructure are removed', async () => {
+    const {statePath} = await workspace();
+    const first = await runner(statePath, {...SERVE, deployment: protectedRevision(2)});
+    expect(first.chatStatus).toBe(200);
+    const second = await runner(statePath, {...UNREACHABLE, managed: false, retainedStore: true});
+    expectNoEgress(second); expect(second.chatError).toBe('privacy_policy_unavailable');
+    expect(await readFile(statePath,'utf8')).toContain('protected-text/v1');
+  });
+
   it('process 1 accepts protection; process 2 with lost state, Platform unreachable and a ready() timeout sends nothing', async () => {
     const { statePath } = await workspace();
     const first = await runner(statePath, { ...SERVE, deployment: protectedRevision(2) });

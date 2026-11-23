@@ -433,6 +433,7 @@ export const PRIVACY_DECISION_CODES = [
   'privacy_tool_outcome_unknown',
   'privacy_not_configured',
   'privacy_policy_unavailable',
+  'privacy_state_binding_mismatch',
   'privacy_policy_revoked',
   'privacy_policy_downgrade',
   'provider_not_allowed',

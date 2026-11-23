@@ -42,6 +42,27 @@ describe('createRecordingTranscriptionHandler', () => {
     expect((await handler(request({ body: wav(100) }))).status).toBe(200);
     expect(transcribe).toHaveBeenCalledOnce();
   });
+  it('preserves ordinary local concurrency without implicit queue refusal', async () => {
+    const finish: Array<() => void> = [];
+    const transcribe = vi.fn(() => new Promise<{text:string}>(resolve => finish.push(()=>resolve({text:'ok'}))));
+    const handler=createRecordingTranscriptionHandler({authorize:allow,transcribe});
+    const calls=Array.from({length:12},()=>handler(request()));
+    await vi.waitFor(()=>expect(transcribe).toHaveBeenCalledTimes(12));
+    for(const release of finish) release();
+    expect((await Promise.all(calls)).map(value=>value.status)).toEqual(Array(12).fill(200));
+  });
+  it('starts the ordinary local timeout after upload and rechecks policy before dispatch', async () => {
+    const transcribe=vi.fn(async()=>({text:'ok'}));
+    const handler=createRecordingTranscriptionHandler({authorize:allow,transcribe,timeoutMs:10});
+    let upload!:()=>void;
+    const body=new ReadableStream<Uint8Array>({start(controller){upload=()=>{controller.enqueue(wav());controller.close();};}});
+    const result=handler(new Request('http://fixture',{method:'POST',headers:{'content-type':'audio/wav'},body,duplex:'half'} as RequestInit));
+    await new Promise(resolve=>setTimeout(resolve,25));upload();expect((await result).status).toBe(200);
+    let protection=false;let changed!:()=>void;
+    const gated=createRecordingTranscriptionHandler({authorize:allow,transcribe,policy:()=>protection?{localOnly:true,maxDurationSeconds:60}:'off'});
+    const pending=gated(new Request('http://fixture',{method:'POST',headers:{'content-type':'audio/wav'},duplex:'half',body:new ReadableStream<Uint8Array>({start(controller){changed=()=>{controller.enqueue(wav());controller.close();};}})} as RequestInit));
+    await Promise.resolve();protection=true;changed();expect((await pending).status).toBe(503);expect(transcribe).toHaveBeenCalledTimes(1);
+  });
   it('refuses a request the app does not authorize', async () => {
     const fetch = service();
     const handler = createRecordingTranscriptionHandler({ authorize: async () => false, url: 'http://stt', fetch });
@@ -154,7 +175,7 @@ describe('createRecordingTranscriptionHandler', () => {
     expect(wavDurationSeconds(wav(2, { sampleRate: 0, byteRate: 0 }))).toBeUndefined();
     expect(wavDurationSeconds(wav(2))).toBe(2);
     const fetch = service();
-    const handler = createRecordingTranscriptionHandler({ authorize: allow, url: 'http://stt', fetch });
+    const handler = createRecordingTranscriptionHandler({ authorize: allow, url: 'http://stt', fetch, policy: () => ({localOnly: true, maxDurationSeconds: 60}) });
     expect((await handler(request({ body: wav(2, { format: 3 }) }))).status).toBe(415);
     expect((await handler(request({ body: wav(2) }))).status).toBe(200);
   });

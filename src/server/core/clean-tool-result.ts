@@ -1,6 +1,6 @@
 import type { Tool } from '../../types.js';
 import { applyOutputBound, type OutputBound } from './output-fields.js';
-import { boundedToolFailure } from './tool-failure-result.js';
+import { boundedToolFailure, isToolFailureResult } from './tool-failure-result.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -46,8 +46,9 @@ export function cleanToolResult(
   let cleanResult: unknown = result;
   let withheld = false;
   // A successful result of the declared shape (not a failure, not withheld): output fields apply to it.
-  let successful = !(isRecord(result) && result.success === false);
-  if (isRecord(result) && result.success === false) {
+  const failed = protectedResult ? isToolFailureResult(result) : isRecord(result) && result.success === false;
+  let successful = !failed;
+  if (isRecord(result) && failed) {
     cleanResult = boundedToolFailure(result, bound, protectedResult);
   } else if (
     tool.outputSchema &&

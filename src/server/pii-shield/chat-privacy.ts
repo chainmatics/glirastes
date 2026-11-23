@@ -170,7 +170,6 @@ export function privacyRefusal(error: unknown): Response {
  * Provider errors keep their numeric HTTP status, which carries no content.
  */
 export function privacySafeError(error: unknown): Error & { code: string; statusCode?: number } {
-  if (isPrivacyError(error)) return error;
   const summary = toSafeError(error);
   const safe = new Error(`${summary.name}: ${summary.code}`) as Error & { code: string; statusCode?: number };
   safe.name = summary.name;

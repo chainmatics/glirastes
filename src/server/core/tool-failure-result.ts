@@ -129,7 +129,9 @@ export function boundedToolFailure(
   protectedResult = false,
 ): Record<string, unknown> {
   const rawError = result.error;
-  const cutError = protectedResult ? 'tool_execution_failed' : typeof rawError === 'string'
+  const cutError = protectedResult
+    ? (rawError === 'privacy_tool_conversion_unsupported' || rawError === 'privacy_tool_middleware_unsupported' ? rawError : 'tool_execution_failed')
+    : typeof rawError === 'string'
     ? cutToolErrorText(rawError, MAX_TOOL_ERROR_MESSAGE_CHARS)
     : '';
   // Also when the cut leaves nothing but whitespace.
@@ -177,4 +179,11 @@ export function boundedToolFailure(
     // `false` too: the app's classifier said `'error'` (the browser then shows it as failed, whatever the status).
     ...(fromEndpoint && typeof result.expectedFailure === 'boolean' ? { expectedFailure: result.expectedFailure } : {}),
   };
+}
+
+/** The same failure shapes drive receipts and protected model projection. */
+export function isToolFailureResult(result: unknown): result is Record<string, unknown> {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return false;
+  const record = result as Record<string, unknown>;
+  return record.success === false || (typeof record.error === 'string' && record.error.length > 0);
 }

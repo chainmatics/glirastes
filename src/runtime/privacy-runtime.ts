@@ -74,6 +74,9 @@ export function privacyRuntimeStatus(
   if (pinned && revocations.some((revocation) => revocation.policyRevisionIds.includes(pinned.revisionId))) {
     return { ...base, state: 'refused', effectivePolicyDigest: null, localRestrictions: [], reasons: ['policy_revoked'] };
   }
+  if (privacy?.managed === true && acceptedStateDurable === false) {
+    return { ...base, state: 'refused', effectivePolicyDigest: null, localRestrictions: [], reasons: ['accepted_state_missing'] };
+  }
   if (!privacy?.shield || privacy.shield.profile !== 'protected-text/v1') {
     return isProtectedPolicy(block) || privacy?.local?.required === true
       ? { ...base, state: 'refused', effectivePolicyDigest: null, localRestrictions: [], reasons: ['store_missing'] }

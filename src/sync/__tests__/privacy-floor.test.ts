@@ -425,3 +425,20 @@ describe('privacy refusal is no silent way out (K2/K3)', () => {
     expect(result.state.privacyFloor).toMatchObject({ profile: 'protected-text/v1', policyRevision: 7 });
   });
 });
+
+describe('authenticated expected application scope', () => {
+  it.each(['targetAppId', 'tenantId'])('rejects consistently signed foreign %s before privacy evaluation or floor writes', async field => {
+    const store = new MemoryRuntimeStateStore(); const validateDeployment = vi.fn();
+    const foreign = deployment(1, 50, PROTECTED);
+    for (const revision of [foreign.agentRevision, foreign.manifestRevision, foreign.policyRevision]) (revision as unknown as Record<string, unknown>)[field] = id(88);
+    const result = await manager(store, {targetAppId: id(3), tenantId: id(2), validateDeployment}).apply(bundle([foreign]));
+    expect(result.rejectedDeploymentIds).toEqual([foreign.deploymentId]); expect(validateDeployment).not.toHaveBeenCalled();
+    expect(result.state.privacyFloor).toBeFalsy();
+  });
+  it('refuses restored state belonging to another application before sync can lower or raise its floor', async () => {
+    const store = new MemoryRuntimeStateStore(); await manager(store).apply(bundle([deployment(1, 5, PROTECTED)]));
+    const before = await store.load();
+    await expect(manager(store, {targetAppId: id(99)}).apply(bundle([]))).rejects.toThrow('runtime_state_scope_mismatch');
+    expect(await store.load()).toEqual(before);
+  });
+});

@@ -51,6 +51,7 @@ export function createManagedRuntimeSync(options: {
   baseUrl: string;
   apiKey: string;
   appId: string;
+  tenantId?: string;
   environmentId: string;
   runnerKey: string;
   version: string;
@@ -117,6 +118,8 @@ export function createManagedRuntimeSync(options: {
   const stage = options.validateDeployment ? 'signature-schema-bindings' : 'missing-local-binding-validator';
   const health = options.validateDeployment ? 'healthy' : 'degraded';
   const manager = new RuntimeSyncManager({
+    targetAppId: options.appId,
+    ...(options.tenantId ? { tenantId: options.tenantId } : {}),
     environmentId: options.environmentId,
     store,
     verifier,

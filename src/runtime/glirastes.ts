@@ -137,6 +137,10 @@ export interface CreateGlirastesOptions {
    * The `ready()` timeout releases none of this.
    */
   stateStore?: (environmentId: string) => RuntimeStateStore;
+  /** Stable nonsecret binding for managed privacy. Also GLIRASTES_STATE_ENVIRONMENT_ID.
+   * Loads retained authority before network discovery; must match the authenticated
+   * live connection. Keep this and the durable store across restarts/downgrades. */
+  stateEnvironmentId?: string;
   /**
    * Upper bound of a serialized successful tool result in characters
    * (integer from 1,000 to 200,000, default 16,000); `chatTurn()` hands it to
@@ -275,20 +279,28 @@ class AcceptedStateStore implements RuntimeStateStore {
    * state throws and stays unreadable: it is neither replaced by defaults
    * nor overwritten by a sync until a later attach reads it.
    */
-  async attach(environmentId: string, persistent: RuntimeStateStore): Promise<void> {
+  async attach(environmentId: string, persistent: RuntimeStateStore, targetAppId: string): Promise<void> {
     this.bind(environmentId);
     this.persistent = persistent;
     let loaded: RuntimeSyncState | null;
     try {
       const raw = await persistent.load();
       loaded = raw === null ? null : parseRuntimeSyncState(raw);
+      if (loaded && ((loaded.scope && (loaded.scope.environmentId !== environmentId || loaded.scope.targetAppId !== targetAppId))
+        || [loaded.stable, loaded.canary, ...loaded.pending].some(deployment => deployment && (
+          deployment.environmentId !== environmentId || [deployment.agentRevision, deployment.manifestRevision, deployment.policyRevision,
+            ...(deployment.configRevision ? [deployment.configRevision] : [])].some(revision => revision.targetAppId !== targetAppId)
+          || (deployment.promptBinding && deployment.promptBinding.appId !== targetAppId))))) {
+        throw new PrivacyError('privacy_state_binding_mismatch');
+      }
     } catch (error) {
       this.unreadable = true;
       throw error;
     }
     if (loaded) {
       this.remember(loaded);
-      this.reconciled = loaded.cursor !== null;
+      // Disk is a retained floor, not current authenticated bootstrap.
+      this.reconciled = false;
     }
   }
 
@@ -548,6 +560,17 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
 
   const base = localSource();
   const store = new AcceptedStateStore();
+  const configuredStateEnvironmentId = options.stateEnvironmentId ?? env.GLIRASTES_STATE_ENVIRONMENT_ID?.trim();
+  const stateEnvironmentId = options.stateStore || options.privacy?.managed || options.privacy?.local?.required
+    ? configuredStateEnvironmentId : undefined;
+  const validStateBinding = Boolean(stateEnvironmentId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stateEnvironmentId));
+  let stateBindingLoaded = !stateEnvironmentId;
+  let stateBindingMismatch = Boolean(stateEnvironmentId && !validStateBinding);
+  const loadBoundState = async () => {
+    if (!stateEnvironmentId || stateBindingLoaded || !validStateBinding || !options.stateStore) return;
+    await store.attach(stateEnvironmentId, options.stateStore(stateEnvironmentId), appId);
+    stateBindingLoaded = true;
+  };
   const abort = new AbortController();
   const retryMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS);
   let resolved: ResolvedRuntimeConnection | undefined;
@@ -633,6 +656,12 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       return false;
     }
     const environmentId = connection.environmentId;
+    if (stateEnvironmentId && environmentId !== stateEnvironmentId) {
+      stateBindingMismatch = true;
+      onError(new PrivacyError('privacy_state_binding_mismatch'));
+      return true;
+    }
+    stateBindingMismatch = Boolean(stateEnvironmentId && !validStateBinding);
     const readOnly = connection.mode === 'development';
     if (environmentId === null) {
       resolved = connection;
@@ -661,7 +690,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       }
       while (!abort.signal.aborted) {
         try {
-          await store.attach(environmentId, persistent);
+          await store.attach(environmentId, persistent, appId);
+          stateBindingLoaded = true;
           break;
         } catch {
           onError(Object.assign(
@@ -694,10 +724,10 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           pinnedOf(revisions.policyRevision),
           options.privacy,
           store.revocations(),
-          store.persistsDurably(),
+          store.persistsDurably() && validStateBinding,
         ),
         // Only a runner that can enforce and durably keep a protected policy claims the capability.
-        privacyCapable: options.privacy?.shield?.profile === 'protected-text/v1' && store.persistsDurably(),
+        privacyCapable: options.privacy?.shield?.profile === 'protected-text/v1' && store.persistsDurably() && validStateBinding,
         // A deployment that names a tool this code lacks, or has changed, keeps running on the local tool.
         validateDeployment: (_deployment, revisions) => {
           validateLocalDeploymentBindings({ revisions, bindings: bound.bindings });
@@ -765,6 +795,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   const connect = async (): Promise<void> => {
     if (!config) return;
     while (!abort.signal.aborted) {
+      try { await loadBoundState(); }
+      catch { onError(Object.assign(new Error('The persisted runtime state cannot be read.'), {name: 'RuntimeStateUnreadable'})); settleFirstAttempt(); await delay(retryMs, abort.signal); continue; }
       const connection = await lookupConnection();
       if (!connection || abort.signal.aborted) return;
       reportedNotBound.clear();
@@ -791,21 +823,17 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
    */
   const withoutEnvironment = () => Boolean(resolved && resolved.environmentId === null);
   const awaitingPolicy = () => Boolean(config) && !store.accepted() && !withoutEnvironment();
-  /**
-   * Managed privacy: the protection requirement does not follow from the
-   * optional `privacy` object alone. A state store or privacy providers in
-   * the committed setup artifact mark the deployment as managed too, so a
-   * missing `privacy` integration there is blocked, not treated as legacy.
-   * Standalone and connected use without explicit activation or retained signed authority stays unchanged.
-   */
-  const managedPrivacy = () => Boolean(config)
-    && (options.privacy?.managed === true || options.privacy?.local?.required === true || store.hasPrivacyAuthority());
-  if (config && (options.privacy?.managed === true || options.privacy?.local?.required === true) && !options.stateStore) {
-    onError(new Error('[glirastes] Managed privacy needs a durable stateStore; a protected privacy policy is refused (accepted_state_missing).'));
+  /** Explicit managed activation is fail-closed even with no connection/reference. */
+  const managedPrivacy = () => options.privacy?.managed === true
+    || (Boolean(config) && options.privacy?.local?.required === true) || store.hasPrivacyAuthority();
+  if (config && (options.privacy?.managed || options.privacy?.local?.required) && !options.stateStore) {
+    onError(new Error('[glirastes] Managed privacy requires durable bound state (accepted_state_missing).'));
   }
   const privacyGate = (pinned: PinnedPrivacyPolicy | undefined) => {
+    if (stateBindingMismatch) throw new PrivacyError('privacy_state_binding_mismatch');
+    if (stateEnvironmentId && !stateBindingLoaded) throw new PrivacyError('privacy_policy_unavailable');
     // Lost, unreadable or unsaved state: no verified, durable decision yet.
-    if (managedPrivacy() && !withoutEnvironment() && store.unavailable()) {
+    if (managedPrivacy() && (!config || !validStateBinding || !resolved?.environmentId || !store.persistsDurably() || store.unavailable())) {
       throw new PrivacyError('privacy_policy_unavailable');
     }
     // A refused protected revision blocks traffic; the old revision does not
@@ -818,7 +846,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       privacy: options.privacy,
       revocations: store.revocations(),
       awaitingPolicy: awaitingPolicy(),
-      ...(config ? { acceptedStateDurable: store.persistsDurably() } : {}),
+      ...(config ? { acceptedStateDurable: store.persistsDurably() && validStateBinding } : {}),
     });
   };
 

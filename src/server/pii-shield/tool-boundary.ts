@@ -1,3 +1,4 @@
+import { boundedToolFailure, isToolFailureResult } from '../core/tool-failure-result.js';
 import { preparePrivacyConversion } from '../core/privacy-conversion.js';
 import { isResultReader, unsupportedPrivateResultRead } from '../core/result-reader.js';
 import { randomUUID } from 'node:crypto';
@@ -61,7 +62,7 @@ const outcomeMayBeCommitted = errorLeavesOutcomeUnknown;
  * - the model's input (pseudonyms) is rehydrated to the authorized originals
  *   of this scope right before `needsApproval` and `execute`; the backend
  *   authorizes the final values with the principal's own credentials;
- * - the result goes back unchanged; the model boundary protects it before
+ * - successful results go back unchanged; failures become fixed codes. The model boundary protects results before
  *   the next model call, so a protection failure never re-runs the tool;
  * - a thrown error reaches the model only as a content-free code.
  */
@@ -163,22 +164,15 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
           // `{ success: false }`: that is not a completed write.
           await options.receipts!.completeToolExecution({
             ...claim,
-            status: isFailureResult(result) ? 'failed' : 'completed',
+            status: isToolFailureResult(result) ? 'failed' : 'completed',
             result: null,
             resultFingerprint: 'not-recorded',
           }).catch((error) => options.onToolError?.(name, toSafeError(error)));
         }
-        return result;
+        return isToolFailureResult(result) ? boundedToolFailure(result, undefined, true) : result;
       },
     };
   }
   return wrapped as T;
-}
-
-/** A tool result that reports a failure instead of throwing. */
-function isFailureResult(result: unknown): boolean {
-  if (typeof result !== 'object' || result === null || Array.isArray(result)) return false;
-  const record = result as Record<string, unknown>;
-  return record.success === false || (typeof record.error === 'string' && record.error.length > 0);
 }
 
