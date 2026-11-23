@@ -19,7 +19,13 @@ export interface NoteEvaluation {
   evidence: Array<{ file: string; line: number }>;
 }
 
-const EXTENSIONS = new Set([
+/**
+ * Style sheets are scanned for `patterns` only: an `@import` of
+ * glirastes/react/styles.css is no code import, so `imports` and `symbols`
+ * never match in them.
+ */
+const STYLE_EXTENSIONS = ['.css', '.scss', '.sass', '.less'] as const;
+const EXTENSIONS = new Set<string>([
   '.ts',
   '.tsx',
   '.mts',
@@ -32,6 +38,7 @@ const EXTENSIONS = new Set([
   '.vue',
   '.svelte',
   '.astro',
+  ...STYLE_EXTENSIONS,
 ]);
 const IGNORED_DIRS = new Set([
   '.git',
@@ -124,7 +131,8 @@ async function walk(dir: string, root: string, out: AppScan['files']): Promise<v
       const info = await stat(full);
       if (info.size > MAX_FILE_BYTES) continue;
       const text = await readFile(full, 'utf8');
-      const specifiers = parseSpecifiers(text);
+      const style = (STYLE_EXTENSIONS as ReadonlyArray<string>).includes(extname(entry.name));
+      const specifiers = style ? [] : parseSpecifiers(text);
       out.push({
         path: relative(root, full).split(sep).join('/'),
         text,

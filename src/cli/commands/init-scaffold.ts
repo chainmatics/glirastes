@@ -6,7 +6,7 @@ import { TOOLS_PATHS } from '../../codegen/tools/config.js';
 import { FoundationDiagnosticError } from '../../diagnostics/index.js';
 import { writeArtifactSetAtomically } from './atomic-artifact-write.js';
 import { detectWorkspaceSources } from './workspace-sources.js';
-import { AUDIO_WORKLET_COMMAND, AUDIO_WORKLET_FILE } from './stt/worklet.js';
+import { AUDIO_WORKLET_COMMAND, audioWorkletGitignoreEntry, withAudioWorkletGitignoreEntry } from './stt/worklet.js';
 
 /**
  * What `glirastes init` writes deterministically before the coding agent
@@ -24,6 +24,11 @@ export interface InitScaffold {
   written: string[];
   /** What the developer or the agent still has to do by hand. */
   notes: string[];
+  /**
+   * The edits to the developer's own files, one line each (a package.json
+   * script added or changed, the .gitignore entry), so a dry run shows them.
+   */
+  changes: string[];
 }
 
 export const AGENT_HINT_START = '<!-- glirastes:tools -->';
@@ -168,6 +173,7 @@ export async function scaffoldToolsInputs(options: {
   const key = targetAppKey(packageJson.name);
   const writes: Array<{ path: string; content: string }> = [];
   const notes: string[] = [];
+  const changes: string[] = [];
   const add = (path: string, content: string) => writes.push({ path, content });
 
   if (!existsSync(join(root, TOOLS_PATHS.config))) {
@@ -226,6 +232,7 @@ export async function scaffoldToolsInputs(options: {
       const existing = scripts[name];
       if (existing === undefined) {
         scripts[name] = servesPublicDir ? `${AUDIO_WORKLET_COMMAND} && ${command}` : command;
+        changes.push(`package.json: add ${JSON.stringify(name)}: ${JSON.stringify(scripts[name])}`);
         changed = true;
         continue;
       }
@@ -235,14 +242,16 @@ export async function scaffoldToolsInputs(options: {
       // Chained in front, never replacing the developer's own step.
       if (servesPublicDir && !existing.includes(AUDIO_WORKLET_COMMAND)) {
         scripts[name] = `${AUDIO_WORKLET_COMMAND} && ${existing}`;
+        changes.push(`package.json: ${JSON.stringify(name)}: ${JSON.stringify(existing)} -> ${JSON.stringify(scripts[name])}`);
         changed = true;
       }
     }
     // The copy is a build output: list it in an existing .gitignore, never create one.
     const gitignore = servesPublicDir ? await readText(join(root, '.gitignore')) : undefined;
-    if (gitignore !== undefined && !/^\/?(?:public\/)?audio-worklet-processor\.js\s*$/m.test(gitignore)) {
-      const separator = gitignore === '' ? '' : gitignore.endsWith('\n') ? '\n' : '\n\n';
-      add('.gitignore', `${gitignore}${separator}# Copied by ${AUDIO_WORKLET_COMMAND}\n/public/${AUDIO_WORKLET_FILE}\n`);
+    const ignored = gitignore === undefined ? undefined : withAudioWorkletGitignoreEntry(gitignore);
+    if (ignored !== undefined) {
+      add('.gitignore', ignored);
+      changes.push(`.gitignore: add ${audioWorkletGitignoreEntry()}`);
     }
     if (!servesPublicDir && 'react' in dependencies) {
       notes.push(`Voice input needs the audio worklet served at /audio-worklet-processor.js: add "${AUDIO_WORKLET_COMMAND} --out <static folder>" to the script that builds the app.`);
@@ -262,7 +271,7 @@ export async function scaffoldToolsInputs(options: {
       preserveMode: true,
     })));
   }
-  return { appId, written: writes.map((write) => write.path).sort(), notes };
+  return { appId, written: writes.map((write) => write.path).sort(), notes, changes };
 }
 
 /**

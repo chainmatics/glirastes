@@ -63,3 +63,26 @@ export async function provideAudioWorklet(options: {
   await rename(temporary, path);
   return { path, status: 'written' };
 }
+
+/** The entry for a copy at `relativePath` (root-relative, `/` separators): `/public/audio-worklet-processor.js` by default. */
+export function audioWorkletGitignoreEntry(relativePath = `public/${AUDIO_WORKLET_FILE}`): string {
+  return `/${relativePath.replace(/^\/+/, '')}`;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The .gitignore with the copied worklet listed, or `undefined` when it is
+ * listed already (at its path, with or without leading slash, or by its bare
+ * file name). The copy is a build output; init and `glirastes stt worklet`
+ * add the same entry.
+ */
+export function withAudioWorkletGitignoreEntry(gitignore: string, relativePath?: string): string | undefined {
+  const entry = audioWorkletGitignoreEntry(relativePath);
+  const listed = new RegExp(`^(?:/?${escapeRegExp(entry.slice(1))}|/?${escapeRegExp(AUDIO_WORKLET_FILE)})\\s*$`, 'm');
+  if (listed.test(gitignore)) return undefined;
+  const separator = gitignore === '' ? '' : gitignore.endsWith('\n') ? '\n' : '\n\n';
+  return `${gitignore}${separator}# Copied by ${AUDIO_WORKLET_COMMAND}\n${entry}\n`;
+}

@@ -157,6 +157,20 @@ describe('detect', () => {
     ]);
   });
 
+  it('scans style sheets for patterns only, never as glirastes imports', async () => {
+    write('app/globals.css', "@import 'glirastes/react/styles.css';\n[data-component=\"voice-input-addon\"]::before { content: ''; }\n");
+    write('app/theme.scss', '.x { color: red; }\n');
+    const scan = await scanApp(root);
+    expect(scan.files.map((f) => [f.path, f.glirastesImports])).toEqual([
+      ['app/globals.css', []],
+      ['app/theme.scss', []],
+    ]);
+    expect(evaluateNote(note({ affectedWhen: { patterns: ['voice-input-addon"\\]::before'] } }), scan))
+      .toEqual({ status: 'affected', evidence: [{ file: 'app/globals.css', line: 2 }] });
+    expect(evaluateNote(note({ affectedWhen: { imports: ['glirastes/react'], symbols: ['color'] } }), scan).status)
+      .toBe('not-affected');
+  });
+
   it('works on hand-built scans without precomputed specifiers', () => {
     const scan = { files: [{ path: 'a.ts', text: "\nimport x from 'glirastes/react';\n", glirastesImports: ['glirastes/react'] }] };
     expect(evaluateNote(note({ affectedWhen: { imports: ['glirastes/react'] } }), scan)).toEqual({

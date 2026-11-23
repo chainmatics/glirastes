@@ -320,6 +320,31 @@ describe('shipped note detection', () => {
     })).status).toBe('adopted');
   });
 
+  it('voice-button-own-icon flags CSS that replaced the voice button text with an own icon, not ordinary voice styles', async () => {
+    const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === 'voice-button-own-icon')!;
+    for (const [file, source] of [
+      ['app/globals.css', '[data-component="voice-input-addon"]::before { content: url(/mic.svg); }\n'],
+      ['app/globals.css', '[data-component=voice-input-addon][data-state="recording"]:after {\n  content: "";\n}\n'],
+      ['app/globals.scss', '[data-component="voice-input-addon"] {\n  font-size: 0;\n  background: url(/mic.svg);\n}\n'],
+      ['src/voice.css', '.glirastes-voice-input-button { color: transparent; }\n'],
+      ['src/retry.css', '[data-action="retry-recording"]::before { content: "↻"; }\n'],
+      ['app/chat.tsx', 'const css = `[data-component="voice-input-button"] { text-indent: -9999px; }`;\n'],
+    ] as const) {
+      expect(evaluateNote(note, scanOf({ [file]: source })).status, source).toBe('affected');
+    }
+    for (const source of [
+      '[data-component="voice-input-addon"] { color: #333; border-radius: 50%; }\n',
+      '[data-component="voice-input-addon"][data-state="recording"] svg { color: red; }\n',
+      '[data-component="voice-input-addon-wrapper"]::before { content: ""; }\n',
+      '.composer::before { content: ""; }\n[data-component="voice-input-addon"] { width: 2rem; }\n',
+    ]) {
+      expect(evaluateNote(note, scanOf({ 'app/globals.css': source })).status, source).toBe('not-affected');
+    }
+    expect(evaluateNote(note, scanOf({
+      'app/test.tsx': "import { screen } from '@testing-library/react';\nscreen.getByRole('button', { name: 'Start voice input' });\n",
+    })).status).toBe('not-affected');
+  });
+
   it('markdown-loading-skeleton and markdown-loading-timeout flag every app that renders the React chat or the embed', async () => {
     for (const id of ['markdown-loading-skeleton', 'markdown-loading-timeout']) {
       const note = (await loadUpgradeNotes(notesDir, SDK_VERSION)).find((n) => n.id === id)!;

@@ -384,10 +384,12 @@ existing app, chain the copy step in front of your scripts:
   web/static`. Served at another path, set `voice.workletUrl`.
 - yarn berry and pnpm may skip `pre*` scripts; when you start `next dev` or
   `vite` directly, run `glirastes stt worklet` once first.
-- The copy is a build output: `public/audio-worklet-processor.js` can be
-  Git-ignored (`glirastes init` adds it to an existing `.gitignore`).
+- The copy is a build output: `glirastes init` and `glirastes stt worklet` add
+  it to an existing `.gitignore` (never creating one; `--no-gitignore` skips
+  it). `glirastes init --dry-run` lists the script and `.gitignore` changes.
 - `glirastes doctor` checks the file at the configured or default URL when the
-  app uses voice input.
+  app uses voice input, and fails when `workletUrl` points to a path the copy
+  step never writes.
 
 ## Standalone and Connected
 
