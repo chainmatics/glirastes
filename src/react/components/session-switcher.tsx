@@ -27,7 +27,9 @@ export interface SessionSwitcherProps {
 export interface SessionSwitcherIcons {
   /** Inside `[data-element="plus"]` of the new-chat button; `false` drops that element. Default: the text `+`. */
   newChat: ReactNode;
+  /** `false` or `null` keep the default: an action button always shows an icon. */
   rename: ReactNode;
+  /** `false` or `null` keep the default: an action button always shows an icon. */
   delete: ReactNode;
 }
 
@@ -101,8 +103,8 @@ export function SessionSwitcher({
   } = useChatContext();
   const blocked = useSessionLock().locked || disabled;
   const newChatIcon = icons?.newChat ?? DEFAULT_SESSION_SWITCHER_ICONS.newChat;
-  const renameIcon = icons?.rename ?? DEFAULT_SESSION_SWITCHER_ICONS.rename;
-  const deleteIcon = icons?.delete ?? DEFAULT_SESSION_SWITCHER_ICONS.delete;
+  const renameIcon = icons?.rename === false ? DEFAULT_SESSION_SWITCHER_ICONS.rename : icons?.rename ?? DEFAULT_SESSION_SWITCHER_ICONS.rename;
+  const deleteIcon = icons?.delete === false ? DEFAULT_SESSION_SWITCHER_ICONS.delete : icons?.delete ?? DEFAULT_SESSION_SWITCHER_ICONS.delete;
   const plus = newChatIcon === false ? null : <span data-element="plus" aria-hidden="true">{newChatIcon}</span>;
   const resolvedFallback = fallbackTitle ?? locale.newChatLabel;
   const [editingId, setEditingId] = useState<string | null>(null);

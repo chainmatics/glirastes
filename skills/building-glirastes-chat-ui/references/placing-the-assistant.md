@@ -117,17 +117,33 @@ behaviour and styles as before.
   `renderModeMenu` draws the app's own control in its place, also without the
   built-in key handling. It gets `{ modes, current, setMode, label, title,
   entries }` (`AssistantModeMenuRenderProps`; `entries[mode]` is an
-  `AssistantModeMenuEntry` with `label` and `icon`, `title` carries the layout shortcut). The app's control owns its
-  keyboard and a11y (e.g. `aria-haspopup`, Escape closes only its menu); a
-  menu it portals out of the shell needs `data-cm-keep-interactive` to stay
-  usable in full screen.
+  `AssistantModeMenuEntry` with `label` and `icon`, `title` carries the
+  layout shortcut). `modes`, `entries` and `setMode` keep their identity
+  between renders, so they can sit in effect dependencies. The app's control
+  owns its keyboard and a11y (e.g. `aria-haspopup`). Its Escape handler calls
+  `event.preventDefault()` and `event.stopPropagation()`, or the full-screen
+  modal sees the same Escape and leaves full screen. A menu it portals out of
+  the shell needs `data-cm-keep-interactive` to stay usable in full screen.
 - Own chat column that closes the drawer: pass `historyPane` as a function.
   It gets `{ open, drawer, close }` (`AssistantHistoryPaneProps`): `open` is
   whether the column is shown, `drawer` whether it is the drawer below 900 px,
   `close()` closes the drawer like a pick in the built-in list and focuses the
   composer, `close('toggle')` gives focus back to the chats toggle (as Escape
-  does). In the wide column `close()` only moves focus. A function always gives
-  a column, also when the chat keeps only one conversation.
+  does). In the wide column `close()` only moves focus. `close` keeps its
+  identity between renders. A function always gives a column, also when the
+  chat keeps only one conversation.
+- Composer focus after `close()` or a pick: the first enabled element in the
+  conversation, never in the column: an element marked
+  `data-glirastes-composer` (an app's own composer; on a wrapper, its editor
+  or input inside), else the SDK editor or a `textarea`, else a text `input`.
+  Without one focus goes to the chats toggle; when that cannot take it, focus
+  stays where it is.
+- Render functions (`historyPane`, `historyTitle`, `renderModeMenu`) are
+  rendered as components: hooks inside them are safe, and they run only while
+  their part is shown. Their state lives while the part stays rendered: the
+  column keeps it when its toggle hides it, and starts fresh after leaving
+  full screen; the layout menu starts fresh when `showModeMenu` or `modes`
+  take it away and give it back.
 
   ```tsx
   <AssistantWorkspace chat={<AiChatPanel />} modes={['sidebar', 'floating', 'fullscreen']}
@@ -144,7 +160,8 @@ behaviour and styles as before.
   `DEFAULT_SESSION_SWITCHER_ICONS` has the shipped ones. The icons are
   decorative: the buttons keep their names from the chat locale
   (`newChatLabel`, `renameSessionAriaLabel`, `deleteSessionAriaLabel`).
-  `newChat: false` drops the "+" element.
+  `newChat: false` drops the "+" element; `rename` and `delete` set to `false`
+  or `null` keep the default icon, so an action button is never empty.
 - Own session controls: `useSessionLock()` gives `{ visible, sessionChangeBlocked,
   locked }` (`SessionLockState`), the rule the built-in `SessionSwitcher`
   follows. `sessionChangeBlocked` is true while a reply streams, a UI action

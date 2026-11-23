@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantLayoutProvider, useAssistantLayout, type AssistantLayoutMode } from '../assistant-layout.js';
 import {
@@ -61,33 +62,54 @@ function Probe() {
 }
 const state = () => JSON.parse(screen.getByTestId('state').textContent!);
 const go = (mode: AssistantLayoutMode) => act(() => { fireEvent.click(screen.getByText(`to ${mode}`, { selector: 'button' })); });
-async function mount(props: Partial<React.ComponentProps<typeof AssistantShell>> = {}, value: ChatContextValue = chat()) {
-  render(<ChatContext.Provider value={value}><AssistantLayoutProvider storageKey={null}>
+type ShellProps = Partial<React.ComponentProps<typeof AssistantShell>>;
+function tree(props: ShellProps, value: ChatContextValue, composer: ReactNode) {
+  return <ChatContext.Provider value={value}><AssistantLayoutProvider storageKey={null}>
     <Probe />
     <div><main data-assistant-main><AssistantToggle /></main>
-      <AssistantShell modes={ALL} {...props}><textarea aria-label="Draft" /></AssistantShell></div>
-  </AssistantLayoutProvider></ChatContext.Provider>);
+      <AssistantShell modes={ALL} {...props}>{composer}</AssistantShell></div>
+  </AssistantLayoutProvider></ChatContext.Provider>;
+}
+async function mount(props: ShellProps = {}, value: ChatContextValue = chat(), composer: ReactNode = <textarea aria-label="Draft" />) {
+  const view = render(tree(props, value, composer));
   await frame();
   fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
   await frame();
+  return { rerender: async (next: ShellProps) => { view.rerender(tree(next, value, composer)); await frame(); } };
 }
 const column = () => document.querySelector<HTMLElement>('[data-element="history"]');
 
+/** Keys on the header and each of its buttons, where the built-in trigger sits, that something prevented. */
+function capturedHeaderKeys(): string[] {
+  const captured: string[] = [];
+  const header = document.querySelector('header')!;
+  for (const target of [header, ...Array.from(header.querySelectorAll('button'))]) {
+    for (const key of ['Enter', ' ', 'ArrowDown', 'ArrowUp']) {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      act(() => { target.dispatchEvent(event); });
+      if (event.defaultPrevented) captured.push(`${key} on ${target.getAttribute('aria-label') ?? target.tagName}`);
+      // Close a menu a key opened, so the next key starts from the same state.
+      if (document.querySelector('[role="menu"]')) act(() => { fireEvent.pointerDown(document.body); });
+    }
+  }
+  return captured;
+}
+
 describe('layout menu slot', () => {
+  it('the key check sees the built-in menu capturing keys', async () => {
+    await mount();
+    expect(capturedHeaderKeys()).toContain('ArrowDown on Layout: Sidebar');
+  });
+
   it('showModeMenu={false} drops the menu and its key handling, full screen stays a mode', async () => {
     await mount({ showModeMenu: false });
     expect(document.querySelector('[data-element="mode-picker"]')).toBeNull();
     expect(document.querySelector('[data-action="mode"]')).toBeNull();
     // Detach and dock do not come back: the app controls the layout itself.
     expect(screen.queryByRole('button', { name: 'Detach as window' })).toBeNull();
-    const header = document.querySelector('header')!;
-    for (const key of ['Enter', ' ', 'ArrowDown', 'ArrowUp']) {
-      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
-      act(() => { header.dispatchEvent(event); });
-      expect(event.defaultPrevented).toBe(false);
-    }
-    expect(screen.queryByRole('menu')).toBeNull();
+    expect(capturedHeaderKeys()).toEqual([]);
     await go('fullscreen');
+    expect(capturedHeaderKeys()).toEqual([]);
     expect(state()).toMatchObject({ mode: 'fullscreen' });
     // The layout shortcut still leaves full screen.
     fireEvent.keyDown(window, { key: 'd', code: 'KeyD', altKey: true, shiftKey: true });
@@ -130,6 +152,136 @@ describe('layout menu slot', () => {
     await mount({ modes: ['sidebar', 'floating'], renderModeMenu });
     expect(renderModeMenu).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Detach as window' })).toBeTruthy();
+  });
+});
+
+describe('render function slots are components', () => {
+  function Counter({ name, onMount }: { name: string; onMount?: () => void }) {
+    const [count, setCount] = useState(0);
+    useEffect(() => { onMount?.(); }, [onMount]);
+    return <button type="button" onClick={() => setCount(n => n + 1)}>{name} {count}</button>;
+  }
+
+  it('hooks in historyPane and historyTitle survive mode changes; the column state resets when full screen is left', async () => {
+    const pane = () => { const [n, set] = useState(0); return <button type="button" onClick={() => set(n + 1)}>pane {n}</button>; };
+    const title = () => { const [n, set] = useState(0); useEffect(() => {}, [n]); return <button type="button" onClick={() => set(n + 1)}>title {n}</button>; };
+    await mount({ historyPane: pane, historyTitle: title });
+    await go('fullscreen');
+    fireEvent.click(screen.getByRole('button', { name: 'pane 0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'title 0' }));
+    // Hiding the column keeps it rendered, so state stays.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide chats' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
+    expect(screen.getByRole('button', { name: 'pane 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'title 1' })).toBeTruthy();
+    await go('floating');
+    expect(screen.queryByRole('button', { name: /^pane/ })).toBeNull();
+    await go('fullscreen');
+    // Unmounted outside full screen: a fresh column.
+    expect(screen.getByRole('button', { name: 'pane 0' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'title 0' })).toBeTruthy();
+  });
+
+  it('render functions run only while their part is shown', async () => {
+    const historyTitle = vi.fn(() => <span>own title</span>);
+    const historyPane = vi.fn(() => <span>own pane</span>);
+    await mount({ historyTitle, historyPane });
+    expect(historyTitle).not.toHaveBeenCalled();
+    expect(historyPane).not.toHaveBeenCalled();
+    await go('fullscreen');
+    expect(historyTitle).toHaveBeenCalled();
+    expect(historyPane).toHaveBeenCalled();
+  });
+
+  it('a hook in renderModeMenu survives runtime changes of modes and showModeMenu', async () => {
+    const mounted = vi.fn();
+    const renderModeMenu = (props: AssistantModeMenuRenderProps) => <Counter name={`menu ${props.current}`} onMount={mounted} />;
+    const hooked = (props: AssistantModeMenuRenderProps) => { const [n, set] = useState(0); return <button type="button" onClick={() => set(n + 1)}>{props.current} {n}</button>; };
+    const view = await mount({ renderModeMenu: hooked });
+    fireEvent.click(screen.getByRole('button', { name: 'sidebar 0' }));
+    await go('fullscreen');
+    expect(screen.getByRole('button', { name: 'fullscreen 1' })).toBeTruthy();
+    await view.rerender({ renderModeMenu: hooked, showModeMenu: false });
+    expect(screen.queryByRole('button', { name: /^fullscreen \d/ })).toBeNull();
+    await view.rerender({ renderModeMenu: hooked });
+    expect(screen.getByRole('button', { name: 'fullscreen 0' })).toBeTruthy();
+    await view.rerender({ renderModeMenu: hooked, modes: ['sidebar', 'floating'] });
+    expect(screen.queryByRole('button', { name: /^(sidebar|floating|fullscreen) \d/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Detach as window' })).toBeTruthy();
+    await view.rerender({ renderModeMenu });
+    expect(mounted).toHaveBeenCalledTimes(1);
+  });
+
+  it('showModeMenu turned off at runtime removes an open built-in menu and its keys', async () => {
+    const view = await mount();
+    fireEvent.click(screen.getByRole('button', { name: /^Layout: / }));
+    expect(screen.getByRole('menu')).toBeTruthy();
+    await view.rerender({ showModeMenu: false });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.querySelector('[data-element="mode-picker"]')).toBeNull();
+    await view.rerender({});
+    expect(screen.getByRole('button', { name: /^Layout: / }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('close, modes and entries keep their identity between renders', async () => {
+    const closes = new Set<unknown>();
+    const modeLists = new Set<unknown>();
+    const entryMaps = new Set<unknown>();
+    await mount({
+      historyPane: ({ close }) => { closes.add(close); return <p>pane</p>; },
+      renderModeMenu: ({ modes, entries }) => { modeLists.add(modes); entryMaps.add(entries); return <span>menu</span>; },
+    });
+    await go('fullscreen');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide chats' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
+    expect(closes.size).toBe(1);
+    expect(modeLists.size).toBe(1);
+    expect(entryMaps.size).toBe(1);
+  });
+});
+
+describe('focus after close()', () => {
+  const composers: Array<[string, ReactNode, string]> = [
+    ['textarea', <textarea key="c" aria-label="Draft" />, 'Draft'],
+    ['input', <input key="c" aria-label="Draft" />, 'Draft'],
+    ['own composer', <><input aria-label="Search filter" /><div key="c" role="textbox" tabIndex={0} aria-label="Draft" data-glirastes-composer /></>, 'Draft'],
+  ];
+  for (const narrowView of [true, false]) {
+    for (const [kind, composer, name] of composers) {
+      it(`${narrowView ? 'drawer' : 'wide column'} with a ${kind} composer`, async () => {
+        narrow = narrowView;
+        await mount({ historyPane: ({ close }) => <button type="button" onClick={() => close()}>Pick project</button> }, chat(), composer);
+        await go('fullscreen');
+        if (narrowView) fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
+        await frame();
+        screen.getByRole('button', { name: 'Pick project' }).focus();
+        fireEvent.click(screen.getByRole('button', { name: 'Pick project' }));
+        await frame();
+        expect(document.activeElement).toBe(screen.getByRole('textbox', { name }));
+      });
+    }
+  }
+
+  it.each([true, false])('without a composer focus goes to the chats toggle, never into the pane (narrow %s)', async narrowView => {
+    narrow = narrowView;
+    await mount({ historyPane: ({ close }) => <button type="button" onClick={() => close()}>Pick project</button> }, chat(), <p>No composer</p>);
+    await go('fullscreen');
+    if (narrowView) fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
+    await frame();
+    screen.getByRole('button', { name: 'Pick project' }).focus();
+    fireEvent.click(screen.getByRole('button', { name: 'Pick project' }));
+    await frame();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: narrowView ? 'Show chats' : 'Hide chats' }));
+  });
+
+  it('a pick in the built-in list with an input composer focuses it', async () => {
+    narrow = true;
+    await mount({}, chat(), <input aria-label="Draft" />);
+    await go('fullscreen');
+    fireEvent.click(screen.getByRole('button', { name: 'Show chats' }));
+    await frame();
+    fireEvent.click(screen.getByRole('button', { name: 'Customers' }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Draft' })));
   });
 });
 

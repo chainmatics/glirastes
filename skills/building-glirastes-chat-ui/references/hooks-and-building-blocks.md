@@ -430,7 +430,9 @@ takes over the transport.
 
 An own session list or switcher disables its controls while
 `useSessionLock().locked` is true (a reply streams, an outcome is awaited, a
-session operation runs, or the chat window is hidden); `SessionSwitcher`
+session operation runs, or a surrounding `ChatWindow` is hidden; inside
+`AssistantShell` `visible` is always true, use `useAssistantLayout().open`
+there); `SessionSwitcher`
 takes `icons` (`newChat`, `rename`, `delete`). See
 [placing-the-assistant.md](placing-the-assistant.md), Replacing shell parts.
 

@@ -37,7 +37,7 @@ describe('SessionSwitcher icons', () => {
     expect(plus.getAttribute('aria-hidden')).toBe('true');
     expect(within(plus as HTMLElement).getByTestId('new')).toBeTruthy();
     expect(plus.textContent).toBe('');
-    expect(screen.getByRole(variant === 'list' ? 'button' : 'button', { name: 'New chat' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeTruthy();
     const edits = Array.from(document.querySelectorAll('[data-element="row-edit"]'));
     expect(edits).toHaveLength(2);
     expect(edits.every(button => button.querySelector('[data-testid="rename"]') && button.getAttribute('aria-label') === 'Rename conversation')).toBe(true);
@@ -49,6 +49,12 @@ describe('SessionSwitcher icons', () => {
     mount({ variant: 'list', icons: { rename: <svg data-testid="rename" /> } });
     expect(document.querySelector('[data-element="plus"]')!.textContent).toBe('+');
     expect(document.querySelector('[data-element="row-delete"] polyline')).not.toBeNull();
+  });
+
+  it.each([false, null] as const)('rename and delete %s keep the default icons, never an empty button', value => {
+    mount({ variant: 'list', icons: { rename: value, delete: value } });
+    expect(document.querySelector('[data-element="row-edit"] svg')).not.toBeNull();
+    expect(document.querySelector('[data-element="row-delete"] svg')).not.toBeNull();
   });
 
   it('newChat={false} drops the plus, the button keeps its name', () => {
