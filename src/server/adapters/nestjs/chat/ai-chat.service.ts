@@ -31,7 +31,7 @@ import { toSafeError } from '../../../pii-shield/detection-result.js';
 
 /** Error class without message or stack: both can carry prompt or tool content. */
 export function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error;
+  return error instanceof Error ? toSafeError(error).name : typeof error;
 }
 
 function wrapToolsForVercelAi(

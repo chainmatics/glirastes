@@ -290,7 +290,7 @@ describe('RuntimeSyncManager', () => {
       store,
       verifier: {
         verifyRevocation: vi.fn().mockResolvedValue(undefined),
-        verifyRevision: vi.fn().mockRejectedValue(new Error('invalid')),
+        verifyRevision: vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined).mockRejectedValue(new Error('invalid')),
       } as never,
     });
     await manager.apply({
@@ -300,5 +300,23 @@ describe('RuntimeSyncManager', () => {
       revocations: [],
     });
     expect((await store.load())?.stable?.deploymentId).toBe(stable.deploymentId);
+  });
+});
+
+
+describe('review residual: materialized scope stays envelope-bound', () => {
+  it.each(['agent','manifest','policy'] as const)('rejects %s payload identity override before validation or floor', async kind => {
+    const candidate=deployment('stable','30');
+    (candidate[`${kind}Revision`].payload as Record<string,unknown>).revision=999;
+    const store=new MemoryRuntimeStateStore();const validateDeployment=vi.fn();
+    const manager=new RuntimeSyncManager({environmentId,store,validateDeployment,verifier:{verifyRevision:async()=>{}} as never});
+    const result=await manager.apply({cursor:'2026-07-28T20:02:00.000Z',activeSnapshotComplete:true,deployments:[candidate],revocations:[]});
+    expect(result.rejectedDeploymentIds).toEqual([candidate.deploymentId]);expect(validateDeployment).not.toHaveBeenCalled();expect(result.state.privacyFloor??null).toBeNull();
+  });
+  it('rejects an explicit foreign agent environment', async()=>{
+    const candidate=deployment('stable','30');candidate.agentRevision.environmentId='019fa9a9-d5f7-7ec3-a3c7-8899de1d3999';
+    const manager=new RuntimeSyncManager({environmentId,store:new MemoryRuntimeStateStore(),verifier:{verifyRevision:async()=>{}} as never});
+    const result=await manager.apply({cursor:'2026-07-28T20:02:00.000Z',activeSnapshotComplete:true,deployments:[candidate],revocations:[]});
+    expect(result.rejectedDeploymentIds).toEqual([candidate.deploymentId]);
   });
 });

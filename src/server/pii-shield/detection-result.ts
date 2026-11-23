@@ -78,11 +78,10 @@ export class PrivacyError extends Error {
 }
 
 export function isPrivacyError(error: unknown): error is PrivacyError {
-  return error instanceof PrivacyError
-    || (typeof error === 'object' && error !== null
+  return (typeof error === 'object' && error !== null
       && (error as { name?: unknown }).name === 'PrivacyError'
       && typeof (error as { code?: unknown }).code === 'string'
-      && (error as { code: string }).code in MESSAGES);
+      && Object.prototype.hasOwnProperty.call(MESSAGES, (error as { code: string }).code));
 }
 
 /** What callbacks and logs receive in the protected profile: no message, no stack, no cause. */
@@ -100,7 +99,7 @@ export function toSafeError(error: unknown): SafeErrorSummary {
   const name = typeof error === 'object' && error !== null && typeof (error as { name?: unknown }).name === 'string'
     ? (error as { name: string }).name
     : 'Error';
-  const safeName = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'AbortError', 'TimeoutError', 'APICallError'].includes(name) ? name : 'Error';
+  const safeName = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'AbortError', 'TimeoutError', 'APICallError', 'PrivacyConfigMismatch'].includes(name) ? name : 'Error';
   if (safeName === 'AbortError') return { name: safeName, code: 'aborted' };
   return { name: safeName, code: 'unknown_error' };
 }

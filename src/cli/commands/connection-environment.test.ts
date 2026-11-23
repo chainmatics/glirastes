@@ -148,7 +148,6 @@ describe('connection environment in a chosen env file', () => {
         'GLIRASTES_APP_ID=kept-in-a-chosen-file',
         '  # indented comment',
         'TAIL=1',
-        `GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}`,
         '',
       ));
 
@@ -168,7 +167,6 @@ describe('connection environment in a chosen env file', () => {
         'GLIRASTES_APP_ID=kept-in-a-chosen-file',
         '  # indented comment',
         'TAIL=1',
-        `GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}`,
         '',
       ));
     },
@@ -194,7 +192,6 @@ describe('connection environment in a chosen env file', () => {
         'B=2',
         `GLIRASTES_CONTROL_PLANE_URL=${connection.baseUrl}`,
         `GLIRASTES_API_KEY=${credential}`,
-        `GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}`,
       ));
     },
   );
@@ -213,7 +210,7 @@ describe('connection environment in a chosen env file', () => {
     });
 
     await expect(readFile(path, 'utf8'))
-      .resolves.toBe(`A=1\r\nGLIRASTES_API_KEY=${credential}\nB=2\r\nGLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\r\n`);
+      .resolves.toBe(`A=1\r\nGLIRASTES_API_KEY=${credential}\nB=2\r\n`);
   });
 
   it('keeps a URL line that already names the hosted Platform', async () => {
@@ -230,7 +227,7 @@ describe('connection environment in a chosen env file', () => {
     });
 
     await expect(readFile(path, 'utf8')).resolves
-      .toBe(`GLIRASTES_CONTROL_PLANE_URL="https://api.glirastes.io"\nGLIRASTES_API_KEY=${credential}\nGLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\n`);
+      .toBe(`GLIRASTES_CONTROL_PLANE_URL="https://api.glirastes.io"\nGLIRASTES_API_KEY=${credential}\n`);
   });
 
   it.skipIf(process.platform === 'win32')('keeps the mode of an existing chosen file and creates a new one as 0600', async () => {
@@ -248,7 +245,7 @@ describe('connection environment in a chosen env file', () => {
     });
 
     expect((await stat(shared)).mode & 0o777).toBe(0o644);
-    await expect(readFile(shared, 'utf8')).resolves.toBe(`A=1\nGLIRASTES_API_KEY=${credential}\nGLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\n`);
+    await expect(readFile(shared, 'utf8')).resolves.toBe(`A=1\nGLIRASTES_API_KEY=${credential}\n`);
     expect((await readdir(root)).filter((name) => name.includes('glirastes-'))).toEqual([]);
 
     await materializeConnectionEnvironment({
@@ -320,14 +317,13 @@ describe('connection environment materialization', () => {
       expect(result).not.toContain(name);
     }
     expect(result.match(/^GLIRASTES_API_KEY=/gm)).toHaveLength(1);
-    expect(result).toContain(`GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}`);
     expect(result).toContain(`GLIRASTES_API_KEY=${credential}`);
     expect(result).toContain(`GLIRASTES_CONTROL_PLANE_URL=${connection.baseUrl}`);
   });
 
   it('writes an app connection without environmentId and keeps GLIRASTES_ENVIRONMENT', async () => {
     const { root, environmentPath, descriptorPath } = await fixture();
-    await writeFile(environmentPath, `GLIRASTES_ENVIRONMENT=staging\nGLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\nKEEP=1\n`);
+    await writeFile(environmentPath, 'GLIRASTES_ENVIRONMENT=staging\nKEEP=1\n');
     const { environmentId: _unused, ...appConnection } = connection;
 
     await materializeConnectionEnvironment({
@@ -340,7 +336,6 @@ describe('connection environment materialization', () => {
 
     const env = await readFile(environmentPath, 'utf8');
     expect(env).toContain('GLIRASTES_ENVIRONMENT=staging');
-    expect(env).toContain(`GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}`);
     expect(env).toContain(`GLIRASTES_API_KEY=${credential}`);
     expect(JSON.parse(await readFile(descriptorPath, 'utf8')))
       .not.toHaveProperty('environmentId');
@@ -359,7 +354,7 @@ describe('connection environment materialization', () => {
     });
 
     await expect(readFile(environmentPath, 'utf8'))
-      .resolves.toBe(`KEEP=1\nGLIRASTES_API_KEY=${credential}\nGLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\n`);
+      .resolves.toBe(`KEEP=1\nGLIRASTES_API_KEY=${credential}\n`);
   });
 
   it('writes a secret-free descriptor and creates the secret file as 0600', async () => {
@@ -547,7 +542,7 @@ describe('secret file safety against a real Git repository', () => {
 
     expect(stagedIn).toBeDefined();
     await expect(readFile(join(root, '.env.local'), 'utf8')).resolves
-      .toBe(`GLIRASTES_CONTROL_PLANE_URL=${connection.baseUrl}\nGLIRASTES_API_KEY=${credential}\nGLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\n`);
+      .toBe(`GLIRASTES_CONTROL_PLANE_URL=${connection.baseUrl}\nGLIRASTES_API_KEY=${credential}\n`);
     expect((await readdir(join(root, '.git'))).filter((name) => name.startsWith('glirastes-connect-staging-'))).toEqual([]);
     expect((await committable(root)).map(({ path }) => path)).not.toContain('.env.local');
     expect(await readdir(outside)).toEqual([]);
@@ -938,6 +933,22 @@ describe('secret file safety against a real Git repository', () => {
     await materializeConnectionEnvironment({
       projectRoot: root, environmentPath: '.env', connection: { ...connection, baseUrl: 'https://api.glirastes.io' }, apiKey: credential,
     });
-    await expect(readFile(join(root, '.env'), 'utf8')).resolves.toBe(`${original}GLIRASTES_API_KEY=${credential}\nGLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\n`);
+    await expect(readFile(join(root, '.env'), 'utf8')).resolves.toBe(`${original}GLIRASTES_API_KEY=${credential}\n`);
+  });
+});
+
+
+describe('explicit managed privacy pairing', () => {
+  it.each([false, true])('only writes a new binding with explicit opt-in %s', async (privacy) => {
+    const {root, environmentPath} = await fixture();
+    await materializeConnectionEnvironment({projectRoot:root,framework:'nextjs',connection,apiKey:credential,privacy,isGitIgnored:async()=>true});
+    const env = await readFile(environmentPath,'utf8');
+    expect(env.includes('GLIRASTES_STATE_ENVIRONMENT_ID=')).toBe(privacy);
+  });
+  it('ordinary re-pairing preserves the existing durable binding', async () => {
+    const {root,environmentPath}=await fixture();
+    await writeFile(environmentPath,`GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}\n`);
+    await materializeConnectionEnvironment({projectRoot:root,framework:'nextjs',connection,apiKey:credential,isGitIgnored:async()=>true});
+    expect(await readFile(environmentPath,'utf8')).toContain(`GLIRASTES_STATE_ENVIRONMENT_ID=${connection.environmentId}`);
   });
 });

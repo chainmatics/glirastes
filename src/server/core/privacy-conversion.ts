@@ -20,10 +20,18 @@ export function preparePrivacyConversion<T extends object>(tool: T): T {
   if (candidate.execute !== conversion.execute) {
     // An arbitrary replacement cannot safely be reconstructed around the original
     // conversion. Refuse instead of discarding its authorization or executing it.
-    return { ...tool, execute: async () => ({ success: false, error: 'privacy_tool_conversion_unsupported' }) };
+    return Object.create(Object.getPrototypeOf(tool), { ...Object.getOwnPropertyDescriptors(tool),
+      execute: {value: async () => ({success:false,error:'privacy_tool_conversion_unsupported'}), enumerable:true, configurable:true},
+    }) as T;
   }
   // Only replace the SDK result projection. The current descriptor owns its
   // schema, approval predicate and all other consumer authorization metadata.
-  const protectedTool = conversion.protectedTool() as { execute?: unknown };
-  return { ...tool, execute: protectedTool.execute };
+  const protectedTool = conversion.protectedTool() as { execute?: unknown; needsApproval?: unknown };
+  return Object.create(Object.getPrototypeOf(tool), { ...Object.getOwnPropertyDescriptors(tool),
+    ...('needsApproval' in tool ? {} : { needsApproval: { enumerable: true, configurable: true, get: () => {
+      const guard = protectedTool.needsApproval;
+      return typeof guard === 'function' ? guard.bind(protectedTool) : guard;
+    } } }),
+    execute: { value: protectedTool.execute, enumerable: true, configurable: true },
+  }) as T;
 }

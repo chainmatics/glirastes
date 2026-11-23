@@ -100,6 +100,8 @@ export interface MaterializeConnectionEnvironmentOptions
   extends ConnectionEnvironmentPreflightOptions, SecretStagingOptions {
   connection: PlatformConnectionDescriptor;
   apiKey: string;
+  /** Explicitly persist the managed privacy binding, requiring durable bootstrap. */
+  privacy?: boolean;
   atomicWriteHooks?: AtomicArtifactWriteHooks;
 }
 
@@ -876,6 +878,10 @@ export async function materializeConnectionEnvironment(
     });
   }
 
+  if (options.privacy && (!connection.environmentId || !targets.environmentPath)) {
+    throw new FoundationDiagnosticError({code: 'E-CONNECT-PRIVACY-BINDING-REQUIRED', operation: 'connect',
+      message: 'Managed privacy requires an environment-bound pairing and an ignored dotenv target.', remediation: 'restart-browser-pairing'});
+  }
   const descriptor = {
     path: targets.descriptorPath,
     content: renderConnectionDescriptor(connection),
@@ -893,7 +899,7 @@ export async function materializeConnectionEnvironment(
     kind: targets.environmentKind,
     baseUrl: connection.baseUrl,
     apiKey: options.apiKey,
-    ...(connection.environmentId ? {stateEnvironmentId: connection.environmentId} : {}),
+    ...(options.privacy && connection.environmentId ? {stateEnvironmentId: connection.environmentId} : {}),
   }));
   // Staged copy and backup of the secret live in a private 0700 directory
   // (git dir or temporary directory) or, only when Git ignores the name,

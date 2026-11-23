@@ -77,6 +77,8 @@ export interface ConnectCommandOptions {
    * Wins over `connection.envFile` of `tools.json` and over `.env.local`.
    */
   envFile?: string;
+  /** Opt into durable managed privacy binding. */
+  privacy?: boolean;
 }
 
 export interface ConnectCommandDependencies {
@@ -369,6 +371,7 @@ export async function runConnect(
         runnerKey: (dependencies.createRunnerKey ?? localRunnerKey)(),
       },
       apiKey: token.apiKey,
+      ...(options.privacy ? { privacy: true } : {}),
       isGitIgnored: dependencies.isGitIgnored,
       ...dependencies.staging,
       atomicWriteHooks: dependencies.atomicWriteHooks,
@@ -402,6 +405,7 @@ export async function runConnect(
         : {
             secretTarget: 'output',
             apiKey: token.apiKey,
+      ...(options.privacy ? { privacy: true } : {}),
             ...(selfHostedUrl ? { controlPlaneUrl: selfHostedUrl } : {}),
           }),
     }));

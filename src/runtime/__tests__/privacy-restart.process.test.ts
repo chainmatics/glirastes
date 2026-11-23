@@ -116,8 +116,9 @@ describe('managed privacy across a process restart (FileRuntimeStateStore)', { t
     const second = await runner(statePath, { ...SERVE, deployment: offRevision(1) });
     expect(second.privacyStates).toEqual(['downgrade-rejected']);
     expect(second.appliedReported).toBe(false);
-    // The turn runs on the persisted protected revision 2.
-    expect(second).toMatchObject({ policy: 'platform', fallbackModelCalls: 0, providerSawCanary: false, audioCloudRequests: 0 });
+    // Retained protection is a floor, not fresh bootstrap after a rejected snapshot.
+    expectNoEgress(second);
+    expect(second.policy).toBe('privacy_policy_unavailable');
   });
 
   it('an off older than the latest accepted protection is rejected after a second restart: nothing runs unprotected', async () => {

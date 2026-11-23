@@ -2481,6 +2481,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           };
         }
 
+        if (beforeModelStep) classifierOptions = { ...classifierOptions, beforeClassifierCall: beforeModelStep };
+
         // Run pipeline: guardrails + classification + routing + model selection
         const pipelineResult = await pipeline.process(
           userText,

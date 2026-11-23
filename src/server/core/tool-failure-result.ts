@@ -138,10 +138,10 @@ export function boundedToolFailure(
   const error = cutError.trim().length > 0 ? cutError : 'Tool execution failed.';
 
   const fromEndpoint = (result as { [ENDPOINT_FAILURE]?: unknown })[ENDPOINT_FAILURE] === true;
-  if (fromEndpoint && isOutcomeUnknown(result)) {
+  if (isOutcomeUnknown(result)) {
     return markOutcomeUnknown({
       success: false, error, outcome: 'unknown', hint: OUTCOME_UNKNOWN_HINT,
-      ...(Number.isInteger(result.status) ? { status: result.status } : {}),
+      ...(fromEndpoint && Number.isInteger(result.status) ? { status: result.status } : {}),
     });
   }
   // Cutting raw errors or backend bodies can create identity fragments that

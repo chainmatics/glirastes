@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   AppSetupArtifactSchema,
   isProtectedPolicy,
@@ -126,6 +127,8 @@ export interface CreateGlirastesOptions {
    * across restarts, e.g. `(id) => new FileRuntimeStateStore(`/var/lib/app/glirastes-${id}.json`)`
    * on a persistent volume, or a database-backed store with `durable: true`.
    *
+   * Configuring this factory explicitly opts into managed privacy bootstrap;
+   * a fixed stateEnvironmentId is required even without a privacy object.
    * Managed privacy requires it: connected with `privacy`, a protected
    * policy is enforced, confirmed and claimed as a capability only with a
    * durable store; without one it is refused (`accepted_state_missing`).
@@ -137,7 +140,7 @@ export interface CreateGlirastesOptions {
    * The `ready()` timeout releases none of this.
    */
   stateStore?: (environmentId: string) => RuntimeStateStore;
-  /** Stable nonsecret binding for managed privacy. Also GLIRASTES_STATE_ENVIRONMENT_ID.
+  /** Explicit managed-bootstrap opt-in and stable nonsecret binding. Also GLIRASTES_STATE_ENVIRONMENT_ID.
    * Loads retained authority before network discovery; must match the authenticated
    * live connection. Keep this and the durable store across restarts/downgrades. */
   stateEnvironmentId?: string;
@@ -346,8 +349,10 @@ class AcceptedStateStore implements RuntimeStateStore {
     if (held && (state.privacyFloor?.policyRevision ?? 0) >= held.policyRevision) {
       this.held.delete(this.environmentId!);
     }
-    if (state.cursor !== null) this.reconciled = true;
+
   }
+
+  markReconciled(): void { this.reconciled = true; }
 
   private remember(state: RuntimeSyncState): void {
     this.state = structuredClone(state);
@@ -381,6 +386,8 @@ class AcceptedStateStore implements RuntimeStateStore {
    * The state cannot back a managed privacy decision: unreadable, the last
    * save failed, or no verified sync yet (lost or new state).
    */
+  stateFailed(): boolean { return this.unreadable || this.saveFailed; }
+
   unavailable(): boolean {
     return this.unreadable || this.saveFailed || !this.reconciled;
   }
@@ -561,9 +568,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   const base = localSource();
   const store = new AcceptedStateStore();
   const configuredStateEnvironmentId = options.stateEnvironmentId ?? env.GLIRASTES_STATE_ENVIRONMENT_ID?.trim();
-  const stateEnvironmentId = options.stateStore || options.privacy?.managed || options.privacy?.local?.required
-    ? configuredStateEnvironmentId : undefined;
-  const validStateBinding = Boolean(stateEnvironmentId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stateEnvironmentId));
+  const stateEnvironmentId = configuredStateEnvironmentId;
+  const validStateBinding = z.uuid().safeParse(stateEnvironmentId).success;
   let stateBindingLoaded = !stateEnvironmentId;
   let stateBindingMismatch = Boolean(stateEnvironmentId && !validStateBinding);
   const loadBoundState = async () => {
@@ -719,6 +725,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         ...(readOnly ? { readOnly } : {}),
         version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
         stateStore: store,
+        onReconciled: () => store.markReconciled(),
         setupArtifact: options.generated.setupArtifact,
         privacyStatus: (revisions) => privacyRuntimeStatus(
           pinnedOf(revisions.policyRevision),
@@ -824,23 +831,23 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   const withoutEnvironment = () => Boolean(resolved && resolved.environmentId === null);
   const awaitingPolicy = () => Boolean(config) && !store.accepted() && !withoutEnvironment();
   /** Explicit managed activation is fail-closed even with no connection/reference. */
-  const managedPrivacy = () => options.privacy?.managed === true
+  const managedPrivacy = () => Boolean(options.stateStore) || Boolean(stateEnvironmentId) || options.privacy?.managed === true
     || (Boolean(config) && options.privacy?.local?.required === true) || store.hasPrivacyAuthority();
   if (config && (options.privacy?.managed || options.privacy?.local?.required) && !options.stateStore) {
     onError(new Error('[glirastes] Managed privacy requires durable bound state (accepted_state_missing).'));
   }
   const privacyGate = (pinned: PinnedPrivacyPolicy | undefined) => {
-    if (stateBindingMismatch) throw new PrivacyError('privacy_state_binding_mismatch');
+    if (stateBindingMismatch || (options.stateStore && !validStateBinding)) throw new PrivacyError('privacy_state_binding_mismatch');
     if (stateEnvironmentId && !stateBindingLoaded) throw new PrivacyError('privacy_policy_unavailable');
     // Lost, unreadable or unsaved state: no verified, durable decision yet.
-    if (managedPrivacy() && (!config || !validStateBinding || !resolved?.environmentId || !store.persistsDurably() || store.unavailable())) {
+    if (managedPrivacy() && (!config || !validStateBinding || !resolved?.environmentId || !store.persistsDurably() || store.stateFailed())) {
       throw new PrivacyError('privacy_policy_unavailable');
     }
     // A refused protected revision blocks traffic; the old revision does not
     // keep running unprotected (K3).
     if (store.privacyRefused()) throw new PrivacyError('privacy_not_configured');
     if (store.privacyFloorUnmet(pinned)) throw new PrivacyError('privacy_not_configured');
-    if (managedPrivacy() && awaitingPolicy()) throw new PrivacyError('privacy_policy_unavailable');
+    if (managedPrivacy() && (store.unavailable() || awaitingPolicy())) throw new PrivacyError('privacy_policy_unavailable');
     assertPrivacyTurn({
       pinned,
       privacy: options.privacy,

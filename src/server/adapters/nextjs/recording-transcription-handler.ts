@@ -292,7 +292,7 @@ function createGate(maxConcurrent: number, maxQueued: number) {
 
 function contentFreeError(error: unknown): string {
   if (error instanceof TranscriptionFailure) return error.code;
-  if (error instanceof Error) return error.name;
+  if (error instanceof Error && ['AbortError', 'TimeoutError', 'TranscriptionUnavailableError'].includes(error.name)) return error.name;
   return 'unknown';
 }
 
@@ -316,8 +316,9 @@ export function createRecordingTranscriptionHandler(
   const configuredMaxDuration = config.maxDurationSeconds ?? Infinity;
   const timeoutMs = config.timeoutMs ?? (transcribe ? 120_000 : 45_000);
   const gate = createGate(Math.max(1, config.maxConcurrent ?? 2), Math.max(0, config.maxQueued ?? 8));
-  const onError = config.onError
+  const reportError = config.onError
     ?? ((error: unknown) => console.error(`[speech] Recording transcription failed: ${contentFreeError(error)}`));
+  const onError = (error: unknown) => reportError(new TranscriptionFailure(contentFreeError(error)));
 
   return async function POST(request: Request): Promise<Response> {
     if (!(await config.authorize(request))) return failed(401, 'Authentication required');

@@ -551,3 +551,12 @@ describe('createIntentClassifier — LLM mode', () => {
     expect(result.intent).toBe('tasks');
   });
 });
+
+
+it('review residual: classifier rechecks live authority immediately before transport', async () => {
+  const generateText=vi.fn(async()=>({text:'{}'}));
+  const classifier=createIntentClassifier({modules:allModules,model:{},generateText});
+  const denied=new Error('privacy_policy_revoked');
+  await expect(classifier.classify('show all open tasks',undefined,undefined,{beforeClassifierCall:()=>{throw denied;}})).rejects.toBe(denied);
+  expect(generateText).not.toHaveBeenCalled();
+});

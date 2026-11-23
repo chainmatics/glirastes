@@ -299,3 +299,11 @@ describe('M5 (independent re-review): birth dates around the context word', () =
     expect(await session.pseudonymizeJson({ updatedAt: '2026-01-15', adobeId: '1980-01-15' })).toEqual({ updatedAt: '2026-01-15', adobeId: '1980-01-15' });
   });
 });
+
+
+it('review residual: mutable and prototype privacy codes cannot escape diagnostics',async()=>{
+ const {PrivacyError,toSafeError}=await import('../detection-result.js');
+ const nominal=new PrivacyError('privacy_policy_unavailable');Object.assign(nominal,{code:'identity@example.invalid'});
+ expect(JSON.stringify(toSafeError(nominal))).not.toContain('identity');
+ expect(toSafeError({name:'PrivacyError',code:'constructor'})).toEqual({name:'Error',code:'unknown_error'});
+});

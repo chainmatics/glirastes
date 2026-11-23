@@ -398,11 +398,12 @@ export const POST = createAiChatHandler({
 - Managed privacy needs durable state. Explicit `privacy.managed: true`
   or `privacy.local.required: true` opts into fail-closed bootstrap.
   A verified signed privacy block or retained authority also binds the runner;
-  a generic state store or provider metadata alone does not activate protection. Pass `stateStore: (environmentId) => new FileRuntimeStateStore(path)`
+  provider metadata alone does not activate protection; an explicit `stateStore` factory does opt into managed bootstrap. Pass `stateStore: (environmentId) => new FileRuntimeStateStore(path)`
   (`glirastes/sync`, one file per environment, on a persistent volume) and
   `stateEnvironmentId` (or `GLIRASTES_STATE_ENVIRONMENT_ID`). This nonsecret UUID
-  comes from the selected environment's Citadel connection block; environment-bound
-  CLI pairing writes it too. App-wide pairing preserves an existing binding.
+  comes from the optional Business/Enterprise Citadel privacy block; explicit
+  `glirastes connect --privacy --dotenv .env` writes it. Ordinary pairing never adds
+  it and preserves an existing binding.
   The SDK reads this store before network discovery. Keep both the binding and
   store when removing local activation: retained signed authority still applies.
   A live connection mismatch fails with `privacy_state_binding_mismatch`; align
@@ -512,3 +513,18 @@ SDK local STT is not evidence of deployed or qualified consumer speech.
 Tool middleware is currently unavailable in protected turns: the handler returns `503 privacy_unsupported_content` with `feature: middleware` before middleware, tools or model calls. Ordinary unprotected calls retain middleware behavior. Delayed middleware execution needs a separate authorization boundary before it can be supported.
 
 Server approval-subject/list/preview lookups are not yet supported under pseudonymization. A protected handler with such declarations returns `503 privacy_unsupported_content` before model calls or backend reads. Ordinary approvals without subject lookups keep the scoped receipt flow; ordinary unprotected subject lookups are unchanged. Do not disable required approval checks to work around this boundary.
+
+
+### Explicit managed bootstrap binding (Nov 23 opt-in port)
+
+Neither ordinary `glirastes connect` nor Shield/provider infrastructure enables protection.
+Use `glirastes connect --privacy --dotenv .env` for the optional managed binding;
+Citadel exposes the corresponding UUID only in its Business/Enterprise privacy block.
+An explicitly configured `stateStore` factory OR `stateEnvironmentId` (including
+`GLIRASTES_STATE_ENVIRONMENT_ID`) opts into durable managed bootstrap, independently
+of the `privacy` object. Both are required to operate. Missing/invalid UUID or live
+scope mismatch gives the content-free `privacy_state_binding_mismatch`; restore
+the original environment UUID and store. Missing, empty or unreadable storage never
+releases traffic before this process accepts a complete authenticated live snapshot.
+Removing both the stateStore factory and fixed UUID is the administrator/DR trust
+boundary. Do not remove one as a way to bypass a retained policy.

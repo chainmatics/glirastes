@@ -91,15 +91,14 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
       continue;
     }
     const execute = tool.execute.bind(tool);
-    const needsApproval = tool.needsApproval;
-    wrapped[name] = {
-      ...tool,
-      ...(isResultReader(tool) ? { needsApproval: false } : typeof needsApproval === 'function'
-        ? {
-            needsApproval: (input: unknown, ...rest: unknown[]) =>
-              (needsApproval as (...args: unknown[]) => unknown)(boundary.rehydrateToolInput(input), ...rest),
-          }
-        : {}),
+    const overrides = {
+      get needsApproval() {
+        if (isResultReader(tool)) return false;
+        const current = tool.needsApproval;
+        return typeof current === 'function'
+          ? (input: unknown, ...rest: unknown[]) => current.call(tool, boundary.rehydrateToolInput(input), ...rest)
+          : current;
+      },
       execute: async (input: unknown, executeOptions?: { toolCallId?: string }) => {
         await options.beforeExecute?.();
         if (isResultReader(tool)) return unsupportedPrivateResultRead();
@@ -142,6 +141,11 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
             throw new PrivacyError(evidence.status === 'pending' ? 'privacy_tool_outcome_unknown' : 'privacy_tool_failed');
           }
         }
+        // Receipt acquisition is asynchronous: no authorization decision survives it.
+        try { await options.beforeExecute?.(); } catch (error) {
+          if (claim) await options.receipts!.completeToolExecution({ ...claim, status: 'failed', result: null, resultFingerprint: 'not-executed' }).catch(() => undefined);
+          throw error;
+        }
         let result: unknown;
         try {
           result = await execute(original, executeOptions);
@@ -172,6 +176,11 @@ export function wrapToolsForPrivacy<T extends Record<string, unknown>>(
         return isToolFailureResult(result) ? boundedToolFailure(result, undefined, true) : result;
       },
     };
+    // Authorization metadata may be inherited or non-enumerable. Spreading a
+    // descriptor would silently erase it; retain its prototype and descriptors.
+    wrapped[name] = Object.create(Object.getPrototypeOf(tool), {
+      ...Object.getOwnPropertyDescriptors(tool), ...Object.getOwnPropertyDescriptors(overrides),
+    });
   }
   return wrapped as T;
 }

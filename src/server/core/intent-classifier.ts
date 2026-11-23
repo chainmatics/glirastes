@@ -375,6 +375,7 @@ export function createIntentClassifier(
       // callback; otherwise LLM classification runs when both are available.
       const call = options?.classifierCall ?? (model && generateText ? { model, generateText } : undefined);
       if (call) {
+        await options?.beforeClassifierCall?.();
         try {
           const result = await classifyWithLlm(
             input,

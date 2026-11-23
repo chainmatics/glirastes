@@ -53,6 +53,34 @@ async function setup() {
 }
 
 describe('authorized tool rehydration', () => {
+  it('review residual: execute-only conversion retains the registered approval', async () => {
+    const {boundary}=await setup();
+    const original=toolToAiTool(defineTool({id:'write',description:'Write',inputSchema:z.object({}),needsApproval:true,execute:async()=>({ok:true})}),{currentDate:new Date(),locale:'en'});
+    const wrapped=wrapToolsForPrivacy({write:{execute:original.execute}},boundary);
+    expect(await (wrapped.write as unknown as {needsApproval:(input:unknown)=>Promise<boolean>}).needsApproval({})).toBe(true);
+  });
+  it('review residual: late-bound inherited boolean approval is preserved', async () => {
+    const {boundary}=await setup();let required=false;
+    const original=Object.assign(Object.create({get needsApproval(){return required;}}),{execute:async()=>({ok:true})});
+    const wrapped=wrapToolsForPrivacy({write:original},boundary);
+    expect(wrapped.write.needsApproval).toBe(false);required=true;expect(wrapped.write.needsApproval).toBe(true);
+  });
+  it('review residual: a revocation during receipt acquisition prevents execution and settles unexecuted claim', async () => {
+    const {boundary}=await setup();const receipts=memoryReceipts();const claim=receipts.claimToolExecution.bind(receipts);let revoked=false;
+    receipts.claimToolExecution=async input=>{const result=await claim(input);revoked=true;return result;};
+    const {PrivacyError}=await import('../detection-result.js');const execute=vi.fn(async(_input:unknown,_options?:unknown)=>({ok:true}));
+    const wrapped=wrapToolsForPrivacy({write:{execute}},boundary,{receipts,beforeExecute:()=>{if(revoked)throw new PrivacyError('privacy_policy_revoked');}});
+    await expect(wrapped.write.execute({}, {toolCallId:'c'})).rejects.toMatchObject({code:'privacy_policy_revoked'});
+    expect(execute).not.toHaveBeenCalled();expect([...receipts.rows.values()].map(r=>r.status)).toEqual(['failed']);
+  });
+  it('review residual: conversion preserves a non-endpoint unknown outcome and pending receipt', async () => {
+    const {boundary}=await setup();const receipts=memoryReceipts();
+    const converted=toolToAiTool(defineTool({id:'write',description:'Write',inputSchema:z.object({}),execute:async()=>markOutcomeUnknown({error:'secret'})}),{currentDate:new Date(),locale:'en'});
+    const wrapped=wrapToolsForPrivacy({write:converted},boundary,{receipts});
+    await expect(wrapped.write.execute({}, {toolCallId:'c'})).rejects.toMatchObject({code:'privacy_tool_outcome_unknown'});
+    expect([...receipts.rows.values()].map(r=>r.status)).toEqual(['pending']);
+  });
+
   it.each([false, true])('protects failure fragments in normally converted tools (copy=%s)', async (copy) => {
     const { boundary } = await setup();
     const name = 'ConvertedIdentityCanary' + 'X'.repeat(1600);
@@ -81,6 +109,20 @@ describe('authorized tool rehydration', () => {
     expect(wrapped.read.inputSchema).toBe(inputSchema); expect(wrapped.read.description).toBe('Consumer guard');
     expect(await wrapped.read.needsApproval({to: fakeEmail})).toBe(true);
     expect(needsApproval).toHaveBeenCalledWith({to: CANARY.colleagueEmail});
+  });
+
+  it.each(['inherited', 'non-enumerable'])('retains %s approval and schema on converted and native tools', async mode => {
+    const {boundary,fakeEmail}=await setup();
+    for(const converted of [false,true]) {
+      const base=converted?toolToAiTool(defineTool({id:'read',description:'Read',inputSchema:z.object({}),execute:async()=>({ok:true})}),{currentDate:new Date(),locale:'en'}):{execute:async()=>({ok:true})};
+      const needsApproval=vi.fn(async(_input:unknown)=>true);
+      const inputSchema=z.object({to:z.string()});
+      const original=mode==='inherited'?Object.assign(Object.create({needsApproval,inputSchema}),{execute:base.execute}):Object.defineProperties({...base},{needsApproval:{value:needsApproval,enumerable:false},inputSchema:{value:inputSchema,enumerable:false}});
+      const wrapped=wrapToolsForPrivacy({read:original},boundary);
+      expect(wrapped.read.inputSchema).toBe(inputSchema);
+      expect(await wrapped.read.needsApproval({to:fakeEmail})).toBe(true);
+      expect(needsApproval).toHaveBeenCalledWith({to:CANARY.colleagueEmail});
+    }
   });
 
   it.each(['converted', 'native'])('withholds error-only failure data on serialized transport for %s tools', async mode => {

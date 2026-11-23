@@ -120,6 +120,11 @@ describe('release workflows', () => {
       'Typecheck', 'Typecheck tests', 'Build', 'Install the NestJS fixture API',
       'Model egress inventory', 'Install the pg floor fixture', 'Test',
     ]);
+    const imageWorkflow = read('.github/workflows/runtime-container.yml');
+    expect(imageWorkflow).toContain('workflow_dispatch: {}');
+    for (const name of ['Verify release tag', 'Authenticate to GHCR', 'Publish the exact tested image']) {
+      expect(jobStep(imageWorkflow, 'runtime-container', name)).toContain("if: inputs.publish && github.workflow == 'Publish glirastes'");
+    }
     // The image is pushed inside runtime-container, so it must wait for the preflight too.
     expect(jobNeeds(workflow, 'runtime-container')).toEqual(['release-preflight', 'stt-local-addon']);
     // Local STT stage 1 is a release gate as well; stage 2 (the model) is not.

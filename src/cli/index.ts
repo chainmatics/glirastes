@@ -826,6 +826,7 @@ export async function runCli(
       baseUrl: getFlagValue(rest, '--base-url'),
       envFile: flagWithValue(rest, DOTENV_FLAG),
       json: hasFlag(rest, '--json'),
+      ...(hasFlag(rest, '--privacy') ? { privacy: true } : {}),
     }, dependencies.connect);
     return;
   }

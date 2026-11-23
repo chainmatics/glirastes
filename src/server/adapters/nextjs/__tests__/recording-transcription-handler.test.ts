@@ -541,3 +541,11 @@ describe('createRecordingTranscriptionHandler with a local transcriber', () => {
     });
   });
 });
+
+
+it('review residual: recording diagnostics do not emit custom error names', async()=>{
+ const onError=vi.fn();const handler=createRecordingTranscriptionHandler({authorize:allow,onError,transcribe:async()=>{throw Object.assign(new Error('secret'),{name:'IdentityCanary@example.invalid'});}});
+ expect((await handler(request())).status).toBe(502);
+ expect(JSON.stringify(onError.mock.calls)).not.toContain('IdentityCanary');
+ expect(onError.mock.calls[0][0].code).toBe('unknown');
+});

@@ -133,6 +133,7 @@ export class RuntimeSyncManager {
       deployment: RuntimeDeploymentBundle,
       revisions: MaterializedDeploymentRevisions,
     ) => void | Promise<void>;
+    onReconciled?: () => void;
     onRevocations?: (revocations: SecurityRevocation[]) => void | Promise<void>;
     onPending?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
     onActivated?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
@@ -320,6 +321,8 @@ export class RuntimeSyncManager {
       updatedAt: wire.cursor,
     };
     await this.options.store.saveAtomic(state);
+    // Cursor persistence (including early revocations) cannot establish fresh bootstrap.
+    if (wire.activeSnapshotComplete && !rejectedActive && rejectedRevocationIds.length === 0) this.options.onReconciled?.();
     if (privacyDowngradeDeploymentIds.length > 0) {
       await this.options.onPrivacyDowngrade?.(privacyDowngradeDeploymentIds);
     }
@@ -357,7 +360,8 @@ export class RuntimeSyncManager {
       && deployment.manifestRevision.environmentId === this.options.environmentId
       && deployment.policyRevision.environmentId === this.options.environmentId
       && revisions.every((revision) => (
-        revision.tenantId === first.tenantId
+        (revision.environmentId === undefined || revision.environmentId === this.options.environmentId)
+        && revision.tenantId === first.tenantId
         && revision.targetAppId === first.targetAppId
       ));
   }

@@ -1,3 +1,9 @@
+import {mkdir,mkdtemp,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {materializeConnectionEnvironment} from '../../cli/commands/connection-environment.js';
+import {createLocalAiPipeline} from '../../server/local-pipeline.js';
+import {generateText} from 'ai';
 import { createAiChatHandler } from '../../server/adapters/nextjs/create-ai-chat-handler.js';
 import { providerAdapters } from '../../server/pii-shield/__tests__/privacy-fixtures.js';
 import {
@@ -240,6 +246,26 @@ type SpreadsIntoChatHandler = GlirastesChatTurn extends Partial<AiChatHandlerCon
 const spreadsIntoChatHandler: SpreadsIntoChatHandler = true;
 
 describe('createGlirastes in standalone', () => {
+  it('ordinary consumer after generic pairing preserves unconfigured transport without a binding or state store',async()=>{
+    const root=await mkdtemp(join(tmpdir(),'privacy-ordinary-pairing-'));
+    try {
+      await mkdir(join(root,'.glirastes'));
+      await materializeConnectionEnvironment({projectRoot:root,framework:'nextjs',connection:{schemaVersion:1,baseUrl:BASE_URL,appId:APP_ID,environmentId:ENVIRONMENT_ID,runnerKey:'fixture'},apiKey:API_KEY,isGitIgnored:async()=>true});
+      const text=await readFile(join(root,'.env.local'),'utf8');expect(text).not.toContain('GLIRASTES_STATE_ENVIRONMENT_ID');
+      const paired=Object.fromEntries(text.split('\n').filter(line=>line.includes('=')).map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));
+      const captures:unknown[]=[];
+      for(const config of [{},paired]) {
+        const runtime=track(createGlirastes({generated:generated(),env:config,fetchImpl:(async()=>{throw new Error('offline')}) as typeof fetch,push:false,firstSyncTimeoutMs:5,pollIntervalMs:60000,onError:()=>{}}));
+        await runtime.ready();expect(runtime.privacyPolicy()).toBeNull();
+        const turn=await runtime.chatTurn(principal);const adapter=providerAdapters().openrouter;
+        const handler=createAiChatHandler({model:adapter.model,tools:{},systemPrompt:'Assistant',managedRuntime:turn.managedRuntime,onError:()=>{}});
+        const response=await handler(new Request('https://app.example/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:[{id:'u1',role:'user',parts:[{type:'text',text:'ordinary.canary@example.invalid'}]}]})}));
+        expect(response.status).toBe(200);await response.text();expect(adapter.requests).toHaveLength(1);captures.push(adapter.requests);
+      }
+      expect(captures[1]).toEqual(captures[0]);expect(JSON.stringify(captures)).toContain('ordinary.canary@example.invalid');
+    }finally{await rm(root,{recursive:true,force:true});}
+  });
+
   it('yields a chat turn the handler config accepts', () => {
     expect(spreadsIntoChatHandler).toBe(true);
   });
@@ -868,9 +894,36 @@ describe('createGlirastes with a privacy policy', () => {
     await instance.ready();expect(codeOf(()=>instance.privacyPolicy())).toBe('privacy_state_binding_mismatch');
     expect(http.calls.some(({url})=>url.includes('/sync?'))).toBe(false);
   });
-  it('keeps a fresh inactive store ordinary when discovery is offline', async () => {
+  it('keeps an explicit binding blocked with a fresh empty store offline', async () => {
     const instance=track(createGlirastes({generated:generated(),env,stateStore:()=>new SharedDurableTestStore(),fetchImpl:(async()=>{throw new Error('offline')}) as typeof fetch,push:false,onError:vi.fn(),pollIntervalMs:60000}));
-    await instance.ready();expect(instance.privacyPolicy()).toBeNull();
+    await instance.ready();expect(codeOf(()=>instance.privacyPolicy())).toBe('privacy_policy_unavailable');
+  });
+
+  it('review residual: retained store without binding fails with a fixed binding diagnostic', async()=>{
+    const instance=track(createGlirastes({generated:generated(),env:{},stateStore:()=>new SharedDurableTestStore(),onError:vi.fn()}));
+    expect(codeOf(()=>instance.privacyPolicy())).toBe('privacy_state_binding_mismatch');
+  });
+  it('review residual: retained binding alone blocks without privacy or stateStore', async () => {
+    const instance=track(createGlirastes({generated:generated(),env,push:false,fetchImpl:(async()=>{throw new Error('offline')}) as typeof fetch,onError:vi.fn(),firstSyncTimeoutMs:5,pollIntervalMs:60000}));
+    await instance.ready();expect(codeOf(()=>instance.privacyPolicy())).toBe('privacy_policy_unavailable');
+    expect(codeOf(()=>instance.speechPolicy())).toBe('privacy_policy_unavailable');
+  });
+  it.each(['rejected','incomplete'] as const)('review residual: cached off cannot bootstrap on %s active snapshot', async (mode) => {
+    const {privateKey,publicKey}=generateKeyPairSync('ed25519');
+    const stateStore=new SharedDurableTestStore();
+    const valid=activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'});
+    const http=platform({deployments:[valid],publicKey});
+    const before=track(createGlirastes({generated:generated(),env,stateStore:()=>stateStore,fetchImpl:http.fetchImpl,push:false,onError:vi.fn(),pollIntervalMs:60000}));
+    await before.ready();expect(before.privacyPolicy()).toBeNull();await before.stop();
+    const changed=structuredClone(valid);changed.policyRevision.signature.value='invalid';
+    const next=platform({deployments:mode==='rejected'?[changed]:[],publicKey});
+    const fetchImpl=(async (...args:Parameters<typeof fetch>)=>{
+      const response=await next.fetchImpl(...args);
+      if(String(args[0]).includes('/sync?')&&mode==='incomplete') return Response.json({...await response.json(),activeSnapshotComplete:false});
+      return response;
+    }) as typeof fetch;
+    const after=track(createGlirastes({generated:generated(),env,stateStore:()=>stateStore,fetchImpl,push:false,onError:vi.fn(),pollIntervalMs:60000}));
+    await after.ready();expect(codeOf(()=>after.privacyPolicy())).toBe('privacy_policy_unavailable');
   });
 
   it('enforces the local profile in standalone when required', () => {
@@ -903,6 +956,23 @@ describe('createGlirastes with a privacy policy', () => {
       request: new Request('https://app.example/api/chat'),
       snapshot: { policyRevision: { revisionId: id('3908') } } as never,
     }))).toBe('privacy_policy_unavailable');
+  });
+
+  it('review residual: signed off classifier revocation during tool loading yields zero serialized HTTP requests',async()=>{
+    const {privateKey,publicKey}=generateKeyPairSync('ed25519');const revocations:SecurityRevocation[]=[];
+    const http=platform({deployments:[activeDeployment(privateKey,[],{schemaVersion:1,profile:'off'})],publicKey,revocations});
+    const runtime=track(createGlirastes({generated:generated(),env,stateStore:()=>new SharedDurableTestStore(),fetchImpl:http.fetchImpl,push:false,pollIntervalMs:10,onError:vi.fn()}));
+    await runtime.ready();const pinned=runtime.accepted()!.policyRevision;const turn=await runtime.chatTurn(principal);
+    const adapter=providerAdapters().openrouter;
+    const modules=[{id:'mail',name:'Mail',description:'Mail',tools:[],classification:{hint:'Mail',examples:['send a mail']}}];
+    const pipeline=createLocalAiPipeline({modules,classifier:{modules,model:adapter.model},generateText:generateText as never});
+    const handler=createAiChatHandler({model:adapter.model,pipeline,systemPrompt:'Assistant',managedRuntime:turn.managedRuntime,onError:()=>{},loadTools:async()=>{
+      const unsigned={revocationId:id('3997'),environmentId:ENVIRONMENT_ID,effectiveAt:'2026-07-29T00:02:00.000Z',reasonCode:'privacy-off-revoked',toolIds:[],agentRevisionIds:[],policyRevisionIds:[pinned.revisionId]};
+      revocations.push({...unsigned,signature:{algorithm:'Ed25519',keyId:'runtime-key',value:sign(null,Buffer.from(canonicalRuntimeJson(unsigned)),privateKey).toString('base64url')}});
+      await vi.waitFor(()=>expect(runtime.revocations()).toHaveLength(1));return {};
+    }});
+    const response=await handler(new Request('https://app.example/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:[{id:'u1',role:'user',parts:[{type:'text',text:'Investigate classifier canary@example.invalid carefully please'}]}]})}));
+    await response.text();expect(adapter.requests).toHaveLength(0);
   });
 
   it.each(['openrouter','anthropic'] as const)('%s: signed off revocation blocks memory before provider HTTP', async (kind) => {
@@ -1067,8 +1137,8 @@ describe('createGlirastes with a privacy policy', () => {
       expect(glirastes.accepted()).toBeUndefined();
       expect((await stateStore.load())?.privacyFloor ?? null).toBeNull();
       expect((await stateStore.load())?.privacyRefusedDeploymentIds ?? []).toEqual([]);
-      // Without explicit opt-in or a verified policy, an attacker cannot activate protection.
-      expect(glirastes.privacyPolicy()).toBeNull();
+      // The explicit binding opted in; bad material cannot establish current bootstrap.
+      expect(codeOf(() => glirastes.privacyPolicy())).toBe('privacy_policy_unavailable');
     });
   });
 
@@ -1113,7 +1183,7 @@ describe('createGlirastes with a privacy policy', () => {
       const { privateKey, publicKey } = generateKeyPairSync('ed25519');
       const unprotected = platform({ deployments: [activeDeployment(privateKey)], publicKey });
       const legacy = createGlirastes({
-        generated: generated(), localLimits: limits, env, fetchImpl: unprotected.fetchImpl, push: false,
+        generated: generated(), localLimits: limits, env: {...env, GLIRASTES_STATE_ENVIRONMENT_ID: undefined}, fetchImpl: unprotected.fetchImpl, push: false,
         pollIntervalMs: 60_000, onError: vi.fn(),
       });
       await legacy.ready();
@@ -1124,7 +1194,7 @@ describe('createGlirastes with a privacy policy', () => {
 
       const protectedHttp = platform({ deployments: [activeDeployment(privateKey, [], block)], publicKey });
       const refusing = track(createGlirastes({
-        generated: generated(), localLimits: limits, env, fetchImpl: protectedHttp.fetchImpl, push: false,
+        generated: generated(), localLimits: limits, env: {...env, GLIRASTES_STATE_ENVIRONMENT_ID: undefined}, fetchImpl: protectedHttp.fetchImpl, push: false,
         pollIntervalMs: 60_000, onError: vi.fn(),
       }));
       await refusing.ready();
@@ -1248,7 +1318,7 @@ describe('createGlirastes with a privacy policy', () => {
       }) as unknown as typeof fetch;
       // A legacy runner: no privacy, no store.
       const glirastes = track(createGlirastes({
-        generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
+        generated: generated(), localLimits: limits, env: {...env, GLIRASTES_STATE_ENVIRONMENT_ID: undefined}, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
       }));
       await glirastes.ready();
       expect(await gateCode(glirastes)).toBe('privacy_policy_unavailable');

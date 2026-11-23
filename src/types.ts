@@ -1080,6 +1080,8 @@ export interface IntentClassifierConfig {
  * kept beyond the call (no learned fast path).
  */
 export interface PipelineCallOptions {
+  /** Recheck live authority immediately before any classifier transport. */
+  beforeClassifierCall?: () => void | Promise<void>;
   wrapModel?: <M>(model: M) => M;
   /**
    * A protected turn's classifier call: exactly this model through this

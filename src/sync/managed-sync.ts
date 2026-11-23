@@ -83,6 +83,8 @@ export function createManagedRuntimeSync(options: {
    * a durable store; registration then claims `privacyPolicyVersions`.
    */
   privacyCapable?: boolean;
+  /** This process received and durably accepted a complete live snapshot. */
+  onReconciled?: () => void;
   /**
    * The committed setup artifact of the running code, e.g. the generated
    * module's `setupArtifact`. Its discovery digest goes into every runner
@@ -123,6 +125,7 @@ export function createManagedRuntimeSync(options: {
     environmentId: options.environmentId,
     store,
     verifier,
+    onReconciled: options.onReconciled,
     validateDeployment: async (deployment, revisions) => {
       const privacy = privacyOfRevisions(revisions);
       if (privacy.state === 'refused') {
