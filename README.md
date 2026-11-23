@@ -49,8 +49,8 @@ Choose the backend host and browser UI independently:
 The public image needs no registry login and no customer-written Node server:
 
 ```sh
-docker pull ghcr.io/chainmatics/glirastes-runtime:0.23.0
-docker run --rm ghcr.io/chainmatics/glirastes-runtime:0.23.0 --help
+docker pull ghcr.io/chainmatics/glirastes-runtime:0.24.2
+docker run --rm ghcr.io/chainmatics/glirastes-runtime:0.24.2 --help
 ```
 
 Run **one active service per app/environment**, independently of backend replica
@@ -59,10 +59,10 @@ V1 uses PostgreSQL for approval consumption and an overlap guard; it does not
 provide HA. Keep the user's cookie/bearer token and all backend permissions.
 
 Start with the [runtime guide](docs/runtime-container.md),
-[image and artifact commands](https://github.com/chainmatics/glirastes/blob/v0.23.0/containers/runtime/README.md), and the
-[PHP example with Docker Compose](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/README.md).
+[image and artifact commands](https://github.com/chainmatics/glirastes/blob/v0.24.2/containers/runtime/README.md), and the
+[PHP example with Docker Compose](https://github.com/chainmatics/glirastes/blob/v0.24.2/examples/php-runtime/README.md).
 Pin the image digest and use its exact SDK version for artifacts and browser code.
-Angular, SvelteKit and Nuxt have [tested browser examples](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/frontend-frameworks/README.md).
+Angular, SvelteKit and Nuxt have [tested browser examples](https://github.com/chainmatics/glirastes/blob/v0.24.2/examples/frontend-frameworks/README.md).
 Those tests cover frontend integration; Rust/Java remain generic HTTP/OpenAPI
 paths, and unknown routers have no automatic page discovery. See the
 [support matrix](docs/support-matrix.md) for the evidence at each layer.
@@ -525,10 +525,10 @@ installed SDK version. The versioned source guides remain available below.
 
 - [Support matrix](docs/support-matrix.md)
 - [Runtime container architecture and operations](docs/runtime-container.md)
-- [Public image and artifact build commands](https://github.com/chainmatics/glirastes/blob/v0.23.0/containers/runtime/README.md)
-- [PHP backend and Docker Compose example](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/README.md)
-- [Angular, SvelteKit and Nuxt browser examples](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/frontend-frameworks/README.md)
-- [Runtime V1 acceptance and release evidence](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/2026-11-15-runtime-container-v1.md)
+- [Public image and artifact build commands](https://github.com/chainmatics/glirastes/blob/v0.24.2/containers/runtime/README.md)
+- [PHP backend and Docker Compose example](https://github.com/chainmatics/glirastes/blob/v0.24.2/examples/php-runtime/README.md)
+- [Angular, SvelteKit and Nuxt browser examples](https://github.com/chainmatics/glirastes/blob/v0.24.2/examples/frontend-frameworks/README.md)
+- [Runtime V1 acceptance and release evidence](https://github.com/chainmatics/glirastes/blob/v0.24.2/docs/acceptance/2026-11-15-runtime-container-v1.md)
 - [Tool policy](docs/tool-policy.md)
 - [Chat route security](docs/chat-route-security.md)
 - [Chat interactions (`@` and `/`)](docs/chat-interactions.md)
@@ -536,10 +536,10 @@ installed SDK version. The versioned source guides remain available below.
 - [Chat message queue](docs/chat-queue.md)
 - [Managed runtime sync](docs/managed-runtime-sync.md)
 - [Runtime persistence](docs/runtime-persistence.md)
-- [0.5.0 acceptance](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/0.5.0-acceptance.md)
-- [Second acceptance app (Vue + FastAPI), run per release](https://github.com/chainmatics/glirastes/blob/v0.23.0/docs/acceptance/second-app-vue-fastapi.md)
+- [0.5.0 acceptance](https://github.com/chainmatics/glirastes/blob/v0.24.2/docs/acceptance/0.5.0-acceptance.md)
+- [Second acceptance app (Vue + FastAPI), run per release](https://github.com/chainmatics/glirastes/blob/v0.24.2/docs/acceptance/second-app-vue-fastapi.md)
 - [Agent skills](skills/README.md)
-- Examples: [`examples/`](https://github.com/chainmatics/glirastes/tree/v0.23.0/examples)
+- Examples: [`examples/`](https://github.com/chainmatics/glirastes/tree/v0.24.2/examples)
 
 ## Upgrading from 0.4
 
@@ -561,7 +561,7 @@ Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 A configured customer-hosted runtime container can run this SDK next to an
 existing HTTP API without customer Node server code. See
 [Runtime container V1](docs/runtime-container.md) and the
-[PHP reference](https://github.com/chainmatics/glirastes/blob/v0.23.0/examples/php-runtime/README.md). It uses generated OpenAPI tools,
+[PHP reference](https://github.com/chainmatics/glirastes/blob/v0.24.2/examples/php-runtime/README.md). It uses generated OpenAPI tools,
 backend-verified user credentials, persistent approvals and one active service
 per app/environment. Image publication and customer deployment are separate
 release steps; V1 does not provide HA or native backend SDKs.
