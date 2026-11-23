@@ -47,8 +47,8 @@ export const VIEW_CONTEXT_LIMITS = Object.freeze({
   maxFactsNodes: 256,
   /** Length of a facts key in code units. */
   maxFactKeyLength: 64,
-  /** All kept entries as a JSON list, in UTF-8 bytes. */
-  maxTotalBytes: 4096,
+  /** All kept entries as a JSON list, in UTF-8 bytes; a long selection is cut to fit before an entry is dropped. */
+  maxTotalBytes: 2560,
 });
 
 /** Which earlier messages keep their view context for the model. `none`: only the newest message's; `changes`: also earlier ones where it changed; `all`: every message's. */
@@ -60,8 +60,8 @@ export type ViewContextHistory = (typeof VIEW_CONTEXT_HISTORY_MODES)[number];
 /**
  * Why something was dropped. Entry reasons (the whole entry is gone):
  * `disabled`, `not-a-list`, `invalid-entry`, `invalid-entity`,
- * `undeclared-type`, `type-not-allowed`, `duplicate`, `over-limit`,
- * `over-size`. Field reasons (the entry stays without that field or id):
+ * `no-entity-or-selection`, `undeclared-type`, `type-not-allowed`,
+ * `duplicate`, `over-limit`, `over-size`. Field reasons (the entry stays without that field or id):
  * the others.
  */
 export const VIEW_CONTEXT_DROP_REASONS = [
@@ -69,6 +69,7 @@ export const VIEW_CONTEXT_DROP_REASONS = [
   'not-a-list',
   'invalid-entry',
   'invalid-entity',
+  'no-entity-or-selection',
   'undeclared-type',
   'type-not-allowed',
   'duplicate',
@@ -81,6 +82,7 @@ export const VIEW_CONTEXT_DROP_REASONS = [
   'invalid-selection',
   'selection-id-invalid',
   'selection-id-over-limit',
+  'selection-id-over-size',
   'facts-disabled',
   'facts-no-schema',
   'facts-invalid',
@@ -91,7 +93,7 @@ export const VIEW_CONTEXT_DROP_REASONS = [
 export type ViewContextDropReason = (typeof VIEW_CONTEXT_DROP_REASONS)[number];
 
 const ENTRY_REASONS: ReadonlySet<ViewContextDropReason> = new Set([
-  'disabled', 'not-a-list', 'invalid-entry', 'invalid-entity', 'undeclared-type', 'type-not-allowed',
+  'disabled', 'not-a-list', 'invalid-entry', 'invalid-entity', 'no-entity-or-selection', 'undeclared-type', 'type-not-allowed',
   'duplicate', 'over-limit', 'over-size',
 ]);
 
@@ -133,22 +135,27 @@ export type ViewContextFactValue =
 /** Facts the app states about the view (`{ status: 'open', tab: 'lines' }`), accepted only against a known schema. */
 export type ViewContextFacts = { readonly [key: string]: ViewContextFactValue };
 
-/**
- * One thing the user looks at. Every field but `entity` is optional and is
- * dropped alone when invalid.
- */
-export interface ViewContextEntry {
-  readonly entity: ViewContextEntity;
-  /** A short name for the record, cleaned: at most 60 code points, one line, no control, format or bidi characters, no comment or marker delimiters. */
+/** The fields every view context entry may carry. */
+interface ViewContextEntryFields {
+  /** A short name for the view, cleaned: at most 60 code points, one line, no control, format or bidi characters, no comment or marker delimiters. */
   readonly label?: string;
-  readonly selection?: ViewContextSelection;
-  /** At most 2 KB as JSON, and only what the schema of the entity type kept. */
+  /** At most 2 KB as JSON, and only what the schema of the entity type (of the selection type in a list view) kept. */
   readonly facts?: ViewContextFacts;
   /** The user has unsaved changes in this view. */
   readonly unsaved?: boolean;
   /** The path of the page (`/orders/42`): no query, no hash, no scheme or host, no dot segments. */
   readonly route?: string;
 }
+
+/**
+ * One thing the user looks at: a record (`entity`, optionally with a
+ * selection, say of its lines), or a list view with selected records and no
+ * single record (`selection` without `entity`). An entry with neither does
+ * not exist. Every other field is optional and is dropped alone when invalid.
+ */
+export type ViewContextEntry =
+  | (ViewContextEntryFields & { readonly entity: ViewContextEntity; readonly selection?: ViewContextSelection })
+  | (ViewContextEntryFields & { readonly entity?: undefined; readonly selection: ViewContextSelection });
 
 /**
  * A schema for the facts of one entity type: any object with `safeParse`,
@@ -327,13 +334,14 @@ function cleanFactText(text: string): string {
 type FactsCheck = { ok: true; value: ViewContextFacts } | { ok: false; reason: 'facts-invalid' | 'facts-too-large' };
 
 /**
- * A plain JSON copy of `value` (a plain object), with cleaned strings, or why
+ * A plain JSON copy of `value` (a plain object), with cleaned strings when
+ * `clean` is set, or why
  * not: `facts-invalid` for anything that is not plain JSON, a forbidden or
  * malformed key, or nesting deeper than the bound (a cycle included);
  * `facts-too-large` when the copy exceeds the size or value bound. Stops at
  * the first problem, so its cost is bounded by the limits, not by the input.
  */
-function plainFacts(value: unknown): FactsCheck {
+function plainFacts(value: unknown, clean: boolean): FactsCheck {
   if (!isPlainObject(value)) return { ok: false, reason: 'facts-invalid' };
   const { maxFactsBytes, maxFactsDepth, maxFactsNodes, maxFactKeyLength } = VIEW_CONTEXT_LIMITS;
   let nodes = 0;
@@ -354,7 +362,7 @@ function plainFacts(value: unknown): FactsCheck {
     if (typeof input === 'string') {
       if (input.length > maxFactsBytes) throw new Stop('facts-too-large');
       grow(input.length + 2);
-      return cleanFactText(input);
+      return clean ? cleanFactText(input) : input;
     }
     if (depth >= maxFactsDepth) throw new Stop('facts-invalid');
     if (Array.isArray(input)) {
@@ -456,9 +464,13 @@ const ENTRY_KEYS: ReadonlySet<string> = new Set(['entity', 'label', 'selection',
  * The valid part of a view context from an untrusted source (the browser):
  * at most `maxEntries` entries of declared (and allowed) types, each field
  * checked and bounded on its own; an invalid entry or field is dropped, never
- * an error. Facts are kept only when a schema for the entity type is known
- * (`policy.facts` first, then `factsSchemas`) and they pass it. Duplicate
- * entities keep the first. Deterministic; its cost is bounded by the limits,
+ * an error. An entry needs an entity or a selection (a list view). Facts are
+ * kept only when a schema for the entity type (the selection type in a list
+ * view) is known (`policy.facts` first, then `factsSchemas`) and the value
+ * as sent passes it; the schema output is then cleaned for the model.
+ * Duplicates keep the first: entities by type and id, list views by
+ * selection type. Over the overall size bound, a selection keeps the ids that
+ * fit (or goes, when the entry has an entity) before an entry is dropped. Deterministic; its cost is bounded by the limits,
  * not by the size of the input. `dropped` holds reason codes and counts only.
  */
 export function sanitizeViewContext(input: unknown, options: ViewContextSanitizeOptions): ViewContextSanitizeResult {
@@ -520,7 +532,10 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
     if (policy.facts === false) { drop('facts-disabled'); return undefined; }
     const schema = schemaFor(type);
     if (!schema) { drop('facts-no-schema'); return undefined; }
-    const before = plainFacts(value);
+    // The schema sees the app's real strings (an enum or pattern may hold a tab
+    // or a joiner); only its output, what reaches the model, is cleaned. Cleaning
+    // only removes or blanks characters, so it can never add a delimiter.
+    const before = plainFacts(value, false);
     if (!before.ok) { drop(before.reason); return undefined; }
     let parsed: ReturnType<ViewContextFactsSchema['safeParse']>;
     try {
@@ -530,29 +545,34 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
       return undefined;
     }
     if (!parsed.success) { drop('facts-invalid'); return undefined; }
-    const after = plainFacts(parsed.data);
+    const after = plainFacts(parsed.data, true);
     if (!after.ok) { drop(after.reason); return undefined; }
     return Object.keys(after.value).length > 0 ? after.value : undefined;
   };
 
   const readEntry = (value: unknown): ViewContextEntry | ViewContextDropReason => {
     if (!isPlainObject(value)) return 'invalid-entry';
-    const entity = value.entity;
-    if (!isPlainObject(entity)) return 'invalid-entity';
-    const issue = typeIssue(entity.type);
-    if (issue) return issue;
-    const type = entity.type as string;
-    const id = entityId(entity.id);
-    if (id === undefined) return 'invalid-entity';
-    for (const key of Object.keys(entity)) if (key !== 'type' && key !== 'id') drop('unknown-field');
+    let entity: ViewContextEntity | undefined;
+    if (value.entity !== undefined) {
+      const raw = value.entity;
+      if (!isPlainObject(raw)) return 'invalid-entity';
+      const issue = typeIssue(raw.type);
+      if (issue) return issue;
+      const id = entityId(raw.id);
+      if (id === undefined) return 'invalid-entity';
+      for (const key of Object.keys(raw)) if (key !== 'type' && key !== 'id') drop('unknown-field');
+      entity = { type: raw.type as string, id };
+    }
+    const selection = value.selection !== undefined ? readSelection(value.selection) : undefined;
+    if (!entity && !selection) return 'no-entity-or-selection';
     for (const key of Object.keys(value)) if (!ENTRY_KEYS.has(key)) drop('unknown-field');
+    const type = entity ? entity.type : selection!.type;
 
     let label: string | undefined;
     if (value.label !== undefined) {
       label = typeof value.label === 'string' ? canonicalViewContextLabel(value.label) : '';
       if (label === '') { label = undefined; drop('invalid-label'); }
     }
-    const selection = value.selection !== undefined ? readSelection(value.selection) : undefined;
     const facts = value.facts !== undefined ? readFacts(type, value.facts) : undefined;
     let unsaved: boolean | undefined;
     if (value.unsaved !== undefined) {
@@ -565,13 +585,40 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
       else drop('invalid-route');
     }
     return {
-      entity: { type, id },
+      ...(entity ? { entity } : {}),
       ...(label !== undefined ? { label } : {}),
       ...(selection !== undefined ? { selection } : {}),
       ...(facts !== undefined ? { facts } : {}),
       ...(unsaved !== undefined ? { unsaved } : {}),
       ...(route !== undefined ? { route } : {}),
-    };
+    } as ViewContextEntry;
+  };
+
+  /**
+   * `entry` within `budget` bytes as a list item: as it is, else with the
+   * first selection ids that fit (at least one), else without its selection
+   * when it has an entity; undefined when even that does not fit.
+   */
+  const fitted = (entry: ViewContextEntry, budget: number): ViewContextEntry | undefined => {
+    if (utf8Length(JSON.stringify(entry)) <= budget) return entry;
+    const selection = entry.selection;
+    if (!selection) return undefined;
+    let size = utf8Length(JSON.stringify({ ...entry, selection: { ...selection, ids: [] } }));
+    let count = 0;
+    for (const id of selection.ids) {
+      size += utf8Length(JSON.stringify(id)) + (count > 0 ? 1 : 0);
+      if (size > budget) break;
+      count += 1;
+    }
+    if (count > 0) {
+      drop('selection-id-over-size', selection.ids.length - count);
+      return { ...entry, selection: { ...selection, ids: selection.ids.slice(0, count) } };
+    }
+    if (!entry.entity) return undefined;
+    const { selection: _removed, ...rest } = entry;
+    if (utf8Length(JSON.stringify(rest)) > budget) return undefined;
+    drop('selection-id-over-size', selection.ids.length);
+    return rest as ViewContextEntry;
   };
 
   const entries: ViewContextEntry[] = [];
@@ -586,13 +633,17 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
       entry = 'invalid-entry';
     }
     if (typeof entry === 'string') { drop(entry); continue; }
-    const key = `${entry.entity.type}\u0000${idKey(entry.entity.id)}`;
+    // A list view is one per selection type; it never collides with an entity.
+    const key = entry.entity
+      ? `entity\u0000${entry.entity.type}\u0000${idKey(entry.entity.id)}`
+      : `list\u0000${entry.selection.type}`;
     if (seen.has(key)) { drop('duplicate'); continue; }
-    const size = utf8Length(JSON.stringify(entry)) + (entries.length > 0 ? 1 : 0);
-    if (total + size > VIEW_CONTEXT_LIMITS.maxTotalBytes) { drop('over-size'); continue; }
+    const comma = entries.length > 0 ? 1 : 0;
+    const kept = fitted(entry, VIEW_CONTEXT_LIMITS.maxTotalBytes - total - comma);
+    if (!kept) { drop('over-size'); continue; }
     seen.add(key);
-    total += size;
-    entries.push(entry);
+    total += utf8Length(JSON.stringify(kept)) + comma;
+    entries.push(kept);
   }
   drop('over-limit', input.length - index);
   return done(entries);
@@ -608,27 +659,33 @@ const idSchema = z.custom<ViewContextEntityId>((value) => {
   return id !== undefined && idKey(id) === idKey(value as ViewContextEntityId);
 }, { message: 'Expected an entity id' });
 
-/**
- * A sanitized entry (what {@link sanitizeViewContext} keeps), for stored view
- * contexts. Strict: it rejects a label that is not canonical, a route that is
- * not a plain path and facts that are not bounded plain JSON. It does not
- * know the declared types or facts schemas; run untrusted input through
- * `sanitizeViewContext` instead.
- */
-export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.object({
-  entity: z.object({ type: typeSchema, id: idSchema }).strict(),
+const entitySchema = z.object({ type: typeSchema, id: idSchema }).strict();
+const selectionSchema = z.object({
+  type: typeSchema,
+  ids: z.array(idSchema).min(1).max(VIEW_CONTEXT_LIMITS.maxSelectionIds),
+}).strict();
+const entryFields = {
   label: z.string().min(1).refine((label) => canonicalViewContextLabel(label) === label, 'Expected a canonical label').optional(),
-  selection: z.object({
-    type: typeSchema,
-    ids: z.array(idSchema).min(1).max(VIEW_CONTEXT_LIMITS.maxSelectionIds),
-  }).strict().optional(),
   facts: z.custom<ViewContextFacts>((value) => {
-    const check = plainFacts(value);
+    const check = plainFacts(value, true);
     return check.ok && JSON.stringify(check.value) === JSON.stringify(value);
   }, { message: 'Expected bounded plain JSON facts' }).optional(),
   unsaved: z.boolean().optional(),
   route: z.custom<string>(isViewContextRoute, { message: 'Expected a route path' }).optional(),
-}).strict();
+};
+
+/**
+ * A sanitized entry (what {@link sanitizeViewContext} keeps), for stored view
+ * contexts: an entity (with an optional selection) or a selection alone.
+ * Strict: it rejects an entry with neither, a label that is not canonical, a
+ * route that is not a plain path and facts that are not bounded, cleaned plain
+ * JSON. It does not know the declared types or facts schemas; run untrusted
+ * input through `sanitizeViewContext` instead.
+ */
+export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
+  z.object({ entity: entitySchema, selection: selectionSchema.optional(), ...entryFields }).strict(),
+  z.object({ selection: selectionSchema, ...entryFields }).strict(),
+]);
 
 /** A sanitized view context: at most 8 entries. */
 export const ViewContextSchema = z.array(ViewContextEntrySchema).max(VIEW_CONTEXT_LIMITS.maxEntries);

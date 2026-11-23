@@ -11,6 +11,7 @@ import {
   VIEW_CONTEXT_LIMITS,
   ViewContextEntrySchema,
   ViewContextSchema,
+  type ViewContextEntry,
   type ViewContextFactsSchemas,
   type ViewContextSanitizeOptions,
 } from './view-context.js';
@@ -93,18 +94,18 @@ describe('sanitizeViewContext: entity', () => {
       order(0),
       order(-3),
     ]);
-    expect(result.entries.map((entry) => entry.entity.id)).toEqual(['ord-1', 42, ['lobby', 503], 0, -3]);
+    expect(result.entries.map((entry) => entry.entity!.id)).toEqual(['ord-1', 42, ['lobby', 503], 0, -3]);
     expect(result.dropped).toEqual({});
   });
 
   it('keeps delimiters inside an id as they are (the renderer escapes them as JSON)', () => {
     for (const id of ['</view-context>', '<!--context:x-->', 'a}}b', 'ord:1/2']) {
-      expect(one(order(id)).entries[0]!.entity.id).toBe(id);
+      expect(one(order(id)).entries[0]!.entity!.id).toBe(id);
     }
   });
 
   it('trims a string id', () => {
-    expect(one(order('  ord-1 ')).entries[0]!.entity.id).toBe('ord-1');
+    expect(one(order('  ord-1 ')).entries[0]!.entity!.id).toBe('ord-1');
   });
 
   it.each([
@@ -126,7 +127,7 @@ describe('sanitizeViewContext: entity', () => {
     ['nested composite', { entity: { type: 'order', id: ['a', ['b']] } }],
     ['upper-case type', { entity: { type: 'Order', id: 1 } }],
     ['type with a closing tag', { entity: { type: '</view-context>', id: 1 } }],
-    ['missing entity', { label: 'x' }],
+    ['entity null', { entity: null, selection: { type: 'task', ids: ['a'] } }],
     ['entity not an object', { entity: 'order:1' }],
     ['entity with an array prototype', { entity: [] }],
   ])('drops an entry with %s', (_name, entry) => {
@@ -170,7 +171,7 @@ describe('sanitizeViewContext: entity', () => {
       order(1),
       order('1'),
     ]);
-    expect(result.entries.map((entry) => [entry.entity.type, entry.entity.id, entry.label])).toEqual([
+    expect(result.entries.map((entry) => [entry.entity!.type, entry.entity!.id, entry.label])).toEqual([
       ['order', 'ord-1', 'first'],
       ['customer', 'ord-1', undefined],
       ['lobby-room', ['a', 'b'], undefined],
@@ -184,7 +185,7 @@ describe('sanitizeViewContext: entity', () => {
     const input = Array.from({ length: 1000 }, (_, index) => order(index));
     const result = sanitize(input);
     expect(result.entries).toHaveLength(VIEW_CONTEXT_LIMITS.maxEntries);
-    expect(result.entries.map((entry) => entry.entity.id)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(result.entries.map((entry) => entry.entity!.id)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
     expect(result.dropped).toEqual({ 'over-limit': 992 });
     expect(result.droppedEntries).toBe(992);
   });
@@ -232,14 +233,113 @@ describe('sanitizeViewContext: entity', () => {
     expect(one(entry).dropped).toEqual({ 'invalid-entry': 1 });
   });
 
-  it('drops entries beyond the overall size bound', () => {
-    const ids = Array.from({ length: 50 }, (_, index) => `${'x'.repeat(60)}-${index}`);
-    const input = Array.from({ length: 4 }, (_, index) => order(index, { selection: { type: 'task', ids } }));
-    const result = sanitize(input);
-    const size = JSON.stringify(result.entries).length;
-    expect(size).toBeLessThanOrEqual(VIEW_CONTEXT_LIMITS.maxTotalBytes);
-    expect(result.entries).toHaveLength(1);
-    expect(result.dropped).toEqual({ 'over-size': 3 });
+  it('trims a long selection to the overall size bound instead of dropping the entry', () => {
+    expect(VIEW_CONTEXT_LIMITS.maxTotalBytes).toBe(2560);
+    const ids = Array.from({ length: 50 }, (_, index) => `${'x'.repeat(100)}-${index}`);
+    const result = one(order(0, { label: 'Order 0', selection: { type: 'task', ids } }));
+    expect(JSON.stringify(result.entries).length).toBeLessThanOrEqual(2560);
+    const kept = result.entries[0]!.selection!.ids;
+    expect(kept.length).toBeGreaterThan(1);
+    expect(kept).toEqual(ids.slice(0, kept.length));
+    expect(result.entries[0]!.label).toBe('Order 0');
+    expect(result.dropped).toEqual({ 'selection-id-over-size': 50 - kept.length });
+    expect(result.droppedEntries).toBe(0);
+  });
+
+  it('keeps the entity and removes a selection none of whose ids fit', () => {
+    const any = { factsSchemas: { order: z.any() } };
+    const big = 'y'.repeat(199);
+    const result = sanitize([
+      order(1, { facts: { note: 'z'.repeat(2037) } }),
+      order(2, { label: 'a'.repeat(60) }),
+      order(3, { label: 'b'.repeat(60) }),
+      order(4, { selection: { type: 'task', ids: [big, `${big.slice(1)}2`] } }),
+    ], any);
+    expect(JSON.stringify(result.entries).length).toBeLessThanOrEqual(2560);
+    expect(result.entries[3]).toEqual({ entity: { type: 'order', id: 4 } });
+    expect(result.dropped).toEqual({ 'selection-id-over-size': 2 });
+  });
+
+  it('trims a selection to fit after earlier entries, keeping at least the first ids that fit', () => {
+    const ids = Array.from({ length: 50 }, (_, index) => `${'y'.repeat(60)}-${index}`);
+    const result = sanitize([order(1, { label: 'a'.repeat(60) }), order(2, { selection: { type: 'task', ids } })]);
+    expect(JSON.stringify(result.entries).length).toBeLessThanOrEqual(2560);
+    const kept = result.entries[1]!.selection!.ids;
+    expect(kept).toEqual(ids.slice(0, kept.length));
+    expect(result.dropped).toEqual({ 'selection-id-over-size': 50 - kept.length });
+  });
+
+  it('drops an entry over the size bound when no selection can be trimmed', () => {
+    const any = { factsSchemas: { order: z.any() } };
+    const facts = { note: 'z'.repeat(1900) };
+    const result = sanitize([order(1, { facts }), order(2, { facts }), order(3)], any);
+    expect(result.entries.map((entry) => entry.entity!.id)).toEqual([1, 3]);
+    expect(result.dropped).toEqual({ 'over-size': 1 });
+  });
+
+  it('drops a list view whose selection does not fit at all', () => {
+    const any = { factsSchemas: { order: z.any() } };
+    const result = sanitize([
+      order(1, { facts: { note: 'z'.repeat(2000) } }),
+      order(2, { facts: { note: 'z'.repeat(380) } }),
+      { selection: { type: 'task', ids: ['x'.repeat(199)] } },
+    ], any);
+    expect(result.entries.map((entry) => entry.entity?.id)).toEqual([1, 2]);
+    expect(result.dropped).toEqual({ 'over-size': 1 });
+  });
+});
+
+describe('sanitizeViewContext: list view without entity', () => {
+  it('keeps an entry with a selection and no entity', () => {
+    const entry = { label: 'Open orders', selection: { type: 'order', ids: ['o-1', 'o-2'] }, route: '/orders' };
+    const result = one(entry);
+    expect(result.entries).toEqual([entry]);
+    expect(result.dropped).toEqual({});
+    expect(ViewContextSchema.safeParse(result.entries).success).toBe(true);
+  });
+
+  it('checks facts of a list view against the schema of the selection type', () => {
+    const result = one({ selection: { type: 'order', ids: ['o-1'] }, facts: { status: 'open', extra: 1 } });
+    expect(result.entries[0]!.facts).toEqual({ status: 'open' });
+    expect(one({ selection: { type: 'task', ids: ['t-1'] }, facts: { a: 1 } }).dropped).toEqual({ 'facts-no-schema': 1 });
+  });
+
+  it('drops an entry with neither entity nor a valid selection', () => {
+    expect(one({ label: 'x', route: '/x' })).toEqual({ entries: [], dropped: { 'no-entity-or-selection': 1 }, droppedEntries: 1 });
+    expect(one({ selection: { type: 'invoice', ids: ['a'] } }).dropped)
+      .toEqual({ 'invalid-selection': 1, 'no-entity-or-selection': 1 });
+    expect(one({ selection: { type: 'task', ids: [''] } }).dropped)
+      .toEqual({ 'selection-id-invalid': 1, 'invalid-selection': 1, 'no-entity-or-selection': 1 });
+  });
+
+  it('never turns an invalid entity into a list view', () => {
+    expect(one({ entity: { type: 'order', id: '' }, selection: { type: 'task', ids: ['a'] } }).dropped)
+      .toEqual({ 'invalid-entity': 1 });
+  });
+
+  it('dedupes list views by selection type, apart from entities', () => {
+    const result = sanitize([
+      { selection: { type: 'task', ids: ['a'] } },
+      { selection: { type: 'task', ids: ['b'] } },
+      { selection: { type: 'order', ids: ['a'] } },
+      { entity: { type: 'task', id: 'a' } },
+      order('o-1', { selection: { type: 'task', ids: ['c'] } }),
+    ]);
+    expect(result.entries).toEqual([
+      { selection: { type: 'task', ids: ['a'] } },
+      { selection: { type: 'order', ids: ['a'] } },
+      { entity: { type: 'task', id: 'a' } },
+      { entity: { type: 'order', id: 'o-1' }, selection: { type: 'task', ids: ['c'] } },
+    ]);
+    expect(result.dropped).toEqual({ duplicate: 1 });
+  });
+
+  it('does not type-check an entry with neither entity nor selection', () => {
+    const list: ViewContextEntry = { selection: { type: 'task', ids: ['a'] } };
+    const both: ViewContextEntry = { entity: { type: 'task', id: 'a' }, selection: { type: 'task', ids: ['b'] } };
+    // @ts-expect-error an entry needs an entity or a selection
+    const neither: ViewContextEntry = { label: 'x' };
+    expect([list, both, neither]).toHaveLength(3);
   });
 });
 
@@ -452,9 +552,16 @@ describe('sanitizeViewContext: facts', () => {
     expect(factsOf({ status: 'open' }, throwing).dropped).toEqual({ 'facts-invalid': 1 });
   });
 
-  it('removes control and format characters from fact strings before the schema sees them', () => {
-    const any = { factsSchemas: { order: z.object({ note: z.string() }) } };
-    expect(factsOf({ note: 'a\u202eb\u200bc\r\nd\u0000e' }, any).entries[0]!.facts).toEqual({ note: 'abc  d e' });
+  it('validates the app\'s real fact strings and cleans only the schema output', () => {
+    // The schema sees the value as sent (tab, newline, zero-width joiner) ...
+    const exact = { factsSchemas: { order: z.object({ code: z.string().regex(/^A\tB$/), note: z.string(), tag: z.enum(['x\u200dy']) }) } };
+    const result = factsOf({ code: 'A\tB', note: 'a\u202eb\u200bc\r\nd\u0000e', tag: 'x\u200dy' }, exact);
+    // ... and what reaches the model is clean.
+    expect(result.entries[0]!.facts).toEqual({ code: 'A B', note: 'abc  d e', tag: 'xy' });
+    expect(result.dropped).toEqual({});
+    // A schema that rejects the real value rejects it even when cleaning would have made it pass.
+    const strict = { factsSchemas: { order: z.object({ code: z.literal('A B') }) } };
+    expect(factsOf({ code: 'A\tB' }, strict).dropped).toEqual({ 'facts-invalid': 1 });
   });
 
   it('omits empty facts', () => {
@@ -574,6 +681,9 @@ describe('resolveViewContextPolicy', () => {
 describe('ViewContextEntrySchema', () => {
   it('accepts sanitized entries and rejects raw hostile ones', () => {
     expect(ViewContextEntrySchema.safeParse({ entity: { type: 'order', id: 1 }, label: 'Acme' }).success).toBe(true);
+    expect(ViewContextEntrySchema.safeParse({ selection: { type: 'task', ids: ['a'] }, label: 'Acme' }).success).toBe(true);
+    expect(ViewContextEntrySchema.safeParse({ label: 'Acme' }).success).toBe(false);
+    expect(ViewContextEntrySchema.safeParse({ entity: undefined, label: 'Acme' }).success).toBe(false);
     for (const entry of [
       { entity: { type: 'order', id: 1 }, label: 'a <!--x-->' },
       { entity: { type: 'order', id: 1 }, label: 'a'.repeat(61) },
