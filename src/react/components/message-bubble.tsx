@@ -1,8 +1,8 @@
-import { Fragment, Suspense, lazy, useContext, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useContext, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
 import { ChatContext, useChatContext } from '../provider/chat-context.js';
-import { markdownModuleForLazy } from '../markdown-module.js';
+import { markdownLoadingLimit, markdownModuleForLazy, markdownOverdue, markdownTimedOut, subscribeMarkdownTimeout } from '../markdown-module.js';
 import { loadingMarkdownSources } from '../utils/copy-message.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { useComposerContext } from '../provider/composer-context.js';
@@ -810,7 +810,8 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
 
 function DefaultMarkdown({ content, className }: { content: string; className?: string }) {
   const links = useChatEntityLinks();
-  const { remarkPlugins } = useChatMarkdownOptions();
+  const { remarkPlugins, loadingTimeoutMs } = useChatMarkdownOptions();
+  const limit = markdownLoadingLimit(loadingTimeoutMs);
   // Optional: rendered outside the provider (print, renderToStaticMarkup) it behaves as before.
   const chat = useContext(ChatContext);
   // Outside a provider both snapshots are `false`: no re-render after hydration, as before.
@@ -821,7 +822,8 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
   // The server and the hydration render decide raw, as before.
   const decide = (): FallbackChoice => ({
     content,
-    skeleton: client && chat !== null && !chat.isLoading && needsMarkdown(content, links.enabled),
+    skeleton: client && chat !== null && !chat.isLoading && limit !== 0
+      && !(limit !== false && markdownOverdue(limit)) && needsMarkdown(content, links.enabled),
   });
   const [choice, setChoice] = useState(decide);
   let skeleton = choice.skeleton;
@@ -830,6 +832,15 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
     skeleton = next.skeleton;
     setChoice(next);
   }
+  // The one exception to "decided once": a skeleton turns into the raw text when
+  // react-markdown has not arrived within the limit (it still turns into Markdown).
+  const waitFor = skeleton && limit !== false ? limit : null;
+  const subscribe = useCallback(
+    (listener: () => void) => (waitFor === null ? () => {} : subscribeMarkdownTimeout(waitFor, listener)),
+    [waitFor],
+  );
+  const timedOut = useSyncExternalStore(subscribe, () => waitFor !== null && markdownTimedOut(waitFor), onServer);
+  if (timedOut) skeleton = false;
   return (
     <div className={className} data-component="markdown">
       <Suspense fallback={skeleton ? <MarkdownLoading content={content} label={chat?.locale.markdownLoadingLabel} /> : <>{content}</>}>
