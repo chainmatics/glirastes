@@ -256,12 +256,15 @@ describe('createGlirastes in standalone', () => {
       const paired=Object.fromEntries(text.split('\n').filter(line=>line.includes('=')).map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));
       const captures:unknown[]=[];
       for(const config of [{},paired]) {
-        const runtime=track(createGlirastes({generated:generated(),env:config,fetchImpl:(async()=>{throw new Error('offline')}) as typeof fetch,push:false,firstSyncTimeoutMs:5,pollIntervalMs:60000,onError:()=>{}}));
+        const lookup = vi.fn(async () => {throw new Error('offline');});
+        const runtime=track(createGlirastes({generated:generated(),env:config,fetchImpl:lookup as typeof fetch,push:false,firstSyncTimeoutMs:5,pollIntervalMs:60000,onError:()=>{}}));
         await runtime.ready();expect(runtime.privacyPolicy()).toBeNull();
         const turn=await runtime.chatTurn(principal);const adapter=providerAdapters().openrouter;
         const handler=createAiChatHandler({model:adapter.model,tools:{},systemPrompt:'Assistant',managedRuntime:turn.managedRuntime,onError:()=>{}});
         const response=await handler(new Request('https://app.example/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:[{id:'u1',role:'user',parts:[{type:'text',text:'ordinary.canary@example.invalid'}]}]})}));
         expect(response.status).toBe(200);await response.text();expect(adapter.requests).toHaveLength(1);captures.push(adapter.requests);
+        expect(lookup).toHaveBeenCalledTimes(config === paired ? 1 : 0);
+        await runtime.stop();
       }
       expect(captures[1]).toEqual(captures[0]);expect(JSON.stringify(captures)).toContain('ordinary.canary@example.invalid');
     }finally{await rm(root,{recursive:true,force:true});}
@@ -1023,6 +1026,31 @@ describe('createGlirastes with a privacy policy', () => {
       expect(response.status).toBe(503);
       expect(codeOf(() => runtime.privacyPolicy())).toBe('privacy_policy_revoked');
     } finally { release(); await runtime.stop(); }
+  });
+
+  it('drains durable writes before allowing stop/recreate on the same app', async () => {
+    const {privateKey, publicKey} = generateKeyPairSync('ed25519');
+    const deployment = activeDeployment(privateKey, [], {schemaVersion: 1, profile: 'off'});
+    const durable = new SharedDurableTestStore();
+    const save = durable.saveAtomic.bind(durable);
+    let held = false, waiting = false, stopped = false;
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => {release = resolve;});
+    durable.saveAtomic = async state => {if (held) {waiting = true; await barrier;} await save(state);};
+    const options = {generated: generated(), env, stateStore: () => durable, fetchImpl: platform({deployments: [deployment], publicKey}).fetchImpl, push: false as const, pollIntervalMs: 10, onError: vi.fn()};
+    const first = track(createGlirastes(options));
+    await first.ready(); held = true;
+    await vi.waitFor(() => expect(waiting).toBe(true));
+    const stopping = first.stop().then(() => {stopped = true;});
+    try {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(stopped).toBe(false);
+      expect(() => createGlirastes(options)).toThrow('runtime_stopping');
+    } finally {release(); await stopping;}
+    const next = {...deployment, deploymentId: id('3988')};
+    const second = track(createGlirastes({...options, fetchImpl: platform({deployments: [next], publicKey}).fetchImpl, pollIntervalMs: 60000}));
+    await second.ready(); await second.stop();
+    expect((await durable.load())?.stable?.deploymentId).toBe(next.deploymentId);
   });
 
   it('temporal review: bound-only off cannot report applied from volatile state',async()=>{

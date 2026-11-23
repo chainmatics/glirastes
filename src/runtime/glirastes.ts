@@ -227,7 +227,7 @@ export interface Glirastes {
   speechPolicy(): EffectivePrivacyPolicy['speech'] | 'off';
   /** Waits for `ready()`, then returns what `createAiChatHandler` needs for one turn. */
   chatTurn(principal: GlirastesPrincipalFactory): Promise<GlirastesChatTurn>;
-  /** Stops the sync, flushes the metrics and forgets this instance. */
+  /** Stops sync, drains durable writes, flushes metrics, then releases this instance. */
   stop(): Promise<void>;
 }
 
@@ -372,6 +372,7 @@ class AcceptedStateStore implements RuntimeStateStore {
   }
 
   invalidateReconciliation(): void { this.storageEpoch += 1; this.reconciled = false; }
+  drain(): Promise<void> { return this.writes; }
 
   markReconciled(): void { this.reconciled = true; }
 
@@ -518,6 +519,7 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 // Next.js bundles instrumentation and each route separately, so the one
 // instance per app and process lives on globalThis, keyed by the app id.
 const INSTANCES = Symbol.for('glirastes.runtime.instances');
+const STOPPING_INSTANCE = Symbol.for('glirastes.runtime.stopping');
 type InstanceHolder = { [INSTANCES]?: Map<string, Glirastes> };
 
 function instances(): Map<string, Glirastes> {
@@ -543,7 +545,10 @@ export function createGlirastes(options: CreateGlirastesOptions): Glirastes {
   assertMaxResultChars(options.maxResultChars, 'createGlirastes');
   const appId = AppSetupArtifactSchema.parse(options.generated.setupArtifact).appId;
   const existing = instances().get(appId);
-  if (existing) return existing;
+  if (existing) {
+    if ((existing as Glirastes & {[STOPPING_INSTANCE]?: boolean})[STOPPING_INSTANCE]) throw new Error('runtime_stopping');
+    return existing;
+  }
   const instance = createInstance(options, appId);
   instances().set(appId, instance);
   return instance;
@@ -607,6 +612,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   let connectedBase: LocalRuntimeSource | undefined;
   let managed: { tenantId: string; source: LocalRuntimeSource } | undefined;
   let metrics: RuntimeMetricsSink | undefined;
+  let stopping: Promise<void> | undefined;
   let stopSync: (() => void) | undefined;
   let connectionGeneration = 0;
   let started = false;
@@ -986,10 +992,18 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       };
     },
     async stop() {
+      if (stopping) return stopping;
+      Object.defineProperty(instance, STOPPING_INSTANCE, {value: true});
+      // Keep ownership while writes drain. A replacement cannot attach to the
+      // same backend until the old writer has finished, even during stop().
+      stopping = Promise.resolve().then(async () => {
+        await store.drain();
+        try { await metrics?.close(); }
+        finally { if (instances().get(appId) === instance) instances().delete(appId); }
+      });
       abort.abort();
       stopSync?.();
-      if (instances().get(appId) === instance) instances().delete(appId);
-      await metrics?.close();
+      return stopping;
     },
   };
   return instance;

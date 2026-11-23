@@ -67,3 +67,7 @@ Exact-source full required isolated-PostgreSQL gate: **5,198 passed / 11 existin
 Fixed0.17 local archive: **1,734 files**, SHA1 `b270714777f69fa4624607d17d6daf0b6d910e9d`, integrity `sha512-zIcCgrFtLUDesRUwdQwqkGkkV8jVi0MrqKR8bootGsU60Wh0o3NkKbMPrRorSM3HXgDvf36ZB9TAcaMnBVpHAQ==`. All installed GID files were byte-compared with zero differences. The new consumer full/build/common acceptance remains separately recorded in GID; previous1,699/1,729-file archive evidence is historical. This archive is not public npm. Release authorization, actual registry-integrity reconciliation and clean public installation remain explicit gates.
 
 Protected turns reject the legacy `intentRouter` and opaque `guardrails` callbacks with `503 privacy_unsupported_content` before passing content to them. Use the supported local `pipeline` classifier and its approved provider instead. Ordinary off callbacks remain available; managed model and classifier transports check the current policy on every attempt, including retries.
+
+Runtime replacement must await `stop()`: it drains accepted-state writes before
+releasing the per-app instance. Recreating the same app while that drain is still
+pending fails with `runtime_stopping`; retry only after the stop promise settles.

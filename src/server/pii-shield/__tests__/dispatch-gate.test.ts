@@ -23,3 +23,23 @@ it('resolves a model string through the same consumer global provider and guards
  await expect(wrapped.doGenerate()).rejects.toMatchObject({code:'privacy_policy_revoked'});expect(generate).not.toHaveBeenCalled();
  }finally{globalThis.AI_SDK_DEFAULT_PROVIDER=previous;}
 });
+
+it.each(['plain', 'frozen', 'callable'] as const)('guards allowed and refused %s model descriptors with their original receiver', async kind => {
+  const requests: unknown[] = [];
+  const provider = createOpenAI({apiKey: 'synthetic', baseURL: 'https://shape.fixture.invalid/v1', fetch: async (_url, init) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({id: 'fixture', object: 'chat.completion', created: 1, model: 'fixture', choices: [{index: 0, message: {role: 'assistant', content: 'OK'}, finish_reason: 'stop'}]});
+  }});
+  const delegate = provider.chat('fixture');
+  const fields = {specificationVersion: 'v3' as const, provider: delegate.provider, modelId: delegate.modelId, supportedUrls: {},
+    doGenerate: delegate.doGenerate.bind(delegate), doStream: delegate.doStream.bind(delegate)};
+  const model = kind === 'frozen' ? Object.freeze(fields) : kind === 'callable' ? Object.assign(() => {}, fields) : fields;
+  const gate = vi.fn();
+  expect((await generateText({model: guardModelDispatch(model, gate), prompt: 'shape.canary@example.invalid', maxRetries: 0})).text).toBe('OK');
+  expect(gate).toHaveBeenCalledTimes(1); expect(requests).toHaveLength(1);
+  const refused = guardModelDispatch(model, () => { throw new PrivacyError('privacy_policy_revoked'); });
+  await expect(generateText({model: refused, prompt: 'blocked.canary@example.invalid', maxRetries: 0})).rejects.toMatchObject({code: 'privacy_policy_revoked'});
+  const stream = streamText({model: refused, prompt: 'blocked.canary@example.invalid', maxRetries: 0, onError: () => {}});
+  for await (const _ of stream.fullStream) { /* consume refusal */ }
+  expect(requests).toHaveLength(1);
+});

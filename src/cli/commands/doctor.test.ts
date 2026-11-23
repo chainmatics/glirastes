@@ -531,6 +531,18 @@ describe('createDoctorReport', () => {
       expect((await voiceCheck(rootDir))?.status).toBe('pass');
     });
 
+    it('omits worklet query and fragment values from JSON and human diagnostics', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir, "{ workletUrl: '/custom/worklet.js?key=synthetic-query-canary#synthetic-fragment-canary' }");
+      await scripts(rootDir, { predev: 'glirastes stt worklet' });
+      const report = await createDoctorReport({rootDir});
+      for (const output of [JSON.stringify(report), formatDoctorReport(report)]) {
+        expect(output).toContain('/custom/worklet.js');
+        expect(output).not.toContain('synthetic-query-canary');
+        expect(output).not.toContain('synthetic-fragment-canary');
+      }
+    });
+
     it('only warns when the configured path is the one a copy step with --out under public/ creates', async () => {
       const rootDir = await fixture();
       await useVoice(rootDir, "{ workletUrl: '/custom/audio-worklet-processor.js' }");
