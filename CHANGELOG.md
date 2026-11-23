@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A message showing the loading skeleton stayed unreadable while the import of react-markdown never settled (a stalled chunk request, offline, a service worker). After a time limit it now shows its raw text, exactly as before 0.24.0 (`[data-component="markdown"]` with the source as text, the copy button unchanged; nothing is announced), and switches to Markdown if the import still arrives. The limit is `markdown.loadingTimeoutMs` (new, default `4000`), counted from the start of the import (the provider's preload at mount, or the first message), with one shared timer per limit that runs only while a bubble shows the skeleton, is cleared when react-markdown arrives and never runs on the server or keeps a Node process alive. A bubble that first renders after the limit has passed shows the raw text directly. `false`: no limit (the skeleton stays until react-markdown loads or fails, as in 0.24); `0`: no skeleton at all (the raw text while loading, as before 0.24.0). Each provider's bubbles use its own value. This is the one exception to "a bubble keeps what it showed first until Markdown renders": skeleton → raw text on timeout. A failed import shows the plain text right away, as before. For apps that set nothing: after 4 seconds without react-markdown the raw text instead of an endless skeleton.
+
 ## [0.24.1] - 2026-11-23
 
 0.24.0 was tagged but never published (its release preflight found an unreleased note); 0.24.1 is the first published 0.24 and contains everything listed under 0.24.0.

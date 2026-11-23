@@ -2747,4 +2747,13 @@ export interface ChatMarkdownOptions {
    * first renders: call `preloadMarkdown()` yourself to avoid the wait.
    */
   preload?: boolean;
+  /**
+   * How long a message shows the loading skeleton while react-markdown has
+   * not arrived, counted from the start of the import (default `4000`): then
+   * it shows its raw text, and Markdown once the import still arrives.
+   * `false`: no limit (the skeleton stays until react-markdown loads or
+   * fails). `0`: no skeleton at all (the raw text while loading, as before
+   * 0.24.0). Each provider's bubbles use its own value.
+   */
+  loadingTimeoutMs?: number | false;
 }
