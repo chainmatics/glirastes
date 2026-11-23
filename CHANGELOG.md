@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-23
+
 ### Added
 
 - `AssistantShell` / `AssistantWorkspace` slots, all opt-in (an app that sets none of them gets the same DOM, behaviour and styles): `showModeMenu={false}` drops the layout menu and its key handling while `'fullscreen'` stays a mode; `renderModeMenu({ modes, current, setMode, label, title, entries })` draws an own layout control in its place. `historyPane` also takes a function, rendered as a component of its own (hooks inside belong to it; pass a stable function and switch panes inside it, it is not remounted when its identity changes), that gets `{ open, drawer, close }` (`AssistantHistoryPaneProps`), so an own column can close the drawer below 900 px (`close()` moves focus to the first editor or `textarea` outside the column, else to an element marked `data-glirastes-composer` or a text input inside it, else to the chats toggle; `close('toggle')` to the chats toggle; a stale `close()` does nothing). `historyTitle` (node, function or `false`) replaces `[data-element="history-title"]`; `classNames.history` styles the column. `icons.newChat`, `icons.rename`, `icons.delete` reach the shell's own session switchers. New types `AssistantModeMenuRenderProps`, `AssistantModeMenuEntry`.
@@ -1221,3 +1223,4 @@ No code changes — patch-level docs release.
 [0.21.0]: https://github.com/chainmatics/glirastes/compare/v0.20.0...v0.21.0
 [0.22.0]: https://github.com/chainmatics/glirastes/compare/v0.21.0...v0.22.0
 [0.23.0]: https://github.com/chainmatics/glirastes/compare/v0.22.0...v0.23.0
+[0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
