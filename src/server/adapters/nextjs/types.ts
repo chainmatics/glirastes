@@ -30,6 +30,7 @@ import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHand
 import type {
   Principal,
   SecurityRevocation,
+  ViewContextOption,
 } from '../../../contracts/index.js';
 import type {
   ManagedTurnBudgetSignal,
@@ -500,6 +501,29 @@ export interface AiChatHandlerConfig {
    * `history.maxTurns` no longer drop earlier turns.
    */
   memory?: ChatMemoryConfig;
+
+  /**
+   * View context: what the user had open in the app when sending a message
+   * (a record, a selection, a label, facts, the route), reported by the
+   * browser in the request body (`glirastesViewContext`) and given to the
+   * model as data, never as an instruction, in its own user message right
+   * after the newest user message (never in the system prompt). On by
+   * default; `false` turns it off. Without the field, the model input is
+   * exactly as without this option. The browser side (a registry and a
+   * hook) follows in a later release; until then nothing sends the field.
+   *
+   * The server keeps only entries of entity types the request's tools
+   * declare (`outputEntities` / `inputEntities`; `types` narrows them), at
+   * most `maxEntries`, and facts only for a type with a schema in `facts`
+   * (Zod or any `safeParse`). Invalid input is dropped, never answered with
+   * 400. It grants no permission: every tool call is authorized as before.
+   * Only the built-in stream handler adds the block; a continuation (an
+   * approval, a UI outcome, a budget stop) and the answer to a
+   * clarification get none. `history` must be `'none'` for now (the newest
+   * message only). An invalid option throws here. See `ViewContextPolicy`
+   * (`glirastes/contracts`).
+   */
+  viewContext?: ViewContextOption;
 
   /**
    * The app's own input check. Runs before the pipeline or the intent router,
