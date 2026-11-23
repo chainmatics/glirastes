@@ -428,6 +428,14 @@ bridge of an app without client-side routing.
 `SessionSwitcher`; `mapSession` / `mapMessage` adapt field names, `request`
 takes over the transport.
 
+An own session list or switcher disables its controls while
+`useSessionLock().locked` is true (a reply streams, an outcome is awaited, a
+session operation runs, or a surrounding `ChatWindow` is hidden; inside
+`AssistantShell` `visible` is always true, use `useAssistantLayout().open`
+there); `SessionSwitcher`
+takes `icons` (`newChat`, `rename`, `delete`). See
+[placing-the-assistant.md](placing-the-assistant.md), Replacing shell parts.
+
 ## Theme and keyboard
 
 `defaultTheme` holds the default tokens; spread `tailwindThemeExtension` into

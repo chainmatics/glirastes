@@ -860,7 +860,7 @@ async function generate(
         method: execution.method,
         path: execution.path,
         requiresApproval: viewByKey.get(execution.stableKey)?.requiresApproval ?? true,
-        ...(tool.contract ? { params: tool.contract.params } : {}),
+        ...(tool.contract ? { params: tool.contract.params, input: tool.contract.input } : {}),
         ...(tool.approvalDeclarations ? { declarations: tool.approvalDeclarations } : {}),
         ...(entities?.outputEntities ? { outputEntities: entities.outputEntities } : {}),
         ...(entities?.inputEntities ? { inputEntities: entities.inputEntities } : {}),

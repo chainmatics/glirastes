@@ -273,6 +273,9 @@ export {
   DEFAULT_ASSISTANT_SHELL_LABELS,
   DE_ASSISTANT_SHELL_LABELS,
   type AssistantShellAction,
+  type AssistantHistoryPaneProps,
+  type AssistantModeMenuEntry,
+  type AssistantModeMenuRenderProps,
   type AssistantShellButtonProps,
   type AssistantShellClassNames,
   type AssistantShellIcons,
@@ -293,6 +296,7 @@ export { AiChatPanel } from './components/ai-chat-panel.js';
 export { FloatingChatUI, type FloatingChatUIProps } from './components/floating-chat-ui.js';
 export { MessageList } from './components/message-list.js';
 export { MessageBubble, useMessageParts } from './components/message-bubble.js';
+export { preloadMarkdown } from './markdown-module.js';
 export { useTurnOutcome, useTurnOutcomes } from './hooks/use-turn-outcome.js';
 export { ChatInput } from './components/chat-input.js';
 export { ChatQueue, useChatQueue } from './components/chat-queue.js';
@@ -314,7 +318,14 @@ export { MentionChip, MentionChipList } from './components/mention-chip.js';
 export { VoiceInputButton } from './components/voice-input-button.js';
 export { RecordingBar } from './components/recording-bar.js';
 export { AiTriggerButton } from './components/ai-trigger-button.js';
-export { SessionSwitcher, type SessionSwitcherProps } from './components/session-switcher.js';
+export {
+  SessionSwitcher,
+  DEFAULT_SESSION_SWITCHER_ICONS,
+  useSessionLock,
+  type SessionLockState,
+  type SessionSwitcherIcons,
+  type SessionSwitcherProps,
+} from './components/session-switcher.js';
 export { ClarificationCard } from './components/clarification-card.js';
 export { AttachmentTray, AttachmentButton } from './components/attachments.js';
 

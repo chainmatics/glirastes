@@ -172,6 +172,16 @@
   border: 1px solid var(--cm-border);
   text-align: left;
 }
+/* While react-markdown loads: skeleton lines. Their size is inline, so they take
+   space without this stylesheet too; adjust with --cm-markdown-skeleton-color,
+   -line-height, -gap, -radius, -padding and -max-width. This only adds the pulse. */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] [data-element="markdown-skeleton-line"] {
+  animation: cm-markdown-skeleton 1.6s ease-in-out infinite;
+}
+@keyframes cm-markdown-skeleton {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
 
 /* ---------- Chat input / mention input ---------- */
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-input"],
@@ -1854,7 +1864,8 @@
 /* ---------- Reduced motion ----------
  * Only when the user's system asks for it. The typing dots stand still,
  * stepped in strength so they still read as "the assistant is writing";
- * dialogs appear without fading or popping. The status spinner (SMIL)
+ * dialogs appear without fading or popping; the Markdown loading skeleton
+ * does not pulse. The status spinner (SMIL)
  * stands still through StatusIcon itself, also without this stylesheet.
  */
 @media (prefers-reduced-motion: reduce) {
@@ -1875,6 +1886,9 @@
   }
   [data-component="session-switcher"][data-variant="list"]:where(:not([data-unstyled], [data-unstyled] *)) :is([data-element="session-row"], [data-element="row-edit"], [data-element="row-delete"]) {
     transition: none;
+  }
+  [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="markdown"] [data-element="markdown-skeleton-line"] {
+    animation: none;
   }
 }
 

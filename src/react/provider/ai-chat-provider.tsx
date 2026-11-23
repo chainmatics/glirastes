@@ -81,6 +81,7 @@ import { resolveTextTable } from '../../contracts/localized-text.js';
 import { deChatLocale } from '../locale-de.js';
 import { STEP_FAILURE_TEXTS_EN } from '../utils/step-failure.js';
 import { VOICE_TEXTS_EN } from '../components/voice-ui.js';
+import { preloadMarkdown } from '../markdown-module.js';
 import { latestUserMessageId, readStoredTurnOutcomes, withStoredTurnOutcomes } from '../utils/turn-outcomes.js';
 import {
   CLARIFICATION_MAX_ANSWER_LENGTH,
@@ -183,6 +184,7 @@ export const DEFAULT_LOCALE: ChatLocale = {
   newChatLabel: 'New chat',
   noSessionsLabel: 'No conversations yet',
   sessionsLoadingLabel: 'Loading…',
+  markdownLoadingLabel: 'Loading message…',
   untitledSessionLabel: 'Untitled',
   deleteSessionAriaLabel: 'Delete conversation',
   confirmDeleteSessionPrompt: 'Delete this conversation?',
@@ -782,6 +784,11 @@ export function AiChatProvider({
   const themeEffect = useMemo(() => getThemeEffect(userTheme), [userTheme]);
   const classNames = useMemo(() => userClassNames ?? {}, [userClassNames]);
   const components = useMemo(() => userComponents ?? {}, [userComponents]);
+  // Load the default Markdown renderer now, not when the first message renders.
+  const usesDefaultMarkdown = !userComponents?.Markdown && !userComponents?.MessageBubble && markdown?.preload !== false;
+  useEffect(() => {
+    if (usesDefaultMarkdown) void preloadMarkdown();
+  }, [usesDefaultMarkdown]);
   const suggestionsConfig = useMemo(
     () => ({ enabled: true, count: 3, autoSuggest: true, ...userSuggestions }),
     [userSuggestions],
