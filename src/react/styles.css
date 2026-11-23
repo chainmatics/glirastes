@@ -2112,7 +2112,7 @@
   color: var(--cm-text);
 }
 [data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="history-backdrop"] {
-  background: rgba(17, 24, 39, 0.3);
+  background: var(--cm-history-backdrop, rgba(17, 24, 39, 0.3));
 }
 @keyframes assistant-history-in {
   from { transform: translateX(-100%); }
