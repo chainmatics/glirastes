@@ -1,6 +1,7 @@
-import { Fragment, Suspense, lazy, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
+import { loadMarkdownModule } from '../markdown-module.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
 import { useComposerContext } from '../provider/composer-context.js';
@@ -49,28 +50,10 @@ import type {
 } from '../types.js';
 import { turnStartId } from '../utils/turn-outcomes.js';
 
-// Lazy-load react-markdown — keeps it out of the synchronous import graph so
-// server-only consumers don't pay for it, and gracefully degrades to raw text
-// when the optional peer dep isn't installed.
-type MarkdownModule = typeof import('react-markdown');
+// Lazy-load react-markdown over the shared import (`preloadMarkdown`).
 type ReactMarkdownOptions = import('react-markdown').Options;
 
-const ReactMarkdown = lazy<MarkdownModule['default']>(async () => {
-  try {
-    const mod = await import('react-markdown');
-    return { default: mod.default };
-  } catch {
-    if (typeof console !== 'undefined') {
-      console.warn(
-        '[MessageBubble] react-markdown is not installed — falling back to plain text. Install it with: npm install react-markdown',
-      );
-    }
-    const Fallback: MarkdownModule['default'] = (({ children }) => (
-      <>{typeof children === 'string' ? children : ''}</>
-    )) as MarkdownModule['default'];
-    return { default: Fallback };
-  }
-});
+const ReactMarkdown = lazy(loadMarkdownModule);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -829,12 +812,90 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
   const { remarkPlugins } = useChatMarkdownOptions();
   return (
     <div className={className} data-component="markdown">
-      <Suspense fallback={<>{content}</>}>
+      <Suspense fallback={<MarkdownLoading content={content} />}>
         <ReactMarkdown
           components={links.enabled ? links.markdownComponents : undefined}
           remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}
         >{content}</ReactMarkdown>
       </Suspense>
+    </div>
+  );
+}
+
+const subscribeNothing = () => () => {};
+const onClient = () => true;
+const onServer = () => false;
+
+const MAX_SKELETON_LINES = 8;
+const SKELETON_CHARS_PER_LINE = 80;
+const SKELETON_SCAN_LIMIT = 2_000;
+
+/**
+ * Lines and last-line width (percent) the rendered text will roughly take: one
+ * line per non-empty source line plus one per 80 characters. A single pass over
+ * at most the first 2,000 characters, stopped at 8 lines.
+ */
+function estimateSkeletonLines(content: string): { lines: number; lastWidth: number } {
+  let lines = 0;
+  let lineLength = 0;
+  const end = Math.min(content.length, SKELETON_SCAN_LIMIT);
+  for (let i = 0; i < end && lines < MAX_SKELETON_LINES; i += 1) {
+    if (content.charCodeAt(i) === 10) {
+      if (lineLength > 0) lines += 1;
+      lineLength = 0;
+      continue;
+    }
+    lineLength += 1;
+    if (lineLength > SKELETON_CHARS_PER_LINE) {
+      lines += 1;
+      lineLength = 1;
+    }
+  }
+  if (lineLength > 0 && lines < MAX_SKELETON_LINES) lines += 1;
+  const lastWidth = lines < MAX_SKELETON_LINES && lineLength > 0
+    ? Math.max(30, Math.round((lineLength / SKELETON_CHARS_PER_LINE) * 100))
+    : 100;
+  return { lines: Math.max(1, lines), lastWidth: Math.min(100, lastWidth) };
+}
+
+const VISUALLY_HIDDEN: CSSProperties = {
+  position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+  overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
+};
+const SKELETON_STYLE: CSSProperties = {
+  display: 'grid',
+  rowGap: 'var(--cm-markdown-skeleton-gap, 0.625em)',
+  paddingBlock: 'var(--cm-markdown-skeleton-padding, 0.3125em)',
+};
+
+/**
+ * Suspense fallback while react-markdown loads. The server (and hydration)
+ * renders the source text as before, so server HTML stays unchanged; a client
+ * render shows skeleton lines instead of the raw source. The geometry is
+ * inline (CSS variables) so it takes space without the SDK stylesheet too.
+ */
+function MarkdownLoading({ content }: { content: string }) {
+  const client = useSyncExternalStore(subscribeNothing, onClient, onServer);
+  const { locale } = useChatContext();
+  if (!client) return <>{content}</>;
+  const { lines, lastWidth } = estimateSkeletonLines(content);
+  return (
+    <div data-element="markdown-skeleton" data-state="loading" aria-busy="true" style={SKELETON_STYLE}>
+      <span style={VISUALLY_HIDDEN}>{locale.markdownLoadingLabel ?? 'Loading message…'}</span>
+      {Array.from({ length: lines }, (_, index) => (
+        <span
+          key={index}
+          aria-hidden="true"
+          data-element="markdown-skeleton-line"
+          style={{
+            display: 'block',
+            width: index === lines - 1 ? `${lastWidth}%` : '100%',
+            height: 'var(--cm-markdown-skeleton-line-height, 0.875em)',
+            borderRadius: 'var(--cm-markdown-skeleton-radius, 0.25em)',
+            background: 'var(--cm-markdown-skeleton-color, rgba(127, 127, 127, 0.2))',
+          }}
+        />
+      ))}
     </div>
   );
 }

@@ -577,6 +577,10 @@ export interface SessionConfig {
    * on switch. Return either full SDK `ChatMessage`s (with `parts`) or
    * flat `WireChatMessage`s (with `content`) — the provider coerces
    * the wire shape automatically.
+   *
+   * To make mention chips appear in a loaded chat, set the provider's
+   * `entityDeclarations`: the declarations the chat handler streams
+   * (`data-tool-entities`) are transient and not part of the messages.
    */
   load?: (
     conversationId: string,
@@ -1457,6 +1461,8 @@ export interface ChatLocale {
   newChatLabel: string;              // "+ New chat" row + default new session title
   noSessionsLabel: string;           // empty state
   sessionsLoadingLabel: string;      // loading state
+  /** Read by screen readers in a message whose Markdown renderer is still loading (not announced). Optional: English "Loading message…". */
+  markdownLoadingLabel?: string;
   untitledSessionLabel: string;
   deleteSessionAriaLabel: string;
   confirmDeleteSessionPrompt: string;
