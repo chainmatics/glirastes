@@ -1,0 +1,16 @@
+{
+  "id": "clear-stops-running-request",
+  "kind": "recommended",
+  "summary": "Behavior change: clear() (also the Clear button) while a request runs now stops that request; its answer is neither shown nor stored and nothing of it is recorded. Before, the answer landed in the emptied chat.",
+  "howTo": "Nothing to do with useVercelAiChatTransport or the LangGraph transport. A custom ChatTransport is now stopped (stop()) when the chat is cleared during a run; until its status leaves submitted/streaming the chat stays busy and shows nothing of that run, then the provider empties the transport's messages (setMessages([])). A transport whose stop() does not end the request keeps the chat busy until its run ends. Apps that cleared during a run to keep the answer apart (or tests that expect the answer after clear()) stop relying on it. See docs/concepts.md, Turn outcomes.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "AiChatProvider",
+      "VercelAiChat"
+    ],
+    "patterns": [
+      "\\bclear\\(\\)"
+    ]
+  }
+}

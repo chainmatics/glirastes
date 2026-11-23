@@ -94,6 +94,8 @@ import {
 import type { ApprovalDescriptionFn, ChatLocale, ToolLabelConfig } from '../types.js';
 
 const NO_HIDDEN_TOOLS: readonly string[] = Object.freeze([]);
+// What the chat shows of a cleared request that is still ending.
+const NO_MESSAGES: readonly ChatMessage[] = Object.freeze([]);
 
 export const DEFAULT_LOCALE: ChatLocale = {
   placeholder: 'Type a message...',
@@ -1160,8 +1162,20 @@ export function AiChatProvider({
   const languageRef = useRef(language);
   languageRef.current = language;
 
+  // A request running when clear() was called, until it ended: everything the transport holds or sends
+  // meanwhile is that request's, so it is neither shown nor stored, and the transport's history is emptied
+  // once it ended. Only the end of the request is waited for; no message is told apart by its id.
+  const [discardingRun, setDiscardingRun] = useState(false);
+  const discardingRunRef = useRef(false);
+  // The chat that was cleared: only its history is emptied at the end (a chat opened meanwhile loaded its own).
+  const discardedSessionRef = useRef<string | null>(null);
+  // The failure the cleared request ended with: not shown in the emptied chat.
+  const [discardedError, setDiscardedError] = useState<Error | null>(null);
+
   // Data part handler — processes pipeline and truncation events from any transport
   const handleDataPart = useCallback((dataPart: { type: string; data: unknown }) => {
+    // Parts of a request cleared with clear() that is still ending belong to nothing shown.
+    if (discardingRunRef.current) return;
     if (dataPart.type === 'data-tool-entities') {
       const data = dataPart.data as { tools?: unknown } | null;
       const next = sanitizeEntityDeclarations(data?.tools);
@@ -1217,16 +1231,22 @@ export function AiChatProvider({
   }, [resolvedTransport, handleDataPart]);
 
   const {
-    messages: rawMessages,
+    messages: transportMessages,
     sendMessage,
-    status,
-    error: transportError,
+    status: transportStatus,
+    error: rawTransportError,
     stop: transportStop,
     setMessages,
     addToolApprovalResponse,
   } = resolvedTransport;
+  const rawMessages = discardingRun ? (NO_MESSAGES as unknown as typeof transportMessages) : transportMessages;
+  const clearedRunFailure = discardingRun || (rawTransportError != null && rawTransportError === discardedError);
+  const transportError = clearedRunFailure ? null : rawTransportError;
+  const status = clearedRunFailure && transportStatus === 'error' ? 'ready' : transportStatus;
 
-  const isLoading = status === 'submitted' || status === 'streaming';
+  const transportLoading = transportStatus === 'submitted' || transportStatus === 'streaming';
+  // A cleared request still ending keeps the chat busy, so nothing new starts before its history is emptied.
+  const isLoading = transportLoading || discardingRun;
   const streamActiveRef = useRef(isLoading);
   streamActiveRef.current = isLoading;
   const sessionNotReady = Boolean(session?.load && loadedSessionId !== activeSessionId);
@@ -2272,8 +2292,15 @@ export function AiChatProvider({
 
   const clear = useCallback(() => {
     resetUiActions();
-    // A request still running belonged to the cleared history: its outcome is recorded nowhere.
-    if (streamActiveRef.current) requestTurnRef.current = { sessionId: null, userMessageId: null };
+    // A request still running belonged to the cleared history: it is stopped, its outcome is recorded nowhere,
+    // and nothing of it is shown or stored until it ended (see `discardingRun`).
+    if (streamActiveRef.current) {
+      requestTurnRef.current = { sessionId: null, userMessageId: null };
+      discardingRunRef.current = true;
+      discardedSessionRef.current = activeSessionId;
+      setDiscardingRun(true);
+      transportStop();
+    }
     setLastRejection(null);
     setMessages([]);
     // A pending draft write must not bring the cleared chat's draft back.
@@ -2298,7 +2325,16 @@ export function AiChatProvider({
     setSuggestionChips(suggestionsConfig.staticChips ?? []);
     // The queue belonged to the cleared conversation.
     queueStore.clearAll();
-  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions, queueStore]);
+  }, [setMessages, activeSessionId, suggestionsConfig.staticChips, resetUiActions, queueStore, transportStop]);
+
+  // The cleared request ended: empty what it left in the transport, then the chat is idle again.
+  useEffect(() => {
+    if (!discardingRun || transportLoading) return;
+    if (discardedSessionRef.current === activeSessionIdRef.current) setMessages([] as unknown as typeof transportMessages);
+    setDiscardedError(rawTransportError ?? null);
+    discardingRunRef.current = false;
+    setDiscardingRun(false);
+  }, [discardingRun, transportLoading, rawTransportError, setMessages]);
 
   // ---------------------------------------------------------------------------
   // Multi-session actions

@@ -140,6 +140,10 @@ export interface ChatContextValue {
   /** Holds the queue until `resumeQueue()`. */
   pauseQueue: () => void;
   stop: () => void;
+  /**
+   * Empties the open chat (and its queue). A running request is stopped; nothing of it is shown, stored or
+   * recorded, and the chat stays busy until the transport reports its end.
+   */
   clear: () => void;
   loadMore: () => void;
   hasMore: boolean;
