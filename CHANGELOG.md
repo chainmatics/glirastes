@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `glirastes doctor` check `react-markdown` (`E-SETUP-109`, warning only): a non-test source file imports `glirastes/react` or `glirastes/embed`, dependencies are installed (`glirastes` is found under `node_modules` from the app folder upwards) and `react-markdown` is not, so every chat answer would show its raw Markdown source. Offline file lookup, no module resolution: under Yarn Plug'n'Play and before dependencies are installed the check is left out.
+- `composer.placeholderOnFocus` (`ComposerConfig`, on `AiChatProvider`, `VercelAiChat` and `<glirastes-chat>`) and the `RichMentionInput` prop `placeholderOnFocus`: `false` hides the placeholder of the pill composer as soon as the editor has focus, the earlier look. Passed on through `useChatComposerInput().inputProps`.
+
+### Changed
+
+- The console warning without react-markdown names the package and no longer recommends `npm install`.
+- The placeholder of the pill composer (`RichMentionInput` in mention mode, the default composer with `chatInteractions` or `completionProviders`) stays visible while the empty editor has focus, until text or a pill is in it, like a native placeholder. It disappeared on focus before; `composer.placeholderOnFocus: false` keeps that.
+
+### Fixed
+
+- With `entityLinks.mentionMarkers: 'markdown'` the raw text of an answer (while react-markdown loads, after `markdown.loadingTimeoutMs`, or without react-markdown) showed the escapes the SDK puts into mention labels: `Abstimmung \- Wochenaktion`. The raw text now shows the labels as they read; backslashes the answer itself wrote stay. `markdownWithMentionMarkers` escapes only what can start inline Markdown in a label (`` \ ` * _ [ ] < | ~ ``) and now also `&`, so `AT&amp;T` in a label is no longer read as an entity; `- . ( ) ! # + { } >` are no longer escaped. Known limit: with remark-gfm a `www.`/`https://`/e-mail text in a label still becomes a link, as before.
+- After a confirmed direct `/` command the chat showed the raw tool name: `runDirectCommand` never sent the tool wording. In a managed turn it now writes the transient `data-tool-presentation` part ahead of the step, on the fresh command and on its approved continuation, in the same shape as the model path (new option `RunDirectCommandOptions.toolPresentation`, passed by `createAiChatHandler`). Without a managed turn there is no wording and no part, as before.
+- `createLocalSessionStore` named a chat that began with a direct `/` command after the raw `<!--glirastes:command …-->` marker. The derived title now drops command and clarification markers and `<!-- context: … -->` blocks, as the message bubble does, so the visible label line becomes the title. Titles already stored are not changed.
+- The shell's title rule in `styles.css` (one line with ellipsis, `flex: 1`, 600 weight) also styled every `[data-element="title"]` inside the shell: the titles of the command argument form, the chat queue, the session switcher and the pipeline timeline. It now only reaches the header's own title (`[data-element="header"] > [data-element="title"]`, same specificity as before, also in `glirastes/embed`). A `headerTitle` that nests its own `[data-element="title"]` deeper than the header no longer gets that rule.
+- Enter that commits an IME composition (Japanese, Chinese, Korean input) sent the message or picked the selected `@`/`/` list entry; Tab picked it too. `RichMentionInput` (plain and mention mode) and the plain chat textarea now leave every key of an open composition to the IME (`isComposing`, keyCode 229 as Safari fires it after `compositionend`, or between `compositionstart` and `compositionend`).
+
 ## [0.25.0] - 2026-11-24
 
 ### Added

@@ -33,6 +33,7 @@ import {
   toolReferenceToDataset,
 } from '../utils/mention-markup.js';
 import { fillTemplate } from '../utils/fill-template.js';
+import { isImeKeyDown } from '../utils/ime.js';
 
 const DEFAULT_TRIGGERS: ReadonlyArray<string> = ['@', '/'];
 const SEARCH_DEBOUNCE_MS = 100;
@@ -303,6 +304,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       allowEmptySubmit = false,
       onListOpenChange,
       completionPreset,
+      placeholderOnFocus = true,
     },
     ref,
   ) {
@@ -415,6 +417,19 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       }
       return text.replace(/\u200B/g, '');
     }, []);
+
+    // The placeholder shows while the editor is empty, also with focus: typing, a pick or `setValue`
+    // change the DOM without a render, so a change of emptiness renders again.
+    const [, renderEmptiness] = useState(true);
+    useEffect(() => {
+      const editor = editableRef.current;
+      if (!hasMentionSupport || !editor || typeof MutationObserver === 'undefined') return;
+      const observer = new MutationObserver(() => {
+        renderEmptiness(getTextContent() === '' && !editor.querySelector('[data-mention-id]'));
+      });
+      observer.observe(editor, { childList: true, characterData: true, subtree: true });
+      return () => observer.disconnect();
+    }, [hasMentionSupport, getTextContent]);
 
     /** Build full value including `prefix+slug` tokens for each chip. */
     const getFullValue = useCallback((): string => {
@@ -1120,6 +1135,11 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
+        // Keys of an IME composition belong to the IME: Enter commits the text and Tab or the arrows
+        // pick a candidate, they neither send nor pick a list entry. Safari fires the committing
+        // keydown after `compositionend`, flagged only by keyCode 229.
+        if (isImeKeyDown(event) || composingRef.current) return;
+
         // Dropdown navigation (mention mode only)
         if (hasMentionSupport && dropdownOpen && searchResults.length > 0) {
           const actions = (onEntityAction && searchResults[selectedIndex]?.actions) || [];
@@ -1631,6 +1651,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           aria-disabled={disabled}
           aria-label={placeholder ?? 'Message input'}
           onInput={handleInput}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onDragOver={handleDragOver}
@@ -1642,7 +1664,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     }
 
     // Mention mode — wrapper with editor + dropdown
-    const isEmpty = !isFocused && getTextContent() === ''
+    const isEmpty = (placeholderOnFocus || !isFocused) && getTextContent() === ''
       && mentions.length === 0 && !editableRef.current?.querySelector('[data-mention-id]');
     const optionId = (index: number, action = -1) => (
       action >= 0 ? `${listboxId}-option-${index}-action-${action}` : `${listboxId}-option-${index}`

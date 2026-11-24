@@ -707,7 +707,6 @@
   "riskTier": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "runApprovalTest": "Legacy pipeline test helper without LLM calls; not part of the Foundation workflow.",
   "runCombinationTest": "Legacy pipeline test helper without LLM calls; not part of the Foundation workflow.",
-  "runDirectCommand": "Lower-level Next.js adapter helper or type that createAiChatHandler uses internally.",
   "runEdgeCaseTest": "Legacy pipeline test helper without LLM calls; not part of the Foundation workflow.",
   "runGuardrailsTest": "Legacy pipeline test helper without LLM calls; not part of the Foundation workflow.",
   "runRegressionTest": "Legacy pipeline test helper without LLM calls; not part of the Foundation workflow.",

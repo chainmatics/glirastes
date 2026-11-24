@@ -426,6 +426,13 @@ component keeps the chips with `useChatEntityLinks().markdownComponents`
 `{{mention:…}}` markers and draws each marker as a chip inside it, checked
 against the ids the conversation showed by declaration (`verifyMentions`,
 default on); see [entity identity](entity-identity.md#entity-link-options).
+In the Markdown handed to the renderer (`markdownWithMentionMarkers`, a custom
+`Markdown` component) each label has `` \ ` * _ [ ] < & | ~ `` escaped, so it
+stays plain text (no emphasis, code, link, HTML, entity, strikethrough or
+table cell). A GFM autolink literal in a label (`www.…`, `https://…`, an
+e-mail address) still becomes a link with remark-gfm, which finds those in the
+parsed text. The raw text shown while react-markdown loads, after its time
+limit or without it shows the labels without these escapes.
 
 ## Mention markers
 
