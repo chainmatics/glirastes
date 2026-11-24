@@ -51,6 +51,8 @@ describe('createChatInteractionsHandler', () => {
       expect(body.commands.find((command) => command.id === 'standup')!.label).toBe('Tagesrückblick');
       expect(warn).toHaveBeenCalledTimes(1);
       expect(String(warn.mock.calls[0]![0])).toContain('commands.filter.tasks');
+      // The overrides came as an object from code: the warning names that source, not only the file.
+      expect(String(warn.mock.calls[0]![0])).toContain('chat interaction overrides (.glirastes/chat-interactions.json or the overrides passed in code)');
     } finally {
       warn.mockRestore();
     }

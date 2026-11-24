@@ -1,0 +1,68 @@
+{
+  "id": "mention-sources-and-type-filter",
+  "kind": "recommended",
+  "summary": "@<name>:<text> now searches one entity type, also without configuration (@task:123 searched all types for task:123 before). The app can decide which entities appear in @ (mentions in tools.json) and order them by view (useMentionContext); derived labels keep every tools.json language.",
+  "howTo": "Check your users' habits: whenever the text before the first colon after @ is an entity type's label, alias or canonical type, the @ list now searches only that type for the rest (@task:123 searches task for 123; before, every type for task:123). Nothing to configure for that. Derived entity labels now carry every language of languages in .glirastes/tools.json, and derived action labels every language of the tool title (before only en and de); run glirastes tools refresh and review the labels. Without mentions in tools.json and without a mention context the @ list is as before, plus type suggestions while typing after @ when the chat has at least two entity types. To declare sources set mentions.policy to \"declared\", run glirastes tools check and paste the mention-source-candidate entries you want into mentions.sources. Call useMentionContext({ preferredTypes, presetType }) in a page below the provider to put its entity types first and preset the filter. Give entity labels and aliases per language in .glirastes/chat-interactions.json; new optional locale keys completionCommandsGroupLabel, completionEntityTypesGroupLabel, completionEntityTypeFilterLabel. An own onCompletionSelect should ignore items of type mention-filter. To show more than 8 entries per provider (12 in total), set chatInteractions.completionLimits per trigger, e.g. { \"/\": { \"perProvider\": 40, \"total\": 40 } }; it applies to your own completionProviders too. See docs/chat-interactions.md.",
+  "skill": "curating-glirastes-chat-interactions",
+  "affectedWhen": {
+    "patterns": [
+      "\\bchatInteractions\\b",
+      "\\bcreateChatInteractionsHandler\\b",
+      "\\bdefineChatEntity\\b",
+      "\\buseChatInteractionsData\\b"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "\\buseMentionContext\\b",
+      "\\bmentionContext\\b",
+      "\"mentions\"\\s*:\\s*\\{"
+    ]
+  },
+  "surface": [
+    "glirastes/adapter/nextjs#ChatEntityData.aliases",
+    "glirastes/embed#ChatEntityAliases",
+    "glirastes/embed#ChatEntityDefinition.aliases",
+    "glirastes/embed#ChatMentionContext",
+    "glirastes/embed#ChatMentionContext.preferredTypes",
+    "glirastes/embed#ChatMentionContext.presetType",
+    "glirastes/embed#CompletionLimits",
+    "glirastes/embed#CompletionLimits.perProvider",
+    "glirastes/embed#CompletionLimits.total",
+    "glirastes/embed#GlirastesChatElementConfig.mentionContext",
+    "glirastes/react#AiChatProviderConfig.mentionContext",
+    "glirastes/react#AiChatProviderProps.mentionContext",
+    "glirastes/react#ChatEntityAliases",
+    "glirastes/react#ChatEntityData.aliases",
+    "glirastes/react#ChatEntityDefinition.aliases",
+    "glirastes/react#ChatInteractionRegistry.completionPreset",
+    "glirastes/react#ChatInteractionRegistry.entityFilter",
+    "glirastes/react#ChatInteractionRegistry.entityFilterConflicts",
+    "glirastes/react#ChatInteractionRegistry.entityFilterNames",
+    "glirastes/react#ChatInteractionTexts",
+    "glirastes/react#ChatInteractionTexts.commandsGroup",
+    "glirastes/react#ChatInteractionTexts.entityTypeFilter",
+    "glirastes/react#ChatInteractionTexts.entityTypesGroup",
+    "glirastes/react#ChatInteractionsConfig.completionLimits",
+    "glirastes/react#ChatInteractionsConfig.mentionContext",
+    "glirastes/react#ChatInteractionsConfig.texts",
+    "glirastes/react#ChatLocale.completionCommandsGroupLabel",
+    "glirastes/react#ChatLocale.completionEntityTypeFilterLabel",
+    "glirastes/react#ChatLocale.completionEntityTypesGroupLabel",
+    "glirastes/react#ChatMentionContext",
+    "glirastes/react#ChatMentionContext.preferredTypes",
+    "glirastes/react#ChatMentionContext.presetType",
+    "glirastes/react#CompletionLimits",
+    "glirastes/react#CompletionLimits.perProvider",
+    "glirastes/react#CompletionLimits.total",
+    "glirastes/react#CompletionSearchOptions.limits",
+    "glirastes/react#RichMentionInputProps.completionPreset",
+    "glirastes/react#useMentionContext",
+    "glirastes/react/vercel#VercelAiChatProps.mentionContext",
+    "glirastes/server/http#ChatEntityData.aliases",
+    "glirastes/server/nextjs#ChatEntityData.aliases",
+    "locale#completionCommandsGroupLabel",
+    "locale#completionEntityTypeFilterLabel",
+    "locale#completionEntityTypesGroupLabel"
+  ]
+}

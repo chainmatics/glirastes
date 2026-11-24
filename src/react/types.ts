@@ -5,7 +5,7 @@ import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { UiActionRunCode } from '../browser/client-actions.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
-import type { ChatInteractionsConfig, PendingChatCommand } from './interactions/registry.js';
+import type { ChatInteractionsConfig, ChatMentionContext, PendingChatCommand } from './interactions/registry.js';
 import type { AttachmentBlobStore } from './utils/attachment-blob-store.js';
 import type { ChatEntityLinksConfig } from './entity-links/entity-links.js';
 
@@ -362,7 +362,7 @@ export interface MentionResult {
   group?: string;
   /** What picking it does; overrides the trigger's `select` (see `CompletionSelectKind`). */
   select?: CompletionSelectKind;
-  /** `select: 'text'`: the text put in place of trigger and query; default `label`. */
+  /** `select: 'text'`: the text put in place of trigger and query; `select: 'query'`: the new query behind the trigger. Default `label`. */
   insertText?: string;
 }
 
@@ -420,7 +420,7 @@ export interface CompletionItem {
   group?: string;
   /** What picking it does; overrides the trigger's `select` (see `CompletionSelectKind`). */
   select?: CompletionSelectKind;
-  /** `select: 'text'`: the text put in place of trigger and query; default `label`. */
+  /** `select: 'text'`: the text put in place of trigger and query; `select: 'query'`: the new query behind the trigger. Default `label`. */
   insertText?: string;
 }
 
@@ -458,10 +458,14 @@ export interface ChatCompletionProvider {
  * pill. `text` replaces trigger and query with the entry's `insertText`
  * (default: its label) as plain text. `run` inserts the pill and sends like
  * the send button (nothing is sent while a turn streams; the pill stays).
+ * `query` refines the search: its `insertText` (default: its label) becomes
+ * the query behind the trigger, without a space, and the list searches again
+ * (the `@<type>:` suggestions); such entries come first and never become a
+ * pill or a mention.
  * For a sub-list, handle the pick in `onCompletionSelect`: call
  * `controls.openCompletion({ trigger, source })` and return `true`.
  */
-export type CompletionSelectKind = 'chip' | 'text' | 'run';
+export type CompletionSelectKind = 'chip' | 'text' | 'run' | 'query';
 
 /** A character that opens a completion list in the composer. */
 export interface ChatTriggerDefinition {
@@ -1515,6 +1519,16 @@ export interface ChatLocale {
   completionResultsLabel: string;     // supports `{count}`
   /** Hint when a `@`/`/` search finds nothing. */
   completionEmptyLabel?: string;
+  /**
+   * Heading of the `/` commands of `chatInteractions`. Default: `Commands`,
+   * `Befehle` for a German `chatInteractions.locale` (a built-in text here
+   * keeps that choice; only an own text replaces it).
+   */
+  completionCommandsGroupLabel?: string;
+  /** Heading of the `@<type>:` suggestions above the `@` hits. Default `Filter by type`. */
+  completionEntityTypesGroupLabel?: string;
+  /** Description of one `@<type>:` suggestion, part of its accessible name; `{type}` is the type's label. Default `Search only this type`. */
+  completionEntityTypeFilterLabel?: string;
 
   // Arguments of `/` commands and entity actions
   commandArgumentsLabel: string;      // supports `{command}`
@@ -1834,6 +1848,14 @@ export interface AiChatProviderConfig {
    * normal authorization and confirmation.
    */
   chatInteractions?: ChatInteractionsConfig;
+  /**
+   * What the current page says about `@` references: `preferredTypes` come
+   * first in the `@` list, `presetType` starts a bare `@` as `@<name>:`. A
+   * page below the provider sets its own with `useMentionContext`, which
+   * wins while it is mounted. Read at search time: a new value re-renders
+   * nothing and keeps the search.
+   */
+  mentionContext?: ChatMentionContext;
   /**
    * Turns entity references in assistant messages into clickable chips:
    * app matchers (e.g. task keys), names the conversation already referenced,
@@ -2422,7 +2444,7 @@ export interface ChatComposerInput extends ChatComposerInputControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers' | 'onListOpenChange'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers' | 'onListOpenChange' | 'completionPreset'>;
   /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
   readonly attachmentInputProps: ChatAttachmentInputProps;
   /** A completion list of the editor is open (e.g. for `ComposerHint`). */
@@ -2465,6 +2487,8 @@ export interface MentionDropdownOptionProps {
   role: 'option';
   'aria-selected': boolean;
   tabIndex: -1;
+  /** Set for a `select: 'query'` entry: its label and description, so the name says it filters. */
+  'aria-label'?: string;
 }
 
 export interface MentionDropdownItemProps {
@@ -2530,6 +2554,15 @@ export interface RichMentionInputProps {
   allowEmptySubmit?: boolean;
   /** The completion list opened (`true`) or closed (`false`); not called on mount. */
   onListOpenChange?: (open: boolean) => void;
+  /**
+   * The query a bare trigger starts with: typing just the trigger (or
+   * `openCompletion` without `query` and `source`) puts the returned text
+   * behind it, caret at its end, and searches it. Backspace right behind the
+   * untouched text removes all of it and searches the bare trigger, which is
+   * not preset again. `undefined` (or text with whitespace): nothing. The
+   * composer passes the `@<type>:` preset of `mentionContext.presetType`.
+   */
+  completionPreset?: (trigger: string) => string | undefined;
 }
 
 export interface ChatWindowHeaderRenderProps {

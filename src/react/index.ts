@@ -343,6 +343,7 @@ export {
 // Completion providers
 export {
   createCompletionSearch,
+  type CompletionLimits,
   type CompletionSearch,
   type CompletionSearchOptions,
 } from './completions/completion-search.js';
@@ -366,9 +367,12 @@ export {
   createChatInteractionRegistry,
   type ChatInteractionRegistry,
   type ChatInteractionsConfig,
+  type ChatInteractionTexts,
+  type ChatMentionContext,
   type ChatSendPlan,
   type PendingChatCommand,
 } from './interactions/registry.js';
+export { useMentionContext } from './interactions/use-mention-context.js';
 // Programmatic composer ("Chat about this") and entity chips in answers
 export {
   useChatComposer,
@@ -416,6 +420,7 @@ export {
   type ChatCommandData,
   type ChatCommandRun,
   type ChatEntityActionData,
+  type ChatEntityAliases,
   type ChatEntityData,
   type ChatInteractionArg,
   type ChatInteractionOverrides,

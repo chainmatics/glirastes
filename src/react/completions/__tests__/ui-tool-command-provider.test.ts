@@ -41,6 +41,15 @@ describe('createUiToolCommandProvider', () => {
     expect(search('newtask').map((item) => item.id)).toEqual(['ui.dialog.newTask']);
   });
 
+  it('folds letters without a decomposition too (Polish ł)', () => {
+    const polish = createUiToolCommandProvider({ tools: [{ definitionId: 'ui.dialog.owner', label: 'Zmień właściciela' }] });
+    const found = (query: string) => (polish.search({
+      query, trigger: '/', signal: new AbortController().signal, context: {}, limit: 8,
+    }) as ReadonlyArray<{ id: string }>).map((item) => item.id);
+    expect(found('wlasc')).toEqual(['ui.dialog.owner']);
+    expect(found('WŁAŚC')).toEqual(['ui.dialog.owner']);
+  });
+
   it('hides role-restricted commands unless the context holds the role', () => {
     expect(search('').map((item) => item.id)).not.toContain('ui.navigate.admin');
     expect(search('admin', ['admin']).map((item) => item.id)).toEqual(['ui.navigate.admin']);

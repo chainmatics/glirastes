@@ -52,6 +52,7 @@ import {
   TOOLS_PATHS,
   type ToolsConfig,
 } from './config.js';
+import { analyzeChatInteractions } from './chat-interactions.js';
 import { renderGeneratedModule } from './emit-module.js';
 import { ToolContractsFileSchema, ToolTombstonesFileSchema, toToolContractsEntry } from './files.js';
 import { sortFindings, toolFinding, TRANSIENT_FINDING_CODES } from './findings.js';
@@ -454,6 +455,7 @@ function renderDerivedOutputs(input: DerivedOutputInput): Record<string, string>
       contracts: input.contracts,
       mcpCatalog: input.config.emit.mcpCatalog === true,
       ...(input.config.emit.moduleResolution ? { moduleResolution: input.config.emit.moduleResolution } : {}),
+      ...(input.config.mentions ? { mentions: input.config.mentions } : {}),
     }),
   };
 }
@@ -935,6 +937,13 @@ async function generate(
     exclusions: excluded,
   });
   assertAppSetupSemanticParity(built.artifact, inventory.executions.map((execution) => execution.definitionId));
+  // tools.json `mentions`: about the configuration, never about one tool, so the artifact's warnings stay as they are.
+  const mentionFindings = analyzeChatInteractions({
+    artifact: built.artifact,
+    contracts: contractEntries,
+    ...(config.mentions ? { mentions: config.mentions } : {}),
+  }).findings;
+  findings.push(...mentionFindings);
   const inventoryRaw = renderInventory(generation.state);
   const derived = renderDerivedOutputs({
     config,
@@ -955,7 +964,7 @@ async function generate(
       appId: config.appId,
       discoveryDigest: discovery.inventoryDigest,
       tools: reportTools,
-      findings: stableFindings,
+      findings: [...stableFindings, ...mentionFindings],
       excluded,
     }),
     [TOOLS_PATHS.setupArtifact]: built.raw,
