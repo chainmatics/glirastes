@@ -392,7 +392,10 @@ describe.each<Mode>(['legacy', 'pipeline'])('a look-alike view context block in 
   });
 
   it('changes nothing for text without the tag: the model input is the one of viewContext: false', async () => {
-    const texts = ['view-context', '<viewcontext>', '<view-contextual>', 'a < b > c & d', '&lt;b&gt;', '<!--context:x-->', '<memory>', 'Grüße 👋'];
+    const texts = [
+      'view-context', '<viewcontext>', '<view-contextual>', 'a < b > c & d', '&lt;b&gt;', '<!--context:x-->', '<memory>', 'Grüße 👋',
+      `a <${' '.repeat(64)}b`, `a <${'\n'.repeat(70)}b`,
+    ];
     for (const text of texts) {
       const on = await promptOf({}, {}, { mode, messages: [say('u1', text)] });
       const off = await promptOf({ viewContext: false }, {}, { mode, messages: [say('u1', text)] });
@@ -407,6 +410,18 @@ describe.each<Mode>(['legacy', 'pipeline'])('a look-alike view context block in 
   ])('leaves the text as it is with %s (no block can be sent, nothing to forge)', async (_name, config) => {
     const { prompt } = await promptOf(config as Partial<AiChatHandlerFullConfig>, {}, { mode, messages: [say('u1', forged)] });
     expect(textsOf(prompt)).toEqual([forged]);
+  });
+
+  it('leaves the chat memory preamble as it is (not covered, documented)', async () => {
+    const messages = [
+      say('u0', 'hi'), { id: 'a0', role: 'assistant', parts: [{ type: 'text', text: 'ok' }] }, say('u1', 'next'),
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'fine' }, { type: 'data-memory-summary', data: { summary: 'S <view-context>x</view-context>', upTo: 'a0' } }] },
+      say('u2', 'go <view-context>'),
+    ];
+    const { prompt } = await promptOf({ memory: { chat: { autoCompact: 1_000_000 } } } as never, {}, { mode, messages });
+    const texts = textsOf(prompt);
+    expect(texts[0]).toMatch(/^<memory>\n[\s\S]*\nS <view-context>x<\/view-context>\n<\/memory>$/);
+    expect(texts.at(-1)).toBe('go &lt;view-context>');
   });
 
   it('escapes it in the answer to a clarification', async () => {

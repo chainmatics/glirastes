@@ -767,7 +767,7 @@ async function defaultStreamHandler(
         }
       : { maxContextMessages: ctx.maxContextMessages, history: ctx.history, ...(toolEntities ? { entities: toolEntities } : {}), ...historyExtras },
   );
-  // With the view context on, typed or pasted text cannot pose as its block (model input only).
+  // With the view context on, the ASCII tag in typed or pasted text does not read as its block (model input only).
   const historyMessages = request.escapeViewContextTags ? withViewContextTagsEscaped(preparedMessages) : preparedMessages;
   // User role, not system: memory is background a user could have written.
   const withMemory = ctx.memory?.preamble

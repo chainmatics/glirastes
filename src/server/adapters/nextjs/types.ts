@@ -536,11 +536,17 @@ export interface AiChatHandlerConfig {
    * is roughly 850 tokens at 3.5 characters per token, 1,000 to 1,500 with
    * random ids or non-ASCII text, usually far less. `maxEntries` and the
    * `facts` config make it smaller. No nonce: instead, while this option is
-   * on, `<view-context` and `</view-context` (any case, also with whitespace
-   * or zero-width characters) in the text of user messages reach the model
-   * as `&lt;view-context`, so typed or pasted text cannot pose as the block;
-   * only the model input changes, after the PII shield and the guardrails,
-   * never the chat or the stream. The runtime container turns this
+   * on, `<view-context` and `</view-context` in their ASCII spelling (any
+   * case, also with whitespace or zero-width characters around the `/`) in
+   * the text of user messages reach the model as `&lt;view-context`; only
+   * the model input changes, after the PII shield and the guardrails, never
+   * the chat or the stream. Not caught: full-width or look-alike characters,
+   * a line break or invisible character inside the name, entities such as
+   * `&#60;`, a tag split across text parts or messages, file attachments,
+   * tool call arguments of an approval continuation, the imitated header
+   * without tags, chat memory, tool results and assistant text. Either way
+   * the block grants no permission: the server checks types, ids and facts
+   * on its own. The runtime container turns this
    * off until its option `chat.viewContext` comes. See `ViewContextPolicy`
    * (`glirastes/contracts`).
    */

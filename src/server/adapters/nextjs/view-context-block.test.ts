@@ -317,6 +317,22 @@ describe('withViewContextTagsEscaped', () => {
     expect(result).toBe(messages);
     expect(JSON.stringify(result)).toBe(JSON.stringify(texts.map(user)));
   });
+
+  it('leaves a < before a long run of whitespace as it is when the text does not name the tag', () => {
+    const texts = [`a <${' '.repeat(64)}b`, `a <${'\n'.repeat(70)}b`, `<${ZWSP.repeat(80)}/`];
+    const messages = texts.map(user);
+    expect(withViewContextTagsEscaped(messages)).toBe(messages);
+    expect(JSON.stringify(messages)).toBe(JSON.stringify(texts.map(user)));
+  });
+
+  it('returns 9 MB of < and whitespace without the tag name fast and unchanged', () => {
+    const text = `<${' '.repeat(63)}`.repeat(147_456);
+    expect(text.length).toBe(9_437_184);
+    const messages = [user(text)];
+    const started = performance.now();
+    expect(withViewContextTagsEscaped(messages)).toBe(messages);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
 });
 
 describe('prepareViewContext', () => {

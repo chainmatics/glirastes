@@ -23,9 +23,11 @@
  * strings. The PII shield replaces values before serializing, never in the
  * serialized line. The block has no nonce: nothing in it depends on a
  * secret, so guessing one gains nothing, and it stays byte-identical for the
- * same entries. Instead, `<view-context` in the text of user messages is
- * escaped for the model (`withViewContextTagsEscaped`), so typed or pasted
- * text cannot pose as the block; it would grant nothing either.
+ * same entries. Instead, `<view-context` in its ASCII spelling in the text
+ * of user messages is escaped for the model (`withViewContextTagsEscaped`),
+ * so the usual way of typing or pasting the tag does not read as the block;
+ * look-alike characters and the other gaps listed there are not caught, and
+ * the block grants nothing either way.
  *
  * @module
  */
@@ -166,10 +168,24 @@ export function withViewContextMessage<T>(messages: T[], text: string | undefine
 /** The tag name of the block, for `escapeTagInText`. */
 const VIEW_CONTEXT_TAG = 'view-context';
 
+/**
+ * Whether `text` names the tag at all. `escapeTagInText` only matches the
+ * name as one contiguous run (its `i` flag without `u`, the same as here), so
+ * text without it is never changed; skipping it also skips the escape's
+ * rule that a `<` before 64 or more whitespace or zero-width characters
+ * counts as a tag, and its scan of such runs.
+ */
+const NAMES_TAG = /view-context/i;
+
+/** `text` with `<view-context` escaped; the same string without the tag name. */
+function escapeUserText(text: string): string {
+  return NAMES_TAG.test(text) ? escapeTagInText(text, VIEW_CONTEXT_TAG) : text;
+}
+
 /** A text part with `<view-context` escaped, or the part itself when nothing changed. */
 function escapedPart(part: unknown): unknown {
   if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') return part;
-  const text = escapeTagInText(part.text, VIEW_CONTEXT_TAG);
+  const text = escapeUserText(part.text);
   return text === part.text ? part : { ...part, text };
 }
 
@@ -178,8 +194,10 @@ function escapedPart(part: unknown): unknown {
  * tag in the text of a user message escaped as `&lt;` (`escapeTagInText`:
  * any case, whitespace, zero-width characters or a soft hyphen around the
  * `/`, `<view-context-…>`; an `&lt;` already in front of the name becomes
- * `&amp;lt;`), so text a user typed or pasted can never pose as the block
- * the SDK renders. Only user messages: string content and `text` parts;
+ * `&amp;lt;`), so the tag a user typed or pasted in its ASCII spelling
+ * does not read as the block the SDK renders. Not caught: full-width or
+ * look-alike characters, a line break or invisible character inside the
+ * name, entities such as `&#60;`, a tag split across parts or messages. Only user messages: string content and `text` parts;
  * other roles and parts stay as they are. The model still reads the text.
  * Messages without such a tag are returned as they are (the same objects,
  * byte-identical); never mutates. Apply to the history before the SDK's own
@@ -191,7 +209,7 @@ export function withViewContextTagsEscaped<T>(messages: T[]): T[] {
     if (!isRecord(message) || message.role !== 'user') return message;
     const { content } = message;
     if (typeof content === 'string') {
-      const text = escapeTagInText(content, VIEW_CONTEXT_TAG);
+      const text = escapeUserText(content);
       if (text === content) return message;
       changed = true;
       return { ...message, content: text } as T;
