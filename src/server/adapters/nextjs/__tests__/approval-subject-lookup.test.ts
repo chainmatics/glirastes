@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { MAX_PART_SUBJECTS, parseApprovalSubjectsPart } from '../../../../contracts/approval-subject.js';
 import { defineEndpointTool, defineTool, type PiiShield, type ToolContext } from '../../../../types.js';
 import { endpointToolsToRegistry } from '../../../core/index.js';
+import { createPiiShield, createRegexPiiDetector } from '../../../pii-shield/index.js';
 import {
   ApprovalSubjectRefusedError,
   createApprovalSubjectResolver,
@@ -239,6 +240,23 @@ describe('approval subject lookups', () => {
     });
     expect(await rechecked.resolver.recheck({ toolName: 'delete_channel', input: { key: '[KEY_1]' }, digestOf: () => '' })).toBeUndefined();
     expect(await rechecked.resolver.recheck({ toolName: 'delete_channel', input: { key: 'garage' }, digestOf: () => '' })).toBe('approval_subject_gone');
+  });
+
+  it('shields the records of an ambiguous subject together: a value one record teaches protects the other (real shield, slow detector)', async () => {
+    const inner = createRegexPiiDetector();
+    const shield = createPiiShield({
+      locale: 'de',
+      detector: { detect: async (text, locales) => { await new Promise((resolve) => setTimeout(resolve, 20)); return inner.detect(text, locales); } },
+    });
+    // Two records with the same key: the card shows both names, each record shielded in parallel.
+    const { resolver } = resolverFor({
+      'GET /channels': () => ok([{ key: 'lobby', title: 'Tel 030 1234567\nRueckruf' }, { key: 'lobby', title: 'Tel030 1234567' }]),
+    }, { shield: { shield, sessionId: () => 's' } });
+    await resolver.resolve({ toolName: 'delete_channel', toolCallId: 'c1', input: { key: 'lobby' } });
+    const subject = resolver.take('c1')!.part.subjects[0]!;
+    expect(subject).toMatchObject({ status: 'ambiguous' });
+    expect(JSON.stringify(subject)).toContain('Rueckruf');
+    expect(JSON.stringify(subject)).not.toContain('1234567');
   });
 
   it('never refuses a call for a preview whose shield fails', async () => {
