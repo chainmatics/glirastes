@@ -189,6 +189,8 @@ Four operations:
 - **rehydrateArgs(args)**: LLM calls a tool with "Person_A" as an argument → replace with "John Smith" before calling the real API
 - **anonymizeResult(result)**: Tool returns data containing PII → anonymize before LLM sees it
 
+How `anonymizeResult` reads a result that is not a string: the detector gets one text per result, the result's JSON text with every string (values and keys) in its real characters instead of JSON escapes (a line break is a line break, not `\n`). For a result without escaped characters this is exactly `JSON.stringify(result)`. Every detected value is then replaced in every string value of the result, also inside longer strings. Not replaced: object keys (the result keeps its shape; a value detected in a key is still replaced where it occurs in a string value) and numbers (a phone number stored as a number reaches the model as it is). The same path shields result handles, approval records and view-context values. Before the fix (all releases up to 0.24.2) the detector read the escaped JSON text, so a value right after a line break, tab or another escaped character could reach the model in plain text; see the changelog's Security entry.
+
 Two modes:
 - `anonymize`: random replacements each time
 - `pseudonymize`: deterministic — same PII always maps to the same pseudonym (so the LLM can reason about "Person_A" consistently across the conversation)

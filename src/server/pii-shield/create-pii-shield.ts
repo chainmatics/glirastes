@@ -7,6 +7,7 @@ import type {
 } from '../../types.js';
 import { createSessionStore } from './session-mapping.js';
 import { deepWalkReplace } from './deep-walk.js';
+import { detectionText } from './detection-text.js';
 import { detectLeakage } from './leakage.js';
 
 interface SessionStats {
@@ -154,8 +155,8 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
     const stats = getStats(sessionId);
     stats.totalToolCalls++;
 
-    // Detect PII in stringified result
-    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    // Detect PII in the result's strings as they are, not in their JSON escapes
+    const text = typeof result === 'string' ? result : detectionText(result);
     const detected = await config.detector.detect(text, [config.locale]);
 
     // Ensure pseudonyms exist for all detected entities
