@@ -364,6 +364,53 @@ describe("runtime context and cleanup", () => {
       .rejects.toThrow(/locales\.pl\.bogus is not a text key/);
   });
 
+  it("turns the view context off (until chat.viewContext exists): a sent field reaches no model input", async () => {
+    await started();
+    await state.host!.handleChat(request());
+    expect(state.handler!.viewContext).toBe(false);
+    const { createAiChatHandler } = await vi.importActual<typeof import("../server/adapters/nextjs/create-ai-chat-handler.js")>(
+      "../server/adapters/nextjs/create-ai-chat-handler.js",
+    );
+    const { defineTool } = await vi.importActual<typeof import("../types.js")>("../types.js");
+    const { z } = await import("zod");
+    const { MockLanguageModelV3, convertArrayToReadableStream } = await import("ai/test");
+    const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 1, text: 1, reasoning: undefined } };
+    const prompts: string[] = [];
+    const run = async (viewContext: false | undefined) => {
+      const handler = createAiChatHandler({
+        tools: {
+          orders_get: defineTool({
+            id: "orders.get", description: "Read one order.", method: "GET", inputSchema: z.object({}),
+            outputEntities: [{ type: "order", id: "id" }], execute: async () => ({ id: "o1" }),
+          }),
+        },
+        systemPrompt: "A",
+        ...(viewContext === undefined ? {} : { viewContext }),
+        model: new MockLanguageModelV3({
+          doStream: async (options) => {
+            prompts.push(JSON.stringify(options.prompt));
+            return { stream: convertArrayToReadableStream([
+              { type: "stream-start", warnings: [] }, { type: "text-start", id: "t" }, { type: "text-delta", id: "t", delta: "ok" },
+              { type: "text-end", id: "t" }, { type: "finish", finishReason: { unified: "stop", raw: undefined }, usage },
+            ] as never) };
+          },
+        }),
+      });
+      await (await handler(new Request("http://localhost/api/ai/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ id: "m1", role: "user", parts: [{ type: "text", text: "Hello" }] }],
+          glirastesViewContext: { version: 1, current: [{ entity: { type: "order", id: "o1" } }] },
+        }),
+      }))).text();
+    };
+    await run(state.handler!.viewContext as false);
+    await run(undefined);
+    expect(prompts[0]).not.toContain("view-context");
+    expect(prompts[1]).toContain("<view-context>");
+  });
+
   it("emits no exception content in its handler error callback", async () => {
     await started();
     const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
