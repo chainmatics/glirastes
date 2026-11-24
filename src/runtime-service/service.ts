@@ -148,6 +148,8 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
           approvalSecret: approvalSigningSecret,
           approvalStore: store,
           toolDiscovery: true,
+          // Off until the container has its own switch (chat.viewContext).
+          viewContext: false,
           maxBodyBytes: config.server.maxBodyBytes,
           maxSteps: config.limits.maxModelSteps,
           maxOutputTokens: config.limits.maxOutputTokens,
