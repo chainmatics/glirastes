@@ -15,7 +15,7 @@ import type { ManagedLocalRuntimeConfig } from './types.js';
 export interface ChatInteractionsHandlerConfig {
   /** `chatInteractions` of the generated module. */
   interactions: ChatInteractionsData;
-  /** Parsed `.glirastes/chat-interactions.json`; validated at creation. */
+  /** Overrides, e.g. the parsed `.glirastes/chat-interactions.json` or an object built in code; validated at creation. */
   overrides?: unknown;
   /**
    * The chat handler's managed runtime. With it, the response is per user:

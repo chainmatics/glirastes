@@ -1,6 +1,7 @@
 import {
   parseChatInteractions,
   type ChatCommandRun,
+  type ChatEntityAliases,
   type ChatInteractionArg,
   type ChatInteractionsData,
   type ChatLocaleCode,
@@ -47,6 +48,12 @@ export interface ChatEntityAction {
 export interface ChatEntityDefinition {
   readonly type: string;
   readonly label: ChatText;
+  /**
+   * Further names that select this type in `@<name>:<text>`, besides the
+   * label (when it has no whitespace or colon) and the type itself: one list
+   * for every language or one per language tag (`{ pl: ['zadanie'] }`).
+   */
+  readonly aliases?: ChatEntityAliases;
   readonly icon?: string;
   search(query: string, context: ChatEntitySearchContext):
     | Promise<ReadonlyArray<ChatEntityItem>>
@@ -123,6 +130,7 @@ export function entitiesFromData(
     return {
       type: entity.type,
       label: entity.label,
+      ...(entity.aliases ? { aliases: entity.aliases } : {}),
       ...(entity.icon ? { icon: entity.icon } : {}),
       ...(entity.actions ? { actions: entity.actions } : {}),
       async search(query, context) {

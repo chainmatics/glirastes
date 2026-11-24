@@ -25,7 +25,10 @@ export {
   type ChatEntityItem,
   type ChatEntitySearchContext,
 } from '../react/interactions/definitions.js';
+export type { ChatMentionContext } from '../react/interactions/registry.js';
+export type { CompletionLimits } from '../react/completions/completion-search.js';
 export type {
+  ChatEntityAliases,
   ChatInteractionArg,
   ChatInteractionsData,
   ChatLocaleCode,

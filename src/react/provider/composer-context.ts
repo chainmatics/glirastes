@@ -1,5 +1,6 @@
 import type { CompletionItem, CompletionSelectContext, ComposerConfig, MessageFooterConfig } from '../types.js';
 import type { ResolvedChatTrigger } from '../completions/triggers.js';
+import type { ChatMentionContext } from '../interactions/registry.js';
 import type { ComposerDraftController } from '../composer/composer-drafts.js';
 import { useChatContext, type ChatContextValue } from './chat-context.js';
 
@@ -33,6 +34,13 @@ export interface ComposerContextValue {
   isTurnRunning?: boolean;
   /** The resolved `messageFooter` (every part a boolean), null when it is off. */
   messageFooter?: Required<MessageFooterConfig> | null;
+  /**
+   * `useMentionContext`: adds a reader of a page's `@` context with its render
+   * order (the highest with a value wins); the returned function removes it.
+   */
+  registerMentionContext?: (read: () => ChatMentionContext | null | undefined, order: number) => () => void;
+  /** The `@<type>:` preset of a bare `@` (`RichMentionInput`'s `completionPreset`); only with `chatInteractions`. */
+  completionPreset?: (trigger: string) => string | undefined;
 }
 
 /** The internal composer fields of a chat context value (absent outside the provider). */

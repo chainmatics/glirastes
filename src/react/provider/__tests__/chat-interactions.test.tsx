@@ -154,3 +154,35 @@ describe('useChatInteractionsData', () => {
     await waitFor(() => expect(onError).toHaveBeenCalledTimes(2));
   });
 });
+
+describe('completion limits in AiChatProvider', () => {
+  const many = Array.from({ length: 30 }, (_, index) => defineChatCommand({
+    id: `cmd.${index}`, label: `Command ${index}`, run: { kind: 'prompt', prompt: 'x' },
+  }));
+  const own = {
+    id: 'snippets', trigger: '/',
+    search: ({ limit }: { limit: number }) => Array.from({ length: 40 }, (_, index) => ({ id: `s${index}`, type: 'snippet', label: `Snippet ${index}` })).slice(0, limit),
+  };
+
+  function searchOf(chatInteractions: { commands: typeof many; completionLimits?: Record<string, { perProvider?: number; total?: number }> }) {
+    let context: ChatContextValue | undefined;
+    function Probe() {
+      context = useChatContext();
+      return null;
+    }
+    render(<AiChatProvider transport={transport()} chatInteractions={chatInteractions} completionProviders={[own]}><Probe /></AiChatProvider>);
+    return context!.completionSearch!;
+  }
+
+  it('keeps 8 per provider and 12 in total without completionLimits', async () => {
+    const results = await searchOf({ commands: many })('', '/');
+    expect(results).toHaveLength(12);
+    expect(results.filter((item) => item.type === 'snippet')).toHaveLength(8);
+  });
+
+  it('passes chatInteractions.completionLimits to every provider of the trigger, the app\'s own included', async () => {
+    const results = await searchOf({ commands: many, completionLimits: { '/': { perProvider: 30, total: 60 } } })('', '/');
+    expect(results.filter((item) => item.type === 'command')).toHaveLength(30);
+    expect(results.filter((item) => item.type === 'snippet')).toHaveLength(30);
+  });
+});

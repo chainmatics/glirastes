@@ -111,6 +111,11 @@ FastAPI: `model_config = ConfigDict(json_schema_extra={'x-glirastes-entity': {..
   No new `status` values. This is the browser's guess from the chat history;
   with a declared read source the server looks the record up instead, and
   the guess is only the fallback: see [approval-subjects.md](approval-subjects.md).
+- **`@` entities:** a derived `@` entity takes the declared type, id and name
+  of the list its search tool returns (when no other `@` search ends up with
+  that type; otherwise it keeps its route type), and `mentions.sources` in
+  `.glirastes/tools.json` declares sources by that type; see
+  [chat interactions](chat-interactions.md#which-entities-appear-in-).
 - **Entity links:** the declared records of any tool result with a `type` and
   a name become known references, also nested. A composite key's reference
   has the readable id (`lobby/503`) and its parts in `data.idValues`.
