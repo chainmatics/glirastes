@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseChatCommandMessage } from '../../../contracts/chat-command.js';
-import type { ChatInteractionsData } from '../../../contracts/chat-interactions.js';
+import { CHAT_COMMAND_MAX_LABEL_LENGTH, parseChatCommandMessage } from '../../../contracts/chat-command.js';
+import { parseMentionMarkers } from '../../../contracts/mention-marker.js';
+import type { ChatInteractionArg, ChatInteractionsData } from '../../../contracts/chat-interactions.js';
 import { createCompletionSearch } from '../../completions/completion-search.js';
 import type { MentionData } from '../../types.js';
 import { defineChatCommand, defineChatEntity } from '../definitions.js';
-import { createChatInteractionRegistry } from '../registry.js';
+import { createChatInteractionRegistry, createChatInteractionRegistryWith } from '../registry.js';
 
 const data: ChatInteractionsData = {
   schemaVersion: 1,
@@ -192,7 +193,7 @@ describe('createChatInteractionRegistry', () => {
     expect(plan?.status).toBe('send');
     expect(parseChatCommandMessage((plan as { text: string }).text)).toEqual({
       invocation: { commandId: 'open.overview', tool: 'ui.navigate', args: { destination: '/overview' } },
-      label: '/Open Overview',
+      label: '{{mention:command:open.overview:Open Overview}}',
     });
     expect(registry.planMessage('/open-overview and summarize it', [open])).toBeUndefined();
     expect(registry.planMessage('Hello', [])).toBeUndefined();
@@ -206,7 +207,7 @@ describe('createChatInteractionRegistry', () => {
     const full = registry.planMessage('/assign @release-prüfen @alice-example', [command, task, alice]);
     expect(parseChatCommandMessage((full as { text: string }).text)).toEqual({
       invocation: { commandId: 'tasks.assign', tool: 'tasks.assign', args: { taskId: '7', assignee: 'alice' } },
-      label: '/Assign @Release prüfen @Alice Example',
+      label: '{{mention:command:tasks.assign:Assign}} {{mention:task:7:Release prüfen}} {{mention:person:alice:Alice Example}}',
     });
     const partial = registry.planMessage('/assign @release-prüfen', [command, task]);
     expect(partial).toEqual({
@@ -229,7 +230,7 @@ describe('createChatInteractionRegistry', () => {
     const request = (plan as { request: Parameters<typeof registry.completeCommand>[0] }).request;
     expect(parseChatCommandMessage((registry.completeCommand(request, { status: '' }) as { text: string }).text)?.invocation.args).toEqual({});
     expect(parseChatCommandMessage((registry.completeCommand(request, { status: 'done' }) as { text: string }).text)).toEqual({
-      invocation: { commandId: 'filter.tasks', tool: 'ui.filter.tasks', args: { status: 'done' } }, label: '/Filter Tasks done',
+      invocation: { commandId: 'filter.tasks', tool: 'ui.filter.tasks', args: { status: 'done' } }, label: '{{mention:command:filter.tasks:Filter Tasks}} done',
     });
     expect(registry.completeCommand(request, { status: 'x'.repeat(2_100) })).toMatchObject({ status: 'needs-args', request: { error: 'invalid' } });
   });
@@ -256,10 +257,120 @@ describe('createChatInteractionRegistry', () => {
     const target = { type: 'task', id: '7', label: 'Release prüfen' };
     expect(parseChatCommandMessage((registry.planAction(target, 'task.tasks.complete') as { text: string }).text)).toEqual({
       invocation: { commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' } },
-      label: '/Erledigen @Release prüfen',
+      label: '{{mention:command:task.tasks.complete:Erledigen}} {{mention:task:7:Release prüfen}}',
     });
     expect(parseChatCommandMessage((registry.planAction(target, 'task.open') as { text: string }).text)?.invocation.args)
       .toEqual({ destination: '/tasks/:taskId', params: { taskId: '7' } });
     expect(registry.planAction(target, 'task.unknown')).toBeUndefined();
+  });
+  describe('label line of a direct command', () => {
+    const labelOf = (plan: unknown) => parseChatCommandMessage((plan as { text: string }).text)?.label;
+    const assignWith = (args: ReadonlyArray<ChatInteractionArg>) => defineChatCommand({ ...assign, args });
+
+    it('writes no marker for an entity argument without a picked label, nor for an argument without an entity type', () => {
+      const registry = createChatInteractionRegistry({ data, entities: [person], commands: [assign], locale: 'en' });
+      const partial = registry.planMessage('/assign @release-prüfen', [mention('command', 'tasks.assign', 'Assign', '/'), mention('task', '7', 'Release prüfen')]);
+      if (partial?.status !== 'needs-args') throw new Error('expected a form request');
+      // Typed into the form without a pick: the id as before, no name the approval card would trust.
+      expect(labelOf(registry.completeCommand(partial.request, { assignee: 'bob' })))
+        .toBe('{{mention:command:tasks.assign:Assign}} {{mention:task:7:Release prüfen}} @bob');
+      expect(labelOf(registry.completeCommand(partial.request, { assignee: 'bob' }, { assignee: 'Bob Builder' })))
+        .toBe('{{mention:command:tasks.assign:Assign}} {{mention:task:7:Release prüfen}} {{mention:person:bob:Bob Builder}}');
+      // No declared entity type: plain text.
+      const untyped = createChatInteractionRegistry({
+        commands: [assignWith([{ name: 'taskId', label: 'Task', required: true }])], locale: 'en',
+      });
+      const asked = untyped.planMessage('/assign', [mention('command', 'tasks.assign', 'Assign', '/')]);
+      if (asked?.status !== 'needs-args') throw new Error('expected a form request');
+      expect(labelOf(untyped.completeCommand(asked.request, { taskId: '7' }, { taskId: 'Release' })))
+        .toBe('{{mention:command:tasks.assign:Assign}} 7');
+    });
+
+    it('falls back to plain text for an id or label that cannot be written as a marker', () => {
+      const registry = createChatInteractionRegistry({ data, entities: [person], commands: [assign], locale: 'en' });
+      const command = mention('command', 'tasks.assign', 'Assign', '/');
+      const label = (task: MentionData, who: MentionData) => labelOf(registry.planMessage(
+        `/assign @${task.slug} @${who.slug}`, [command, task, who],
+      ));
+      // A colon splits the id for every reader, `}` ends the marker, a hidden character could carry text.
+      expect(label(mention('task', 'a:b', 'Colon'), mention('person', 'x}y', 'Brace')))
+        .toBe('{{mention:command:tasks.assign:Assign}} @Colon @Brace');
+      expect(label(mention('task', 'a\u200bb', 'Hidden'), mention('person', 'two  spaces', 'Spaces')))
+        .toBe('{{mention:command:tasks.assign:Assign}} @Hidden @Spaces');
+      // A label is written in its canonical form, never ending the marker early.
+      expect(label(mention('task', '7', 'A}}B'), mention('person', 'alice', 'Line\nbreak')))
+        .toBe('{{mention:command:tasks.assign:Assign}} {{mention:task:7:A｝｝B}} {{mention:person:alice:Line break}}');
+    });
+
+    it('never cuts a marker at the label limit', () => {
+      const registry = createChatInteractionRegistry({ data, entities: [person], commands: [assign], locale: 'en' });
+      const command = mention('command', 'tasks.assign', 'Assign', '/');
+      const longId = `t${'1'.repeat(150)}`;
+      for (const [task, who] of [
+        [mention('task', '7', 'R'.repeat(150)), mention('person', 'alice', 'A'.repeat(150))],
+        [mention('task', longId, 'Short'), mention('person', 'alice', 'Alice')],
+        [mention('task', '7', '😀'.repeat(110)), mention('person', 'alice', '😀'.repeat(110))],
+      ] as const) {
+        const line = labelOf(registry.planMessage(`/assign @${task.slug} @${who.slug}`, [command, task, who]))!;
+        expect(line.length).toBeLessThanOrEqual(CHAT_COMMAND_MAX_LABEL_LENGTH);
+        // Every `{{mention:` that starts in the line is a whole marker.
+        expect(line.split('{{mention:').length - 1).toBe(parseMentionMarkers(line).length);
+        expect(line.startsWith('{{mention:command:tasks.assign:Assign}} ')).toBe(true);
+      }
+      // A label too long for the rest of the line is shortened inside its marker, not dropped.
+      const send = (task: MentionData, who: MentionData) => labelOf(registry.planMessage(`/assign @${task.slug} @${who.slug}`, [command, task, who]))!;
+      const long = send(mention('task', '7', 'R'.repeat(150)), mention('person', 'alice', 'Alice'));
+      expect(parseMentionMarkers(long).map(({ type, id }) => `${type}:${id}`)).toEqual(['command:tasks.assign', 'task:7', 'person:alice']);
+      expect(parseMentionMarkers(long)[1]!.label).toMatch(/^R+…$/);
+      // An id that leaves no room for a marker: that piece as plain text, cut like before.
+      const plain = send(mention('task', longId, 'Short'), mention('person', 'alice', 'Alice'));
+      expect(plain).toBe(`{{mention:command:tasks.assign:Assign}} @Short {{mention:person:alice:Alice}}`);
+
+      // Free text between two mentions: the first label leaves room for it and the second marker.
+      const noted = createChatInteractionRegistry({
+        entities: [person],
+        commands: [assignWith([
+          { name: 'taskId', label: 'Task', required: true, entity: 'task' },
+          { name: 'note', label: 'Note', required: true },
+          { name: 'assignee', label: 'Person', required: true, entity: 'person' },
+        ])],
+        locale: 'en',
+      });
+      const asked = noted.planMessage('/assign', [command]);
+      if (asked?.status !== 'needs-args') throw new Error('expected a form request');
+      const withNote = labelOf(noted.completeCommand(
+        asked.request,
+        { taskId: '7', note: 'n'.repeat(40), assignee: 'alice' },
+        { taskId: 'T'.repeat(150), assignee: 'Alice' },
+      ))!;
+      expect(withNote.length).toBeLessThanOrEqual(CHAT_COMMAND_MAX_LABEL_LENGTH);
+      expect(parseMentionMarkers(withNote).map(({ type }) => type)).toEqual(['command', 'task', 'person']);
+      expect(withNote).toContain(` ${'n'.repeat(40)} {{mention:person:alice:Alice}}`);
+    });
+
+    it('writes the line as before without markers when the app turned mention markup off', () => {
+      const registry = createChatInteractionRegistryWith({ data, entities: [person], commands: [assign], locale: 'en' }, { labelMarkers: false });
+      const command = mention('command', 'tasks.assign', 'Assign', '/');
+      expect(labelOf(registry.planMessage('/assign @release-prüfen @alice-example', [command, mention('task', '7', 'Release prüfen'), mention('person', 'alice', 'Alice Example')])))
+        .toBe('/Assign @Release prüfen @Alice Example');
+      expect(labelOf(registry.planAction({ type: 'task', id: '7', label: 'Release' }, 'task.open'))).toBe('/Open @Release');
+    });
+
+    it('bounds marker labels by maxLabelLength, normalized like the mention serializer', () => {
+      const line = (maxLabelLength: number) => labelOf(createChatInteractionRegistryWith({ data, locale: 'en' }, { maxLabelLength })
+        .planAction({ type: 'task', id: '7', label: 'Release prüfen' }, 'task.open'));
+      expect(line(10)).toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release p…}}');
+      expect(line(3)).toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release…}}');
+      expect(line(500)).toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release prüfen}}');
+      expect(line(Number.NaN)).toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release prüfen}}');
+    });
+
+    it('marks the target of an entity action with the type of its entity', () => {
+      const registry = createChatInteractionRegistry({ data, locale: 'en' });
+      expect(labelOf(registry.planAction({ type: 'task', id: '7', label: 'Release' }, 'task.open')))
+        .toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release}}');
+      expect(labelOf(registry.planAction({ type: 'task', id: '7:8', label: 'Release' }, 'task.open')))
+        .toBe('{{mention:command:task.open:Open}} @Release');
+    });
   });
 });

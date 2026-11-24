@@ -585,6 +585,39 @@ plus its visible label. Missing arguments open a form first; a command with
 only optional arguments asks once. A command mixed with free text goes to the
 model as before, with the command as a tool reference.
 
+The visible label is one line of at most 200 characters. Since the release
+after 0.25.0 it carries [mention markers](#mention-markers): one for the
+command (`{{mention:command:<id>:<label>}}`) and one for each picked object
+(`{{mention:<type>:<id>:<label>}}`), so the chat shows them as pills, like
+the composer did. A picked object of an entity argument has the type the
+argument declares (`entity`); the object an entity action runs on has the type
+of that entity. These stay plain text, as before: a command argument without
+an entity type (`done`), a value typed without picking an object (`@bob`), an
+id with `:`, or an id or type that cannot be written as a marker (see
+above). The line is never cut inside a marker: a long label is shortened
+inside its marker (to at least 8 code points, with `…`), and a marker that
+still does not fit is written as plain text. A message sent by an older
+release keeps its plain line (`/Assign @Release @Alice`) and is shown as
+before.
+
+The line follows the app's `mentions.serialize`: with `enabled: false` it
+stays plain text exactly as before (no markers), and `maxLabelLength` is the
+upper bound of each label in its markers (the line's limit can shorten a
+label further). `labels: 'raw'` does not apply here: the line is always
+written with canonical labels, since a raw label could end a marker early or
+break the command message.
+
+The picked object's name then counts like a name the user mentioned: the
+approval card of the command shows it (provenance `mention`) instead of
+warning that no name is known for the id. The model reads the label line of
+earlier commands on later turns as it reads any user message with mentions:
+it now sees the command id and the object ids in the markers. It saw these
+ids before in the arguments of the command's tool call in the history; the
+PII shield treats the line like any user text. Copy text, the chat title and
+`stripChatCommandMarkers` work on the new line unchanged; the chat title now
+also leaves out the hidden command marker for a chat that starts with a
+command (it showed `<!--glirastes:command…` before).
+
 The chat handler runs such a message without routing, guardrails or a model:
 the tool comes from the same registry, wrapped like on the model path, so the
 managed guard (manifest, principal, roles, revocation, budget), confirmation

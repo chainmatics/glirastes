@@ -79,6 +79,20 @@ describe('chats kept in the browser', () => {
     expect((await sessions.list!())[0]!.title).toBe('/Zusammenfassen @Release prüfen bitte');
   });
 
+  it('names a chat that starts with a direct command after its label line, with or without pills', async () => {
+    const pills = store();
+    await pills.save!('default', [user(formatChatCommandMessage({
+      commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' },
+      label: '{{mention:command:task.tasks.complete:Erledigen}} {{mention:task:7:Release prüfen}}',
+    }))]);
+    expect((await pills.list!())[0]!.title).toBe('/Erledigen @Release prüfen');
+    const plain = store();
+    await plain.save!('default', [user(formatChatCommandMessage({
+      commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' }, label: '/Erledigen @Release prüfen',
+    }))]);
+    expect((await plain.list!())[0]!.title).toBe('/Erledigen @Release prüfen');
+  });
+
   // #19: the title is the visible label line, as the bubble shows it, not the marker of a direct command.
   it('names a chat after the visible label of a direct command, without its marker', async () => {
     const sessions = store();

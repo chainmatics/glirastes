@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import { AiChatPanel } from '../components/ai-chat-panel.js';
 import type { ChatTransport } from '../types.js';
+import { formatChatCommandMessage } from '../../contracts/chat-command.js';
+import type { ChatInteractionsData } from '../../contracts/chat-interactions.js';
+import { createChatInteractionRegistry } from '../interactions/registry.js';
 import { UNSTYLED_GUARD } from '../unstyled.js';
 import { CHAT_STYLES } from '../../embed/chat-styles.generated.js';
 
@@ -108,6 +111,51 @@ describe('approval card names the ids of the call (default setup)', () => {
     const warning = screen.getByRole('alert');
     expect(warning.querySelector('[data-element="subject-id"]')!.textContent).toBe(UNSEEN);
     expect(screen.getByRole('button', { name: /All 2/ }).getAttribute('aria-describedby')).toBe(warning.id);
+  });
+});
+
+describe('approval card of a direct command', () => {
+  const tasks: ChatInteractionsData = {
+    schemaVersion: 1,
+    entities: [{
+      type: 'task', label: 'Task',
+      actions: [{ id: 'task.tasks.delete', label: 'Delete', entityArg: 'taskId', run: { kind: 'tool', tool: 'tasks.delete' } }],
+    }],
+    commands: [],
+  };
+
+  /** The command message the chat sends for the picked task, and the confirmation the server asks for. */
+  function commandTransport(text: string): ChatTransport {
+    return {
+      messages: [
+        { id: 'u1', role: 'user', parts: [{ type: 'text', text }] },
+        {
+          id: 'a1', role: 'assistant',
+          parts: [{
+            type: 'tool-tasks_delete', toolCallId: 'glirastes-command-0123456789abcdef0123', state: 'approval-requested',
+            input: { taskId: UNSEEN }, approval: { id: 'approval-0' },
+          } as never],
+        },
+      ],
+      status: 'ready', error: null,
+      sendMessage: vi.fn(async () => {}), stop: vi.fn(), setMessages: vi.fn(), addToolApprovalResponse: vi.fn(async () => {}),
+    };
+  }
+
+  it('names the object the user picked by its label, without the unknown-id warning', async () => {
+    const plan = createChatInteractionRegistry({ data: tasks }).planAction({ type: 'task', id: UNSEEN, label: 'Release prüfen' }, 'task.tasks.delete');
+    render(<AiChatProvider transport={commandTransport((plan as { text: string }).text)}><AiChatPanel /></AiChatProvider>);
+    const el = await card();
+    expect(el.querySelector('[data-subject]')!.textContent).toBe('TaskRelease prüfen');
+    expect(el.textContent).not.toContain(UNSEEN);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('still warns for an older command message that carries the name as plain text', async () => {
+    const text = formatChatCommandMessage({ commandId: 'task.tasks.delete', tool: 'tasks.delete', args: { taskId: UNSEEN }, label: '/Delete @Release prüfen' });
+    render(<AiChatProvider transport={commandTransport(text)}><AiChatPanel /></AiChatProvider>);
+    await card();
+    expect(screen.getByRole('alert').textContent).toContain('No name is known for this id in this conversation.');
   });
 });
 
