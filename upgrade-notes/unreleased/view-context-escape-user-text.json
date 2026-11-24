@@ -1,0 +1,12 @@
+{
+  "id": "view-context-escape-user-text",
+  "kind": "optional",
+  "summary": "With viewContext on (the default), createAiChatHandler sends <view-context and </view-context in the text of user messages to the model as &lt;view-context, so typed or pasted text cannot pose as the view context block. Text without the tag is byte-identical.",
+  "howTo": "Nothing to do. Only the model input changes, and only for user text that contains such a tag (any case, whitespace or zero-width characters around the /, <view-context-…>; a typed &lt; before the name becomes &amp;lt;). The chat, the stream, the PII shield, the guardrails and a custom streamHandler still get the text as the user wrote it. With viewContext: false (and in the runtime container) nothing changes. Tests that assert the exact model input for a user message containing <view-context need the escaped form.",
+  "skill": "integrating-glirastes-nextjs#history-and-answers",
+  "affectedWhen": {
+    "symbols": [
+      "createAiChatHandler"
+    ]
+  }
+}

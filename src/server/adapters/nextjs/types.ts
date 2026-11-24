@@ -535,9 +535,12 @@ export interface AiChatHandlerConfig {
    * Size: the block has at most 2,966 characters (a hard bound); full, that
    * is roughly 850 tokens at 3.5 characters per token, 1,000 to 1,500 with
    * random ids or non-ASCII text, usually far less. `maxEntries` and the
-   * `facts` config make it smaller. No nonce: a user (or third-party data
-   * through a mention label) can write a look-alike block into their own
-   * message; no permission comes from it. The runtime container turns this
+   * `facts` config make it smaller. No nonce: instead, while this option is
+   * on, `<view-context` and `</view-context` (any case, also with whitespace
+   * or zero-width characters) in the text of user messages reach the model
+   * as `&lt;view-context`, so typed or pasted text cannot pose as the block;
+   * only the model input changes, after the PII shield and the guardrails,
+   * never the chat or the stream. The runtime container turns this
    * off until its option `chat.viewContext` comes. See `ViewContextPolicy`
    * (`glirastes/contracts`).
    */

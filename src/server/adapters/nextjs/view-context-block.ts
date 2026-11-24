@@ -23,12 +23,13 @@
  * strings. The PII shield replaces values before serializing, never in the
  * serialized line. The block has no nonce: nothing in it depends on a
  * secret, so guessing one gains nothing, and it stays byte-identical for the
- * same entries; a user can type a look-alike block in their own message,
- * which grants nothing either.
+ * same entries. Instead, `<view-context` in the text of user messages is
+ * escaped for the model (`withViewContextTagsEscaped`), so typed or pasted
+ * text cannot pose as the block; it would grant nothing either.
  *
  * @module
  */
-import { escapeJsonForBlock } from '../../../contracts/delimited-text.js';
+import { escapeJsonForBlock, escapeTagInText } from '../../../contracts/delimited-text.js';
 import { cleanDisplayText } from '../../../contracts/mention-marker.js';
 import {
   canonicalViewContextLabel,
@@ -160,6 +161,48 @@ export function withViewContextMessage<T>(messages: T[], text: string | undefine
   const last = messages.at(-1) as { role?: unknown } | undefined;
   if (last?.role !== 'user') return messages;
   return [...messages, { role: 'user', content: text } as T];
+}
+
+/** The tag name of the block, for `escapeTagInText`. */
+const VIEW_CONTEXT_TAG = 'view-context';
+
+/** A text part with `<view-context` escaped, or the part itself when nothing changed. */
+function escapedPart(part: unknown): unknown {
+  if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') return part;
+  const text = escapeTagInText(part.text, VIEW_CONTEXT_TAG);
+  return text === part.text ? part : { ...part, text };
+}
+
+/**
+ * Model messages with every `<` that may open or close a `<view-context>`
+ * tag in the text of a user message escaped as `&lt;` (`escapeTagInText`:
+ * any case, whitespace, zero-width characters or a soft hyphen around the
+ * `/`, `<view-context-…>`; an `&lt;` already in front of the name becomes
+ * `&amp;lt;`), so text a user typed or pasted can never pose as the block
+ * the SDK renders. Only user messages: string content and `text` parts;
+ * other roles and parts stay as they are. The model still reads the text.
+ * Messages without such a tag are returned as they are (the same objects,
+ * byte-identical); never mutates. Apply to the history before the SDK's own
+ * block is added (`withViewContextMessage`).
+ */
+export function withViewContextTagsEscaped<T>(messages: T[]): T[] {
+  let changed = false;
+  const result = messages.map((message) => {
+    if (!isRecord(message) || message.role !== 'user') return message;
+    const { content } = message;
+    if (typeof content === 'string') {
+      const text = escapeTagInText(content, VIEW_CONTEXT_TAG);
+      if (text === content) return message;
+      changed = true;
+      return { ...message, content: text } as T;
+    }
+    if (!Array.isArray(content)) return message;
+    const parts = content.map(escapedPart);
+    if (parts.every((part, index) => part === content[index])) return message;
+    changed = true;
+    return { ...message, content: parts } as T;
+  });
+  return changed ? result : messages;
 }
 
 /** What a request's view context became: the block (when anything is left) and content-free drop counts. */
