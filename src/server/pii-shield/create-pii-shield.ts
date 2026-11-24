@@ -5,9 +5,10 @@ import type {
   ComplianceSummary,
   PiiEntity,
 } from '../../types.js';
-import { createSessionStore } from './session-mapping.js';
+import { createSessionStore, type Session } from './session-mapping.js';
 import { deepWalkReplace } from './deep-walk.js';
 import { detectLeakage } from './leakage.js';
+import { longestFirst, replaceKnown, type Replacements } from './replace-known.js';
 
 interface SessionStats {
   startedAt: number;
@@ -20,6 +21,21 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
   const store = createSessionStore(config.locale);
   const auditLog = new Map<string, PiiAuditEntry[]>();
   const sessionStats = new Map<string, SessionStats>();
+
+  /**
+   * The session's originals and their pseudonyms, the longest first, for
+   * {@link replaceKnown}: `toPseudonym` maps original → pseudonym, otherwise
+   * pseudonym → original.
+   */
+  function knownPairs(session: Session, toPseudonym: boolean): Replacements {
+    const pairs: Array<[string, string]> = [];
+    for (const original of session.allOriginals()) {
+      const pseudonym = session.getPseudonym(original);
+      if (!pseudonym) continue;
+      pairs.push(toPseudonym ? [original, pseudonym] : [pseudonym, original]);
+    }
+    return longestFirst(pairs);
+  }
 
   function getStats(sessionId: string): SessionStats {
     let stats = sessionStats.get(sessionId);
@@ -111,16 +127,8 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
       }
     }
 
-    // Replace pseudonyms with originals
-    const originals = session.allOriginals();
-    let result = text;
-    for (const original of originals) {
-      const pseudonym = session.getPseudonym(original);
-      if (!pseudonym) continue;
-      result = result.split(pseudonym).join(original);
-    }
-
-    return result;
+    // Replace pseudonyms with originals, the longest pseudonym first, in one pass
+    return replaceKnown(text, knownPairs(session, false));
   }
 
   function rehydrateArgs(
@@ -129,20 +137,14 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
   ): Record<string, unknown> {
     const session = store.getOrCreate(sessionId);
 
+    const pairs = knownPairs(session, false);
     const result = deepWalkReplace(args, (s: string) => {
       // Check if the entire string is a known pseudonym
       const original = session.resolveOriginal(s);
       if (original) return original;
 
-      // Check if any known pseudonyms appear as substrings
-      const originals = session.allOriginals();
-      let replaced = s;
-      for (const orig of originals) {
-        const pseudonym = session.getPseudonym(orig);
-        if (!pseudonym) continue;
-        replaced = replaced.split(pseudonym).join(orig);
-      }
-      return replaced;
+      // Known pseudonyms inside the string, the longest first, in one pass
+      return replaceKnown(s, pairs);
     }) as Record<string, unknown>;
 
     addAuditEntry(buildAuditEntry(sessionId, 'rehydrate-args', []));
@@ -163,17 +165,11 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
       session.getOrCreatePseudonym(entity.text, entity.type);
     }
 
-    // Deep-walk and replace originals with pseudonyms
-    const originals = session.allOriginals();
-    const anonymized = deepWalkReplace(result, (s: string) => {
-      let replaced = s;
-      for (const original of originals) {
-        const pseudonym = session.getPseudonym(original);
-        if (!pseudonym) continue;
-        replaced = replaced.split(original).join(pseudonym);
-      }
-      return replaced;
-    });
+    // Deep-walk and replace originals with pseudonyms: the longest original
+    // first, in one pass, so a known original that is part of a longer one
+    // never leaves a piece of the longer one in clear text
+    const pairs = knownPairs(session, true);
+    const anonymized = deepWalkReplace(result, (s: string) => replaceKnown(s, pairs));
 
     addAuditEntry(buildAuditEntry(sessionId, 'anonymize-result', detected));
     return anonymized;
