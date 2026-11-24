@@ -33,6 +33,7 @@ import {
   toolReferenceToDataset,
 } from '../utils/mention-markup.js';
 import { fillTemplate } from '../utils/fill-template.js';
+import { isImeKeyDown } from '../utils/ime.js';
 
 const DEFAULT_TRIGGERS: ReadonlyArray<string> = ['@', '/'];
 const SEARCH_DEBOUNCE_MS = 100;
@@ -1120,6 +1121,11 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
 
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>) => {
+        // Keys of an IME composition belong to the IME: Enter commits the text and Tab or the arrows
+        // pick a candidate, they neither send nor pick a list entry. Safari fires the committing
+        // keydown after `compositionend`, flagged only by keyCode 229.
+        if (isImeKeyDown(event) || composingRef.current) return;
+
         // Dropdown navigation (mention mode only)
         if (hasMentionSupport && dropdownOpen && searchResults.length > 0) {
           const actions = (onEntityAction && searchResults[selectedIndex]?.actions) || [];
@@ -1631,6 +1637,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           aria-disabled={disabled}
           aria-label={placeholder ?? 'Message input'}
           onInput={handleInput}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onDragOver={handleDragOver}

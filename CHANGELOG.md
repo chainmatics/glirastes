@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Enter that commits an IME composition (Japanese, Chinese, Korean input) sent the message or picked the selected `@`/`/` list entry; Tab picked it too. `RichMentionInput` (plain and mention mode) and the plain chat textarea now leave every key of an open composition to the IME (`isComposing`, keyCode 229 as Safari fires it after `compositionend`, or between `compositionstart` and `compositionend`).
+
 ## [0.25.0] - 2026-11-24
 
 ### Added

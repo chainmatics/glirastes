@@ -18,6 +18,7 @@ import { ComposerHint } from './composer-hint.js';
 import { composerContextOf } from '../provider/composer-context.js';
 import { useChatComposerTarget } from '../composer/chat-composer.js';
 import { useComposerDraft } from '../composer/use-composer-draft.js';
+import { isImeKeyDown } from '../utils/ime.js';
 import type { ChatAttachment, ChatComposerInputControls, ChatInputProps, RichMentionInputHandle } from '../types.js';
 
 const NO_ATTACHMENTS: ReadonlyArray<ChatAttachment> = [];
@@ -87,6 +88,8 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Enter that commits an IME composition does not send.
+      if (isImeKeyDown(e)) return;
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSubmit(e as unknown as FormEvent);
