@@ -1215,6 +1215,15 @@ export interface ComposerConfig {
    * The plain text field keeps the browser's placeholder.
    */
   placeholderOnFocus?: boolean;
+  /**
+   * The active entry of the `@`/`/` list follows real pointer movement over
+   * a row or an entity action (default `true`), with a hover look in the
+   * built-in stylesheet. `false` restores the earlier keyboard-only list: no
+   * pointer handling, `onActivate` does nothing, no `data-active-source`
+   * and no hover look. Passed to `RichMentionInput` as `pointerActivation`,
+   * also through `useChatComposerInput().inputProps`.
+   */
+  pointerActivation?: boolean;
 }
 
 /**
@@ -2452,7 +2461,7 @@ export interface ChatComposerInput extends ChatComposerInputControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers' | 'onListOpenChange' | 'completionPreset' | 'placeholderOnFocus'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers' | 'onListOpenChange' | 'completionPreset' | 'placeholderOnFocus' | 'pointerActivation'>;
   /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
   readonly attachmentInputProps: ChatAttachmentInputProps;
   /** A completion list of the editor is open (e.g. for `ComposerHint`). */
@@ -2511,7 +2520,8 @@ export interface MentionDropdownItemProps {
    * list already activates the entry under the pointer when the pointer
    * really moves. Call it only on real pointer movement, never on
    * `mouseenter`/`mouseover`, which also fire when the list scrolls or
-   * re-renders under a resting pointer.
+   * re-renders under a resting pointer. Does nothing with
+   * `pointerActivation={false}`.
    */
   onActivate?: () => void;
 }
@@ -2587,6 +2597,14 @@ export interface RichMentionInputProps {
    * look). Plain mode only sets `data-placeholder`.
    */
   placeholderOnFocus?: boolean;
+  /**
+   * Real pointer movement over a row or an entity action makes it the active
+   * entry (default `true`); the listbox carries `data-active-source`.
+   * `false`: the active entry changes by keyboard only, as before (no
+   * pointer or scroll handling, `onActivate` does nothing, no
+   * `data-active-source`, so no hover look from the built-in stylesheet).
+   */
+  pointerActivation?: boolean;
 }
 
 export interface ChatWindowHeaderRenderProps {

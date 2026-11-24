@@ -66,6 +66,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     composer: composerConfig,
   } = useComposerContext();
   const placeholderOnFocus = composerConfig?.placeholderOnFocus;
+  const pointerActivation = composerConfig?.pointerActivation;
   // A hand-built context without `canCompose` locks while loading, as before.
   const canCompose = composable ?? !isLoading;
   const { onSubmit, initialValue } = options;
@@ -222,6 +223,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     ...(completionPreset ? { completionPreset } : {}),
     // Only when the provider sets it: the input's own default (visible on focus) applies otherwise.
     ...(placeholderOnFocus !== undefined ? { placeholderOnFocus } : {}),
+    ...(pointerActivation !== undefined ? { pointerActivation } : {}),
     ...(attachmentOptions
       ? {
           onFiles: (files: File[]) => { void addFiles(files); },
@@ -229,7 +231,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
           allowEmptySubmit: attachments.length > 0,
         }
       : {}),
-  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length, completionPreset, placeholderOnFocus]);
+  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length, completionPreset, placeholderOnFocus, pointerActivation]);
 
   const attachmentInputProps = useMemo<ChatComposerInput['attachmentInputProps']>(() => ({
     ref: fileInputRef,

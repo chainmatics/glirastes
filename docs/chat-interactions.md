@@ -664,6 +664,10 @@ then goes to the model.
   The built-in stylesheet
   shows a hover look (same as the selected look) only in pointer mode and
   only on devices with hover.
+  `composer.pointerActivation: false` (`ComposerConfig`; the
+  `RichMentionInput` prop `pointerActivation`) restores the keyboard-only
+  list: no pointer or scroll handling, `onActivate` does nothing, no
+  `data-active-source` and no hover look.
 - Backspace behind a pill and Delete before it remove the whole pill; each
   pill's remove control is named by `locale.removeMentionLabel`.
 - A chip in an answer is a button named by `locale.openEntityLabel`.

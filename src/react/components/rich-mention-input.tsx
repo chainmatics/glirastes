@@ -320,6 +320,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onListOpenChange,
       completionPreset,
       placeholderOnFocus = true,
+      pointerActivation = true,
     },
     ref,
   ) {
@@ -1704,7 +1705,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const listOpen = dropdownOpen && searchResults.length > 0;
     /** Pointer activation: the entry becomes the active one (Enter/Tab pick it); the list does not scroll. */
     const activateEntry = (index: number, action: number) => {
-      if (!searchResults[index]) return;
+      if (!pointerActivation || !searchResults[index]) return;
       setSelectedIndex(index);
       setSelectedAction(action);
       setActiveSource('pointer');
@@ -1871,15 +1872,18 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             aria-label={listLabel}
             data-component="mention-dropdown"
             data-state={isSearching ? 'searching' : 'idle'}
-            data-active-source={activeSource}
             // Keep the caret in the editor while the list is clicked.
             onMouseDown={(event) => event.preventDefault()}
-            onPointerMove={handleListPointerMove}
-            onMouseMove={handleListPointerMove}
-            // `pointer` means "the active entry is the one under the pointer". After a scroll (wheel,
-            // trackpad, keyboard) another row may be under it: back to `keyboard`; the stored position
-            // stays, so a resting pointer re-activates nothing until it really moves.
-            onScroll={() => { if (activeSource === 'pointer') setActiveSource('keyboard'); }}
+            // `pointerActivation={false}`: the keyboard-only list as before, no attribute, no handlers.
+            {...(pointerActivation ? {
+              'data-active-source': activeSource,
+              onPointerMove: handleListPointerMove,
+              onMouseMove: handleListPointerMove,
+              // `pointer` means "the active entry is the one under the pointer". After a scroll (wheel,
+              // trackpad, keyboard) another row may be under it: back to `keyboard`; the stored position
+              // stays, so a resting pointer re-activates nothing until it really moves.
+              onScroll: () => { if (activeSource === 'pointer') setActiveSource('keyboard'); },
+            } : {})}
           >
             <PointerActiveContext.Provider value={activeSource === 'pointer'}>
             {searchResults.map((result, index) => {

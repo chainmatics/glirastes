@@ -198,8 +198,19 @@ A custom `DropdownItem` needs no change: the list finds the row from the
 one element). It can call `onActivate()` itself, only on real pointer
 movement. An own hover style is best scoped to
 `[data-active-source="pointer"]`, or the hovered row and the active row
-both look marked after the arrow keys or a scroll. A custom item that scrolls itself on
-`isSelected` also scrolls on pointer activation.
+both look marked after the arrow keys or a scroll. A custom item that scrolls
+itself on `isSelected` also scrolls on pointer activation.
+
+`composer.pointerActivation: false` (`ComposerConfig`, on `AiChatProvider`,
+`VercelAiChat` and `<glirastes-chat>` `config.composer`) restores the earlier
+keyboard-only list: no pointer or scroll handling, `onActivate` does nothing,
+no `data-active-source` and so no hover look. It reaches the built-in
+composer and `useChatComposerInput().inputProps`; an own `RichMentionInput`
+takes the prop `pointerActivation`.
+
+```tsx
+const composer = useMemo<ComposerConfig>(() => ({ pointerActivation: false }), []);
+```
 
 ## Opening a list from a button
 

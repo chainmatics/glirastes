@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
-import React from 'react';
+import React, { useMemo } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MentionDropdownItemProps, MentionResult } from '../../types.js';
+import type {
+  ChatCompletionProvider,
+  ChatTransport,
+  ComposerConfig,
+  MentionDropdownItemProps,
+  MentionResult,
+} from '../../types.js';
+import { AiChatProvider } from '../../provider/ai-chat-provider.js';
+import { MentionInput } from '../mention-input.js';
 import { RichMentionInput } from '../rich-mention-input.js';
 
 const RESULTS: MentionResult[] = [
@@ -294,5 +302,104 @@ describe('completion list: the active entry follows real pointer movement', () =
     expect(activeId()).toBe(option('Cleo').id);
     fireEvent.keyDown(editor, { key: 'Enter' });
     await waitFor(() => expect(editor.querySelector('[data-mention-id="c"]')).toBeTruthy());
+  });
+});
+
+describe('pointerActivation: false keeps the keyboard-only list', () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn() as unknown as Element['scrollIntoView'];
+  });
+  afterEach(cleanup);
+
+  it('pointer movement changes nothing; Enter picks the keyboard row', async () => {
+    const { editor } = await open({ pointerActivation: false });
+    const before = activeId();
+    move(option('Anna'), 1, 1);
+    move(option('Cleo'), 1, 60);
+    move(option('Cleo'), 1, 70);
+    expect(selectedLabels()).toEqual(['Anna']);
+    expect(option('Anna').getAttribute('data-selected')).toBe('true');
+    expect(option('Cleo').getAttribute('data-selected')).toBe('false');
+    expect(activeId()).toBe(before);
+    // The hover rules of the stylesheet match only `[data-active-source="pointer"]`.
+    expect(screen.getByRole('listbox').hasAttribute('data-active-source')).toBe(false);
+    fireEvent.scroll(screen.getByRole('listbox'));
+    expect(screen.getByRole('listbox').hasAttribute('data-active-source')).toBe(false);
+    fireEvent.keyDown(editor, { key: 'ArrowDown' });
+    expect(selectedLabels()).toEqual(['Bert']);
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(editor.querySelector('[data-mention-id="b"]')).toBeTruthy());
+  });
+
+  it('ignores the action buttons under the pointer', async () => {
+    await open({ pointerActivation: false });
+    move(option('Anna'), 1, 1);
+    move(screen.getByRole('option', { name: 'Mail: Dora' }), 200, 90);
+    expect(activeId()).toBe(option('Anna').id);
+  });
+
+  it('makes onActivate a no-op', async () => {
+    function Item({ result, isSelected, onClick, optionProps, onActivate }: MentionDropdownItemProps) {
+      return (
+        <div {...optionProps} onClick={onClick} data-mine={isSelected ? 'on' : 'off'}>
+          <span data-testid={`activate-${result.id}`} onFocus={() => onActivate?.()} tabIndex={-1}>{result.label}</span>
+        </div>
+      );
+    }
+    await open({ pointerActivation: false, components: { DropdownItem: Item } });
+    fireEvent.focus(screen.getByTestId('activate-c'));
+    expect(option('Cleo').getAttribute('data-mine')).toBe('off');
+    expect(option('Anna').getAttribute('data-mine')).toBe('on');
+  });
+});
+
+const people: ChatCompletionProvider = { id: 'people', trigger: '@', search: () => RESULTS };
+
+function ProviderComposer({ composer }: { composer?: ComposerConfig }) {
+  const providers = useMemo(() => [people], []);
+  return (
+    <AiChatProvider transport={transport()} completionProviders={providers} composer={composer}>
+      <MentionInput />
+    </AiChatProvider>
+  );
+}
+
+function transport(): ChatTransport {
+  return {
+    messages: [],
+    status: 'ready',
+    error: null,
+    sendMessage: vi.fn(async () => {}),
+    stop: vi.fn(),
+    setMessages: vi.fn(),
+    addToolApprovalResponse: vi.fn(async () => {}),
+  };
+}
+
+describe('composer.pointerActivation on the provider', () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn() as unknown as Element['scrollIntoView'];
+  });
+  afterEach(cleanup);
+
+  async function openProvider(composer?: ComposerConfig) {
+    render(<ProviderComposer composer={composer} />);
+    typeInto(screen.getByRole('textbox'), '@');
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy());
+  }
+
+  it('follows the pointer by default', async () => {
+    await openProvider();
+    move(option('Anna'), 1, 1);
+    move(option('Cleo'), 1, 60);
+    expect(selectedLabels()).toEqual(['Cleo']);
+  });
+
+  it('composer.pointerActivation: false reaches the built-in composer (useChatComposerInput().inputProps)', async () => {
+    await openProvider({ pointerActivation: false });
+    move(option('Anna'), 1, 1);
+    move(option('Cleo'), 1, 60);
+    expect(selectedLabels()).toEqual(['Anna']);
+    expect(screen.getByRole('listbox').hasAttribute('data-active-source')).toBe(false);
   });
 });
