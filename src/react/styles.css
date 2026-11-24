@@ -2049,7 +2049,8 @@
   display: inline-flex;
   color: var(--cm-primary);
 }
-[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="title"] {
+/* Only the header's own title: parts inside the shell (queue, argument form, plan) have their own. :where keeps the specificity of the earlier descendant rule. */
+[data-component="assistant-shell"]:where(:not([data-unstyled], [data-unstyled] *)) :where([data-element="header"]) > [data-element="title"] {
   flex: 1 1 0%;
   min-width: 0;
   overflow: hidden;
