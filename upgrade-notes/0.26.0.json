@@ -1,0 +1,96 @@
+{
+  "version": "0.26.0",
+  "notes": [
+    {
+      "id": "command-label-markers",
+      "kind": "optional",
+      "summary": "The label line of a direct command (/ command or entity action) now carries {{mention:…}} markers for the command and each picked object: the chat shows pills, the approval card names the picked object, and later model turns see these ids as for any mention.",
+      "howTo": "Nothing to do with the built-in bubble. Code that reads the label line itself (parseChatCommandMessage(text).label, stored user messages) now gets {{mention:command:<id>:<label>}} and {{mention:<type>:<id>:<label>}} instead of /Label @Name: render it with parseMentionSegments or parseMentionMarkers, as for composer mentions. Old messages keep their plain line. With mentions.serialize.enabled: false the line stays plain text as before; maxLabelLength bounds the marker labels; labels: 'raw' is not applied to the line (always canonical, so a raw label cannot break the command message). A value without a picked label, an argument without an entity type and an id with : stay plain text; the line stays at most 200 characters and is never cut inside a marker. An own PendingChatCommand for an entity action can set valueTypes (argument name to entity type) so its target is shown as a pill. See docs/chat-interactions.md, What happens on send.",
+      "skill": "curating-glirastes-chat-interactions",
+      "affectedWhen": {
+        "patterns": [
+          "\\bparseChatCommandMessage\\b",
+          "\\bcompleteCommand\\b",
+          "\\bPendingChatCommand\\b"
+        ]
+      },
+      "surface": [
+        "glirastes/react#PendingChatCommand.valueTypes"
+      ]
+    },
+    {
+      "id": "completion-pointer-active",
+      "kind": "recommended",
+      "summary": "Visible change: the active entry of the @ and / list (the one Enter or Tab picks, aria-activedescendant) now follows real pointer movement over a row or an entity action. composer.pointerActivation: false (or the RichMentionInput prop) restores the keyboard-only list.",
+      "howTo": "Nothing to do for the built-in item: it now has a hover look equal to its selected look, only while the pointer drives the list and only on devices with hover. A custom components.DropdownItem (or components.MentionDropdownItem) needs no change; it gets isSelected for the pointer row too. If it has an own :hover style, scope it to [data-component=\"mention-dropdown\"][data-active-source=\"pointer\"] (set while the active entry is the one under the pointer; arrow keys, new results and any scroll of the list set it back to keyboard), or after the arrow keys or a scroll the hovered row and the active row both look marked. A custom item with own pointer handling can call the new optional onActivate() prop, only on real pointer movement, never on mouseenter or mouseover. A custom item that scrolls itself on isSelected also scrolls on pointer activation. Tests that fire pointermove (or, without any pointermove, mousemove) at least 1px away from the last position over the list now move the active entry; the first event after the list opens only records the position. To keep the earlier keyboard-only list, set composer={{ pointerActivation: false }} on AiChatProvider, VercelAiChat or <glirastes-chat> (config.composer); it reaches the built-in composer and useChatComposerInput().inputProps. An own RichMentionInput takes pointerActivation={false}. Then there is no pointer or scroll handling, onActivate does nothing, the listbox has no data-active-source and the built-in stylesheet shows no hover look.",
+      "skill": "building-glirastes-chat-ui#pointer-and-the-active-entry",
+      "affectedWhen": {
+        "symbols": [
+          "RichMentionInput",
+          "MentionInput",
+          "MentionDropdownItemProps",
+          "useChatComposerInput",
+          "chatInteractions",
+          "completionProviders"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "\\bonActivate\\b",
+          "data-active-source",
+          "\\bpointerActivation\\b"
+        ]
+      },
+      "surface": [
+        "glirastes/react#MentionDropdownItemProps.onActivate",
+        "glirastes/react#ComposerConfig.pointerActivation",
+        "glirastes/react#RichMentionInputProps.pointerActivation"
+      ]
+    },
+    {
+      "id": "composer-placeholder-on-focus",
+      "kind": "recommended",
+      "summary": "Visible change: the placeholder of the pill composer (RichMentionInput in mention mode, the default composer with chatInteractions or completionProviders) now stays visible while the empty editor has focus, like a native placeholder. It used to disappear on focus.",
+      "howTo": "Nothing to do for the new default. To keep the earlier look, set composer={{ placeholderOnFocus: false }} on AiChatProvider, VercelAiChat or <glirastes-chat> (config.composer); it reaches the built-in composer and useChatComposerInput().inputProps. An own RichMentionInput takes the prop placeholderOnFocus={false}. The placeholder still hides as soon as text or a pill is in the editor. CSS on [data-element=\"placeholder\"] keeps working; a rule that assumed the placeholder is never shown on :focus-within may need a look. The plain text field (no completion) uses the browser placeholder and is unchanged. Tests that expected no [data-element=\"placeholder\"] after focusing the editor now find it.",
+      "skill": "building-glirastes-chat-ui#placeholder-on-focus",
+      "affectedWhen": {
+        "symbols": [
+          "RichMentionInput",
+          "MentionInput",
+          "useChatComposerInput",
+          "chatInteractions",
+          "completionProviders"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "\\bplaceholderOnFocus\\b"
+        ]
+      },
+      "surface": [
+        "glirastes/react#ComposerConfig.placeholderOnFocus",
+        "glirastes/react#RichMentionInputProps.placeholderOnFocus"
+      ]
+    },
+    {
+      "id": "direct-command-tool-presentation",
+      "kind": "optional",
+      "summary": "A direct / command of a managed turn now sends the tool wording (data-tool-presentation) ahead of its step, also when the approved command runs, so the chat names the tool by its label instead of its raw name. runDirectCommand takes it as the new option toolPresentation.",
+      "howTo": "Nothing to do with createAiChatHandler: it passes the managed turn's wording. Without a managed turn there is no wording and no part is sent; the chat uses the app's toolLabels or the tool name, as before. An app that calls runDirectCommand itself can pass toolPresentation: { locale, tools: { [modelName]: { label } } }; it is written as a transient data-tool-presentation part right after start.",
+      "skill": "integrating-glirastes-nextjs#tools-and-routing",
+      "affectedWhen": {
+        "symbols": [
+          "runDirectCommand"
+        ]
+      },
+      "adoptedWhen": {
+        "patterns": [
+          "\\btoolPresentation\\b"
+        ]
+      },
+      "surface": [
+        "*#RunDirectCommandOptions.toolPresentation"
+      ]
+    }
+  ]
+}
