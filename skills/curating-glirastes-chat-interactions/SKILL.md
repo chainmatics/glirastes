@@ -167,7 +167,9 @@ identifiers ("Open task create dialog", German "Task create dialog öffnen").
    }
    ```
 
-   A custom `DropdownItem` spreads `optionProps` onto its clickable element.
+   A custom `DropdownItem` spreads `optionProps` onto its clickable element;
+   the row under a moving pointer becomes the active one without more code
+   (`onActivate` only for own pointer handling, on real movement).
    Never call `send(text)` without the editor's mentions, and never pass an
    own `onSearch` next to `chatInteractions`: both bypass direct commands and
    entity actions.

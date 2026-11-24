@@ -1,4 +1,5 @@
 import {
+  createContext,
   forwardRef,
   useCallback,
   useContext,
@@ -11,6 +12,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
 import type {
   MentionData,
@@ -241,14 +243,27 @@ function charAfter(range: Range, editor: HTMLElement): string {
 // Default dropdown item (data-attribute driven, no hardcoded styles)
 // ---------------------------------------------------------------------------
 
+/** True while the active entry was set by the pointer: the default item does not scroll it into view. */
+const PointerActiveContext = createContext(false);
+
+/** Index and action (-1: the result itself) of an option id of this list, or null. */
+function parseOptionId(id: string, prefix: string): { index: number; action: number } | null {
+  if (!id.startsWith(prefix)) return null;
+  const match = /^(\d+)(?:-action-(\d+))?$/.exec(id.slice(prefix.length));
+  if (!match) return null;
+  return { index: Number(match[1]), action: match[2] === undefined ? -1 : Number(match[2]) };
+}
+
 function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: MentionDropdownItemProps) {
   const itemRef = useRef<HTMLButtonElement>(null);
   // Standalone (outside a provider) there is no `composer.renderIcon`: no icon, as before.
   const renderIcon = composerContextOf(useContext(ChatContext)).composer?.renderIcon;
   const icon = result.icon && renderIcon ? renderIcon(result.icon, { type: result.type }) : null;
+  const pointerActive = useContext(PointerActiveContext);
 
   useEffect(() => {
-    if (isSelected && itemRef.current) {
+    // The row under the pointer is visible already; scrolling it would move the list under the pointer.
+    if (isSelected && !pointerActive && itemRef.current) {
       itemRef.current.scrollIntoView({ block: 'nearest' });
     }
   }, [isSelected]);
@@ -305,6 +320,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       onListOpenChange,
       completionPreset,
       placeholderOnFocus = true,
+      pointerActivation = true,
     },
     ref,
   ) {
@@ -332,6 +348,14 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     const [selectedIndex, setSelectedIndex] = useState(0);
     // -1: the result itself; 0..n: one of its entity actions.
     const [selectedAction, setSelectedAction] = useState(-1);
+    // Who set the active entry: the pointer (real movement over a row) or the keyboard (and resets).
+    const [activeSource, setActiveSource] = useState<'keyboard' | 'pointer'>('keyboard');
+    // Last pointer position seen over the list, with the results it was seen over: a position from
+    // another result list (the list reopened or its results changed) counts as none, so the next event
+    // only records it (a list appearing under a resting pointer activates nothing).
+    const lastPointRef = useRef<{ x: number; y: number; results: MentionResult[] } | null>(null);
+    // Set by the first `pointermove`: from then on mouse moves are compatibility events and skipped.
+    const pointerEventsSeenRef = useRef(false);
     const [isSearching, setIsSearching] = useState(false);
 
     // `onListOpenChange` on every change of the shown list, not on mount (closed).
@@ -548,6 +572,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       setNoMatches(false);
       setSelectedIndex(0);
       setSelectedAction(-1);
+      setActiveSource('keyboard');
     }, []);
 
     /**
@@ -608,12 +633,14 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           setSearchResults(results);
           setSelectedIndex(0);
           setSelectedAction(-1);
+          setActiveSource('keyboard');
           setDropdownOpen(results.length > 0);
           setNoMatches(results.length === 0 && !removed);
         } catch {
           if (searchVersionRef.current !== version) return;
           if (removeArmed()) sourceRef.current = undefined;
           setSearchResults([]);
+          setActiveSource('keyboard');
           setDropdownOpen(false);
           setNoMatches(false);
         } finally {
@@ -1115,6 +1142,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           clearTimeout(searchTimeoutRef.current);
           setSelectedIndex(0);
           setSelectedAction(-1);
+          setActiveSource('keyboard');
           onChange?.(getFullValue());
           void performSearch(query, char, sourceRef.current);
         }
@@ -1147,6 +1175,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             event.preventDefault();
             setSelectedIndex((prev) => (prev + 1) % searchResults.length);
             setSelectedAction(-1);
+            setActiveSource('keyboard');
             return;
           }
           if (event.key === 'ArrowUp') {
@@ -1155,17 +1184,20 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
               (prev) => (prev - 1 + searchResults.length) % searchResults.length,
             );
             setSelectedAction(-1);
+            setActiveSource('keyboard');
             return;
           }
           // Left/right move between a result and its actions; elsewhere they move the caret.
           if (event.key === 'ArrowRight' && selectedAction < actions.length - 1) {
             event.preventDefault();
             setSelectedAction((prev) => prev + 1);
+            setActiveSource('keyboard');
             return;
           }
           if (event.key === 'ArrowLeft' && selectedAction >= 0) {
             event.preventDefault();
             setSelectedAction((prev) => prev - 1);
+            setActiveSource('keyboard');
             return;
           }
           if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
@@ -1515,6 +1547,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       sourceRef.current = options.source;
       setSelectedIndex(0);
       setSelectedAction(-1);
+      setActiveSource('keyboard');
       onChange?.(getFullValue());
       void performSearch(query, trigger, options.source);
     }, [armTrigger, onChange, getFullValue, performSearch, triggers, hasMentionSupport, disabled, presetFor]);
@@ -1670,6 +1703,62 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       action >= 0 ? `${listboxId}-option-${index}-action-${action}` : `${listboxId}-option-${index}`
     );
     const listOpen = dropdownOpen && searchResults.length > 0;
+    /** Pointer activation: the entry becomes the active one (Enter/Tab pick it); the list does not scroll. */
+    const activateEntry = (index: number, action: number) => {
+      if (!pointerActivation || !searchResults[index]) return;
+      setSelectedIndex(index);
+      setSelectedAction(action);
+      setActiveSource('pointer');
+    };
+    /** The entry under `target`: from the option ids, else from the row order of the list. */
+    const entryAt = (target: EventTarget | null): { index: number; action: number } | null => {
+      const list = dropdownRef.current;
+      // `nodeType`, not `instanceof Element`: the list may render into another window (an iframe).
+      if (!list || !target || (target as Node).nodeType !== 1 || !list.contains(target as Node)) return null;
+      const prefix = `${listboxId}-option-`;
+      for (let node: Element | null = target as Element; node && node !== list; node = node.parentElement) {
+        const entry = node.id ? parseOptionId(node.id, prefix) : null;
+        if (entry) return entry;
+      }
+      // A custom item without `optionProps`: its row is the n-th direct child (headings aside),
+      // used only when every result has exactly one such child.
+      let row: Element | null = target as Element;
+      while (row && row.parentElement !== list) row = row.parentElement;
+      if (!row || row.getAttribute('data-element') === 'group-heading') return null;
+      const rows = Array.from(list.children).filter((child) => child.getAttribute('data-element') !== 'group-heading');
+      if (rows.length !== searchResults.length) return null;
+      return { index: rows.indexOf(row), action: -1 };
+    };
+    /**
+     * Real pointer movement over the list activates the entry under it. Browsers also fire enter/over
+     * and sometimes move events without movement (the list opens, scrolls or re-renders under a resting
+     * pointer): an event at the last seen coordinates, or the first one after the list opened or its
+     * results changed, only records the position.
+     */
+    const handleListPointerMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+      // One physical movement counts once: where pointer events fire, the compatibility mouse event
+      // that follows each one (integer coordinates where the pointer event may carry 10.5) is skipped.
+      // Mouse events count only where no pointer event was ever seen.
+      if (event.type === 'pointermove') pointerEventsSeenRef.current = true;
+      else if (pointerEventsSeenRef.current) return;
+      // A finger dragging the list scrolls it; it does not choose an entry.
+      if ((event.nativeEvent as PointerEvent).pointerType === 'touch') return;
+      const point = { x: event.clientX, y: event.clientY, results: searchResults };
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+      const last = lastPointRef.current;
+      if (!last || last.results !== searchResults) {
+        lastPointRef.current = point;
+        return;
+      }
+      // Movement is at least 1 CSS pixel on an axis. A smaller difference neither activates nor
+      // replaces the stored position, so slow real movement still adds up.
+      if (Math.abs(point.x - last.x) < 1 && Math.abs(point.y - last.y) < 1) return;
+      lastPointRef.current = point;
+      const entry = entryAt(event.target);
+      if (entry && (entry.index !== selectedIndex || entry.action !== selectedAction || activeSource !== 'pointer')) {
+        activateEntry(entry.index, entry.action);
+      }
+    };
     const showEmpty = !listOpen && noMatches && Boolean(emptyLabel);
     const showHeadings = new Set(searchResults.map((result) => result.group ?? '')).size > 1;
     const optionProps = (index: number, action = -1): MentionDropdownOptionProps => {
@@ -1693,6 +1782,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           isSelected={index === selectedIndex && selectedAction === -1}
           onClick={() => pickResult(result)}
           optionProps={optionProps(index)}
+          onActivate={() => activateEntry(index, -1)}
         />
       );
       if (!onEntityAction || !result.actions?.length) return item;
@@ -1784,7 +1874,18 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             data-state={isSearching ? 'searching' : 'idle'}
             // Keep the caret in the editor while the list is clicked.
             onMouseDown={(event) => event.preventDefault()}
+            // `pointerActivation={false}`: the keyboard-only list as before, no attribute, no handlers.
+            {...(pointerActivation ? {
+              'data-active-source': activeSource,
+              onPointerMove: handleListPointerMove,
+              onMouseMove: handleListPointerMove,
+              // `pointer` means "the active entry is the one under the pointer". After a scroll (wheel,
+              // trackpad, keyboard) another row may be under it: back to `keyboard`; the stored position
+              // stays, so a resting pointer re-activates nothing until it really moves.
+              onScroll: () => { if (activeSource === 'pointer') setActiveSource('keyboard'); },
+            } : {})}
           >
+            <PointerActiveContext.Provider value={activeSource === 'pointer'}>
             {searchResults.map((result, index) => {
               const key = result.key ?? `${result.type}:${result.id}`;
               const heading = showHeadings && result.group && result.group !== searchResults[index - 1]?.group
@@ -1793,6 +1894,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
               const row = renderRow(result, index, key);
               return heading ? [heading, row] : row;
             })}
+            </PointerActiveContext.Provider>
           </div>
         )}
       </div>

@@ -198,10 +198,10 @@ repository, not shipped in the package) has the table and override format.
 - Keyboard model of the `/` and `@` list: the editor is a `textbox` that
   controls the suggestion `listbox`; ArrowUp and ArrowDown move between
   results, ArrowRight and ArrowLeft between an entity and its actions, Enter
-  or Tab picks, Escape closes. Headings group a mixed list, and a search
-  without hits says so. The argument form starts at the first empty
-  required field, entity fields are ARIA 1.2 comboboxes, and Escape closes an
-  open list before it cancels the form.
+  or Tab picks, Escape closes; a moving pointer activates a row (`onActivate`
+  optional). Headings group a mixed list; a search without hits says so. The
+  argument form starts at the first empty required field, entity fields are
+  ARIA 1.2 comboboxes; Escape closes an open list before it cancels the form.
 
 ## Pills, "Chat about this" and chips in answers
 

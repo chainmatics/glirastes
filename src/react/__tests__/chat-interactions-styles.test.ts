@@ -89,3 +89,42 @@ describe('history drawer backdrop color', () => {
     expect(CHAT_STYLES).toContain('background: var(--cm-history-backdrop, rgba(17, 24, 39, 0.3))');
   });
 });
+
+describe('completion list rows under the pointer', () => {
+  const list = '[data-component="ai-chat-panel"] [data-component="mention-dropdown"][data-active-source="pointer"]';
+  const hoverBlock = () => {
+    const item = plain.indexOf(`${list} [data-component="mention-dropdown-item"]:hover`);
+    expect(item, 'missing hover rule for the rows').toBeGreaterThanOrEqual(0);
+    const start = plain.lastIndexOf('@media (hover: hover) {', item);
+    expect(start, 'hover rules sit in a (hover: hover) block').toBeGreaterThanOrEqual(0);
+    const block = plain.slice(start, plain.indexOf('\n}', start));
+    expect(block, 'the row hover rule is inside the block').toContain(`${list} [data-component="mention-dropdown-item"]:hover`);
+    return block;
+  };
+
+  it('marks a hovered row and action like the selected one, only while the pointer drives the list', () => {
+    const block = hoverBlock();
+    const item = block.slice(block.indexOf(`${list} [data-component="mention-dropdown-item"]:hover {`));
+    expect(item.slice(0, item.indexOf('}'))).toContain('background: var(--cm-primary-tint)');
+    const action = block.slice(block.indexOf(`${list} [data-component="mention-action"]:hover {`));
+    expect(block.indexOf(`${list} [data-component="mention-action"]:hover {`)).toBeGreaterThanOrEqual(0);
+    expect(action.slice(0, action.indexOf('}'))).toContain('background: var(--cm-primary-tint)');
+    expect(action.slice(0, action.indexOf('}'))).toContain('border-color: var(--cm-primary)');
+    // The selected look the hover matches.
+    expect(rule('[data-component="ai-chat-panel"] [data-component="mention-dropdown-item"][data-selected="true"]'))
+      .toContain('background: var(--cm-primary-tint)');
+  });
+
+  it('has no hover look outside pointer mode, so a resting pointer never marks a second row', () => {
+    const hovers = plain.match(/[^\n]*\[data-component="(mention-dropdown-item|mention-action)"\]:hover[^\n]*/g) ?? [];
+    expect(hovers.length).toBe(2);
+    for (const line of hovers) expect(line).toContain('[data-active-source="pointer"]');
+  });
+
+  it('keeps the unstyled guard on the hover rules and ships them in the embed styles', () => {
+    const guarded = css.match(/[^\n]*\[data-component="(mention-dropdown-item|mention-action)"\]:hover[^\n]*/g) ?? [];
+    expect(guarded.length).toBe(2);
+    for (const line of guarded) expect(line).toContain(UNSTYLED_GUARD);
+    expect(CHAT_STYLES).toBe(css);
+  });
+});
