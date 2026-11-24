@@ -622,7 +622,7 @@ describe('C3 a transport wrapper that is a new object on every render', () => {
  */
 const KNOWN_OPTIONAL_MEMBERS = [
   'subscribeToData', 'addToolOutput', 'continueTurn', 'continueAfterBudgetStop', 'setUiOutcomeReporting',
-  'setRequestLanguage', 'setAutomaticSendsPaused', 'sessions',
+  'setRequestLanguage', 'setRequestViewContext', 'setAutomaticSendsPaused', 'sessions',
 ];
 
 /** What the provider does with the transport object it is given: property writes and reads of absent members. */

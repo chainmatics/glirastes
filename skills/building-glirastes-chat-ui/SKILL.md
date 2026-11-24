@@ -68,7 +68,7 @@ component; headless hooks and building blocks for an own chat:
 | `suggestions`, `messageFooter` | suggestion chips (`placement: 'message'` puts follow-ups under the answer); `messageFooter`: copy, sources, duration and stop per answer (references/hooks-and-building-blocks.md) |
 | `voice` | speech-to-text |
 | `attachments`, `queue` | image and PDF attachments (section below); opt-in message queue, messages sent while busy or during an approval go once idle (`references/composer-chips-attachments.md`, "Message queue") |
-| `chatInteractions` | derived `@` entities and `/` commands (section below) |
+| `chatInteractions`, `viewContext` | derived `@` entities and `/` commands (section below); `viewContext`: `{ enabled }` (`ChatViewContextConfig`, default on): what a page registers with `useViewContext(entry)` (`glirastes/react`) or `registerViewContext(source, entry)` (`glirastes/browser`) goes with each new user message; nothing registered, nothing sent (`docs/chat-interactions.md`, View context) |
 | `entityLinks` | entity references in answers as chips (`knownEntities`, `ambiguousNames` (default `'text'`: a shared name stays text; `'first'` = before 0.18.0; markers with an id link by id), `resolveAmbiguous`, `scope`, `mentionMarkers: 'markdown'` + `verifyMentions`); `entityDeclarations` sets declared identity by tool name (`docs/entity-identity.md`) |
 | `toolResults`, `toolLabels` | how tool output is displayed and named |
 | `onBeforeSend`, `onToolResult`, `onUiActionOutcome` | hooks around a turn; UI action outcomes in `references/hooks-and-building-blocks.md` |

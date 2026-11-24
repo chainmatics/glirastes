@@ -113,6 +113,12 @@ export interface ChatTransport {
    * (`Content-Language`), or null for none (`sendLanguage: false`, unknown).
    */
   setRequestLanguage?(language: string | null): void;
+  /**
+   * Called by the provider (`viewContext.enabled`): whether a new user
+   * message carries the view context the page registered
+   * (`glirastesViewContext`). A transport without it sends none.
+   */
+  setRequestViewContext?(enabled: boolean): void;
 }
 
 /**
@@ -1811,6 +1817,12 @@ export interface ChatQueueProps {
 // Provider Config
 // ============================================================================
 
+/** `viewContext` of the provider. */
+export interface ChatViewContextConfig {
+  /** Default true: a page's registered view context goes with each new user message. `false` sends none. */
+  readonly enabled?: boolean;
+}
+
 export interface AiChatProviderConfig {
   mentions?: MentionConfig;
   /**
@@ -1864,6 +1876,13 @@ export interface AiChatProviderConfig {
    * nothing and keeps the search.
    */
   mentionContext?: ChatMentionContext;
+  /**
+   * The view context: what the page declared with `useViewContext` or
+   * `registerViewContext` (`glirastes/browser`) goes with each new user
+   * message to the chat endpoint, read at send time. Nothing is sent while
+   * no page registers anything. `{ enabled: false }` sends none.
+   */
+  viewContext?: ChatViewContextConfig;
   /**
    * Turns entity references in assistant messages into clickable chips:
    * app matchers (e.g. task keys), names the conversation already referenced,

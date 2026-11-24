@@ -136,6 +136,7 @@ export type {
   ChatComposerInput,
   ChatComposerInputControls,
   ComposerConfig,
+  ChatViewContextConfig,
   ComposerDraft,
   ComposerDraftStorage,
   ChatStarter,
@@ -373,6 +374,8 @@ export {
   type PendingChatCommand,
 } from './interactions/registry.js';
 export { useMentionContext } from './interactions/use-mention-context.js';
+// View context: what the page shows, sent with a new message
+export { useViewContext } from './hooks/use-view-context.js';
 // Programmatic composer ("Chat about this") and entity chips in answers
 export {
   useChatComposer,

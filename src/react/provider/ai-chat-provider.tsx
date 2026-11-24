@@ -710,6 +710,7 @@ export function AiChatProvider({
   onCompletionSelect,
   chatInteractions,
   mentionContext: mentionContextProp,
+  viewContext,
   entityLinks,
   markdown,
   onOpenRequest,
@@ -1332,6 +1333,14 @@ export function AiChatProvider({
     setRequestLanguage(requestLanguage);
     return () => setRequestLanguage(null);
   }, [setRequestLanguage, requestLanguage]);
+  // Whether a new user message carries the page's view context (default on: nothing goes while nothing is registered).
+  const viewContextEnabled = viewContext?.enabled !== false;
+  const setRequestViewContext = resolvedTransport.setRequestViewContext;
+  useEffect(() => {
+    if (!setRequestViewContext) return undefined;
+    setRequestViewContext(viewContextEnabled);
+    return () => setRequestViewContext(true);
+  }, [setRequestViewContext, viewContextEnabled]);
   const setUiOutcomeReporting = resolvedTransport.setUiOutcomeReporting;
   useEffect(() => {
     if (!setUiOutcomeReporting) return undefined;

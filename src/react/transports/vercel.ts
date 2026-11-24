@@ -12,6 +12,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart } from 'ai';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
+import { viewContextRequestBody } from '../../browser/view-context.js';
 import type {
   ChatTransport,
   ChatTransportConfig,
@@ -145,6 +146,12 @@ export function useVercelAiChatTransport(
     languageRef.current = language;
   }, []);
 
+  // Set by the provider (`viewContext.enabled`): whether a new message carries the page's view context.
+  const viewContextRef = useRef(true);
+  const setRequestViewContext = useCallback((enabled: boolean) => {
+    viewContextRef.current = enabled;
+  }, []);
+
   const onDataRef = useRef(onData);
   onDataRef.current = onData;
 
@@ -212,10 +219,14 @@ export function useVercelAiChatTransport(
 
   const send = useCallback(
     ({ text, files }: { text: string; files?: FilePart[] }) => {
-      if (!files || files.length === 0) return sendMessage({ text });
+      // A new user message carries the view context as it is now; continuations
+      // (approval resume, continueTurn, budget) send none. No registration, no field.
+      const viewContext = viewContextRef.current ? viewContextRequestBody() : undefined;
+      const options = viewContext ? { body: viewContext } : undefined;
+      if (!files || files.length === 0) return sendMessage({ text }, options);
       // Only the open metadata record differs from the SDK's JSON-typed one.
       const uiFiles = files as FileUIPart[];
-      return text === '' ? sendMessage({ parts: uiFiles }) : sendMessage({ text, files: uiFiles });
+      return text === '' ? sendMessage({ parts: uiFiles }, options) : sendMessage({ text, files: uiFiles }, options);
     },
     [sendMessage],
   );
@@ -245,10 +256,11 @@ export function useVercelAiChatTransport(
       addToolApprovalResponse,
       subscribeToData,
       setRequestLanguage,
+      setRequestViewContext,
       continueAfterBudgetStop,
       ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
     [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
-      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
+      setRequestLanguage, setRequestViewContext, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
   );
 }

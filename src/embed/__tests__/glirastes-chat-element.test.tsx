@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SttProviderAdapter } from '../../react/stt/controller.js';
 import type { ChatMessage, ChatTransport } from '../../react/types.js';
 import { registerNavigationBridge } from '../../browser/navigation.js';
+import { registerViewContext } from '../../browser/view-context.js';
 import { CHAT_STYLES } from '../chat-styles.generated.js';
 import {
   EMBED_CSS_VARIABLES,
@@ -333,6 +334,35 @@ describe('<glirastes-chat>', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(new Headers(fetchMock.mock.calls[1]![1]?.headers).get('content-language')).toBeNull();
     document.documentElement.removeAttribute('lang');
+  });
+
+  it('sends the view context a non-React host registered, and none with config.viewContext.enabled false', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Ok'));
+    vi.stubGlobal('fetch', fetchMock);
+    const bodyOf = (call: number) => JSON.parse(String(fetchMock.mock.calls[call]![1]?.body)) as Record<string, unknown>;
+    const { element } = await mount((node) => { node.setAttribute('endpoint', '/api/chat'); });
+    await act(async () => { expect(element.send('Ohne')).toBe(true); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(bodyOf(0)).not.toHaveProperty('glirastesViewContext');
+    await waitFor(() => expect(element.shadowRoot!.textContent).toContain('Ok'));
+
+    const off = registerViewContext('vue-order-page', { entity: { type: 'order', id: 'ord-1' }, label: 'Order 1' });
+    try {
+      await act(async () => { expect(element.send('Und das?')).toBe(true); });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(bodyOf(1).glirastesViewContext).toEqual({
+        version: 1,
+        current: [{ entity: { type: 'order', id: 'ord-1' }, label: 'Order 1' }],
+      });
+      await waitFor(() => expect(element.shadowRoot!.querySelectorAll('[data-component="message-bubble"]').length).toBe(4));
+      element.config = { viewContext: { enabled: false } };
+      await act(async () => {});
+      await act(async () => { expect(element.send('Noch mal')).toBe(true); });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      expect(bodyOf(2)).not.toHaveProperty('glirastesViewContext');
+    } finally {
+      off();
+    }
   });
 
   it('maps the voice and voice-language attributes onto the composer microphone', async () => {

@@ -238,10 +238,91 @@ that keep this state themselves. Types the chat does not know are ignored;
 without any of them the order is the declared one. The value is read when a
 search runs and never sent anywhere.
 
-This is the one host indication for `@`. The planned view context
-(`ViewContextEntry`, `useViewContext`) will feed it from the entity and
+This is the one host indication for `@`. The [view context](#view-context)
+does not feed it yet; a later release will feed it from the entity and
 selection types of the registered view, and an explicit `useMentionContext`
 keeps winning; there will be no second channel.
+
+## View context
+
+What the user has open (an order, the selected rows of a list) goes with
+each new message to the app's chat route, so the model knows what "this"
+means. The app declares it; nothing is read from the page or the URL.
+
+```tsx
+import { useViewContext } from 'glirastes/react';
+
+function OrderPage({ order }) {
+  useViewContext({ entity: { type: 'order', id: order.id }, label: order.number, route: `/orders/${order.id}` });
+  …
+}
+```
+
+Outside React (Vue, Angular, plain JS, next to `<glirastes-chat>`):
+
+```ts
+import { registerViewContext } from 'glirastes/browser';
+
+const unregister = registerViewContext('order-page', { entity: { type: 'order', id: '42' } });
+// on leaving the page: unregister(), or registerViewContext('order-page', null)
+```
+
+One entry per source (`useViewContext` takes one per component); an update
+keeps its place, sources are sent in the order they first registered. A
+`ViewContextEntry` (`glirastes/contracts`) names a record (`entity`), a
+selection of records (`selection: { type, ids }`), or both, plus optionally
+`label`, `facts`, `unsaved` and `route`. `useViewContext` re-registers only
+when the content changes and withdraws on unmount (StrictMode included);
+`null` withdraws, on the server it does nothing.
+
+Rules (the server checks all of them again and drops what fails; it grants
+no permission):
+
+- The type must be declared on the server: an entity type of the request's
+  tools (`outputEntities` / `inputEntities`).
+- Ids exactly as the app has them, never reformatted (2 to 4 parts for a
+  composite key); a selection keeps at most 50.
+- `facts` are kept only for a type with a schema in the handler's
+  `viewContext.facts`; without one the server drops them.
+- `route` only as an explicit decoded path (`/orders/42`): no query, hash,
+  `%` escapes or host. Query values belong in declared facts.
+- At most 8 entries and labels of at most 60 characters. Keep personal data
+  out of long labels: with `piiShield` the server cuts a label to 60
+  characters before the shield sees it, so a value at the cut (an e-mail
+  address, IBAN or phone number) may not be recognised (known limit,
+  changelog 0.25.0). The browser cuts the same way; that does not change it.
+
+The browser cleans and bounds each snapshot with the contract
+(`sanitizeViewContext`, `VIEW_CONTEXT_LIMITS`); `currentViewContext()`
+(`glirastes/browser`) returns it. The authority stays the server
+(`createAiChatHandler` option `viewContext`, on by default; see the
+[handler options](../skills/integrating-glirastes-nextjs/references/handler-options.md)).
+
+When it is sent: the bundled transport (`VercelAiChat`,
+`useVercelAiChatTransport`, `<glirastes-chat>`) adds
+`glirastesViewContext: { version: 1, current }` to the body of a new user
+message, read at that moment. A request without a new user message (approval
+resume, `continueTurn` after a UI action, "Continue" after a budget stop)
+carries none: the server would not use it there. Nothing registered, no
+field: the request is exactly as before. `viewContext={{ enabled: false }}`
+on `AiChatProvider` / `VercelAiChat` (`config.viewContext` of
+`<glirastes-chat>`) sends none. An own transport sends nothing unless it
+adds the field itself from `currentViewContext()`.
+
+Limits of this release:
+
+- A queued message (`queue`) carries the view context of the moment it is
+  sent, not of the moment it was queued. Binding the view context to a
+  message (queue, history) follows.
+- The view context goes only to the app's chat route: never to the
+  Platform, telemetry, logs or storage, and it is not stored with the chat.
+- A record of the view context does not yet count as seen for
+  `entityLinks.verifyMentions`.
+- The runtime container (`glirastes-runtime`) turns the server side off until
+  its option `chat.viewContext` comes; a browser that sends the field
+  changes nothing there.
+- A chat on a route of its own has no page that registers anything, so it
+  sends none.
 
 ## Type filter
 

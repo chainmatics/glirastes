@@ -1,0 +1,25 @@
+{
+  "id": "view-context-browser",
+  "kind": "optional",
+  "summary": "A page can declare what the user has open (useViewContext, registerViewContext); the chat sends it with each new user message as glirastesViewContext. Unchanged apps: nothing changes; while nothing is registered no field is sent.",
+  "howTo": "Optional. In a React page call useViewContext({ entity: { type: 'order', id: order.id }, label: order.number }) (null withdraws, unmounting too); outside React call registerViewContext('order-page', entry) from glirastes/browser and the returned function on leaving the page. The type must be an entity type the request's tools declare (outputEntities / inputEntities), ids exactly as the app has them, facts are kept only with a schema in the handler's viewContext.facts, route only as an explicit path; nothing is read from the URL. viewContext={{ enabled: false }} on AiChatProvider / VercelAiChat (config.viewContext of <glirastes-chat>) sends none. Sent by the bundled Vercel transport only, read when the message is sent (a queued message carries the view of its send time); continuations carry none. An own transport adds currentViewContext() as glirastesViewContext: { version: 1, current } itself. The runtime container keeps the server side off. Known limit with piiShield: keep personal data out of labels over 60 characters (changelog 0.25.0).",
+  "skill": "building-glirastes-chat-ui#configuration",
+  "adoptedWhen": {
+    "patterns": [
+      "\\buseViewContext\\s*\\(",
+      "\\bregisterViewContext\\s*\\("
+    ]
+  },
+  "surface": [
+    "glirastes/browser#currentViewContext",
+    "glirastes/browser#registerViewContext",
+    "glirastes/embed#GlirastesChatElementConfig.viewContext",
+    "glirastes/react#AiChatProviderConfig.viewContext",
+    "glirastes/react#AiChatProviderProps.viewContext",
+    "glirastes/react#ChatTransport.setRequestViewContext",
+    "glirastes/react#ChatViewContextConfig",
+    "glirastes/react#ChatViewContextConfig.enabled",
+    "glirastes/react#useViewContext",
+    "glirastes/react/vercel#VercelAiChatProps.viewContext"
+  ]
+}
