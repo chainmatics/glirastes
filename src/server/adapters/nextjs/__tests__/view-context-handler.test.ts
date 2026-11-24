@@ -381,8 +381,8 @@ describe.each<Mode>(['legacy', 'pipeline'])('view context labels and the PII shi
       const entry = JSON.parse(((prompt!.at(-1)!.content as Array<{ text: string }>)[0]!.text).split('\n')[2]!) as { label: string };
       expect([...entry.label].length).toBeLessThanOrEqual(60);
       expect(entry.label).toBe(canonicalViewContextLabel(`${'a'.repeat(offset - 1)} ${pseudonym}`));
-      // Two calls for the block: the labels, then the id.
-      expect(calls).toHaveLength(2);
+      // One call for the block: the id and the uncut label.
+      expect(calls).toHaveLength(1);
     }
   });
 

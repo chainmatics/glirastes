@@ -29,7 +29,7 @@
  * @module
  */
 import { escapeJsonForBlock } from '../../../contracts/delimited-text.js';
-import { cleanDisplayText, firstCodePoints, MAX_INPUT_CODE_POINTS } from '../../../contracts/mention-marker.js';
+import { canonicalMentionLabel, cleanDisplayText, firstCodePoints, MAX_INPUT_CODE_POINTS } from '../../../contracts/mention-marker.js';
 import {
   canonicalViewContextLabel,
   isViewContextRoute,
@@ -236,80 +236,94 @@ function labelMarker(canonical: string, index: number): string | undefined {
   return jsonBytes(text) === jsonBytes(canonical) && canonicalViewContextLabel(text) === text ? text : undefined;
 }
 
+/** The marker and comment delimiters a canonical label replaces (`{` `}` `<!` `-->` `--!>`). */
+const LABEL_DELIMITERS = /[{}]|<!|--!?>/g;
+
 /**
- * The labels of `entries` (an own copy, see {@link ownEntries}), cleaned:
- * `cleanDisplayText`, the cleaning the sanitizer applies before it cuts
- * (so an address split by a hidden character is whole for the detector).
- * Each string label is replaced by its {@link labelMarker}; a label that
+ * `label` as the sanitizer reads it before it cuts: `cleanDisplayText`,
+ * then each delimiter replaced as `canonicalMentionLabel` replaces it
+ * (`｛` `｝` `‹!` `--›` `--!›`, taken from that function), so the
+ * shield sees the characters the model gets: a URL with `{` reads on
+ * through `｛` as it does there. Uncut; a test checks it against
+ * `canonicalMentionLabel` for every label that is not cut.
+ */
+export function uncutLabel(label: string): string {
+  return cleanDisplayText(label).replace(LABEL_DELIMITERS, (found) => canonicalMentionLabel(found));
+}
+
+/**
+ * The labels of `entries` (an own copy, see {@link ownEntries}) as the
+ * sanitizer reads them before it cuts ({@link uncutLabel}: cleaned, so an
+ * address split by a hidden character is whole for the detector, and with
+ * the delimiters replaced). Each string label is replaced by its {@link labelMarker}; a label that
  * cleans to nothing stays (the sanitizer drops it as before). A label
  * longer than {@link VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS} after
  * cleaning, longer than the 4096 code points the cleaning reads (its unread
  * rest could start inside a value) or without a marker is set to `null`
  * (the sanitizer drops it as `invalid-label`). Changes `entries` in place.
  */
-function markLabels(entries: unknown[]): Array<{ entry: Record<string, unknown>; cleaned: string; marker: string }> {
-  const marked: Array<{ entry: Record<string, unknown>; cleaned: string; marker: string }> = [];
+function markLabels(entries: unknown[]): Array<{ entry: Record<string, unknown>; visible: string; marker: string }> {
+  const marked: Array<{ entry: Record<string, unknown>; visible: string; marker: string }> = [];
   for (let index = 0; index < Math.min(entries.length, VIEW_CONTEXT_LIMITS.maxScannedEntries); index += 1) {
     const entry = entries[index];
     if (!isRecord(entry) || typeof entry.label !== 'string') continue;
     const raw = entry.label;
-    const cleaned = cleanDisplayText(raw);
-    if (cleaned === '') continue;
+    const visible = uncutLabel(raw);
+    if (visible === '') continue;
     const unread = firstCodePoints(raw, MAX_INPUT_CODE_POINTS) !== raw;
-    const tooLong = cleaned.length > VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS
-      && Array.from(cleaned).length > VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS;
+    const tooLong = visible.length > VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS
+      && Array.from(visible).length > VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS;
     const marker = unread || tooLong ? undefined : labelMarker(canonicalViewContextLabel(raw), marked.length);
     if (marker === undefined) { entry.label = null; continue; }
     entry.label = marker;
-    marked.push({ entry, cleaned, marker });
+    marked.push({ entry, visible, marker });
   }
   return marked;
 }
 
 /**
- * `labels` through the PII shield in one `anonymizeResult` call, same
- * session as the user's messages. The result is read once by a JSON round
- * trip and must be a list of as many strings; anything else throws.
- */
-async function shieldLabels(labels: string[], shield: ViewContextShield): Promise<string[]> {
-  const result: unknown = await shield.shield.anonymizeResult(labels, shield.sessionId);
-  const shielded: unknown = JSON.parse(JSON.stringify(result) ?? 'null');
-  if (!Array.isArray(shielded) || shielded.length !== labels.length || !shielded.every((label) => typeof label === 'string')) {
-    throw new Error('unexpected shield result');
-  }
-  return shielded as string[];
-}
-
-/**
- * `entries` with their other string values through the PII shield, the way
- * tool results go (`anonymizeResult`, one call, same session as the user's
+ * `entries` with their string values through the PII shield, the way tool
+ * results go (`anonymizeResult`, one call, same session as the user's
  * messages, so a value gets the pseudonym it has there): ids, selection ids,
- * routes and fact values. Labels are not in it: they were shielded before
- * the sanitizer cut them ({@link shieldLabels}), and a pseudonym shielded
- * again could be taken for an original. Ids are shielded like the ids of
- * tool results: a pseudonym in a tool argument is restored to the original
- * id (`rehydrateArgs`), so tool calls still name the right record. Entity
+ * routes, fact values and, when `labels` is given, the label of each entry
+ * as given there (uncut, see {@link uncutLabel}), in the order and shape of
+ * the call before labels were shielded uncut (`id`, `ids`, `label`,
+ * `route`, `facts` per entry). Without `labels` no label is sent: a
+ * label shielded before is not shielded again (a pseudonym could be taken
+ * for an original). Ids are shielded like the ids of tool results: a
+ * pseudonym in a tool argument is restored to the original id
+ * (`rehydrateArgs`), so tool calls still name the right record. Entity
  * types (declared names, no user data) and keys stay as they are, as in
  * tool results. The shield's result is read exactly once, by a JSON round
  * trip into an own copy: a getter or proxy in it cannot show one value to
  * the check and another to the renderer, and everything after works on
  * plain JSON only. Extra keys are never used. Throws when the shield fails,
- * its result cannot be serialized (a cycle, a BigInt) or is no list of as
- * many objects; each entry is checked afterwards ({@link checkShielded}).
+ * its result cannot be serialized (a cycle, a BigInt), is no list of as
+ * many objects or a label sent is not a string afterwards; each entry is
+ * checked afterwards ({@link checkShielded}). Returns the entries (labels
+ * as they were) and the shielded labels.
  */
 async function shieldEntries(
   entries: ReadonlyArray<ViewContextEntry>,
   shield: ViewContextShield,
-): Promise<ViewContextEntry[]> {
-  const values = entries.map((entry) => ({
-    id: entry.entity?.id, ids: entry.selection?.ids, route: entry.route, facts: entry.facts,
+  labels?: ReadonlyArray<string | undefined>,
+): Promise<{ entries: ViewContextEntry[]; labels: Array<string | undefined> }> {
+  const values = entries.map((entry, index) => ({
+    id: entry.entity?.id, ids: entry.selection?.ids, ...(labels ? { label: labels[index] } : {}), route: entry.route, facts: entry.facts,
   }));
   const result: unknown = await shield.shield.anonymizeResult(values, shield.sessionId);
   const shielded: unknown = JSON.parse(JSON.stringify(result) ?? 'null');
   if (!Array.isArray(shielded) || shielded.length !== entries.length) throw new Error('unexpected shield result');
-  return entries.map((entry, index) => {
-    const value = shielded[index] as Partial<Record<'id' | 'ids' | 'route' | 'facts', unknown>>;
+  const shieldedLabels: Array<string | undefined> = [];
+  const shieldedEntries = entries.map((entry, index) => {
+    const value = shielded[index] as Partial<Record<'id' | 'ids' | 'label' | 'route' | 'facts', unknown>>;
     if (!isRecord(value)) throw new Error('unexpected shield result');
+    if (labels?.[index] !== undefined) {
+      if (typeof value.label !== 'string') throw new Error('unexpected shield result');
+      shieldedLabels.push(value.label);
+    } else {
+      shieldedLabels.push(undefined);
+    }
     return {
       ...(entry.entity ? { entity: { type: entry.entity.type, id: value.id } } : {}),
       ...(entry.selection ? { selection: { type: entry.selection.type, ids: value.ids } } : {}),
@@ -319,7 +333,14 @@ async function shieldEntries(
       ...(entry.facts !== undefined ? { facts: value.facts } : {}),
     } as ViewContextEntry;
   });
+  return { entries: shieldedEntries, labels: shieldedLabels };
 }
+
+/** `entry` without its label, as JSON (to see whether two runs kept the same entry). */
+const withoutLabel = (entry: ViewContextEntry) => {
+  const { label: _label, ...rest } = entry;
+  return JSON.stringify(rest);
+};
 
 /**
  * A shielded entry as the model may get it, or undefined. A pseudonym may
@@ -352,10 +373,11 @@ function checkShielded(entry: ViewContextEntry): ViewContextEntry | undefined {
  * it keeps exactly the entries it keeps with the labels and says which
  * ones; no entry left, no shield call. When a kept entry has a label, only
  * the labels of the kept entries are shielded uncut ({@link shieldLabels},
- * one `anonymizeResult` call), every other label of the copy is removed,
- * and the copy is sanitized again, so the sanitizer cuts the shielded label
- * to 60 and an entry that only the second run keeps (a pseudonym of another
- * length moved the size bound) has no label, never an unshielded one. Then the
+ * one `anonymizeResult` call), every other label keeps its marker, and the
+ * copy is sanitized again, so the sanitizer cuts the shielded label to 60
+ * and, when the shield keeps the sizes, keeps the same entries. An entry
+ * that only the second run keeps (a pseudonym of another length moved the
+ * size bound) loses its marker label: never an unshielded one. Then the
  * other values of the kept entries go through the shield
  * ({@link shieldEntries}, one more call) and each shielded entry is checked
  * again ({@link checkShielded}). So a request makes no, one or two
@@ -387,21 +409,41 @@ export async function prepareViewContext(
     const marked = markLabels(own);
     let result = sanitize(own);
     if (result.entries.length === 0) return { dropped: result.dropped };
-    const kept = result.entries.flatMap((entry) => {
-      if (entry.label === undefined) return [];
+    const probe = result.entries;
+    const kept = probe.map((entry) => {
+      if (entry.label === undefined) return undefined;
       const found = marked.find((item) => item.marker === entry.label);
       if (!found) throw new Error('unknown label');
-      return [found];
+      return found;
     });
-    if (kept.length > 0) {
-      const shieldedLabels = await shieldLabels(kept.map((item) => item.cleaned), options.shield);
-      // Every label of the copy is now shielded or gone, whatever the second run keeps.
-      for (const item of marked) item.entry.label = null;
-      kept.forEach((item, index) => { item.entry.label = shieldedLabels[index]; });
+    // One call, as without uncut labels: the values of the kept entries, each label uncut.
+    const first = await shieldEntries(probe, options.shield, kept.map((item) => item?.visible));
+    let entries = first.entries;
+    if (kept.some((item) => item !== undefined)) {
+      kept.forEach((item, index) => { if (item) item.entry.label = first.labels[index]; });
+      // The other labels keep their same-sized markers, so the second run sizes them as
+      // the first did; a marker an entry still carries afterwards is removed with its
+      // label: every label in the block is a shielded one.
+      const left = new Set(marked.filter((item) => !kept.includes(item)).map((item) => item.marker));
       result = sanitize(own);
-      if (result.entries.length === 0) return { dropped: result.dropped };
+      const second = result.entries.map((entry) => {
+        if (entry.label === undefined || !left.has(entry.label)) return entry;
+        const { label: _marker, ...rest } = entry;
+        return rest as ViewContextEntry;
+      });
+      if (second.length === 0) return { dropped: result.dropped };
+      const same = second.length === probe.length
+        && second.every((entry, index) => withoutLabel(entry) === withoutLabel(probe[index]!) && (entry.label === undefined) === (kept[index] === undefined));
+      // The same entries: their values are shielded already; else (a pseudonym of another
+      // length moved the size bound) the values of the entries now kept, labels not again.
+      entries = same
+        ? second.map((entry, index) => {
+          const { label: _marker, ...values } = first.entries[index]!;
+          return (entry.label !== undefined ? { ...values, label: entry.label } : values) as ViewContextEntry;
+        })
+        : (await shieldEntries(second, options.shield)).entries;
     }
-    const shielded = (await shieldEntries(result.entries, options.shield)).map(checkShielded);
+    const shielded = entries.map(checkShielded);
     if (shielded.some((entry) => entry === undefined)) return { dropped: result.dropped };
     const block = renderViewContextBlock(viewContextLines(shielded as ViewContextEntry[]));
     return { ...(block ? { text: block.text } : {}), dropped: result.dropped };
