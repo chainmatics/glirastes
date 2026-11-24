@@ -1004,6 +1004,18 @@
   background: var(--cm-primary-tint);
   border-color: var(--cm-primary);
 }
+/* Real pointer movement makes the row under the pointer the selected one, so the hover look is the
+   selected look. Only while the pointer drives the list (`data-active-source="pointer"`): after the
+   arrow keys, a resting pointer must not mark a second row. Touch screens get no hover look. */
+@media (hover: hover) {
+  [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown"][data-active-source="pointer"] [data-component="mention-dropdown-item"]:hover {
+    background: var(--cm-primary-tint);
+  }
+  [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-dropdown"][data-active-source="pointer"] [data-component="mention-action"]:hover {
+    background: var(--cm-primary-tint);
+    border-color: var(--cm-primary);
+  }
+}
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="command-arguments"] {
   box-sizing: border-box;
   display: flex;

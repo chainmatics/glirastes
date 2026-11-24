@@ -2505,6 +2505,15 @@ export interface MentionDropdownItemProps {
   onClick: () => void;
   /** Custom items must spread these onto their clickable element for keyboard and screen-reader use. */
   optionProps?: MentionDropdownOptionProps;
+  /**
+   * Makes this entry the active one (as the arrow keys do; Enter and Tab then
+   * pick it), without scrolling the list. Not needed for the usual case: the
+   * list already activates the entry under the pointer when the pointer
+   * really moves. Call it only on real pointer movement, never on
+   * `mouseenter`/`mouseover`, which also fire when the list scrolls or
+   * re-renders under a resting pointer.
+   */
+  onActivate?: () => void;
 }
 
 export interface RichMentionInputComponents {

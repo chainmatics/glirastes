@@ -1,0 +1,26 @@
+{
+  "id": "completion-pointer-active",
+  "kind": "recommended",
+  "summary": "Visible change: the active entry of the @ and / list (the one Enter or Tab picks, aria-activedescendant) now follows real pointer movement over a row or an entity action. A list that opens, scrolls or re-renders under a resting pointer keeps the keyboard entry.",
+  "howTo": "Nothing to do for the built-in item: it now has a hover look equal to its selected look, only while the pointer drives the list and only on devices with hover. A custom components.DropdownItem (or components.MentionDropdownItem) needs no change; it gets isSelected for the pointer row too. If it has an own :hover style, scope it to [data-component=\"mention-dropdown\"][data-active-source=\"pointer\"], or after the arrow keys the hovered row and the keyboard row both look marked. A custom item with own pointer handling can call the new optional onActivate() prop, only on real pointer movement, never on mouseenter or mouseover. A custom item that scrolls itself on isSelected also scrolls on pointer activation. Tests that fire pointermove or mousemove with changed coordinates over the list now move the active entry. There is no opt-out.",
+  "skill": "building-glirastes-chat-ui#pointer-and-the-active-entry",
+  "affectedWhen": {
+    "symbols": [
+      "RichMentionInput",
+      "MentionInput",
+      "MentionDropdownItemProps",
+      "useChatComposerInput",
+      "chatInteractions",
+      "completionProviders"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "\\bonActivate\\b",
+      "data-active-source"
+    ]
+  },
+  "surface": [
+    "glirastes/react#MentionDropdownItemProps.onActivate"
+  ]
+}

@@ -9,6 +9,7 @@ All names below come from `glirastes/react` unless noted.
   - Mention markers
 - What a pick does
   - Sub-lists
+  - Pointer and the active entry
 - Opening a list from a button
 - Toolbar
   - Layout
@@ -178,6 +179,25 @@ const onCompletionSelect = useCallback<NonNullable<AiChatProviderConfig['onCompl
 
 `templates` is a second provider on the same trigger. The same works for an
 entry of the "+" menu's `source` section.
+
+### Pointer and the active entry
+
+The active entry of the `@`/`/` list (the one Enter or Tab picks,
+`aria-activedescendant`, `isSelected`, `data-selected="true"`) follows the
+pointer when it really moves over a row or an entity action button. Arrow
+keys go on from there. `mouseenter`/`mouseover` and a move event at the same
+coordinates (the list opens, scrolls or re-renders under a resting pointer)
+change nothing, nor does a finger dragging the list. Pointer activation does
+not scroll the list. The listbox carries `data-active-source="pointer"` or
+`"keyboard"`.
+
+A custom `DropdownItem` needs no change: the list finds the row from the
+`optionProps` id (or, without it, from the row order when each result renders
+one element). It can call `onActivate()` itself, only on real pointer
+movement. An own hover style is best scoped to
+`[data-active-source="pointer"]`, or the hovered row and the keyboard row
+both look marked after the arrow keys. A custom item that scrolls itself on
+`isSelected` also scrolls on pointer activation.
 
 ## Opening a list from a button
 
