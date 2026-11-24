@@ -275,8 +275,10 @@ source name of its own, also across several React roots); an update keeps
 its place, sources are sent in the order they first registered, and a
 source withdrawn with `null` comes last when it registers again. A
 `ViewContextEntry` (`glirastes/contracts`) names a record (`entity`), a
-selection of records (`selection: { type, ids }`), or both, plus optionally
-`label`, `facts`, `unsaved` and `route`. The registry keeps a reference to
+selection of records (`selection: { type, ids }`), or both in one entry
+(an order with its selected lines), plus optionally `label`, `facts`,
+`unsaved` (its own field: the user has unsaved changes in this view) and
+`route`. The registry keeps a reference to
 the entry; it is read and copied when a message is sent. `useViewContext`
 re-registers only when the content changes (it compares the entry as JSON on
 every render, so keep `facts` small) and withdraws on unmount (StrictMode
@@ -297,13 +299,16 @@ Rules (the server checks all of them again and drops what fails; it grants
 no permission):
 
 - The type must be declared on the server: an entity type of the request's
-  tools (`outputEntities` / `inputEntities`).
+  tools (`outputEntities` / `inputEntities`). A selection of a type the
+  server does not declare is dropped; its entry stays when it has an entity.
 - Ids exactly as the app has them, never reformatted (2 to 4 parts for a
-  composite key); a selection keeps at most 50.
+  composite key); a selection keeps at most 50 ids, and at most 100 are
+  looked at.
 - `facts` are kept only for a type with a schema in the handler's
   `viewContext.facts`; without one the server drops them.
 - `route` only as an explicit decoded path (`/orders/42`): no query, hash,
-  `%` escapes or host. Query values belong in declared facts.
+  `%` escapes or host. It is a hint only; state the page keeps in the URL
+  query (a filter, a tab) belongs in `facts`, with a schema on the server.
 - At most 8 entries and labels of at most 60 characters. Keep personal data
   out of long labels: with `piiShield` the server cuts a label to 60
   characters before the shield sees it, so a value at the cut (an e-mail
@@ -324,28 +329,19 @@ follow-up, the "continue" message after a cut-off answer, and a direct `/`
 command (the server adds no block for a direct command). A request without a
 new user message (approval resume, `continueTurn` after a UI action,
 "Continue" after a budget stop) carries none: the server would not use it
-there. Nothing registered, no field: the request is exactly as before. When
-it is on and the cleaned snapshot is not empty, the field replaces a
+there. Nothing registered (or nothing left after cleaning), no field: the
+request is exactly as before. When it is sent, the field replaces a
 `glirastesViewContext` the app puts into `bodyExtras`.
 
-`viewContext={{ enabled: false }}` on `AiChatProvider` / `VercelAiChat`
-(`config.viewContext` of `<glirastes-chat>`) sends none. The provider decides
-per message from its committed render and hands the transport
-`sendMessage(message, { viewContext: false })`; nothing is stored on the
-transport, so two providers sharing one do not affect each other, and a
-render React discards changes nothing. A child that sends in its mount
-effect already sees the setting. React semantics apply to a state change:
-`setOff(true); send()` in the same event handler sends with the setting of
-the last render (still on); turn it off a render before sending. For
-`<glirastes-chat>` set `config` before appending the element. A `send()`
-right after setting `config.viewContext.enabled: false` (in the
-`glirastes-chat:ready` handler or a host effect) returns `true` and is held
-until the chat rendered that config, then sent without the field; without
-that switch `send()` behaves as before. An own transport sends nothing
-unless it adds the field itself from `currentViewContext()` (and leaves it
-out when called with `{ viewContext: false }`). The transport reaches the
-cleaning code only through `registerViewContext`: an app that never
-registers anything does not load it and gets no global state from a send.
+Turning it off: register nothing, or pass `null` (`useViewContext(null)`,
+`registerViewContext(source, null)`), and nothing is sent; or set
+`viewContext: false` on the server (`createAiChatHandler`), which then
+ignores the field. There is no switch per chat instance: two chats on one
+page share the registry, so only their server endpoints can turn it off
+separately. An own transport sends nothing unless it adds the field itself
+from `currentViewContext()`. The transport reaches the cleaning code only
+through `registerViewContext`: an app that never registers anything does
+not load it and gets no global state from a send.
 
 Limits of this release:
 
