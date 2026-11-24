@@ -373,9 +373,10 @@ describe('canonicalMentionLabel cut: value-safe never splits a value', () => {
     expect(canonicalMentionLabel('Tel +49 170 1234567', { maxLength: 8, ...SAFE })).toBe('Tel…');
   });
 
-  it('cuts the id fallback as before in both modes (the id goes whole into the marker anyway)', () => {
-    expect(canonicalMentionLabel('', { id: '4711-0815-ab', maxLength: 8, ...SAFE })).toBe('4711-08…');
+  it('cuts the id fallback in the same mode (grapheme as on main)', () => {
+    expect(canonicalMentionLabel('', { id: '4711-0815-ab', maxLength: 8, ...SAFE })).toBe('…');
     expect(canonicalMentionLabel('', { id: '4711-0815-ab', maxLength: 8 })).toBe('4711-08…');
+    expect(canonicalMentionLabel('', { id: 'Kunde Nord Filiale', maxLength: 8, ...SAFE })).toBe('Kunde N…');
   });
 
   it('ordinary labels are cut exactly as in 0.24.2 (difference probe, 60 000 seeded labels)', () => {

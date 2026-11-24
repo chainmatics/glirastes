@@ -97,10 +97,11 @@ IBAN, phone number, URL) is left out whole, also with spaces (`+49 170
 1234567`, `GB29 NWBK 6016 …`), so the server's PII shield never sees a
 fragment it cannot recognise (`labelCut: 'value-safe'`, the chat's
 default; dates, prices, file names, versions and `z.B.` at the edge go
-too, a label of only values becomes the id, CJK text with a digit can go
-whole; `labelCut: 'grapheme'` keeps the 0.24.2 cut, `MentionLabelCut`).
-Not covered: text stored by 0.24.2 clients, a postcode before a cut city
-name, names cut inside a word. A type
+too, a label of only values becomes the id, a label without spaces (CJK)
+over the limit with any digit always becomes the id; `labelCut:
+'grapheme'` keeps the 0.24.2 cut, `MentionLabelCut`). Not covered: text
+stored by 0.24.2 clients, a postcode right before the cut (`80331 M…`),
+names cut inside a word, letter groups of lower-case IBANs. A type
 or id with control, format, invisible, private-use or unassigned
 characters, `}`, `{{`, `<!`, `-->` or `--!>` gets no marker: the typed
 token stays and the model loses the id (console warning once per type,

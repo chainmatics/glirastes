@@ -48,7 +48,7 @@
  * | `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (single `<` `>` stay) |
  * | nothing left | the canonical id |
  * | over 120 (or `maxLength`) code points | cut at a grapheme boundary (`Intl.Segmenter`; without it, never before a mark, joiner or selector, after a joiner or virama, or inside a flag or keycap; other clusters such as Thai Sara Am can then be split) to at most 119 and `…`; a bare `…` becomes the id; never empty |
- * | a value the cut would split, only with `cut: 'value-safe'` (the React chat's send path; the default `grapheme` cuts as in 0.24.2) | the value run at the cut is left out whole: tokens (split at whitespace) with a digit, `@ / : + _ % = # & ~ \ |` or a dot inside, punctuation-only tokens, and groups of 1-4 upper-case letters next to them (`+49 170 1234567`, `GB29 NWBK 6016 …`), so a PII detector on the server never gets a fragment it cannot recognise; the id fallback is cut as before |
+ * | a value the cut would split, only with `cut: 'value-safe'` (the React chat's send path; the default `grapheme` cuts as in 0.24.2) | the value run at the cut is left out whole: tokens (split at whitespace) with a digit, `@ / : + _ % = # & ~ \ |` or a dot inside, punctuation-only tokens, and groups of 1-4 upper-case letters next to them (`+49 170 1234567`, `GB29 NWBK 6016 …`), so a PII detector on the server never gets a fragment it cannot recognise; the id fallback is cut the same way |
  *
  * No NFKC: look-alikes such as `｛` or fullwidth letters stay as they are.
  * They are visible to the user, so the chip still shows what the model reads.
@@ -196,8 +196,8 @@ export interface CanonicalMentionLabelOptions {
    * number, URL), punctuation-only tokens and groups of 1-4 upper-case
    * letters next to them (`GB29 NWBK 6016 …`), so a PII detector on the
    * server never gets a fragment it cannot recognise; the React chat sends
-   * mention labels with it. Labels within `maxLength`, and the id fallback,
-   * are the same either way.
+   * mention labels with it, and an id fallback over `maxLength` is cut the
+   * same way. Labels within `maxLength` are the same either way.
    */
   cut?: MentionLabelCut;
 }
@@ -423,6 +423,12 @@ function cutAtBoundary(visible: string, budget: number): string {
 
 /** Whitespace that separates words; all BMP, so a check per UTF-16 unit is exact. */
 const isSpace = (unit: string | undefined) => unit !== undefined && /\s/.test(unit);
+/**
+ * Punctuation at the edges of a token. Not linear: `\p{P}+$` is retried at
+ * each start inside a punctuation run, so a token of punctuation runs costs
+ * up to quadratic time in its length; a label is read to at most 4096 code
+ * points (`MAX_INPUT_CODE_POINTS`), which bounds it.
+ */
 const EDGE_PUNCTUATION = /^\p{P}+|\p{P}+$/gu;
 /** A keycap emoji (1️⃣, #️⃣): a digit or `#` `*` that is not a value. */
 const KEYCAP_EMOJI = /[0-9#*]\uFE0F?\u20E3/gu;
@@ -467,7 +473,8 @@ function tokenStartBefore(text: string, end: number): number {
  * part of the run before the cut is dropped, with the whitespace before
  * it, so a value written with spaces (`+49 170 1234567`, `GB29 NWBK 6016
  * …`) goes whole. A server-side PII detector never sees a value it can no
- * longer recognise. Otherwise `prefix` is returned as it is. Linear.
+ * longer recognise. Otherwise `prefix` is returned as it is. Linear in the
+ * label apart from `tokenKind` (see `EDGE_PUNCTUATION`).
  */
 function withoutSplitValue(full: string, prefix: string): string {
   const cut = prefix.length;
@@ -520,8 +527,8 @@ function truncated(visible: string, max: number, cut: MentionLabelCut): string {
 export function canonicalMentionLabel(label: string, options?: CanonicalMentionLabelOptions): string {
   const max = labelLength(options?.maxLength);
   const cut: MentionLabelCut = options?.cut === 'value-safe' ? 'value-safe' : 'grapheme';
-  // The id fallback is cut as in 0.24.2 in both modes: the id is app data, sent whole in the marker anyway.
-  const fromId = () => (typeof options?.id === 'string' ? truncated(visibleLabel(options.id), max, 'grapheme') : '');
+  // The id fallback is cut in the same mode: a label that was only a value run must not bring a fragment back through the id.
+  const fromId = () => (typeof options?.id === 'string' ? truncated(visibleLabel(options.id), max, cut) : '');
   const visible = visibleLabel(typeof label === 'string' ? label : '');
   // Never empty: a marker with an empty label is read by no reader.
   if (!visible) return fromId() || '…';

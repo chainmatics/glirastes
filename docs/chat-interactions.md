@@ -338,26 +338,27 @@ percentages, file names, paths, case numbers and product versions at the
 edge go as well (`… Office 365 …` becomes `… Office…`), and the label can
 end on a preposition or conjunction (`… und…`, `… für…`). A label full of
 numbers can shrink to its first word (`Messwerte 100 101 …` becomes
-`Messwerte…`); a label that is only a value run becomes the id. Scripts
-without spaces (Chinese, Japanese) make a whole sentence one token: one
-digit in it (`第3回`, `2024年`) makes the token a value, so a long run can go
-whole and the label becomes the id. Measured on samples of labels over
-120 code points: about 15-25 % change in a mixed sample, 30-40 % in a
-sample with many numbers, losing 7-26 code points on average (at most
-about 115); in Japanese samples with digits 40-80 % of the over-long labels
-change and up to about one in ten becomes the id.
+`Messwerte…`); a label that is only a value run becomes the id, and an id
+over `maxLabelLength` is cut the same way. Scripts without spaces
+(Chinese, Japanese) make a whole label one token: a label without spaces
+over the limit with a digit anywhere in it (`第3回`, `2024年`), also behind
+the cut, always becomes the id.
 
 Known limits of the value-safe cut (PII shield): text already stored by a
 0.24.2 client keeps its cut label (`…max.musterm…`), and the shield sees
 that fragment again in every later turn that sends the history; a 0.24.2
-client that still runs keeps cutting as before. A postcode stays when the
-cut falls in the city name after it (`… 80331 Mü…`): the city is a word,
-and the shield's address pattern no longer matches (the same as with the
-0.24.2 cut). A name or street without digits that the cut splits inside
-the word (`Maximilian Muster…`) stays a fragment for a name detector. A
-lower-case IBAN, and a value a custom detector finds without a digit, a
-dot inside or one of the characters above, is not treated as a value
-(the regex detector does not find a lower-case IBAN either). Values the
+client that still runs keeps cutting as before. A postcode stays in plain
+text when the cut falls right after it, after the space, or after the
+first letter of the city (`… 80331…`, `… 80331 …`, `… 80331 M…`): the city
+is a word, and the shield's address pattern needs two letters of it
+(`… 80331 Mü…` is recognised); the same as with the 0.24.2 cut. A name or
+street without digits that the cut splits inside the word (`Maximilian
+Muster…`) stays a fragment for a name detector. In a lower-case IBAN the
+groups with digits are values, but a letter group such as `nwbk` is a word
+and ends the run, so `gb29 nwbk…` can stay (the regex detector does not
+find lower-case IBANs at all). A value a custom detector finds without a
+digit, a dot inside or one of the characters above is not treated as a
+value. Values the
 detector does not recognise even whole (some compact IBANs, Norwegian
 IBANs) are not protected by the cut either. An own client or server that
 calls `canonicalMentionLabel` / `serializeMentionMarker` directly gets the

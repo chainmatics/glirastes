@@ -263,6 +263,9 @@ describe('value-safe cut: each trigger on its own', () => {
     ['only @', 'max@localhost'],
     ['only a dot inside', 'www.kanzlei-wendt.de'],
     ['only a digit', 'Raum4711'],
+    ['only +', 'vertrieb+nord'],
+    ['only an Arabic-Indic digit', 'غرفة٤'],
+    ['only a fullwidth digit', 'Raum７'],
   ])('%s', (_name, value) => {
     const label = `${pad(116)} ${value} Ende der Notiz`;
     expect(canonicalMentionLabel(label, { cut: 'value-safe' })).toBe(`${pad(116)}…`);
@@ -276,9 +279,104 @@ describe('value-safe cut: each trigger on its own', () => {
     }
   });
 
+  it('a single upper-case letter next to a value belongs to it (4 O 123/24)', () => {
+    const label = `${pad(112)} Az. 4 O 123/24 Ende`;
+    expect(canonicalMentionLabel(label, { cut: 'value-safe' })).toBe(`${pad(112)} Az.…`);
+  });
+
   it('an acronym next to plain words is a word: KG, EU, USA, GmbH change nothing', () => {
     const label = `${pad(110)} ACME KG EU USA GmbH Vertrag`;
     expect(canonicalMentionLabel(label, { cut: 'value-safe' })).toBe(canonicalMentionLabel(label, { cut: 'grapheme' }));
   });
+});
+
+describe('value-safe cut: known limit and id fallback against the real shield', () => {
+  const pad = (length: number) => 'notiz '.repeat(30).slice(0, length - 1);
+
+  it('a postcode stays only when the cut falls after it or in the first letter of the city', async () => {
+    const cases: Array<[number, string, boolean]> = [
+      [114, '80331…', true],
+      [113, '80331 …', true],
+      [112, '80331 M…', true],
+      [111, '80331 Mü…', false],
+    ];
+    for (const [at, tail, plainPostcode] of cases) {
+      const label = `${pad(at)} 80331 München Ende der Notiz`;
+      const sent = send(label);
+      expect(sent, tail).toContain(`${tail}}}`);
+      expect((await plainAfterShield(sent)).includes('80331'), tail).toBe(plainPostcode);
+      expect(send(label, { labelCut: 'grapheme' }), tail).toBe(sent);
+    }
+  });
+
+  it('a label that is only a value run falls back to the id, which is cut value-safe too', async () => {
+    const label = `https://example.com/${'a'.repeat(200)}`;
+    const id = `${'k'.repeat(90)} max.mustermann@kanzlei-wendt.de ${'z'.repeat(40)}`;
+    const mention = { id, type: 'customer', label, displayName: label, slug: 'kunde', prefix: '@' };
+    const sent = serializeMentionsForSend('Bitte prüfe @kunde', [mention]);
+    expect(fragmentOf('max.mustermann@kanzlei-wendt.de', (await plainAfterShield(sent)).replace(id, ''))).toBe('');
+    // grapheme: the id fallback is cut as on main.
+    const graphemeSent = serializeMentionsForSend('Bitte prüfe @kunde', [mention], { labelCut: 'grapheme' });
+    expect(graphemeSent).toContain(`:${canonicalMentionLabel(label, { id, cut: 'grapheme' })}}}`);
+  });
+});
+
+describe('value-safe cut: fuzzing through the send path and the real shield', () => {
+  /** Seeded generators of every value kind the regex detector knows (German locale). */
+  function generators(next: () => number) {
+    const pick = <T,>(items: readonly T[]) => items[Math.floor(next() * items.length)]!;
+    const digits = (n: number) => Array.from({ length: n }, () => Math.floor(next() * 10)).join('');
+    const letter = () => String.fromCharCode(65 + Math.floor(next() * 26));
+    const iban = () => {
+      const shape = pick(IBANS);
+      return shape.slice(0, 2) + shape.slice(2).replace(/\d/g, () => digits(1)).replace(/(?<=^\d\d.*)[A-Z]/g, letter);
+    };
+    return {
+      email: () => `${pick(['jolanda', 'k.oster', 'info', 'm-weber', 'x_y'])}${digits(2)}@${pick(['kanzlei-wendt', 'firma', 'mail-host'])}.${pick(['de', 'com', 'info'])}`,
+      'iban grouped': iban,
+      'iban compact': () => iban().replace(/ /g, ''),
+      phone: () => pick([`+49 ${digits(3)} ${digits(7)}`, `+49${digits(10)}`, `0049 ${digits(2)} ${digits(8)}`, `+49 (${digits(2)}) ${digits(4)} ${digits(4)}`,
+        `+49-${digits(2)}-${digits(8)}`, `0${digits(3)} ${digits(7)}`, `0${digits(2)}/${digits(8)}`, `0${digits(2)} ${digits(4)} ${digits(4)}`,
+        `0${digits(3)}.${digits(6)}`, `0${digits(2)}-${digits(7)}`]),
+      url: () => `https://${pick(['crm', 'app', 'portal'])}.kundenportal.de/${pick(['kunden', 'akten'])}/${digits(4)}`,
+      ip: () => `${10 + Math.floor(next() * 200)}.${Math.floor(next() * 255)}.${Math.floor(next() * 255)}.${Math.floor(next() * 255)}`,
+      date: () => `${pick(['01', '12', '24', '30'])}.${pick(['01', '06', '12'])}.${pick(['1985', '2001', '1970'])}`,
+      'tax number': () => `${digits(2)}/${digits(3)}/${digits(5)}`,
+    } as Record<string, () => string>;
+  }
+
+  it('200,000 labels: no fragment with value-safe where the detector knows the whole value, never more than grapheme', async () => {
+    let state = 0x2026;
+    const next = () => {
+      state = (Math.imul(state, 1103515245) + 12345) >>> 0;
+      return state / 4294967296;
+    };
+    const kinds = generators(next);
+    const words = ['kunde', 'Projekt', 'Angebot', 'Rückruf', 'Wartung', 'bitte', 'offen', 'Lieferung', 'Vertrag', 'zum', 'Fall', 'und', 'für', 'Anna', 'Weber'];
+    const filler = (length: number) => {
+      let text = '';
+      while (text.length < length) text += `${words[Math.floor(next() * words.length)]} `;
+      return text.slice(0, length - 1);
+    };
+    const leaks: Record<string, { valueSafe: number; grapheme: number; worse: number }> = {};
+    for (let run = 0; run < 200_000; run += 1) {
+      const names = Object.keys(kinds);
+      const kind = names[Math.floor(next() * names.length)]!;
+      const value = kinds[kind]!();
+      const label = `${filler(60 + Math.floor(next() * 76))} ${value} ${filler(20 + Math.floor(next() * 30))}`;
+      const count = (leaks[kind] ??= { valueSafe: 0, grapheme: 0, worse: 0 });
+      if (fragmentOf(value, await plainAfterShield(send(label, { labels: 'raw' })))) continue; // the detector misses it whole
+      const safe = Boolean(fragmentOf(value, await plainAfterShield(send(label))));
+      const grapheme = Boolean(fragmentOf(value, await plainAfterShield(send(label, { labelCut: 'grapheme' }))));
+      if (safe) count.valueSafe += 1;
+      if (grapheme) count.grapheme += 1;
+      if (safe && !grapheme) count.worse += 1;
+    }
+    for (const [kind, count] of Object.entries(leaks)) {
+      expect(count.valueSafe, kind).toBe(0);
+      expect(count.worse, kind).toBe(0);
+    }
+    expect(Object.values(leaks).reduce((sum, count) => sum + count.grapheme, 0)).toBeGreaterThan(10_000);
+  }, 300_000);
 });
 
