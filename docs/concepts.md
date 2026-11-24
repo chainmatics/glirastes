@@ -195,6 +195,8 @@ Two modes:
 
 Can delegate detection to Glirastes Aegis or run locally.
 
+**Replacement order.** `anonymizeResult` replaces every original the session knows (from the user's messages, earlier results, the view context), not only what the detector finds in the result; `inbound` and `rehydrateArgs` replace every known pseudonym. Both go longest value first (equal lengths in the order the session learnt them), in one pass over the text: a value that is part of a longer one (`max@firma.de` in `johannes.max@firma.de`, `https://firma.de` in `https://firma.de/u/max.mustermann@firma.de`) never breaks the longer one, and a replacement is never searched again, so a pseudonym is never changed by a later value it happens to contain. `outbound` replaces only what the detector finds in the message. Known limit: two values that overlap without one containing the other (`37/1571/24067` known, then `37/1571/24067Z.huber@kanzlei-x.de`, where the detector reads `24067Z.huber@kanzlei-x.de` as the e-mail address) keep the rest of the shorter one (`37/1571/`) in plain text.
+
 ---
 
 ## Approvals
