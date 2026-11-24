@@ -2,6 +2,8 @@
 // Markdown renderer and `preloadMarkdown()`. It keeps react-markdown out of the
 // synchronous import graph so server-only consumers don't pay for it, and
 // gracefully degrades to raw text when the optional peer dep isn't installed.
+import { unescapeMarkerLabels } from './entity-links/marker-text.js';
+
 type MarkdownModule = typeof import('react-markdown');
 
 type LoadedModule = { default: MarkdownModule['default'] };
@@ -25,8 +27,9 @@ export function loadMarkdownModule(): Promise<LoadedModule> {
           '[MessageBubble] react-markdown is not installed — falling back to plain text. Add the package react-markdown (a peer dependency of glirastes) to the app with its package manager.',
         );
       }
+      // The raw text, mention labels without the escapes the SDK put in for react-markdown.
       const Fallback: MarkdownModule['default'] = (({ children }) => (
-        <>{typeof children === 'string' ? children : ''}</>
+        <>{typeof children === 'string' ? unescapeMarkerLabels(children) : ''}</>
       )) as MarkdownModule['default'];
       return { default: Fallback };
     }

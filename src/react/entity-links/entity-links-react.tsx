@@ -17,6 +17,7 @@ import { getDefaultUiActionBus, type UiActionBus } from '../../browser/ui-action
 import { MentionChip as DefaultMentionChip } from '../components/mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import type { Mention } from '../types.js';
+import { MARKER_CHARS, MARKER_EDGE, MARKER_SPAN, escapeMarkerLabel } from './marker-text.js';
 import {
   collectKnownEntities,
   collectSeenReferenceKeys,
@@ -278,14 +279,6 @@ export function EntityLinkChip({ reference, text }: { reference: ChatEntityRefer
   );
 }
 
-/**
- * A marker kept in Markdown text: `\u2060`, its index in zero-width digits
- * (`\u200B` 0, `\u200C` 1), `\u2063`, its label, `\u2060`. Invisible where
- * nothing renders a chip; the index keeps markers with one label apart.
- */
-const MARKER_EDGE = '\u2060';
-const MARKER_SPAN = /\u2060([\u200B\u200C]+)\u2063([^\u2060]*)\u2060/g;
-const MARKER_CHARS = /[\u2060\u2063]/g;
 
 function markerIndexText(index: number): string {
   return index.toString(2).replace(/0/g, '\u200B').replace(/1/g, '\u200C');
@@ -294,7 +287,6 @@ function markerIndexText(index: number): string {
 function markerIndexOf(text: string): number {
   return Number.parseInt(text.replace(/\u200B/g, '0').replace(/\u200C/g, '1'), 2);
 }
-const MARKDOWN_PUNCTUATION = /[\\`*_{}[\]()#+\-.!<>|~]/g;
 
 /** The markers of one text part, in the order they occur. */
 const MentionMarkersContext = createContext<ReadonlyArray<Mention> | null>(null);
@@ -316,7 +308,8 @@ export function markdownWithMentionMarkers(
       continue;
     }
     const index = mentions.push(segment.mention) - 1;
-    const label = segment.mention.displayName.replace(MARKER_CHARS, '').replace(MARKDOWN_PUNCTUATION, (char) => `\\${char}`);
+    const name = segment.mention.displayName.replace(MARKER_CHARS, '');
+    const label = escapeMarkerLabel(name);
     content += `${MARKER_EDGE}${markerIndexText(index)}\u2063${label}${MARKER_EDGE}`;
   }
   return { content, mentions };
