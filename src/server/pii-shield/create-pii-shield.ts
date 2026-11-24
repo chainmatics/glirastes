@@ -8,7 +8,7 @@ import type {
 import { createSessionStore, type Session } from './session-mapping.js';
 import { deepWalkReplace } from './deep-walk.js';
 import { detectLeakage } from './leakage.js';
-import { longestFirst, replaceKnown, type Replacements } from './replace-known.js';
+import { longestFirst, OVERLAP_PLACEHOLDER, replaceKnown, type Replacements } from './replace-known.js';
 
 interface SessionStats {
   startedAt: number;
@@ -22,19 +22,30 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
   const auditLog = new Map<string, PiiAuditEntry[]>();
   const sessionStats = new Map<string, SessionStats>();
 
+  /** Sorted pairs per session, rebuilt when the session learnt a value (it only ever grows). */
+  const pairsCache = new WeakMap<Session, { count: number; forward: Replacements; back: Replacements }>();
+
   /**
    * The session's originals and their pseudonyms, the longest first, for
    * {@link replaceKnown}: `toPseudonym` maps original → pseudonym, otherwise
    * pseudonym → original.
    */
   function knownPairs(session: Session, toPseudonym: boolean): Replacements {
-    const pairs: Array<[string, string]> = [];
-    for (const original of session.allOriginals()) {
-      const pseudonym = session.getPseudonym(original);
-      if (!pseudonym) continue;
-      pairs.push(toPseudonym ? [original, pseudonym] : [pseudonym, original]);
+    const originals = session.allOriginals();
+    let cached = pairsCache.get(session);
+    if (!cached || cached.count !== originals.length) {
+      const forward: Array<[string, string]> = [];
+      const back: Array<[string, string]> = [];
+      for (const original of originals) {
+        const pseudonym = session.getPseudonym(original);
+        if (!pseudonym) continue;
+        forward.push([original, pseudonym]);
+        back.push([pseudonym, original]);
+      }
+      cached = { count: originals.length, forward: longestFirst(forward), back: longestFirst(back) };
+      pairsCache.set(session, cached);
     }
-    return longestFirst(pairs);
+    return toPseudonym ? cached.forward : cached.back;
   }
 
   function getStats(sessionId: string): SessionStats {
@@ -167,9 +178,11 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
 
     // Deep-walk and replace originals with pseudonyms: the longest original
     // first, in one pass, so a known original that is part of a longer one
-    // never leaves a piece of the longer one in clear text
+    // never leaves a piece of the longer one in clear text; the rest of one
+    // that only partly overlaps another becomes OVERLAP_PLACEHOLDER (fail
+    // closed: no position of a known original reaches the model)
     const pairs = knownPairs(session, true);
-    const anonymized = deepWalkReplace(result, (s: string) => replaceKnown(s, pairs));
+    const anonymized = deepWalkReplace(result, (s: string) => replaceKnown(s, pairs, OVERLAP_PLACEHOLDER));
 
     addAuditEntry(buildAuditEntry(sessionId, 'anonymize-result', detected));
     return anonymized;

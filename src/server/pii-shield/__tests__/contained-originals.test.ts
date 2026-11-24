@@ -133,24 +133,32 @@ describe('pii shield: an original contained in a longer one', () => {
   });
 
   /**
-   * Known limit: two originals that overlap without one containing the
-   * other. The longer one is replaced, the rest of the shorter one stays.
-   * Here `37/1571/24067` is known and the detector reads the e-mail as
-   * `24067Z.huber@kanzlei-x.de`, so `37/1571/` stays in clear text.
+   * Two originals that overlap without one containing the other: the longer
+   * one becomes its pseudonym, the rest of the shorter one the placeholder
+   * `[REDACTED]` (fail closed). Here `37/1571/24067` is known and the
+   * detector reads the e-mail as `24067Z.huber@kanzlei-x.de`. The way back
+   * restores the e-mail and keeps the placeholder: lossy, never another value.
    */
-  it('known limit: a partial overlap leaves the rest of the shorter original', async () => {
-    const shield = regexShield();
-    await shield.outbound('Steuer 37/1571/24067', 's');
-    const shown = await shield.anonymizeResult({ file: 'Akte 37/1571/24067Z.huber@kanzlei-x.de' }, 's') as { file: string };
-    expect(shown.file).not.toContain('huber@kanzlei-x.de');
-    expect(shown.file.startsWith('Akte 37/1571/')).toBe(true);
-  });
-
-  it.fails('known limit, wanted: no piece of a partially overlapping original stays', async () => {
+  it('a partial overlap: no piece of either original stays, the rest becomes a placeholder', async () => {
     const shield = regexShield();
     await shield.outbound('Steuer 37/1571/24067', 's');
     const shown = await shield.anonymizeResult({ file: 'Akte 37/1571/24067Z.huber@kanzlei-x.de' }, 's') as { file: string };
     expect(fragmentsOf('37/1571/24067', shown.file)).toEqual([]);
+    expect(fragmentsOf('24067Z.huber@kanzlei-x.de', shown.file)).toEqual([]);
+    expect(shown.file).toMatch(/^Akte \[REDACTED\]\S+@\S+$/);
+    expect(shield.inbound(shown.file, 's')).toBe('Akte [REDACTED]24067Z.huber@kanzlei-x.de');
+    expect(shield.rehydrateArgs({ file: shown.file }, 's')).toEqual({ file: 'Akte [REDACTED]24067Z.huber@kanzlei-x.de' });
+  });
+
+  it('a longer value that reaches into a second occurrence of a shorter one leaves no digit of it', async () => {
+    // The phone pattern reads `030 123456 030` as one number.
+    const shield = regexShield();
+    const message = await shield.outbound('Bitte 030 123456 anrufen', 's');
+    const shown = await shield.anonymizeResult({ phones: '030 123456 030 123456-99' }, 's') as { phones: string };
+    expect(shown.phones).not.toContain('123456');
+    expect(shown.phones).toMatch(/\[REDACTED\]-99$/);
+    expect(message).not.toContain('123456');
+    expect(shield.inbound(shown.phones, 's')).toBe('030 123456 030[REDACTED]-99');
   });
 });
 

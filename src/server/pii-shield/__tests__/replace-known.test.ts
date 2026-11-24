@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { longestFirst, replaceKnown } from '../replace-known.js';
+import { longestFirst, OVERLAP_PLACEHOLDER, replaceKnown } from '../replace-known.js';
 
 const replace = (text: string, pairs: Array<[string, string]>) => replaceKnown(text, longestFirst(pairs));
+const covered = (text: string, pairs: Array<[string, string]>) => replaceKnown(text, longestFirst(pairs), '#');
 
 describe('replaceKnown', () => {
   it('replaces the longest value first, whichever order the values came in', () => {
@@ -25,8 +26,25 @@ describe('replaceKnown', () => {
     expect(replace('abc', [['bc', 'Y'], ['ab', 'X']])).toBe('aY');
   });
 
-  it('a partial overlap: the longer value wins, the rest of the shorter one stays', () => {
+  it('a partial overlap without cover (the way back): the longer value wins, the rest of the shorter one stays', () => {
     expect(replace('37/1571/24067Z.huber@kanzlei-x.de', [['37/1571/24067', 'T'], ['24067Z.huber@kanzlei-x.de', 'E']])).toBe('37/1571/E');
+  });
+
+  it('a partial overlap with cover (to the model): the rest of the shorter value becomes the cover', () => {
+    expect(covered('37/1571/24067Z.huber@kanzlei-x.de', [['37/1571/24067', 'T'], ['24067Z.huber@kanzlei-x.de', 'E']])).toBe('#E');
+    expect(covered('030 123456 030 123456-99', [['030 123456', 'S'], ['030 123456 030', 'L']])).toBe('L#-99');
+    // A rest on both sides of a longer value, and a value between two longer ones.
+    expect(covered('xabcdefgy', [['abcdefg', 'L'], ['xabc', 'A'], ['efgy', 'B']])).toBe('#L#');
+    expect(covered('ab1234cd', [['ab12', 'A'], ['34cd', 'B'], ['1234', 'C']])).toBe('AB');
+    expect(covered('ab12x34cd', [['ab12', 'A'], ['34cd', 'B'], ['12x34', 'C']])).toBe('#C#');
+  });
+
+  it('with cover, an occurrence that overlaps another of the same value is covered too; neighbouring covers become one', () => {
+    expect(covered('abcabcab', [['abcab', 'P']])).toBe('P#');
+    expect(replace('abcabcab', [['abcab', 'P']])).toBe('Pcab');
+    expect(covered('aaaaa', [['aa', 'X']])).toBe('XX#');
+    expect(covered('a'.repeat(2500), [['a'.repeat(1000), 'P']])).toBe('PP#');
+    expect(OVERLAP_PLACEHOLDER).toBe('[REDACTED]');
   });
 
   it('takes occurrences left to right without overlap, as split does', () => {
@@ -38,6 +56,26 @@ describe('replaceKnown', () => {
     expect(replace('abc', [['', 'X']])).toBe('abc');
     const text = 'nothing known here';
     expect(replace(text, [['zzz', 'X']])).toBe(text);
+  });
+
+  it('stays linear in a periodic text: the time does not grow with the length of the value', () => {
+    const text = 'a'.repeat(400_000);
+    const time = (length: number, cover?: string) => {
+      const pairs = longestFirst(Array.from({ length: 21 }, (_, index): [string, string] => ['a'.repeat(length - index), `<${index}>`]));
+      let best = Infinity;
+      for (let run = 0; run < 3; run += 1) {
+        const started = performance.now();
+        replaceKnown(text.slice(0, text.length - 7), pairs, cover);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    for (const cover of [undefined, '#']) {
+      const short = time(1_000, cover);
+      const long = time(16_000, cover);
+      // O(n·L) would make the long values about 16 times slower.
+      expect(long).toBeLessThan(Math.max(4 * short, 50));
+    }
   });
 
   it('equals replacing one value after the other when no value is part of another', () => {
