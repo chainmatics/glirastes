@@ -9,7 +9,8 @@ import { ChatInput } from '../components/chat-input.js';
 import { ChatQueue, useChatQueue } from '../components/chat-queue.js';
 import { MentionInput } from '../components/mention-input.js';
 import { UiActionBus } from '../../browser/ui-action-bus.js';
-import { defineChatCommand } from '../interactions/definitions.js';
+import { defineChatCommand, defineChatEntity } from '../interactions/definitions.js';
+import { parseChatCommandMessage } from '../../contracts/chat-command.js';
 import { useChatContext, type ChatContextValue } from '../provider/chat-context.js';
 import { deChatLocale } from '../locale-de.js';
 import type {
@@ -1257,5 +1258,123 @@ describe('ChatQueue component', () => {
     await startRun(prop);
     await act(async () => { ctx.submit('x'); ctx.submit('y'); });
     expect(screen.getByTestId('count').textContent).toBe('2:false');
+  });
+});
+
+describe('queued direct commands', () => {
+  const enabled = { queue: { enabled: true } } as const;
+  const person = defineChatEntity({
+    type: 'person',
+    label: 'Person',
+    search: () => [{ id: 'alice', label: 'Alice' }],
+    actions: [{ id: 'person.assign', label: 'Assign', entityArg: 'who', run: { kind: 'tool', tool: 'people.assign' } }],
+  });
+  const assign = defineChatCommand({
+    id: 'people.assign',
+    label: 'Assign',
+    args: [{ name: 'who', label: 'Who', required: true, entity: 'person' }],
+    run: { kind: 'tool', tool: 'people.assign' },
+  });
+  const budget = defineChatCommand({
+    id: 'tasks.budget',
+    label: 'Budget',
+    args: [{ name: 'amount', label: 'Cost', required: true }],
+    run: { kind: 'tool', tool: 'tasks.budget' },
+  });
+  const chatInteractions = { entities: [person], commands: [assign, budget] };
+  const config = { ...enabled, chatInteractions };
+  const cmd: MentionData = { id: 'people.assign', type: 'command', label: 'assign', prefix: '/', slug: 'assign' };
+  const alice: MentionData = { id: 'alice', type: 'person', label: 'Alice', prefix: '@', slug: 'alice' };
+  const typed = '/assign @alice';
+
+  async function queueTyped(chat: FakeChat) {
+    await startRun(chat);
+    let result = '';
+    await act(async () => { result = ctx.submit(typed, { mentions: [cmd, alice] }); });
+    expect(result).toBe('queued');
+  }
+
+  it('keeps the typed text in the queue, without markers or command envelope', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={config} />);
+    await queueTyped(chat);
+    expect(queuedTexts()).toEqual([typed]);
+    expect(ctx.queue.items[0]!.text).not.toContain('{{mention:');
+    expect(ctx.queue.items[0]!.text).not.toContain('<!--glirastes:command');
+    expect(texts(chat)).toEqual(['first']);
+  });
+
+  it('builds the direct command with its marker label line only when the item is sent', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={config} />);
+    await queueTyped(chat);
+    await act(async () => { chat.finish(); });
+    await waitFor(() => expect(texts(chat)).toHaveLength(2));
+    const sent = texts(chat)[1]!;
+    expect(parseChatCommandMessage(sent)).toEqual({
+      invocation: { commandId: 'people.assign', tool: 'people.assign', args: { who: 'alice' } },
+      label: '{{mention:command:people.assign:Assign}} {{mention:person:alice:Alice}}',
+    });
+    expect(sent).toContain('<!--glirastes:command');
+  });
+
+  it('edits the typed text; an edit that stays a command is planned from the edited text on send', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={config} />);
+    await queueTyped(chat);
+    const id = ctx.queue.items[0]!.id;
+    await act(async () => { expect(ctx.beginEdit(id)).toBe(true); });
+    await act(async () => { expect(ctx.editQueued(id, '@alice /assign')).toBe(true); });
+    expect(queuedTexts()).toEqual(['@alice /assign']);
+    expect(ctx.queue.items[0]!.text).not.toContain('{{mention:');
+    await act(async () => { chat.finish(); });
+    await waitFor(() => expect(texts(chat)).toHaveLength(2));
+    expect(parseChatCommandMessage(texts(chat)[1]!)?.label)
+      .toBe('{{mention:command:people.assign:Assign}} {{mention:person:alice:Alice}}');
+  });
+
+  it('an edit adding free text turns the item into a model message on send', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={config} />);
+    await queueTyped(chat);
+    const id = ctx.queue.items[0]!.id;
+    await act(async () => { expect(ctx.beginEdit(id)).toBe(true); });
+    await act(async () => { expect(ctx.editQueued(id, '/assign @alice today')).toBe(true); });
+    expect(queuedTexts()).toEqual(['/assign @alice today']);
+    await act(async () => { chat.finish(); });
+    await waitFor(() => expect(texts(chat)).toHaveLength(2));
+    const sent = texts(chat)[1]!;
+    expect(parseChatCommandMessage(sent)).toBeUndefined();
+    expect(sent).not.toContain('<!--glirastes:command');
+    expect(sent).toContain('today');
+  });
+
+  it('refuses a command form submit and an entity action while a run is active', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={config} />);
+    // Open the form while idle, then a run starts behind it (e.g. started elsewhere).
+    await act(async () => { ctx.submit('/budget', { mentions: [{ id: 'tasks.budget', type: 'command', label: 'Budget', prefix: '/', slug: 'budget' }] }); });
+    expect(ctx.pendingCommand).not.toBeNull();
+    await act(async () => { void chat.sendMessage({ text: 'external' }); });
+    expect(ctx.isLoading).toBe(true);
+    chat.sendMessage.mockClear();
+    let accepted = true;
+    await act(async () => { accepted = ctx.submitPendingCommand({ amount: '5' }); });
+    expect(accepted).toBe(false);
+    expect(ctx.pendingCommand).not.toBeNull();
+    await act(async () => { ctx.runEntityAction({ type: 'person', id: 'alice', label: 'Alice' }, 'person.assign'); });
+    expect(chat.sendMessage).not.toHaveBeenCalled();
+    expect(ctx.queue.items).toHaveLength(0);
+  });
+
+  it('refuses an entity action while a run is active, also without a form', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={config} />);
+    await startRun(chat);
+    chat.sendMessage.mockClear();
+    await act(async () => { ctx.runEntityAction({ type: 'person', id: 'alice', label: 'Alice' }, 'person.assign'); });
+    expect(chat.sendMessage).not.toHaveBeenCalled();
+    expect(ctx.queue.items).toHaveLength(0);
+    expect(ctx.pendingCommand).toBeNull();
   });
 });
