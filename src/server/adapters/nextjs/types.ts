@@ -525,6 +525,13 @@ export interface AiChatHandlerConfig {
    * failing shield or check sends no block. `history` must be `'none'`
    * for now (the newest message only). An invalid option throws here.
    *
+   * Known limit: the sanitizer cuts a label to 60 characters before the PII
+   * shield sees it, so a cut e-mail address, IBAN or phone number at the end
+   * of a longer label may reach the model as a fragment in plain text (ids
+   * and facts are never cut). The fix follows before the browser side; until
+   * then a client of your own should cut labels to at most 60 characters or
+   * set `viewContext: false`.
+   *
    * Size: the block has at most 2,966 characters (a hard bound); full, that
    * is roughly 850 tokens at 3.5 characters per token, 1,000 to 1,500 with
    * random ids or non-ASCII text, usually far less. `maxEntries` and the
