@@ -512,6 +512,73 @@ describe('createDoctorReport', () => {
       });
     });
 
+    it('fails and names both paths when the configured workletUrl is not where the copy step writes', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir, "{ workletUrl: '/custom/worklet.js' }");
+      await scripts(rootDir, { predev: 'glirastes stt worklet && glirastes tools refresh --keep-going' });
+      const report = await createDoctorReport({ rootDir });
+      expect(report.checks).toContainEqual({
+        name: 'voice-worklet', status: 'fail', code: 'E-SETUP-034', remediation: 'align-audio-worklet-url',
+        detail: { workletUrl: '/custom/worklet.js', copyTarget: 'public/audio-worklet-processor.js' },
+      });
+      expect(report.status).toBe('fail');
+      const text = formatDoctorReport(report);
+      expect(text).toContain('✗ Voice input audio worklet');
+      expect(text).toContain('/custom/worklet.js');
+      expect(text).toContain('public/audio-worklet-processor.js');
+      // Served at the configured path, the check passes whatever the copy step writes.
+      await serve(rootDir, 'custom/worklet.js');
+      expect((await voiceCheck(rootDir))?.status).toBe('pass');
+    });
+
+    it('only warns when the configured path is the one a copy step with --out under public/ creates', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir, "{ workletUrl: '/custom/audio-worklet-processor.js' }");
+      await scripts(rootDir, { prebuild: 'glirastes stt worklet --out public/custom && next build' });
+      expect(await voiceCheck(rootDir)).toEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'run-audio-worklet-copy',
+      });
+      await scripts(rootDir, { prebuild: 'glirastes stt worklet --out public/other' });
+      expect(await voiceCheck(rootDir)).toMatchObject({
+        status: 'fail', remediation: 'align-audio-worklet-url',
+        detail: { workletUrl: '/custom/audio-worklet-processor.js', copyTarget: 'public/other/audio-worklet-processor.js' },
+      });
+      // Outside public/ the served URL is unknown, so the same file name stays a warning.
+      await scripts(rootDir, { prebuild: 'glirastes stt worklet --out static' });
+      expect((await voiceCheck(rootDir))?.remediation).toBe('verify-audio-worklet-url');
+    });
+
+    it('fails for a file name no glirastes copy step can create, wherever it copies', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir, "{ workletUrl: '/custom/worklet.js' }");
+      await scripts(rootDir, { prebuild: 'glirastes stt worklet --out static' });
+      expect(await voiceCheck(rootDir)).toMatchObject({
+        status: 'fail', remediation: 'align-audio-worklet-url',
+        detail: { workletUrl: '/custom/worklet.js', copyTarget: 'static/audio-worklet-processor.js' },
+      });
+    });
+
+    it('only warns for a configured URL under a base path ending in the copied file (Next basePath, Vite base)', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir, "{ workletUrl: '/app/audio-worklet-processor.js' }");
+      await scripts(rootDir, { predev: 'glirastes stt worklet' });
+      expect(await voiceCheck(rootDir)).toEqual({
+        name: 'voice-worklet', status: 'warn', code: 'E-SETUP-108', remediation: 'verify-audio-worklet-url',
+      });
+    });
+
+    it('ignores workletUrl literals in test files', async () => {
+      const rootDir = await fixture();
+      await useVoice(rootDir);
+      await mkdir(join(rootDir, 'src/__tests__'), { recursive: true });
+      for (const path of ['src/voice.test.ts', 'src/voice.spec.tsx', 'src/__tests__/voice.ts']) {
+        await writeFile(join(rootDir, path),
+          "import { RecordedSttAdapter } from 'glirastes/react';\nnew RecordedSttAdapter({ workletUrl: '/custom/worklet.js' });\n");
+      }
+      await scripts(rootDir, { predev: 'glirastes stt worklet' });
+      expect((await voiceCheck(rootDir))?.remediation).toBe('run-audio-worklet-copy');
+    });
+
     it('checks a configured worklet path, not the default file, and only warns about an absolute URL', async () => {
       const rootDir = await fixture();
       await useVoice(rootDir, "{ workletUrl: '/static/pcm.js?v=2' }");

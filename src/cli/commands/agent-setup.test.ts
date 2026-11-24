@@ -37,6 +37,22 @@ describe('agent-led init', () => {
     expect(await readdir(root)).toEqual(['package.json']);
   });
 
+  it('lists the script changes and the .gitignore entry in the dry-run preview', async () => {
+    const root = await freshApp();
+    await writeFile(join(root, 'package.json'), JSON.stringify({ dependencies: { next: '16', react: '19' }, scripts: { prebuild: 'tsc' } }));
+    await writeFile(join(root, '.gitignore'), 'node_modules\n');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runCli(['init', '--root', root, '--agent', 'codex', '--dry-run'], {
+      init: { env: {}, isInteractive: false, available, launch: vi.fn() },
+    });
+    const text = String(log.mock.calls[0]?.[0]);
+    expect(text).toContain('Would write: ');
+    expect(text).toContain('package.json: add "predev": "glirastes stt worklet && glirastes tools refresh --keep-going"');
+    expect(text).toContain('package.json: "prebuild": "tsc" -> "glirastes stt worklet && tsc"');
+    expect(text).toContain('.gitignore: add /public/audio-worklet-processor.js');
+    expect(await readFile(join(root, '.gitignore'), 'utf8')).toBe('node_modules\n');
+  });
+
   it('continues inside the current coding agent without nesting another process', async () => {
     const root = await freshApp();
     const launch = vi.fn();

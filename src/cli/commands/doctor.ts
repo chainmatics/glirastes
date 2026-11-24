@@ -32,6 +32,8 @@ export interface DoctorCheck {
   status: DoctorCheckStatus;
   code: `E-${string}`;
   remediation: string;
+  /** Local values the remediation text names (e.g. the two mismatching worklet paths). */
+  detail?: Record<string, string>;
 }
 
 export interface DoctorReport {
@@ -166,6 +168,15 @@ async function voiceWorkletCheck(rootDir: string): Promise<DoctorCheck | null> {
   }
   if (inspection.status === 'unverifiable') {
     return check('voice-worklet', 'warn', 'E-SETUP-108', 'verify-audio-worklet-url');
+  }
+  if (inspection.status === 'mismatch' && inspection.mismatch) {
+    return {
+      ...check('voice-worklet', 'fail', 'E-SETUP-034', 'align-audio-worklet-url'),
+      detail: {
+        workletUrl: inspection.mismatch.workletUrls.join(', '),
+        copyTarget: inspection.mismatch.copyTargets.join(', '),
+      },
+    };
   }
   return check('voice-worklet', 'fail', 'E-SETUP-034', 'provide-audio-worklet');
 }

@@ -19,7 +19,17 @@ export interface NoteEvaluation {
   evidence: Array<{ file: string; line: number }>;
 }
 
-const EXTENSIONS = new Set([
+/**
+ * Style sheets are matched only for notes with `files: ['style']`, and for
+ * `patterns` only: an `@import` of glirastes/react/styles.css is no code
+ * import, so `imports` and `symbols` never match in them.
+ */
+const STYLE_EXTENSIONS = ['.css', '.scss', '.sass', '.less'] as const;
+
+function isStyleFile(path: string): boolean {
+  return (STYLE_EXTENSIONS as ReadonlyArray<string>).includes(extname(path));
+}
+const EXTENSIONS = new Set<string>([
   '.ts',
   '.tsx',
   '.mts',
@@ -32,6 +42,7 @@ const EXTENSIONS = new Set([
   '.vue',
   '.svelte',
   '.astro',
+  ...STYLE_EXTENSIONS,
 ]);
 const IGNORED_DIRS = new Set([
   '.git',
@@ -52,6 +63,9 @@ const IGNORED_DIRS = new Set([
   '.claude',
   '.codex',
   '.glirastes',
+  'storybook-static',
+  '.docusaurus',
+  '.cache',
 ]);
 /** Lockfiles are large JSON that name every package, never app code. */
 const IGNORED_FILES = new Set(['package-lock.json', 'bun.lock', 'npm-shrinkwrap.json']);
@@ -124,7 +138,7 @@ async function walk(dir: string, root: string, out: AppScan['files']): Promise<v
       const info = await stat(full);
       if (info.size > MAX_FILE_BYTES) continue;
       const text = await readFile(full, 'utf8');
-      const specifiers = parseSpecifiers(text);
+      const specifiers = isStyleFile(entry.name) ? [] : parseSpecifiers(text);
       out.push({
         path: relative(root, full).split(sep).join('/'),
         text,
@@ -154,15 +168,18 @@ function matchDetect(detect: Detect, scan: AppScan): Array<{ file: string; line:
 
   // Symbols only count in files that import glirastes, so most files skip them.
   const withSymbols = [...symbolRes, ...patternRes];
+  const kinds = detect.files ?? ['code'];
   for (const file of scan.files) {
+    const style = isStyleFile(file.path);
+    if (!kinds.includes(style ? 'style' : 'code')) continue;
     const offsets: number[] = [];
 
-    if (imports.length > 0 && (file.glirastesImports.length > 0 || !imports.every(isGlirastesSpecifier))) {
+    if (!style && imports.length > 0 && (file.glirastesImports.length > 0 || !imports.every(isGlirastesSpecifier))) {
       for (const { spec, index } of fileSpecifiers(file)) {
         if (imports.some((i) => spec === i || spec.startsWith(`${i}/`))) offsets.push(index);
       }
     }
-    const regexes = file.glirastesImports.length > 0 ? withSymbols : patternRes;
+    const regexes = !style && file.glirastesImports.length > 0 ? withSymbols : patternRes;
     for (const re of regexes) {
       re.lastIndex = 0;
       for (let m = re.exec(file.text); m; m = re.exec(file.text)) {
