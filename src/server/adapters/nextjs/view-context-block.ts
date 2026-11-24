@@ -203,7 +203,8 @@ function escapedPart(part: unknown): unknown {
  * reads the text. Messages without such a tag are returned as they are (the
  * same objects, byte-identical); never mutates. Apply to the user's history
  * only, never to messages the SDK writes (the seen-objects memo, see
- * `prepareHistoryMessages`, the chat memory, this block).
+ * `prepareHistoryMessages`, the chat memory, this block, the budget
+ * continuation and the final summary instruction).
  */
 export function withViewContextTagsEscaped<T>(messages: T[]): T[] {
   let changed = false;

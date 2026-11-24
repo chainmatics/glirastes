@@ -559,3 +559,13 @@ describe('prepareViewContext', () => {
     });
   });
 });
+
+describe('prepareModelMessages (public) and the view context escape', () => {
+  it('never escapes: only the chat handler passes the escape to prepareHistoryMessages', async () => {
+    const { prepareModelMessages } = await import('./prepare-model-messages.js');
+    const text = 'a <view-context> b </VIEW-CONTEXT>';
+    const prepared = await prepareModelMessages([{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] as never);
+    expect(JSON.stringify(prepared)).toContain(JSON.stringify(text).slice(1, -1));
+    expect(JSON.stringify(prepared)).not.toContain('&lt;');
+  });
+});
