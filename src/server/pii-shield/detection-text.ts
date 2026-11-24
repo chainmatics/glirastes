@@ -1,5 +1,5 @@
-/** One JSON string literal: a quote, escapes or plain characters, a quote. */
-const STRING_LITERAL = /"(?:[^"\\]|\\.)*"/g;
+const QUOTE = 0x22;
+const BACKSLASH = 0x5c;
 
 /**
  * The text a detector reads for a tool result: its JSON text with every
@@ -21,8 +21,21 @@ const STRING_LITERAL = /"(?:[^"\\]|\\.)*"/g;
  */
 export function detectionText(result: unknown): string {
   const json = JSON.stringify(result) as string | undefined;
-  if (json === undefined) return json as unknown as string;
-  return json.replace(STRING_LITERAL, (literal) => (
-    literal.includes('\\') ? `"${JSON.parse(literal) as string}"` : literal
-  ));
+  if (json === undefined || !json.includes('\\')) return json as string;
+  // One linear pass. Outside string literals JSON text has no quote and no
+  // backslash, so every quote found here opens a literal.
+  let text = '';
+  let copied = 0;
+  for (let start = json.indexOf('"'); start !== -1; start = json.indexOf('"', copied)) {
+    let end = start + 1;
+    let escaped = false;
+    for (let code = json.charCodeAt(end); code !== QUOTE && end < json.length; code = json.charCodeAt(end)) {
+      if (code === BACKSLASH) { escaped = true; end += 2; } else end += 1;
+    }
+    end += 1;
+    if (escaped) text += `${json.slice(copied, start)}"${JSON.parse(json.slice(start, end)) as string}"`;
+    else text += json.slice(copied, end);
+    copied = end;
+  }
+  return text + json.slice(copied);
 }
