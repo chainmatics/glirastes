@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import React, { StrictMode, useEffect } from 'react';
+import React, { StrictMode, useEffect, useState } from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -221,6 +221,23 @@ describe('view context from a page to the model', () => {
   });
 });
 
+describe('an update and a send in the same event handler', () => {
+  it('sends the entry of the last commit: the hook registers the new one only after its commit', async () => {
+    const viewB: ViewContextEntry = { entity: { type: 'order', id: 'ord-2' } };
+    function Picker() {
+      const [selected, setSelected] = useState<ViewContextEntry>(orderView);
+      useViewContext(selected);
+      const { send: sendText } = useChatContext();
+      return <button type="button" onClick={() => { setSelected(viewB); sendText('Delete this'); }}>go</button>;
+    }
+    const view = render(<Chat><Picker /></Chat>);
+    fireEvent.click(view.getByText('go'));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
+    expect(currentViewContext()).toEqual([viewB]);
+  });
+});
+
 describe('several React roots on one page', () => {
   it('keep their own sources: a root unmounting removes only its own entry', async () => {
     const hostA = document.createElement('div');
@@ -243,7 +260,7 @@ describe('several React roots on one page', () => {
   });
 });
 
-describe('continuations without a new user message carry no view context', () => {
+describe('continuations without a new user message', () => {
   let transport: ChatTransport;
   function Probe() {
     transport = useVercelAiChatTransport({ endpoint: '/api/chat' });
@@ -251,7 +268,7 @@ describe('continuations without a new user message carry no view context', () =>
     return null;
   }
 
-  it('not with the approval auto-resume, continueTurn or the budget continuation', async () => {
+  it('carry no view context when they start after the stream ended: approval resume, continueTurn, budget continuation', async () => {
     scripted = [[
       { type: 'start' }, { type: 'start-step' },
       { type: 'tool-input-available', toolCallId: 'c1', toolName: 'orders_get', input: { orderId: 'ord-1' } },
@@ -276,6 +293,70 @@ describe('continuations without a new user message carry no view context', () =>
     await act(async () => { await transport.sendMessage({ text: 'And this?' }); });
     expect(bodies[4]!.glirastesViewContext).toEqual({ version: 1, current: [orderView, { entity: { type: 'order', id: 'ord-2' } }] });
     registerViewContext('other', null);
+  });
+
+  it('an automatic continuation the AI SDK starts from the running request repeats the field of the first send, which the server ignores', async () => {
+    const encoder = new TextEncoder();
+    const line = (chunk: unknown) => encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`);
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const recorded: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: RequestInit) => {
+      recorded.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (recorded.length === 1) {
+        return new Response(new ReadableStream<Uint8Array>({ start(open) { controller = open; } }), {
+          status: 200, headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+        });
+      }
+      // A text answer ends the turn, so the AI SDK does not resume again.
+      return sse([{ type: 'start' }, { type: 'start-step' }, { type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'Done.' }, { type: 'text-end', id: 't' }, { type: 'finish-step' }, { type: 'finish' }]);
+    }));
+    let transportOnly!: ChatTransport;
+    function Bare() { transportOnly = useVercelAiChatTransport({ endpoint: '/api/chat' }); return null; }
+    const off = registerViewContext('page', orderView);
+    render(<Bare />);
+    let first!: Promise<void>;
+    act(() => { first = transportOnly.sendMessage({ text: 'Open it' }); });
+    await waitFor(() => expect(controller).toBeDefined());
+    for (const chunk of [{ type: 'start' }, { type: 'start-step' },
+      { type: 'tool-input-available', toolCallId: 'c1', toolName: 'orders_get', input: { orderId: 'ord-1' } },
+      { type: 'tool-approval-request', approvalId: 'ap-1', toolCallId: 'c1' }, { type: 'finish-step' }]) controller.enqueue(line(chunk));
+    await waitFor(() => expect(JSON.stringify(transportOnly.messages)).toContain('approval-requested'));
+    // The view is left and the approval answered while the first request still streams.
+    off();
+    await act(async () => { await transportOnly.addToolApprovalResponse({ id: 'ap-1', approved: true }); });
+    controller.enqueue(line({ type: 'finish' }));
+    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+    controller.close();
+    await act(async () => { await first; });
+    await waitFor(() => expect(recorded).toHaveLength(2));
+    expect(currentViewContext()).toEqual([]);
+    // The AI SDK passes the body of the first send on to the resume: the unregistered entry goes again.
+    expect(recorded[1]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
+
+    // The real chat route takes it as a continuation: no block, the model input as without the field.
+    const approvalTool = defineTool({ ...getOrder, needsApproval: true } as never);
+    const promptFor = async (body: Record<string, unknown>) => {
+      const model = new MockLanguageModelV3({
+        doStream: async () => ({
+          stream: convertArrayToReadableStream([
+            { type: 'stream-start', warnings: [] },
+            { type: 'text-start', id: 't1' }, { type: 'text-delta', id: 't1', delta: 'Done.' }, { type: 'text-end', id: 't1' },
+            { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+          ] as never),
+        }),
+      });
+      const handler = createAiChatHandler({ tools: { orders_get: approvalTool }, systemPrompt: 'Assistant', model } as never);
+      const response = await handler(new Request('https://app.example/api/chat', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      }));
+      await response.text();
+      return JSON.stringify(model.doStreamCalls[0]?.prompt);
+    };
+    const withField = await promptFor(recorded[1]!);
+    const { glirastesViewContext: _dropped, ...withoutField } = recorded[1]!;
+    expect(withField).toBeDefined();
+    expect(withField).not.toContain('view-context');
+    expect(withField).toBe(await promptFor(withoutField));
   });
 
   it('is sent with a message that has files too', async () => {

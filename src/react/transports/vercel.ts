@@ -213,8 +213,9 @@ export function useVercelAiChatTransport(
 
   const send = useCallback(
     ({ text, files }: { text: string; files?: FilePart[] }) => {
-      // A new user message carries the view context as it is now; continuations
-      // (approval resume, continueTurn, budget) send none. No registration, no field.
+      // A new user message carries the view context as it is now. Continuations started after the stream
+      // (approval resume, continueTurn, budget) send none; one the AI SDK starts from the running request
+      // can repeat this body, which the server ignores for continuations. No registration, no field.
       const viewContext = viewContextRequestBody();
       const options = viewContext ? { body: viewContext } : undefined;
       if (!files || files.length === 0) return sendMessage({ text }, options);

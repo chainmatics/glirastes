@@ -282,7 +282,10 @@ selection of records (`selection: { type, ids }`), or both in one entry
 the entry; it is read and copied when a message is sent. `useViewContext`
 re-registers only when the content changes (it compares the entry as JSON on
 every render, so keep `facts` small) and withdraws on unmount (StrictMode
-included); `null` withdraws, on the server it does nothing.
+included); `null` withdraws, on the server it does nothing. The hook
+registers a new entry after its commit, so an update and a send in the same
+event handler (`setSelected(b); send()`) still send the previous entry; call
+`registerViewContext` before sending, or send after the commit.
 
 Order and the limit of 8: React runs the effects of children before those
 of their parents, so a page registers before the layout around it. Past 8
@@ -317,7 +320,8 @@ no permission):
 
 The browser cleans and bounds each snapshot with the contract
 (`sanitizeViewContext`, `VIEW_CONTEXT_LIMITS`); `currentViewContext()`
-(`glirastes/browser`) returns it. The authority stays the server
+(`glirastes/browser`) returns it (unlike sending, a call creates the shared
+registry on the page if there is none yet). The authority stays the server
 (`createAiChatHandler` option `viewContext`, on by default; see the
 [handler options](../skills/integrating-glirastes-nextjs/references/handler-options.md)).
 
@@ -325,11 +329,16 @@ When it is sent: the bundled transport (`VercelAiChat`,
 `useVercelAiChatTransport`, `<glirastes-chat>`) adds
 `glirastesViewContext: { version: 1, current }` to the body of every new
 user message, read at that moment: a typed or queued message, a starter or
-follow-up, the "continue" message after a cut-off answer, and a direct `/`
-command (the server adds no block for a direct command). A request without a
-new user message (approval resume, `continueTurn` after a UI action,
-"Continue" after a budget stop) carries none: the server would not use it
-there. Nothing registered (or nothing left after cleaning), no field: the
+follow-up, the "continue" message after a cut-off answer, the answer to a
+clarification and a direct `/` command (the server adds no block for the
+last two). A request without a new user message that starts after the
+stream ended (approval resume, `continueTurn` after a UI action, "Continue"
+after a budget stop) carries none. An automatic continuation the AI SDK
+starts from the running request (an approval answered or a UI outcome
+written while the answer still streams) can repeat the field of the first
+send, also an entry unregistered since; the server ignores the field for
+every continuation (no block, the model input as without it), and it goes
+only to the chat route. Nothing registered (or nothing left after cleaning), no field: the
 request is exactly as before. When it is sent, the field replaces a
 `glirastesViewContext` the app puts into `bodyExtras`.
 
