@@ -768,15 +768,17 @@ const MAX_SCHEMA_LIST_LENGTH = 10_000;
  * A value checked and copied by `check` in both directions (`parse` and
  * `z.encode`): the result is the copy `check` returned, never the input, so
  * a getter or proxy cannot show other content after the check. `check`
- * reads the input once; `undefined` means invalid: one `custom` issue that
- * aborts like the one of `z.custom` (`continue: false`), so a list holding
- * it reports no further size issue. Built as a codec, not a transform, so
- * `z.encode` works.
+ * reads the input once; `undefined` means invalid: the issue `z.custom`
+ * raises (`continue: false`, so a list holding it reports no further size
+ * issue; the message comes from a `z.custom` instance, as before, so the
+ * issue reads `{ code, path, message }` and an error map applies the same
+ * way). Built as a codec, not a transform, so `z.encode` works.
  */
 function checkedCopy<T>(check: (value: unknown) => T | undefined, message: string): z.ZodType<T> {
+  const inst = z.custom<T>(() => true, { message });
   const run = (value: unknown, payload: { issues: unknown[] }): T => {
     const copy = check(value);
-    if (copy === undefined) payload.issues.push({ code: 'custom', message, input: value, continue: false });
+    if (copy === undefined) payload.issues.push({ code: 'custom', input: value, inst, continue: false });
     return copy as T;
   };
   return z.codec(z.unknown(), z.custom<T>(() => true), { decode: run, encode: run }) as unknown as z.ZodType<T>;
@@ -842,12 +844,16 @@ const entryFields = {
  * the policy does not allow, facts that are not bounded, cleaned plain JSON,
  * and `selection.ids` over 10,000 items before any item is checked. The
  * result holds no object of the input: lists, composite ids and facts are
- * the copies that were checked. `parse` reads each list `length` and index
- * once. `z.encode` / `z.safeEncode` also bound every list length before any
- * loop, never throw on a lying length and return checked copies, but may
- * read an item more than once (the read-once promise is for `parse`). It
- * does not know the declared types or facts schemas; input from the browser
- * goes through `sanitizeViewContext`.
+ * the copies that were checked. Every list `length` is read once per check
+ * and bounded before any item is read. The two variants (with an entity, a
+ * list view without) each check and copy on their own, and the returned
+ * copy comes from the variant that passed: an entry with a valid entity is
+ * read once, a list-view entry or an entry with an invalid entity is read by
+ * both variants (its lists twice). `z.encode` / `z.safeEncode` also bound
+ * every list length before any loop, never throw on a lying length and
+ * return checked copies, but may read an item more than once. It does not
+ * know the declared types or facts schemas; input from the browser goes
+ * through `sanitizeViewContext`.
  */
 export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
   z.object({ entity: entitySchema, selection: selectionSchema.optional(), ...entryFields }).strict(),

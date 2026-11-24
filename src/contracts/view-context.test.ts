@@ -1414,18 +1414,20 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     ['frozen ids', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: Object.freeze(['a']) } }]],
     ['51 ids', () => [{ entity: { type: 'order', id: 1 }, selection: { type: 'task', ids: Array.from({ length: 51 }, (_, i) => i) } }]],
     ['51 ids, one invalid', () => [{ selection: { type: 'task', ids: [...Array.from({ length: 50 }, (_, i) => `t-${i}`), ' bad'] } }]],
+    ['invalid entity id', () => [{ entity: { type: 'order', id: ' x' } }]],
+    ['invalid composite id', () => [{ entity: { type: 'order', id: ['a', ''] } }]],
+    ['invalid facts', () => [{ entity: { type: 'order', id: 1 }, facts: { list: [Number.NaN] } }]],
+    ['facts not cleaned', () => [{ entity: { type: 'order', id: 1 }, facts: { note: 'a\tb' } }]],
+    ['invalid route', () => [{ entity: { type: 'order', id: 1 }, route: '/a/../b' }]],
+    ['label not canonical', () => [{ entity: { type: 'order', id: 1 }, label: ' Acme ' }]],
+    ['composite ids and facts', () => [{ entity: { type: 'order', id: ['lobby', 4] }, selection: { type: 'task', ids: [['a', 1], 'b'] }, facts: { status: 'open', n: [1, { x: null }] } }]],
   ];
-  // Code and path of an issue, and of the issues of each union branch.
-  const shape = (issue: any): unknown => ({
-    code: issue.code,
-    path: issue.path,
-    ...(issue.errors ? { errors: issue.errors.map((branch: any[]) => branch.map(shape)) } : {}),
-  });
+  // The text a caller sees: the data, or the issues as JSON and the error message.
   const run = (schema: any, input: unknown) => {
     const result = schema.safeParse(input);
     return result.success
       ? { success: true, json: JSON.stringify(result.data), copy: result.data !== input }
-      : { success: false, issues: result.error.issues.map(shape) };
+      : { success: false, issues: JSON.stringify(result.error.issues), message: result.error.message };
   };
   const expected: Record<string, unknown> = {
     "list: valid": {
@@ -1435,39 +1437,23 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     },
     "list: undefined": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_type",
-          "path": []
-        }
-      ]
+      "issues": "[{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[],\"message\":\"Invalid input: expected array, received undefined\"}]",
+      "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected array, received undefined\"\n  }\n]"
     },
     "list: null": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_type",
-          "path": []
-        }
-      ]
+      "issues": "[{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[],\"message\":\"Invalid input: expected array, received null\"}]",
+      "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected array, received null\"\n  }\n]"
     },
     "list: string": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_type",
-          "path": []
-        }
-      ]
+      "issues": "[{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[],\"message\":\"Invalid input: expected array, received string\"}]",
+      "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected array, received string\"\n  }\n]"
     },
     "list: object": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_type",
-          "path": []
-        }
-      ]
+      "issues": "[{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[],\"message\":\"Invalid input: expected array, received object\"}]",
+      "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected array, received object\"\n  }\n]"
     },
     "list: empty list": {
       "success": true,
@@ -1476,124 +1462,28 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     },
     "list: nine entries": {
       "success": false,
-      "issues": [
-        {
-          "code": "too_big",
-          "path": []
-        }
-      ]
+      "issues": "[{\"origin\":\"array\",\"code\":\"too_big\",\"maximum\":8,\"inclusive\":true,\"path\":[],\"message\":\"Too big: expected array to have <=8 items\"}]",
+      "message": "[\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_big\",\n    \"maximum\": 8,\n    \"inclusive\": true,\n    \"path\": [],\n    \"message\": \"Too big: expected array to have <=8 items\"\n  }\n]"
     },
     "list: broken entry at index 3": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [
-            3
-          ],
-          "errors": [
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              }
-            ],
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "selection"
-                ]
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected object, received undefined\"}],[{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"}]],\"path\":[3],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      3\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
     },
     "list: empty ids": {
       "success": false,
-      "issues": [
-        {
-          "code": "too_small",
-          "path": [
-            0,
-            "selection",
-            "ids"
-          ]
-        }
-      ]
+      "issues": "[{\"origin\":\"array\",\"code\":\"too_small\",\"minimum\":1,\"inclusive\":true,\"path\":[0,\"selection\",\"ids\"],\"message\":\"Too small: expected array to have >=1 items\"}]",
+      "message": "[\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      0,\n      \"selection\",\n      \"ids\"\n    ],\n    \"message\": \"Too small: expected array to have >=1 items\"\n  }\n]"
     },
     "list: invalid id at index 1": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [
-            0
-          ],
-          "errors": [
-            [
-              {
-                "code": "custom",
-                "path": [
-                  "selection",
-                  "ids",
-                  1
-                ]
-              }
-            ],
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              },
-              {
-                "code": "custom",
-                "path": [
-                  "selection",
-                  "ids",
-                  1
-                ]
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"selection\",\"ids\",1],\"message\":\"Expected an entity id\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"code\":\"custom\",\"path\":[\"selection\",\"ids\",1],\"message\":\"Expected an entity id\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"selection\",\n            \"ids\",\n            1\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"selection\",\n            \"ids\",\n            1\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
     },
     "list: extra keys": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [
-            0
-          ],
-          "errors": [
-            [
-              {
-                "code": "unrecognized_keys",
-                "path": []
-              }
-            ],
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              },
-              {
-                "code": "unrecognized_keys",
-                "path": []
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"unrecognized_keys\",\"keys\":[\"extra\"],\"path\":[],\"message\":\"Unrecognized key: \\\"extra\\\"\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"code\":\"unrecognized_keys\",\"keys\":[\"extra\"],\"path\":[],\"message\":\"Unrecognized key: \\\"extra\\\"\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"unrecognized_keys\",\n          \"keys\": [\n            \"extra\"\n          ],\n          \"path\": [],\n          \"message\": \"Unrecognized key: \\\"extra\\\"\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"code\": \"unrecognized_keys\",\n          \"keys\": [\n            \"extra\"\n          ],\n          \"path\": [],\n          \"message\": \"Unrecognized key: \\\"extra\\\"\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
     },
     "list: other key order": {
       "success": true,
@@ -1607,65 +1497,13 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     },
     "list: hole in list": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [
-            1
-          ],
-          "errors": [
-            [
-              {
-                "code": "invalid_type",
-                "path": []
-              }
-            ],
-            [
-              {
-                "code": "invalid_type",
-                "path": []
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[],\"message\":\"Invalid input: expected object, received undefined\"}],[{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[],\"message\":\"Invalid input: expected object, received undefined\"}]],\"path\":[1],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      1\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
     },
     "list: ids not a list": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [
-            0
-          ],
-          "errors": [
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "selection",
-                  "ids"
-                ]
-              }
-            ],
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              },
-              {
-                "code": "invalid_type",
-                "path": [
-                  "selection",
-                  "ids"
-                ]
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[\"selection\",\"ids\"],\"message\":\"Invalid input: expected array, received string\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[\"selection\",\"ids\"],\"message\":\"Invalid input: expected array, received string\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\",\n            \"ids\"\n          ],\n          \"message\": \"Invalid input: expected array, received string\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\",\n            \"ids\"\n          ],\n          \"message\": \"Invalid input: expected array, received string\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
     },
     "list: frozen ids": {
       "success": true,
@@ -1674,55 +1512,48 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     },
     "list: 51 ids": {
       "success": false,
-      "issues": [
-        {
-          "code": "too_big",
-          "path": [
-            0,
-            "selection",
-            "ids"
-          ]
-        }
-      ]
+      "issues": "[{\"origin\":\"array\",\"code\":\"too_big\",\"maximum\":50,\"inclusive\":true,\"path\":[0,\"selection\",\"ids\"],\"message\":\"Too big: expected array to have <=50 items\"}]",
+      "message": "[\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_big\",\n    \"maximum\": 50,\n    \"inclusive\": true,\n    \"path\": [\n      0,\n      \"selection\",\n      \"ids\"\n    ],\n    \"message\": \"Too big: expected array to have <=50 items\"\n  }\n]"
     },
     "list: 51 ids, one invalid": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [
-            0
-          ],
-          "errors": [
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              },
-              {
-                "code": "custom",
-                "path": [
-                  "selection",
-                  "ids",
-                  50
-                ]
-              }
-            ],
-            [
-              {
-                "code": "custom",
-                "path": [
-                  "selection",
-                  "ids",
-                  50
-                ]
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected object, received undefined\"},{\"code\":\"custom\",\"path\":[\"selection\",\"ids\",50],\"message\":\"Expected an entity id\"}],[{\"code\":\"custom\",\"path\":[\"selection\",\"ids\",50],\"message\":\"Expected an entity id\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"selection\",\n            \"ids\",\n            50\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ],\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"selection\",\n            \"ids\",\n            50\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "list: invalid entity id": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"entity\",\"id\"],\"message\":\"Expected an entity id\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"entity\",\n            \"id\"\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "list: invalid composite id": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"entity\",\"id\"],\"message\":\"Expected an entity id\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"entity\",\n            \"id\"\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "list: invalid facts": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"facts\"],\"message\":\"Expected bounded, cleaned plain JSON facts\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"},{\"code\":\"custom\",\"path\":[\"facts\"],\"message\":\"Expected bounded, cleaned plain JSON facts\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"facts\"\n          ],\n          \"message\": \"Expected bounded, cleaned plain JSON facts\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"facts\"\n          ],\n          \"message\": \"Expected bounded, cleaned plain JSON facts\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "list: facts not cleaned": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"facts\"],\"message\":\"Expected bounded, cleaned plain JSON facts\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"},{\"code\":\"custom\",\"path\":[\"facts\"],\"message\":\"Expected bounded, cleaned plain JSON facts\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"facts\"\n          ],\n          \"message\": \"Expected bounded, cleaned plain JSON facts\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"facts\"\n          ],\n          \"message\": \"Expected bounded, cleaned plain JSON facts\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "list: invalid route": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"route\"],\"message\":\"Expected a route path\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"},{\"code\":\"custom\",\"path\":[\"route\"],\"message\":\"Expected a route path\"}]],\"path\":[0],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"route\"\n          ],\n          \"message\": \"Expected a route path\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"route\"\n          ],\n          \"message\": \"Expected a route path\"\n        }\n      ]\n    ],\n    \"path\": [\n      0\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "list: label not canonical": {
+      "success": false,
+      "issues": "[{\"code\":\"custom\",\"path\":[0,\"label\"],\"message\":\"Expected a canonical label\"}]",
+      "message": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      0,\n      \"label\"\n    ],\n    \"message\": \"Expected a canonical label\"\n  }\n]"
+    },
+    "list: composite ids and facts": {
+      "success": true,
+      "json": "[{\"entity\":{\"type\":\"order\",\"id\":[\"lobby\",4]},\"selection\":{\"type\":\"task\",\"ids\":[[\"a\",1],\"b\"]},\"facts\":{\"status\":\"open\",\"n\":[1,{\"x\":null}]}}]",
+      "copy": true
     },
     "entry: valid": {
       "success": true,
@@ -1741,81 +1572,18 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     },
     "entry: empty ids": {
       "success": false,
-      "issues": [
-        {
-          "code": "too_small",
-          "path": [
-            "selection",
-            "ids"
-          ]
-        }
-      ]
+      "issues": "[{\"origin\":\"array\",\"code\":\"too_small\",\"minimum\":1,\"inclusive\":true,\"path\":[\"selection\",\"ids\"],\"message\":\"Too small: expected array to have >=1 items\"}]",
+      "message": "[\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"selection\",\n      \"ids\"\n    ],\n    \"message\": \"Too small: expected array to have >=1 items\"\n  }\n]"
     },
     "entry: invalid id at index 1": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [],
-          "errors": [
-            [
-              {
-                "code": "custom",
-                "path": [
-                  "selection",
-                  "ids",
-                  1
-                ]
-              }
-            ],
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              },
-              {
-                "code": "custom",
-                "path": [
-                  "selection",
-                  "ids",
-                  1
-                ]
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"selection\",\"ids\",1],\"message\":\"Expected an entity id\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"code\":\"custom\",\"path\":[\"selection\",\"ids\",1],\"message\":\"Expected an entity id\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"selection\",\n            \"ids\",\n            1\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"selection\",\n            \"ids\",\n            1\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
     },
     "entry: extra keys": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [],
-          "errors": [
-            [
-              {
-                "code": "unrecognized_keys",
-                "path": []
-              }
-            ],
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              },
-              {
-                "code": "unrecognized_keys",
-                "path": []
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"unrecognized_keys\",\"keys\":[\"extra\"],\"path\":[],\"message\":\"Unrecognized key: \\\"extra\\\"\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"code\":\"unrecognized_keys\",\"keys\":[\"extra\"],\"path\":[],\"message\":\"Unrecognized key: \\\"extra\\\"\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"unrecognized_keys\",\n          \"keys\": [\n            \"extra\"\n          ],\n          \"path\": [],\n          \"message\": \"Unrecognized key: \\\"extra\\\"\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"code\": \"unrecognized_keys\",\n          \"keys\": [\n            \"extra\"\n          ],\n          \"path\": [],\n          \"message\": \"Unrecognized key: \\\"extra\\\"\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
     },
     "entry: other key order": {
       "success": true,
@@ -1834,38 +1602,8 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     },
     "entry: ids not a list": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [],
-          "errors": [
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "selection",
-                  "ids"
-                ]
-              }
-            ],
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              },
-              {
-                "code": "invalid_type",
-                "path": [
-                  "selection",
-                  "ids"
-                ]
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[\"selection\",\"ids\"],\"message\":\"Invalid input: expected array, received string\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[\"selection\",\"ids\"],\"message\":\"Invalid input: expected array, received string\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\",\n            \"ids\"\n          ],\n          \"message\": \"Invalid input: expected array, received string\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"array\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\",\n            \"ids\"\n          ],\n          \"message\": \"Invalid input: expected array, received string\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
     },
     "entry: frozen ids": {
       "success": true,
@@ -1874,56 +1612,52 @@ describe('schemas behave as before for lists with an honest length (frozen from 
     },
     "entry: 51 ids": {
       "success": false,
-      "issues": [
-        {
-          "code": "too_big",
-          "path": [
-            "selection",
-            "ids"
-          ]
-        }
-      ]
+      "issues": "[{\"origin\":\"array\",\"code\":\"too_big\",\"maximum\":50,\"inclusive\":true,\"path\":[\"selection\",\"ids\"],\"message\":\"Too big: expected array to have <=50 items\"}]",
+      "message": "[\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_big\",\n    \"maximum\": 50,\n    \"inclusive\": true,\n    \"path\": [\n      \"selection\",\n      \"ids\"\n    ],\n    \"message\": \"Too big: expected array to have <=50 items\"\n  }\n]"
     },
     "entry: 51 ids, one invalid": {
       "success": false,
-      "issues": [
-        {
-          "code": "invalid_union",
-          "path": [],
-          "errors": [
-            [
-              {
-                "code": "invalid_type",
-                "path": [
-                  "entity"
-                ]
-              },
-              {
-                "code": "custom",
-                "path": [
-                  "selection",
-                  "ids",
-                  50
-                ]
-              }
-            ],
-            [
-              {
-                "code": "custom",
-                "path": [
-                  "selection",
-                  "ids",
-                  50
-                ]
-              }
-            ]
-          ]
-        }
-      ]
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected object, received undefined\"},{\"code\":\"custom\",\"path\":[\"selection\",\"ids\",50],\"message\":\"Expected an entity id\"}],[{\"code\":\"custom\",\"path\":[\"selection\",\"ids\",50],\"message\":\"Expected an entity id\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"selection\",\n            \"ids\",\n            50\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ],\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"selection\",\n            \"ids\",\n            50\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "entry: invalid entity id": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"entity\",\"id\"],\"message\":\"Expected an entity id\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"entity\",\n            \"id\"\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "entry: invalid composite id": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"entity\",\"id\"],\"message\":\"Expected an entity id\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"entity\",\n            \"id\"\n          ],\n          \"message\": \"Expected an entity id\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "entry: invalid facts": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"facts\"],\"message\":\"Expected bounded, cleaned plain JSON facts\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"},{\"code\":\"custom\",\"path\":[\"facts\"],\"message\":\"Expected bounded, cleaned plain JSON facts\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"facts\"\n          ],\n          \"message\": \"Expected bounded, cleaned plain JSON facts\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"facts\"\n          ],\n          \"message\": \"Expected bounded, cleaned plain JSON facts\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "entry: facts not cleaned": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"facts\"],\"message\":\"Expected bounded, cleaned plain JSON facts\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"},{\"code\":\"custom\",\"path\":[\"facts\"],\"message\":\"Expected bounded, cleaned plain JSON facts\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"facts\"\n          ],\n          \"message\": \"Expected bounded, cleaned plain JSON facts\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"facts\"\n          ],\n          \"message\": \"Expected bounded, cleaned plain JSON facts\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "entry: invalid route": {
+      "success": false,
+      "issues": "[{\"code\":\"invalid_union\",\"errors\":[[{\"code\":\"custom\",\"path\":[\"route\"],\"message\":\"Expected a route path\"}],[{\"expected\":\"undefined\",\"code\":\"invalid_type\",\"path\":[\"entity\"],\"message\":\"Invalid input: expected undefined, received object\"},{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"selection\"],\"message\":\"Invalid input: expected object, received undefined\"},{\"code\":\"custom\",\"path\":[\"route\"],\"message\":\"Expected a route path\"}]],\"path\":[],\"message\":\"Invalid input\"}]",
+      "message": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"route\"\n          ],\n          \"message\": \"Expected a route path\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"undefined\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"entity\"\n          ],\n          \"message\": \"Invalid input: expected undefined, received object\"\n        },\n        {\n          \"expected\": \"object\",\n          \"code\": \"invalid_type\",\n          \"path\": [\n            \"selection\"\n          ],\n          \"message\": \"Invalid input: expected object, received undefined\"\n        },\n        {\n          \"code\": \"custom\",\n          \"path\": [\n            \"route\"\n          ],\n          \"message\": \"Expected a route path\"\n        }\n      ]\n    ],\n    \"path\": [],\n    \"message\": \"Invalid input\"\n  }\n]"
+    },
+    "entry: label not canonical": {
+      "success": false,
+      "issues": "[{\"code\":\"custom\",\"path\":[\"label\"],\"message\":\"Expected a canonical label\"}]",
+      "message": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"label\"\n    ],\n    \"message\": \"Expected a canonical label\"\n  }\n]"
+    },
+    "entry: composite ids and facts": {
+      "success": true,
+      "json": "{\"entity\":{\"type\":\"order\",\"id\":[\"lobby\",4]},\"selection\":{\"type\":\"task\",\"ids\":[[\"a\",1],\"b\"]},\"facts\":{\"status\":\"open\",\"n\":[1,{\"x\":null}]}}",
+      "copy": true
     }
   };
 
-  it('gives the same success, output (a copy, same key order) and issues (code, path, union branches)', () => {
+  it('gives the same text: output (a copy, same key order), issues and error message', () => {
     const out: Record<string, unknown> = {};
     for (const [name, make] of listCases) out[`list: ${name}`] = run(ViewContextSchema, make());
     for (const [name, make] of listCases) {
