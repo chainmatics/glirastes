@@ -10,6 +10,7 @@ import { createPiiShield, createRegexPiiDetector } from '../../../pii-shield/ind
 import { formatChatCommandMessage } from '../../../../contracts/chat-command.js';
 import { createAiChatHandler, type AiChatHandlerFullConfig } from '../create-ai-chat-handler.js';
 import { VIEW_CONTEXT_HEADER } from '../view-context-block.js';
+import { canonicalViewContextLabel } from '../../../../contracts/view-context.js';
 import type { RuntimeMetricEvent } from '../../../../contracts/index.js';
 import type { RuntimeMetricsSink } from '../../../../runtime/index.js';
 
@@ -350,5 +351,131 @@ describe('viewContext option of createAiChatHandler', () => {
 
   it.each(['changes', 'all'])('throws at creation for history %s (needs view contexts bound to messages, a later release)', (history) => {
     expect(() => createAiChatHandler({ tools: registry, model: textModel(), viewContext: { history } } as never)).toThrow(/viewContext.*history/);
+  });
+});
+
+describe.each<Mode>(['legacy', 'pipeline'])('view context labels and the PII shield (%s)', (mode) => {
+  /** The shield of this package (regex detector), counting its `anonymizeResult` calls. */
+  function countingShield() {
+    const shield = createPiiShield({ locale: 'de', detector: createRegexPiiDetector() });
+    const calls: unknown[] = [];
+    const anonymizeResult = shield.anonymizeResult;
+    shield.anonymizeResult = async (value, sessionId) => { calls.push(value); return anonymizeResult(value, sessionId); };
+    return { shield, calls };
+  }
+
+  it('shields a label before it is cut: no fragment of an address at the cut reaches the model, same pseudonym as in the message', async () => {
+    const address = 'max.mustermann@firma-beispiel.de';
+    for (const offset of [50, 55, 58, 60, 62, 65]) {
+      const label = `${'a'.repeat(offset - 1)} ${address}`;
+      const { shield, calls } = countingShield();
+      const messages = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: `Schreib an <${address}> bitte.` }] }];
+      const { status, prompt } = await promptOf({ piiShield: shield }, field([{ entity: { type: 'order', id: 'ord-1' }, label }]), { mode, messages });
+      expect(status).toBe(200);
+      const all = JSON.stringify(prompt);
+      for (let start = 0; start + 6 <= address.length; start += 1) {
+        expect(all.includes(address.slice(start, start + 6)), `${offset}: ${address.slice(start, start + 6)}`).toBe(false);
+      }
+      const userText = JSON.stringify(prompt!.at(-2));
+      const pseudonym = /<([^<>]+)>/.exec(userText)![1]!;
+      const entry = JSON.parse(((prompt!.at(-1)!.content as Array<{ text: string }>)[0]!.text).split('\n')[2]!) as { label: string };
+      expect([...entry.label].length).toBeLessThanOrEqual(60);
+      expect(entry.label).toBe(canonicalViewContextLabel(`${'a'.repeat(offset - 1)} ${pseudonym}`));
+      // Two calls for the block: the labels, then the id.
+      expect(calls).toHaveLength(2);
+    }
+  });
+
+  it('calls the shield once for entries without a label, as before', async () => {
+    const { shield, calls } = countingShield();
+    const { prompt } = await promptOf({ piiShield: shield }, field([{ entity: { type: 'order', id: 'ord-1' } }]), { mode });
+    expect(blockOf(prompt)).toBe(true);
+    expect(calls).toEqual([[{ id: 'ord-1' }]]);
+  });
+
+  const continuationHistory = [userMessage, {
+    id: 'a1',
+    role: 'assistant',
+    parts: [{ type: 'step-start' }, {
+      type: 'tool-ui_navigate',
+      toolCallId: 'call-1',
+      state: 'output-available',
+      input: { destination: '/orders' },
+      output: {
+        handedOff: true, message: UI_ACTION_HANDOFF_MESSAGE, awaitsOutcome: true, outcome: { v: 1, code: 'ok' },
+        uiAction: { type: 'glirastes.navigate', actionId: 'glirastes.navigate', payload: { href: '/orders', destination: '/orders' } },
+      },
+    }],
+  }];
+  const clarificationMessages = [
+    userMessage,
+    {
+      id: 'a1', role: 'assistant',
+      parts: [{ type: 'tool-ask_clarification', toolCallId: 'call-1', state: 'output-available', input: { question: 'Which order?', target: 'object' }, output: { success: true } }],
+    },
+    { id: 'u2', role: 'user', parts: [{ type: 'text', text: formatClarificationAnswer({ toolCallId: 'call-1', answer: 'The first' }) }] },
+  ];
+  const labelled = [{ entity: { type: 'order', id: 'ord-1' }, label: 'Kontakt max@firma.de' }];
+
+  it.each<[string, Partial<AiChatHandlerFullConfig>, Record<string, unknown>, unknown[] | undefined]>([
+    ['viewContext: false', { viewContext: false }, field(labelled), undefined],
+    ['no field', {}, {}, undefined],
+    ['another version', {}, { glirastesViewContext: { version: 2, current: labelled } }, undefined],
+    ['current not a list', {}, field({ entity: { type: 'order', id: 'ord-1' } }), undefined],
+    ['invalid entries only', {}, field([{ entity: { type: 'order', id: '' }, label: 'max@firma.de' }, 7, null]), undefined],
+    ['an undeclared type only', {}, field([{ entity: { type: 'invoice', id: 'inv-1' }, label: 'max@firma.de' }]), undefined],
+    ['no declared type', { tools: { ui_navigate: navigate } }, field(labelled), undefined],
+    ['a continuation', { }, { glirastesUiOutcomes: 1, ...field(labelled) }, continuationHistory],
+    ['the answer to a clarification', { clarification: {} }, field(labelled), clarificationMessages],
+  ])('calls the shield for no view context with %s', async (_name, config, body, messages) => {
+    const { shield, calls } = countingShield();
+    const { status, prompt } = await promptOf({ ...config, piiShield: shield }, body, { mode, ...(messages ? { messages } : {}) });
+    expect(status).toBe(200);
+    expect(blockOf(prompt)).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('calls the shield for no view context with a custom stream handler', async () => {
+    const { shield, calls } = countingShield();
+    const handler = createAiChatHandler({
+      tools: registry, systemPrompt: 'Assistant', model: textModel(), piiShield: shield,
+      ...(mode === 'pipeline' ? { pipeline: { process: async () => pipelineResult } } : {}),
+      streamHandler: async () => new Response('ok'),
+    } as AiChatHandlerFullConfig);
+    const response = await handler(new Request('https://app.example/api/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [userMessage], ...field(labelled) }),
+    }));
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('calls the shield for a direct command as often as without the field', async () => {
+    const command = formatChatCommandMessage({ commandId: 'orders.get', tool: 'orders.get', args: { orderId: 'ord-1' }, label: '/Open order' });
+    const run = async (body: Record<string, unknown>) => {
+      const { shield, calls } = countingShield();
+      const handler = createAiChatHandler({
+        tools: registry, systemPrompt: 'Assistant', model: textModel(), piiShield: shield,
+        ...(mode === 'pipeline' ? { pipeline: { process: async () => pipelineResult } } : {}),
+      } as AiChatHandlerFullConfig);
+      const response = await handler(new Request('https://app.example/api/chat', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: command }] }], ...body }),
+      }));
+      const wire = await response.text();
+      expect(response.status).toBe(200);
+      expect(wire).not.toContain('view-context');
+      return calls;
+    };
+    expect(await run(field(labelled))).toEqual(await run({}));
+  });
+
+  it('calls the shield for no view context when the pipeline guardrails block the request', async () => {
+    const { shield, calls } = countingShield();
+    const blocked = { ...pipelineResult, blocked: true };
+    const { status, prompt } = await promptOf({ piiShield: shield, pipeline: { process: async () => blocked } }, field(labelled), { mode: 'pipeline' });
+    expect(status).toBe(200);
+    expect(blockOf(prompt)).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 });

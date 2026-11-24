@@ -29,9 +29,8 @@
  * @module
  */
 import { escapeJsonForBlock } from '../../../contracts/delimited-text.js';
-import { cleanDisplayText } from '../../../contracts/mention-marker.js';
+import { cleanDisplayText, firstCodePoints, MAX_INPUT_CODE_POINTS } from '../../../contracts/mention-marker.js';
 import {
-  canonicalViewContextLabel,
   isViewContextRoute,
   sanitizeViewContext,
   VIEW_CONTEXT_LIMITS,
@@ -168,13 +167,98 @@ export interface PreparedViewContext {
   readonly dropped: Readonly<Partial<Record<ViewContextDropReason, number>>>;
 }
 
+/** The PII shield of a request: its `anonymizeResult` and the session of the user's messages. */
+type ViewContextShield = { shield: Pick<PiiShield, 'anonymizeResult'>; sessionId: string };
+
 /**
- * `entries` with their string values through the PII shield, the way tool
- * results go (`anonymizeResult`, one call, same session as the user's
+ * Longest label, in code points after cleaning, that is shielded before the
+ * sanitizer cuts it to 60; a longer label is dropped (`invalid-label`) when
+ * a shield is set, never cut first. 512 keeps every value that starts in the
+ * 60 code points the model can see whole up to 452 code points (an e-mail
+ * address has at most 254), and bounds what the shield reads for labels to
+ * 32 entries times 512 code points per request. A label for a view is a few
+ * words; one this long is no name a user reads.
+ */
+export const VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS = 512;
+
+/**
+ * An own copy of the `current` entries the sanitizer looks at (the first
+ * `maxScannedEntries`), each read once by a JSON round trip; an entry that
+ * cannot be copied (a cycle, a BigInt, a throwing getter) becomes `null`,
+ * which the sanitizer drops as `invalid-entry` like the original. Entries
+ * after them stay holes: the sanitizer only counts them (`over-limit`).
+ * Anything else than a list becomes `{}` (`not-a-list`); `undefined` and
+ * `null` stay. The sanitizer and the label shield read only this copy, so
+ * the labels they see are the ones that were shielded.
+ */
+function ownEntries(current: unknown): unknown {
+  if (current === undefined || current === null) return current;
+  if (!Array.isArray(current)) return {};
+  const length: unknown = current.length;
+  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) return {};
+  const copy: unknown[] = new Array(length);
+  for (let index = 0; index < Math.min(length, VIEW_CONTEXT_LIMITS.maxScannedEntries); index += 1) {
+    try {
+      copy[index] = JSON.parse(JSON.stringify(current[index]) ?? 'null');
+    } catch {
+      copy[index] = null;
+    }
+  }
+  return copy;
+}
+
+/**
+ * `entries` (an own copy, see {@link ownEntries}) with their labels through
+ * the PII shield, cleaned but not yet cut: `cleanDisplayText` first (the
+ * cleaning the sanitizer applies before it cuts, so an address split by a
+ * hidden character is whole for the detector), then one `anonymizeResult`
+ * call with the list of labels, same session as the user's messages. The
+ * sanitizer then cuts the shielded label, so a value at the 60-character
+ * cut is replaced before it could be cut into an unrecognised fragment. A
+ * label longer than {@link VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS} after
+ * cleaning, or longer than the 4096 code points the cleaning reads (its
+ * unread rest could start inside a value), is set to `null` (the sanitizer
+ * drops it as `invalid-label`). The
+ * result is read once by a JSON round trip and must be a list of as many
+ * strings; anything else throws. Changes `entries` in place.
+ */
+async function shieldLabels(entries: unknown[], shield: ViewContextShield): Promise<void> {
+  const labelled: Array<Record<string, unknown>> = [];
+  const labels: string[] = [];
+  for (let index = 0; index < Math.min(entries.length, VIEW_CONTEXT_LIMITS.maxScannedEntries); index += 1) {
+    const entry = entries[index];
+    if (!isRecord(entry) || typeof entry.label !== 'string') continue;
+    const raw = entry.label;
+    const cleaned = cleanDisplayText(raw);
+    if (cleaned === '') continue;
+    // Over 4096 code points the cleaning reads only the start, which can end inside a value.
+    const unread = firstCodePoints(raw, MAX_INPUT_CODE_POINTS) !== raw;
+    if (unread || (cleaned.length > VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS
+      && Array.from(cleaned).length > VIEW_CONTEXT_LABEL_SHIELD_MAX_CODE_POINTS)) {
+      entry.label = null;
+      continue;
+    }
+    labelled.push(entry);
+    labels.push(cleaned);
+  }
+  if (labels.length === 0) return;
+  const result: unknown = await shield.shield.anonymizeResult(labels, shield.sessionId);
+  const shielded: unknown = JSON.parse(JSON.stringify(result) ?? 'null');
+  if (!Array.isArray(shielded) || shielded.length !== labels.length || !shielded.every((label) => typeof label === 'string')) {
+    throw new Error('unexpected shield result');
+  }
+  labelled.forEach((entry, index) => { entry.label = shielded[index]; });
+}
+
+/**
+ * `entries` with their other string values through the PII shield, the way
+ * tool results go (`anonymizeResult`, one call, same session as the user's
  * messages, so a value gets the pseudonym it has there): ids, selection ids,
- * labels, routes and fact values. Ids are shielded like the ids of tool
- * results: a pseudonym in a tool argument is restored to the original id
- * (`rehydrateArgs`), so tool calls still name the right record. Entity
+ * routes and fact values. Labels are not in it: they were shielded before
+ * the sanitizer cut them ({@link shieldLabels}), and a pseudonym shielded
+ * again could be taken for an original. Ids are shielded like the ids of
+ * tool results: a pseudonym in a tool argument is restored to the original
+ * id (`rehydrateArgs`), so tool calls still name the right record. Entity
  * types (declared names, no user data) and keys stay as they are, as in
  * tool results. The shield's result is read exactly once, by a JSON round
  * trip into an own copy: a getter or proxy in it cannot show one value to
@@ -185,21 +269,21 @@ export interface PreparedViewContext {
  */
 async function shieldEntries(
   entries: ReadonlyArray<ViewContextEntry>,
-  shield: { shield: Pick<PiiShield, 'anonymizeResult'>; sessionId: string },
+  shield: ViewContextShield,
 ): Promise<ViewContextEntry[]> {
   const values = entries.map((entry) => ({
-    id: entry.entity?.id, ids: entry.selection?.ids, label: entry.label, route: entry.route, facts: entry.facts,
+    id: entry.entity?.id, ids: entry.selection?.ids, route: entry.route, facts: entry.facts,
   }));
   const result: unknown = await shield.shield.anonymizeResult(values, shield.sessionId);
   const shielded: unknown = JSON.parse(JSON.stringify(result) ?? 'null');
   if (!Array.isArray(shielded) || shielded.length !== entries.length) throw new Error('unexpected shield result');
   return entries.map((entry, index) => {
-    const value = shielded[index] as Partial<Record<'id' | 'ids' | 'label' | 'route' | 'facts', unknown>>;
+    const value = shielded[index] as Partial<Record<'id' | 'ids' | 'route' | 'facts', unknown>>;
     if (!isRecord(value)) throw new Error('unexpected shield result');
     return {
       ...(entry.entity ? { entity: { type: entry.entity.type, id: value.id } } : {}),
       ...(entry.selection ? { selection: { type: entry.selection.type, ids: value.ids } } : {}),
-      ...(entry.label !== undefined ? { label: value.label } : {}),
+      ...(entry.label !== undefined ? { label: entry.label } : {}),
       ...(entry.unsaved !== undefined ? { unsaved: entry.unsaved } : {}),
       ...(entry.route !== undefined ? { route: value.route } : {}),
       ...(entry.facts !== undefined ? { facts: value.facts } : {}),
@@ -208,24 +292,16 @@ async function shieldEntries(
 }
 
 /**
- * A shielded entry as the model may get it, or undefined. A pseudonym may be
- * longer or hold a space where the original did not: a label is then cut at
- * 60 code points like the sanitizer cuts it (only a cut; a label that would
- * need any other change is refused), and a route that is no longer a valid
- * route is left out, as the sanitizer leaves out an invalid one. Everything
- * else must pass `ViewContextEntrySchema` unchanged (ids, selection ids,
- * facts, types). `entry` is plain JSON of our own (see {@link shieldEntries}),
- * so what the schema returns is what it checked.
+ * A shielded entry as the model may get it, or undefined. A pseudonym may
+ * hold a space where the original did not: a route that is no longer a
+ * valid route is left out, as the sanitizer leaves out an invalid one.
+ * Everything else must pass `ViewContextEntrySchema` unchanged (ids,
+ * selection ids, facts, types; the label is the sanitizer's). `entry` is
+ * plain JSON of our own (see {@link shieldEntries}), so what the schema
+ * returns is what it checked.
  */
 function checkShielded(entry: ViewContextEntry): ViewContextEntry | undefined {
   let candidate: ViewContextEntry = entry;
-  const label: unknown = entry.label;
-  if (typeof label === 'string') {
-    const canonical = canonicalViewContextLabel(label);
-    const cutOnly = canonical !== label && canonical.endsWith('…') && cleanDisplayText(label) === label
-      && label.startsWith(canonical.slice(0, -1));
-    if (cutOnly) candidate = { ...candidate, label: canonical };
-  }
   const route: unknown = entry.route;
   if (typeof route === 'string' && !isViewContextRoute(route)) {
     const { route: _left, ...rest } = candidate;
@@ -239,31 +315,50 @@ function checkShielded(entry: ViewContextEntry): ViewContextEntry | undefined {
  * The block for the `current` entries of a request: sanitized against the
  * types `tools` declare (the request's tools, so a type only a tool this
  * user cannot use declares is dropped) and the facts schemas of the policy,
- * the values through the PII shield (only when an entry is left) and each
- * shielded entry checked again ({@link checkShielded}), then serialized and
- * escaped. Undefined for a disabled policy. Never throws: anything
- * unexpected, a failing shield or a shielded entry that fails its check
- * included, gives no block (never an unshielded one); the request runs on.
+ * then serialized and escaped. Undefined for a disabled policy.
+ *
+ * With a shield the sanitizer works on an own copy ({@link ownEntries}),
+ * first to see whether any entry is left (no shield call otherwise). When a
+ * kept entry has a label, the labels are shielded uncut
+ * ({@link shieldLabels}, one `anonymizeResult` call) and the copy is
+ * sanitized again, so the sanitizer cuts the shielded label to 60. Then the
+ * other values of the kept entries go through the shield
+ * ({@link shieldEntries}, one more call) and each shielded entry is checked
+ * again ({@link checkShielded}). So a request makes no, one or two
+ * `anonymizeResult` calls (audit entries `anonymize-result`). Without a
+ * shield nothing of this runs. Never throws: anything unexpected, a failing
+ * shield or a shielded entry that fails its check included, gives no block
+ * (never an unshielded one); the request runs on.
  */
 export async function prepareViewContext(
   field: { current: unknown },
   options: {
     policy: ResolvedViewContextPolicy;
     tools: Readonly<Record<string, unknown>>;
-    shield?: { shield: Pick<PiiShield, 'anonymizeResult'>; sessionId: string };
+    shield?: ViewContextShield;
   },
 ): Promise<PreparedViewContext | undefined> {
   if (!options.policy.enabled) return undefined;
   try {
-    const result = sanitizeViewContext(field.current, { declaredTypes: declaredEntityTypes(options.tools), policy: options.policy });
-    if (result.entries.length === 0) return { dropped: result.dropped };
-    let entries = result.entries;
-    if (options.shield) {
-      const shielded = (await shieldEntries(entries, options.shield)).map(checkShielded);
-      if (shielded.some((entry) => entry === undefined)) return { dropped: result.dropped };
-      entries = shielded as ViewContextEntry[];
+    const declaredTypes = declaredEntityTypes(options.tools);
+    const sanitize = (input: unknown) => sanitizeViewContext(input, { declaredTypes, policy: options.policy });
+    if (!options.shield) {
+      const result = sanitize(field.current);
+      if (result.entries.length === 0) return { dropped: result.dropped };
+      const block = renderViewContextBlock(viewContextLines(result.entries));
+      return { ...(block ? { text: block.text } : {}), dropped: result.dropped };
     }
-    const block = renderViewContextBlock(viewContextLines(entries));
+    const own = ownEntries(field.current);
+    let result = sanitize(own);
+    if (result.entries.length === 0) return { dropped: result.dropped };
+    if (Array.isArray(own) && result.entries.some((entry) => entry.label !== undefined)) {
+      await shieldLabels(own, options.shield);
+      result = sanitize(own);
+      if (result.entries.length === 0) return { dropped: result.dropped };
+    }
+    const shielded = (await shieldEntries(result.entries, options.shield)).map(checkShielded);
+    if (shielded.some((entry) => entry === undefined)) return { dropped: result.dropped };
+    const block = renderViewContextBlock(viewContextLines(shielded as ViewContextEntry[]));
     return { ...(block ? { text: block.text } : {}), dropped: result.dropped };
   } catch {
     return { dropped: {} };
