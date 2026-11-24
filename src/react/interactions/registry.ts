@@ -1,4 +1,5 @@
 import {
+  CHAT_COMMAND_MAX_LABEL_LENGTH,
   formatChatCommandMessage,
   serializeChatCommandArgs,
 } from '../../contracts/chat-command.js';
@@ -13,6 +14,7 @@ import {
   type ChatLocaleCode,
 } from '../../contracts/chat-interactions.js';
 import { pickLanguage } from '../../contracts/localized-text.js';
+import { serializeMentionMarker } from '../../contracts/mention-marker.js';
 import { resolveCompletionLimits, type CompletionLimits } from '../completions/completion-search.js';
 import type {
   ChatCompletionProvider,
@@ -118,6 +120,12 @@ export interface PendingChatCommand {
   readonly values: Readonly<Record<string, string>>;
   /** Display labels for entity values, by argument name. */
   readonly valueLabels: Readonly<Record<string, string>>;
+  /**
+   * Entity type of a value that no entry of `args` declares, by argument
+   * name: the target of an entity action. With a label it is shown as a
+   * mention pill in the sent message.
+   */
+  readonly valueTypes?: Readonly<Record<string, string>>;
   /** Set when the last attempt was refused, e.g. values too long. */
   readonly error?: 'invalid';
 }
@@ -257,6 +265,79 @@ function tokenOf(mention: MentionData): string | undefined {
   return typeof mention.prefix === 'string' && typeof mention.slug === 'string'
     ? `${mention.prefix}${mention.slug}`
     : undefined;
+}
+
+/** One piece of a direct command's label line: a mention marker where one can be written, else `plain`. */
+interface LabelPiece {
+  readonly plain: string;
+  readonly mention?: { readonly type: string; readonly id: string; readonly label: string };
+}
+
+/** Whitespace as `formatChatCommandMessage` cleans it: a run becomes one space. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** Shortest label length `serializeMentionMarker` writes (`maxLabelLength` below 8 means 8). */
+const MIN_MARKER_LABEL = 8;
+
+/**
+ * The marker of `mention` in at most `room` UTF-16 units, its label
+ * shortened (canonically, with `…`) when needed; `undefined` when it cannot
+ * be written, would not survive the label line's whitespace cleaning, or
+ * does not fit. An id with `:` is refused: every reader splits it there.
+ */
+function markerWithin(mention: NonNullable<LabelPiece['mention']>, room: number, longest = 120): string | undefined {
+  if (mention.id.includes(':')) return undefined;
+  let max = longest;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const marker = serializeMentionMarker({ ...mention, label: oneLine(mention.label) }, { maxLabelLength: max });
+    if (marker === undefined || oneLine(marker) !== marker) return undefined;
+    if (marker.length <= room) return marker;
+    if (max <= MIN_MARKER_LABEL) return undefined;
+    // Shrink by the overshoot (a code point is at most two units, so this never undershoots by much).
+    max = Math.max(MIN_MARKER_LABEL, Math.min(max - 1, max - (marker.length - room)));
+  }
+  return undefined;
+}
+
+/**
+ * The visible line of a direct command: each piece with a mention written
+ * as its `{{mention:…}}` marker while the whole marker fits within the
+ * line's limit, else as its plain text (cut by `formatChatCommandMessage`
+ * like before). A marker is never cut. First, in order, every mention whose
+ * shortest marker (label shortened to 8 code points) still fits gets one;
+ * then each such marker keeps room for what comes after it up to the last
+ * marker, so one long label does not push the others out.
+ */
+function labelLine(pieces: ReadonlyArray<LabelPiece>): string {
+  const kept = pieces
+    .map((piece) => ({ ...piece, plain: oneLine(piece.plain) }))
+    .filter((piece) => piece.plain);
+  const shortest = kept.map((piece) => (
+    piece.mention ? markerWithin(piece.mention, Number.POSITIVE_INFINITY, MIN_MARKER_LABEL)?.length : undefined
+  ));
+  // Pass one: which pieces get a marker at all, each counted at its shortest.
+  let length = -1;
+  const planned = kept.map((piece, index) => {
+    const marker = shortest[index];
+    const fits = marker !== undefined && length + 1 + marker <= CHAT_COMMAND_MAX_LABEL_LENGTH;
+    length += 1 + (fits ? marker : piece.plain.length);
+    return fits;
+  });
+  // What a piece up to the last planned marker takes at least: its shortest marker or its plain text.
+  const last = planned.lastIndexOf(true);
+  const least = kept.map((piece, index) => (index > last ? 0 : 1 + (planned[index] ? shortest[index]! : piece.plain.length)));
+  let reserved = least.reduce((sum, value) => sum + value, 0);
+  let line = '';
+  kept.forEach((piece, index) => {
+    reserved -= least[index]!;
+    const separator = line ? 1 : 0;
+    const room = CHAT_COMMAND_MAX_LABEL_LENGTH - line.length - separator - reserved;
+    const marker = planned[index] && piece.mention ? markerWithin(piece.mention, room) : undefined;
+    line += `${separator ? ' ' : ''}${marker ?? piece.plain}`;
+  });
+  return line;
 }
 
 function withoutToken(text: string, token: string): { text: string; found: boolean } {
@@ -486,19 +567,34 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     if (serializeChatCommandArgs(args) === undefined) {
       return { status: 'needs-args', request: { ...pending, values: merged, valueLabels, error: 'invalid' } };
     }
+    // A picked entity (type, id and label known) is shown as a mention pill; anything else as plain text.
+    const entityPiece = (name: string, type: string | undefined, label: string | undefined): LabelPiece => {
+      const id = merged[name];
+      const named = typeof label === 'string' && label.trim() ? label : undefined;
+      const plain = `@${named ?? id ?? ''}`;
+      return type && id && named ? { plain, mention: { type, id, label: named } } : { plain };
+    };
     const shown = pending.args
       .filter((arg) => merged[arg.name])
-      .map((arg) => (arg.entity ? `@${valueLabels[arg.name] || merged[arg.name]}` : merged[arg.name]!));
+      .map((arg): LabelPiece => (arg.entity ? entityPiece(arg.name, arg.entity, valueLabels[arg.name]) : { plain: merged[arg.name]! }));
     const entityLabels = Object.entries(valueLabels)
       .filter(([name]) => !pending.args.some((arg) => arg.name === name))
-      .map(([, label]) => `@${label}`);
+      .map(([name, label]): LabelPiece => {
+        const piece = entityPiece(name, pending.valueTypes?.[name], label);
+        // Without a value the label is shown as before.
+        return piece.mention ? piece : { plain: `@${label}` };
+      });
+    const command: LabelPiece = {
+      plain: `/${pending.label}`,
+      mention: { type: 'command', id: pending.commandId, label: pending.label },
+    };
     return {
       status: 'send',
       text: formatChatCommandMessage({
         commandId: pending.commandId,
         tool: pending.tool,
         args,
-        label: [`/${pending.label}`, ...entityLabels, ...shown].join(' '),
+        label: labelLine([command, ...entityLabels, ...shown]),
       }),
     };
   };
@@ -609,6 +705,7 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
         args: action.args ?? [],
         values: { [action.entityArg]: target.id },
         valueLabels: { [action.entityArg]: target.label },
+        valueTypes: { [action.entityArg]: target.type },
       }, 0);
     },
   };

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
+import { formatChatCommandMessage } from '../../../contracts/chat-command.js';
 import type { ChatMessage } from '../../types.js';
 import { clearLocalSessionStore, createLocalSessionStore } from '../local-session-store.js';
 import { createMemoryAttachmentStore, type AttachmentBlobStore } from '../attachment-blob-store.js';
@@ -75,6 +76,20 @@ describe('chats kept in the browser', () => {
     const sessions = store();
     await sessions.save!('default', [user('{{mention:command:tasks.summarize:Zusammenfassen}} {{mention:task:a65e:Release prüfen}} bitte')]);
     expect((await sessions.list!())[0]!.title).toBe('/Zusammenfassen @Release prüfen bitte');
+  });
+
+  it('names a chat that starts with a direct command after its label line, with or without pills', async () => {
+    const pills = store();
+    await pills.save!('default', [user(formatChatCommandMessage({
+      commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' },
+      label: '{{mention:command:task.tasks.complete:Erledigen}} {{mention:task:7:Release prüfen}}',
+    }))]);
+    expect((await pills.list!())[0]!.title).toBe('/Erledigen @Release prüfen');
+    const plain = store();
+    await plain.save!('default', [user(formatChatCommandMessage({
+      commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' }, label: '/Erledigen @Release prüfen',
+    }))]);
+    expect((await plain.list!())[0]!.title).toBe('/Erledigen @Release prüfen');
   });
 
   it('lists the chat used last first', async () => {

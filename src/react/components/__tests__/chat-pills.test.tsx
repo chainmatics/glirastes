@@ -228,7 +228,7 @@ describe('useChatComposer', () => {
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
     expect(parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)).toEqual({
       invocation: { commandId: 'tasks.summarize', tool: 'tasks.summarize', args: { taskId: '7' } },
-      label: '/Summarize @Release prüfen',
+      label: '{{mention:command:tasks.summarize:Summarize}} {{mention:task:7:Release prüfen}}',
     });
   });
 

@@ -106,6 +106,16 @@ describe('stripChatCommandMessages', () => {
       { role: 'assistant', content: listCommand },
     ]);
   });
+
+  it('reads and keeps a label line with mention markers as the chat sends it since the release after 0.25.0', () => {
+    const label = '{{mention:command:task.tasks.complete:Complete}} {{mention:task:7:Release prüfen}}';
+    const marked = formatChatCommandMessage({ commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' }, label });
+    expect(resolveDirectCommand([user(marked)])).toEqual({
+      invocation: { commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' } }, label,
+    });
+    // Later model turns read the markers like any `@` mention of the user.
+    expect(stripChatCommandMessages([user(marked)])).toEqual([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: label }] }]);
+  });
 });
 
 describe('pseudonymizeCommandToolInputs', () => {

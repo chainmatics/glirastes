@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The label line of a direct command (a `/` command or entity action run without the model) carries mention markers: `{{mention:command:<id>:<label>}}` for the command and `{{mention:<type>:<id>:<label>}}` for each picked object, written with the canonical marker writer. The sent message shows them as pills instead of the plain text `/Label @Name`, and the approval card names an object the user picked instead of warning that no name is known for its id (provenance `mention`). The type comes from the argument's `entity` or, for an entity action's target, the action's entity (new optional `PendingChatCommand.valueTypes`). A value without a picked label, an argument without an entity type, an id with `:` and an id or type the marker writer refuses stay plain text. The line keeps its 200-character limit and is never cut inside a marker (labels are shortened inside the marker, down to 8 code points; otherwise plain text). Old messages with a plain line show as before. On later turns the model reads the markers, so it sees the command and object ids as for any mention (it saw them before in the command's tool call). No server change: the wire format and `parseChatCommandMessage` are unchanged.
+
+### Fixed
+
+- The local chat title of a chat that starts with a direct command is its label line; it showed the hidden `<!--glirastes:command…` marker before.
+
 ## [0.25.0] - 2026-11-24
 
 ### Added

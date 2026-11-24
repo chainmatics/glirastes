@@ -103,7 +103,7 @@ describe('chat interactions in AiChatProvider', () => {
     await act(async () => { context().runEntityAction({ type: 'task', id: '7', label: 'Release prüfen' }, 'task.tasks.complete'); });
     expect(parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)).toEqual({
       invocation: { commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' } },
-      label: '/Complete @Release prüfen',
+      label: '{{mention:command:task.tasks.complete:Complete}} {{mention:task:7:Release prüfen}}',
     });
     await act(async () => { context().send('/stand-up', { mentions: [command('standup', 'stand-up')] }); });
     expect(chat.sendMessage.mock.calls[1]![0]).toEqual({ text: 'Summarize my day.' });
@@ -130,6 +130,19 @@ describe('chat interactions in AiChatProvider', () => {
     const message: ChatMessage = { id: 'u1', role: 'user', parts: [{ type: 'text', text }] };
     const view = render(<AiChatProvider transport={transport([message])}><MessageBubble message={message} /></AiChatProvider>);
     expect(view.container.textContent).toContain('/Open Overview');
+    expect(view.container.innerHTML).not.toContain('glirastes:command');
+  });
+
+  it('shows the command and the picked objects of a sent command as pills', async () => {
+    const chat = transport();
+    const context = mount(chat);
+    await act(async () => { context().runEntityAction({ type: 'task', id: '7', label: 'Release prüfen' }, 'task.tasks.complete'); });
+    const text = chat.sendMessage.mock.calls[0]![0].text as string;
+    const message: ChatMessage = { id: 'u1', role: 'user', parts: [{ type: 'text', text }] };
+    const view = render(<AiChatProvider transport={transport([message])}><MessageBubble message={message} /></AiChatProvider>);
+    const chips = [...view.container.querySelectorAll('[data-component="mention-chip"]')];
+    expect(chips.map((chip) => chip.textContent)).toEqual([expect.stringContaining('Complete'), expect.stringContaining('Release prüfen')]);
+    expect(view.container.textContent).not.toContain('{{mention');
     expect(view.container.innerHTML).not.toContain('glirastes:command');
   });
 });

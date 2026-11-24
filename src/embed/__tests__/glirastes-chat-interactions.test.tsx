@@ -103,7 +103,7 @@ describe('<glirastes-chat> chat interactions', () => {
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
     expect(parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)).toEqual({
       invocation: { commandId: 'open.overview', tool: 'ui.navigate', args: { destination: '/overview' } },
-      label: '/Übersicht öffnen',
+      label: '{{mention:command:open.overview:Übersicht öffnen}}',
     });
   });
 

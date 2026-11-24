@@ -3,6 +3,7 @@ import { attachmentIdOf } from '../../contracts/attachments.js';
 import { fileToDataUrl, omitAttachmentData } from './attachments.js';
 import { createIndexedDbAttachmentStore, dataUrlToBlob, type AttachmentBlobStore } from './attachment-blob-store.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
+import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import { inferMentionPrefix, parseMentionSegments } from './mention-markup.js';
 
 type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & Partial<Pick<Storage, 'length' | 'key'>>;
@@ -100,7 +101,8 @@ function titleFrom(
   prefixOf: (type: string) => string,
 ): string | null {
   const first = messages.find((message) => message.role === 'user');
-  const raw = first ? textOf(first) : '';
+  // A direct command is named by its label line, not by its hidden marker.
+  const raw = first ? stripChatCommandMarkers(textOf(first)) : '';
   // Mentions read as `@Name` and `/Command`, not as their markup.
   const text = parseMentionSegments(raw, prefixOf)
     .map((segment) => (segment.kind === 'text' ? segment.text : `${segment.mention.prefix ?? ''}${segment.mention.displayName}`))

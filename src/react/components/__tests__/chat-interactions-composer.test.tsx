@@ -118,7 +118,7 @@ describe('composer keyboard and ARIA for chat interactions', () => {
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
     expect(parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)).toEqual({
       invocation: { commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' } },
-      label: '/Complete @Release prüfen',
+      label: '{{mention:command:task.tasks.complete:Complete}} {{mention:task:7:Release prüfen}}',
     });
     expect(editor.textContent).toBe('');
   });

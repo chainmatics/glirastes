@@ -118,7 +118,7 @@ describe('CommandArgumentsForm', () => {
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
     expect(parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)).toEqual({
       invocation: { commandId: 'tasks.assign', tool: 'tasks.assign', args: { assignee: 'alice', priority: 'high', note: 'bis Freitag' } },
-      label: '/Assign @Alice Example high bis Freitag',
+      label: '{{mention:command:tasks.assign:Assign}} {{mention:person:alice:Alice Example}} high bis Freitag',
     });
     expect(screen.queryByRole('form')).toBeNull();
     expect(document.activeElement?.getAttribute('role')).toBe('textbox');

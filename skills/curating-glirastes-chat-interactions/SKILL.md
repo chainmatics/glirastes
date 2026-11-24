@@ -192,9 +192,12 @@ glirastes tools check
   argument form is reached with Tab. Headings appear when the list mixes
   types, and a search without hits says so.
 - A `/` command sent alone runs without a model call: no model request in the
-  network log or the app's model mock, and the bubble shows the label.
+  network log or the app's model mock, and the bubble shows the command and
+  each picked object as pills (the label line carries `{{mention:…}}`
+  markers; a value typed without a pick stays plain text).
 - A destructive action answers with the approval card. After a list, the card
-  names the entity (e.g. "Playlist: Abend-Promos"); an id the chat never showed
+  names the entity (e.g. "Playlist: Abend-Promos"), also an object picked for
+  the command by `@` or an entity action; an id the chat never showed
   gets a visible warning with the id. Both come from the browser's history
   (convenience, not a trust boundary).
 - A user with a narrower role gets a shorter GET list and a refused POST for
