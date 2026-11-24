@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   parseChatInteractions,
@@ -93,7 +93,6 @@ function EmbeddedChat({
   welcomeMessage,
   emit,
   onSendReady,
-  onCommit,
 }: {
   endpoint: string;
   transport?: ChatTransport;
@@ -102,10 +101,7 @@ function EmbeddedChat({
   welcomeMessage?: string;
   emit: Emit;
   onSendReady: (api: EmbedApi | null) => void;
-  onCommit: (config: GlirastesChatElementConfig) => void;
 }) {
-  // Every commit: the element knows which config the chat runs with.
-  useLayoutEffect(() => onCommit(config));
   const { headers, bodyExtras, onToolResult, onUiActionOutcome, ...providerConfig } = config;
   const shared = {
     ...providerConfig,
@@ -184,10 +180,6 @@ export class GlirastesChatElement extends BaseElement {
   #interactionsFromProperty = false;
   #interactionsLoad: AbortController | null = null;
   #mentionContext: ChatMentionContext | undefined;
-  // The config of the last commit; differs from #config while a render is pending.
-  #committedConfig: GlirastesChatElementConfig | null = null;
-  // Messages sent while a `viewContext.enabled: false` was set but not yet rendered.
-  #heldSends: string[] = [];
   // The nearest `lang` the last render used; a page (or a region of it) may set or change it later.
   #renderedLang: string | null = null;
   #langObserver: MutationObserver | null = null;
@@ -199,21 +191,6 @@ export class GlirastesChatElement extends BaseElement {
   readonly #onSendReady = (api: EmbedApi | null) => {
     this.#api = api;
   };
-
-  readonly #onCommit = (config: GlirastesChatElementConfig) => {
-    this.#committedConfig = config;
-    if (this.#heldSends.length === 0 || this.#viewContextOffPending()) return;
-    for (const text of this.#heldSends.splice(0)) this.#api?.send(text);
-  };
-
-  /** `config.viewContext.enabled: false` is set but the chat has not rendered it yet. */
-  #viewContextOffPending(): boolean {
-    return this.#config.viewContext?.enabled === false && !this.#committedViewContextOff();
-  }
-
-  #committedViewContextOff(): boolean {
-    return this.#committedConfig?.viewContext?.enabled === false;
-  }
 
   get config(): GlirastesChatElementConfig {
     return this.#config;
@@ -281,12 +258,6 @@ export class GlirastesChatElement extends BaseElement {
   /** Sends a user message through the embedded chat. False before mount. */
   send(text: string): boolean {
     if (!this.#api || !text.trim()) return false;
-    // `config.viewContext.enabled: false` set just before applies to this message: it goes once the chat
-    // rendered that config (the next commit), never with the earlier one. Without that switch: at once, as before.
-    if (this.#viewContextOffPending()) {
-      this.#heldSends.push(text);
-      return true;
-    }
     return this.#api.send(text);
   }
 
@@ -323,7 +294,6 @@ export class GlirastesChatElement extends BaseElement {
       this.#root = null;
       this.#style = null;
       this.#api = null;
-      this.#heldSends = [];
       this.#interactionsLoad?.abort();
       root?.unmount();
       this.shadowRoot?.replaceChildren();
@@ -434,7 +404,6 @@ export class GlirastesChatElement extends BaseElement {
         welcomeMessage={this.getAttribute('welcome-message') ?? undefined}
         emit={this.#emit}
         onSendReady={this.#onSendReady}
-        onCommit={this.#onCommit}
       />,
     );
   }

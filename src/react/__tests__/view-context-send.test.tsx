@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { StrictMode, startTransition, useEffect, useState } from 'react';
+import React, { StrictMode, useEffect } from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
@@ -152,27 +152,6 @@ describe('view context from a page to the model', () => {
     expect(Object.keys(body)).toEqual(['glirastesClientActions', 'glirastesUiOutcomes', 'id', 'messages', 'trigger']);
   });
 
-  it('is switched off with viewContext={{ enabled: false }}: no field, byte for byte as without a registration', async () => {
-    const view = render(<Chat viewContext={{ enabled: false }}><Page entry={orderView} /></Chat>);
-    const off = await sendAndWait('Hi');
-    expect(off).not.toHaveProperty('glirastesViewContext');
-    view.unmount();
-    render(<Chat />);
-    const none = await sendAndWait('Hi');
-    const normalized = (body: Record<string, unknown>) => JSON.stringify({ ...body, id: 'x', messageId: 'x', messages: (body.messages as Array<{ parts: unknown }>).map((message) => message.parts) });
-    expect(normalized(off)).toBe(normalized(none));
-    await waitFor(() => expect(models).toHaveLength(2));
-    await waitFor(() => expect(models[1]?.doStreamCalls).toHaveLength(1));
-    expect(promptText(models[0])).not.toContain('view-context');
-  });
-
-  it('turns back on when the provider prop changes', async () => {
-    const view = render(<Chat viewContext={{ enabled: false }}><Page entry={orderView} /></Chat>);
-    expect(await sendAndWait('one')).not.toHaveProperty('glirastesViewContext');
-    view.rerender(<Chat viewContext={{ enabled: true }}><Page entry={orderView} /></Chat>);
-    expect((await sendAndWait('two')).glirastesViewContext).toEqual({ version: 1, current: [orderView] });
-  });
-
   it('sends several sources in mount order, bounded by the contract', async () => {
     const lines: ViewContextEntry = { selection: { type: 'order', ids: Array.from({ length: 70 }, (_, index) => `o-${index}`) } };
     render(<Chat><Page entry={orderView} /><Page entry={lines} /></Chat>);
@@ -211,7 +190,7 @@ describe('view context from a page to the model', () => {
     expect(publicUseViewContext).toBe(useViewContext);
   });
 
-  it('a custom transport without the setter keeps working and sends nothing new', async () => {
+  it('a custom transport is called exactly as on main: one argument, no view context', async () => {
     const sendMessage = vi.fn(async () => {});
     const transport: ChatTransport = {
       messages: [], status: 'ready', error: null, sendMessage, stop: vi.fn(), setMessages: vi.fn(),
@@ -221,130 +200,21 @@ describe('view context from a page to the model', () => {
     await act(async () => { await send('Hi'); });
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     expect(sendMessage).toHaveBeenCalledWith({ text: 'Hi' });
+    expect((sendMessage.mock.calls[0] as unknown[]).length).toBe(1);
   });
-});
 
-describe('the switch holds for a message sent early', () => {
   function AutoSend() {
     const { send: sendText } = useChatContext();
     useEffect(() => { sendText('Hello on mount'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
     return null;
   }
 
-  it('a child sending in its mount effect with enabled false sends no field', async () => {
-    const off = registerViewContext('page', orderView);
-    try {
-      render(<Chat viewContext={{ enabled: false }}><AutoSend /></Chat>);
-      await waitFor(() => expect(bodies).toHaveLength(1));
-      expect(bodies[0]).not.toHaveProperty('glirastesViewContext');
-    } finally {
-      off();
-    }
-  });
-
-  it('the default (on) still sends with a message sent in a mount effect', async () => {
+  it('is sent with a message a child sends in its mount effect', async () => {
     const off = registerViewContext('page', orderView);
     try {
       render(<Chat><AutoSend /></Chat>);
       await waitFor(() => expect(bodies).toHaveLength(1));
       expect(bodies[0]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
-    } finally {
-      off();
-    }
-  });
-
-  it('turning it off applies to a message a child sends in the same commit', async () => {
-    const off = registerViewContext('page', orderView);
-    try {
-      const view = render(<Chat />);
-      view.rerender(<Chat viewContext={{ enabled: false }}><AutoSend /></Chat>);
-      await waitFor(() => expect(bodies).toHaveLength(1));
-      expect(bodies[0]).not.toHaveProperty('glirastesViewContext');
-    } finally {
-      off();
-    }
-  });
-});
-
-describe('the switch belongs to each provider and its committed render', () => {
-  const never = new Promise(() => {});
-  function Suspender(): null { throw never; }
-  let sendText: (text: string) => void = () => {};
-  function Sender() { const { send: next } = useChatContext(); sendText = next; return null; }
-
-  it('a discarded render with enabled false does not mute the chat', async () => {
-    const off = registerViewContext('page', orderView);
-    try {
-      let setOff!: (value: boolean) => void;
-      function App() {
-        const [isOff, setIsOff] = useState(false);
-        setOff = setIsOff;
-        const transport = useVercelAiChatTransport({ endpoint: '/api/chat' });
-        return (
-          <AiChatProvider transport={transport} viewContext={isOff ? { enabled: false } : undefined}>
-            <Sender />
-            {isOff ? <Suspender /> : null}
-          </AiChatProvider>
-        );
-      }
-      render(<App />);
-      await act(async () => { startTransition(() => setOff(true)); });
-      await act(async () => { setOff(false); });
-      await act(async () => { sendText('hi'); });
-      await waitFor(() => expect(bodies).toHaveLength(1));
-      expect(bodies[0]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
-    } finally {
-      off();
-    }
-  });
-
-  it('two providers on one transport: the one that is off sends none, the other sends it', async () => {
-    const off = registerViewContext('page', orderView);
-    try {
-      let sendOff: (text: string) => void = () => {};
-      function SenderOff() { const { send: next } = useChatContext(); sendOff = next; return null; }
-      function App({ second }: { second: boolean }) {
-        const transport = useVercelAiChatTransport({ endpoint: '/api/chat' });
-        return (
-          <>
-            <AiChatProvider transport={transport} viewContext={{ enabled: false }}><SenderOff /></AiChatProvider>
-            {second ? <AiChatProvider transport={transport}><Sender /></AiChatProvider> : null}
-          </>
-        );
-      }
-      const view = render(<App second={false} />);
-      view.rerender(<App second />);
-      await act(async () => { sendOff('from off'); });
-      await waitFor(() => expect(bodies).toHaveLength(1));
-      expect(bodies[0]).not.toHaveProperty('glirastesViewContext');
-      await waitFor(() => expect(document.body).toBeTruthy());
-      await act(async () => { await new Promise((settle) => setTimeout(settle, 20)); });
-      await act(async () => { sendText('from on'); });
-      await waitFor(() => expect(bodies).toHaveLength(2));
-      expect(bodies[1]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
-      await act(async () => { await new Promise((settle) => setTimeout(settle, 20)); });
-      await act(async () => { sendOff('from off again'); });
-      await waitFor(() => expect(bodies).toHaveLength(3));
-      expect(bodies[2]).not.toHaveProperty('glirastesViewContext');
-    } finally {
-      off();
-    }
-  });
-
-  it('setting it off and sending in one event handler sends with the setting of the last render (on)', async () => {
-    const off = registerViewContext('page', orderView);
-    try {
-      let flip!: () => void;
-      function App() {
-        const [isOff, setIsOff] = useState(false);
-        const transport = useVercelAiChatTransport({ endpoint: '/api/chat' });
-        flip = () => { setIsOff(true); sendText('hi'); };
-        return <AiChatProvider transport={transport} viewContext={isOff ? { enabled: false } : undefined}><Sender /></AiChatProvider>;
-      }
-      render(<App />);
-      await act(async () => { flip(); });
-      await waitFor(() => expect(bodies).toHaveLength(1));
-      expect(bodies[0]).toHaveProperty('glirastesViewContext');
     } finally {
       off();
     }
@@ -408,12 +278,10 @@ describe('continuations without a new user message carry no view context', () =>
     registerViewContext('other', null);
   });
 
-  it('is sent with a message that has files too, and not for a message sent with viewContext: false', async () => {
+  it('is sent with a message that has files too', async () => {
     render(<Probe />);
     const file = { type: 'file' as const, mediaType: 'text/plain', url: 'data:text/plain;base64,aGk=', filename: 'a.txt' };
     await act(async () => { await transport.sendMessage({ text: 'Look', files: [file] }); });
     expect(bodies[0]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
-    await act(async () => { await transport.sendMessage({ text: 'Again' }, { viewContext: false }); });
-    expect(bodies[1]).not.toHaveProperty('glirastesViewContext');
   });
 });

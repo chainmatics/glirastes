@@ -73,12 +73,8 @@ export interface ChatTransport {
   status: 'ready' | 'submitted' | 'streaming' | 'error';
   /** Current error, if any */
   error: Error | null;
-  /**
-   * Send a user message; `files` only with a transport that supports attachments.
-   * `options.viewContext: false` (passed by a provider with `viewContext.enabled: false`):
-   * this message carries no view context. The provider passes no second argument otherwise.
-   */
-  sendMessage(opts: { text: string; files?: FilePart[] }, options?: { viewContext?: boolean }): Promise<void>;
+  /** Send a user message; `files` only with a transport that supports attachments. */
+  sendMessage(opts: { text: string; files?: FilePart[] }): Promise<void>;
   /** Stop the current generation */
   stop(): void;
   /** Replace the message list (for session restore, sanitization) */
@@ -1815,12 +1811,6 @@ export interface ChatQueueProps {
 // Provider Config
 // ============================================================================
 
-/** `viewContext` of the provider. */
-export interface ChatViewContextConfig {
-  /** Default true: a page's registered view context goes with each new user message. `false` sends none. */
-  readonly enabled?: boolean;
-}
-
 export interface AiChatProviderConfig {
   mentions?: MentionConfig;
   /**
@@ -1874,13 +1864,6 @@ export interface AiChatProviderConfig {
    * nothing and keeps the search.
    */
   mentionContext?: ChatMentionContext;
-  /**
-   * The view context: what the page declared with `useViewContext` or
-   * `registerViewContext` (`glirastes/browser`) goes with each new user
-   * message to the chat endpoint, read at send time. Nothing is sent while
-   * no page registers anything. `{ enabled: false }` sends none.
-   */
-  viewContext?: ChatViewContextConfig;
   /**
    * Turns entity references in assistant messages into clickable chips:
    * app matchers (e.g. task keys), names the conversation already referenced,

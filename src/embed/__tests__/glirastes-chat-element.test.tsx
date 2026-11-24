@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import React, { useEffect, useLayoutEffect } from 'react';
-import { act, fireEvent, render as renderReact, waitFor } from '@testing-library/react';
+import { act, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SttProviderAdapter } from '../../react/stt/controller.js';
 import type { ChatMessage, ChatTransport } from '../../react/types.js';
@@ -337,7 +336,7 @@ describe('<glirastes-chat>', () => {
     document.documentElement.removeAttribute('lang');
   });
 
-  it('sends the view context a non-React host registered, and none with config.viewContext.enabled false', async () => {
+  it('sends the view context a non-React host registered, and none once it unregistered', async () => {
     const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Ok'));
     vi.stubGlobal('fetch', fetchMock);
     const bodyOf = (call: number) => JSON.parse(String(fetchMock.mock.calls[call]![1]?.body)) as Record<string, unknown>;
@@ -356,96 +355,13 @@ describe('<glirastes-chat>', () => {
         current: [{ entity: { type: 'order', id: 'ord-1' }, label: 'Order 1' }],
       });
       await waitFor(() => expect(element.shadowRoot!.querySelectorAll('[data-component="message-bubble"]').length).toBe(4));
-      element.config = { viewContext: { enabled: false } };
-      await act(async () => {});
+      off();
       await act(async () => { expect(element.send('Noch mal')).toBe(true); });
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
       expect(bodyOf(2)).not.toHaveProperty('glirastesViewContext');
     } finally {
       off();
     }
-  });
-
-  it('sends no view context from the ready event with config.viewContext.enabled false', async () => {
-    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Ok'));
-    vi.stubGlobal('fetch', fetchMock);
-    const off = registerViewContext('page', { entity: { type: 'order', id: 'ord-1' } });
-    try {
-      let sent: boolean | undefined;
-      await mount((node) => {
-        node.setAttribute('endpoint', '/api/chat');
-        node.config = { viewContext: { enabled: false } };
-        node.addEventListener('glirastes-chat:ready', () => { sent ??= node.send('Hi'); });
-      });
-      expect(sent).toBe(true);
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).not.toHaveProperty('glirastesViewContext');
-    } finally {
-      off();
-    }
-  });
-
-  it('applies config.viewContext.enabled false set right before a synchronous send', async () => {
-    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Ok'));
-    vi.stubGlobal('fetch', fetchMock);
-    const off = registerViewContext('page', { entity: { type: 'order', id: 'ord-1' } });
-    try {
-      const { element } = await mount((node) => { node.setAttribute('endpoint', '/api/chat'); });
-      element.config = { viewContext: { enabled: false } };
-      let sent: boolean | undefined;
-      await act(async () => { sent = element.send('Again'); });
-      expect(sent).toBe(true);
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).not.toHaveProperty('glirastesViewContext');
-    } finally {
-      off();
-    }
-  });
-
-  describe('config.viewContext.enabled false set right before send(), from React code', () => {
-    const cases: Array<[string, (element: GlirastesChatElement) => Promise<boolean | undefined>]> = [
-      ['the ready event', async () => undefined],
-      ['a host useEffect', async (element) => {
-        let sent: boolean | undefined;
-        function Host() { useEffect(() => { element.config = { viewContext: { enabled: false } }; sent = element.send('x'); }, []); return null; }
-        await act(async () => { renderReact(<Host />); });
-        return sent;
-      }],
-      ['a host useLayoutEffect', async (element) => {
-        let sent: boolean | undefined;
-        function Host() { useLayoutEffect(() => { element.config = { viewContext: { enabled: false } }; sent = element.send('x'); }, []); return null; }
-        await act(async () => { renderReact(<Host />); });
-        return sent;
-      }],
-    ];
-    it.each(cases)('from %s: the message goes once rendered, without the field', async (name, act2) => {
-      const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Ok'));
-      vi.stubGlobal('fetch', fetchMock);
-      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const off = registerViewContext('page', { entity: { type: 'order', id: 'ord-1' } });
-      try {
-        let sent: boolean | undefined;
-        const { element } = await mount((node) => {
-          node.setAttribute('endpoint', '/api/chat');
-          if (name === 'the ready event') {
-            node.addEventListener('glirastes-chat:ready', () => {
-              if (sent !== undefined) return;
-              node.config = { viewContext: { enabled: false } };
-              sent = node.send('Hi');
-            });
-          }
-        });
-        if (name !== 'the ready event') sent = await act2(element);
-        await act(async () => {});
-        expect(sent).toBe(true);
-        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-        expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).not.toHaveProperty('glirastesViewContext');
-        expect(errors).not.toHaveBeenCalled();
-      } finally {
-        off();
-        errors.mockRestore();
-      }
-    });
   });
 
   it('maps the voice and voice-language attributes onto the composer microphone', async () => {
