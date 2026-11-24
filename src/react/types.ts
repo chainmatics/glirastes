@@ -1207,6 +1207,14 @@ export interface ComposerConfig {
    * replaces both.
    */
   layout?: 'inline' | 'stacked';
+  /**
+   * The placeholder of the pill composer stays visible while the empty
+   * editor has focus (default `true`, like a native placeholder); `false`
+   * hides it on focus, the earlier look. Passed to `RichMentionInput` as
+   * `placeholderOnFocus`, also through `useChatComposerInput().inputProps`.
+   * The plain text field keeps the browser's placeholder.
+   */
+  placeholderOnFocus?: boolean;
 }
 
 /**
@@ -2444,7 +2452,7 @@ export interface ChatComposerInput extends ChatComposerInputControls {
   /** `<RichMentionInput ref={composer.inputRef} {...composer.inputProps} />` */
   readonly inputRef: RefObject<RichMentionInputHandle | null>;
   readonly inputProps: Pick<RichMentionInputProps,
-    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers' | 'onListOpenChange' | 'completionPreset'>;
+    'onChange' | 'onSubmit' | 'onSearch' | 'onEntityAction' | 'onCompletionSelect' | 'placeholder' | 'disabled' | 'listLabel' | 'resultsLabel' | 'emptyLabel' | 'removeMentionLabel' | 'onFiles' | 'onBackspaceEmpty' | 'allowEmptySubmit' | 'triggers' | 'onListOpenChange' | 'completionPreset' | 'placeholderOnFocus'>;
   /** Spread onto a hidden `<input>` rendered next to the editor; `openFilePicker` clicks it. */
   readonly attachmentInputProps: ChatAttachmentInputProps;
   /** A completion list of the editor is open (e.g. for `ComposerHint`). */
@@ -2563,6 +2571,13 @@ export interface RichMentionInputProps {
    * composer passes the `@<type>:` preset of `mentionContext.presetType`.
    */
   completionPreset?: (trigger: string) => string | undefined;
+  /**
+   * Mention mode: the placeholder stays visible while the empty editor has
+   * focus, until text or a pill is in it, like a native placeholder (default
+   * `true`). `false` hides it as soon as the editor is focused (the earlier
+   * look). Plain mode only sets `data-placeholder`.
+   */
+  placeholderOnFocus?: boolean;
 }
 
 export interface ChatWindowHeaderRenderProps {

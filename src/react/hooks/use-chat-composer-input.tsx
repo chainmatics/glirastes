@@ -63,7 +63,9 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     attachments: attachmentOptions,
     interactions,
     completionPreset,
+    composer: composerConfig,
   } = useComposerContext();
+  const placeholderOnFocus = composerConfig?.placeholderOnFocus;
   // A hand-built context without `canCompose` locks while loading, as before.
   const canCompose = composable ?? !isLoading;
   const { onSubmit, initialValue } = options;
@@ -218,6 +220,8 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
     removeMentionLabel: locale.removeMentionLabel,
     // A bare `@` starts as `@<type>:` while the page's `mentionContext` names a `presetType`.
     ...(completionPreset ? { completionPreset } : {}),
+    // Only when the provider sets it: the input's own default (visible on focus) applies otherwise.
+    ...(placeholderOnFocus !== undefined ? { placeholderOnFocus } : {}),
     ...(attachmentOptions
       ? {
           onFiles: (files: File[]) => { void addFiles(files); },
@@ -225,7 +229,7 @@ export function useChatComposerInput(options: UseChatComposerInputOptions = {}):
           allowEmptySubmit: attachments.length > 0,
         }
       : {}),
-  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length, completionPreset]);
+  }), [completionSearch, triggers, onCompletionSelect, canCompose, locale, runEntityAction, submitText, attachmentOptions, addFiles, removeLastAttachment, attachments.length, completionPreset, placeholderOnFocus]);
 
   const attachmentInputProps = useMemo<ChatComposerInput['attachmentInputProps']>(() => ({
     ref: fileInputRef,

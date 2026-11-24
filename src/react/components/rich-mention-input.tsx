@@ -304,6 +304,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       allowEmptySubmit = false,
       onListOpenChange,
       completionPreset,
+      placeholderOnFocus = true,
     },
     ref,
   ) {
@@ -416,6 +417,19 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       }
       return text.replace(/\u200B/g, '');
     }, []);
+
+    // The placeholder shows while the editor is empty, also with focus: typing, a pick or `setValue`
+    // change the DOM without a render, so a change of emptiness renders again.
+    const [, renderEmptiness] = useState(true);
+    useEffect(() => {
+      const editor = editableRef.current;
+      if (!hasMentionSupport || !editor || typeof MutationObserver === 'undefined') return;
+      const observer = new MutationObserver(() => {
+        renderEmptiness(getTextContent() === '' && !editor.querySelector('[data-mention-id]'));
+      });
+      observer.observe(editor, { childList: true, characterData: true, subtree: true });
+      return () => observer.disconnect();
+    }, [hasMentionSupport, getTextContent]);
 
     /** Build full value including `prefix+slug` tokens for each chip. */
     const getFullValue = useCallback((): string => {
@@ -1650,7 +1664,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     }
 
     // Mention mode — wrapper with editor + dropdown
-    const isEmpty = !isFocused && getTextContent() === ''
+    const isEmpty = (placeholderOnFocus || !isFocused) && getTextContent() === ''
       && mentions.length === 0 && !editableRef.current?.querySelector('[data-mention-id]');
     const optionId = (index: number, action = -1) => (
       action >= 0 ? `${listboxId}-option-${index}-action-${action}` : `${listboxId}-option-${index}`
