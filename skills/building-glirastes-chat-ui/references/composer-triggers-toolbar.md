@@ -185,8 +185,8 @@ entry of the "+" menu's `source` section.
 The active entry of the `@`/`/` list (the one Enter or Tab picks,
 `aria-activedescendant`, `isSelected`, `data-selected="true"`) follows the
 pointer when it really moves over a row or an entity action button. Arrow
-keys go on from there. `mouseenter`/`mouseover` and a move event at the same
-coordinates (the list opens, scrolls or re-renders under a resting pointer)
+keys go on from there. `mouseenter`/`mouseover` and a move of less than 1 CSS
+pixel (the list opens, scrolls or re-renders under a resting pointer)
 change nothing, nor does a finger dragging the list. Pointer activation does
 not scroll the list. The listbox carries `data-active-source="pointer"`
 while the active entry is the one under the pointer, else `"keyboard"`:

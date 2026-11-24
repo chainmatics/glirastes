@@ -655,8 +655,9 @@ then goes to the model.
   active entry (`aria-activedescendant`, `aria-selected`; Enter or Tab picks
   it) without scrolling the list; the arrow keys go on from there. A list
   that opens, scrolls or re-renders under a resting pointer keeps the
-  keyboard entry: `mouseenter`/`mouseover` and move events at unchanged
-  coordinates are ignored, as is touch movement. The listbox carries
+  keyboard entry: `mouseenter`/`mouseover` and moves of less than 1 CSS
+  pixel are ignored, as is touch movement; a pointer event and its
+  compatibility mouse event count as one move. The listbox carries
   `data-active-source="pointer"` while the active entry is the one under the
   pointer, else `"keyboard"`: arrow keys, new results and any scroll of the
   list (wheel, trackpad) set it back until the pointer really moves again.

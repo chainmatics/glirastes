@@ -146,6 +146,51 @@ describe('completion list: the active entry follows real pointer movement', () =
     expect(screen.getByRole('listbox').getAttribute('data-active-source')).toBe('keyboard');
   });
 
+  it('counts a pointer event and its integer mouse event as one position right after opening', async () => {
+    await open();
+    fireEvent.pointerMove(option('Cleo'), { clientX: 10.5, clientY: 30.5, pointerType: 'mouse' });
+    fireEvent.mouseMove(option('Cleo'), { clientX: 10, clientY: 30 });
+    expect(selectedLabels()).toEqual(['Anna']);
+    expect(screen.getByRole('listbox').getAttribute('data-active-source')).toBe('keyboard');
+  });
+
+  it('keeps the keyboard row for the same pair over a resting pointer after the arrow keys', async () => {
+    const { editor } = await open();
+    fireEvent.pointerMove(option('Anna'), { clientX: 10.5, clientY: 2.5, pointerType: 'mouse' });
+    fireEvent.mouseMove(option('Anna'), { clientX: 10, clientY: 2 });
+    fireEvent.pointerMove(option('Bert'), { clientX: 10.5, clientY: 30.5, pointerType: 'mouse' });
+    fireEvent.mouseMove(option('Bert'), { clientX: 10, clientY: 30 });
+    expect(selectedLabels()).toEqual(['Bert']);
+    fireEvent.keyDown(editor, { key: 'ArrowDown' });
+    fireEvent.keyDown(editor, { key: 'ArrowDown' });
+    expect(selectedLabels()).toEqual(['Dora']);
+    fireEvent.pointerMove(option('Cleo'), { clientX: 10.5, clientY: 30.5, pointerType: 'mouse' });
+    fireEvent.mouseMove(option('Cleo'), { clientX: 10, clientY: 30 });
+    expect(selectedLabels()).toEqual(['Dora']);
+  });
+
+  it('activates once sub-pixel steps add up to a full pixel', async () => {
+    await open();
+    const step = (y: number) => fireEvent.pointerMove(option('Bert'), { clientX: 10, clientY: y, pointerType: 'mouse' });
+    step(30);
+    step(30.4);
+    step(30.8);
+    expect(selectedLabels()).toEqual(['Anna']);
+    step(31.2);
+    expect(selectedLabels()).toEqual(['Bert']);
+  });
+
+  it('still works with mouse events only (no pointer events)', async () => {
+    const { editor } = await open();
+    fireEvent.mouseMove(option('Anna'), { clientX: 10, clientY: 2 });
+    fireEvent.mouseMove(option('Cleo'), { clientX: 10, clientY: 60 });
+    expect(selectedLabels()).toEqual(['Cleo']);
+    fireEvent.mouseMove(option('Cleo'), { clientX: 10.5, clientY: 60.5 });
+    fireEvent.keyDown(editor, { key: 'ArrowUp' });
+    fireEvent.mouseMove(option('Cleo'), { clientX: 10, clientY: 60 });
+    expect(selectedLabels()).toEqual(['Bert']);
+  });
+
   it('continues arrow-key navigation from the pointer row', async () => {
     const { editor } = await open();
     move(option('Anna'), 1, 1);

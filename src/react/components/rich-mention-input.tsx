@@ -353,6 +353,8 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     // another result list (the list reopened or its results changed) counts as none, so the next event
     // only records it (a list appearing under a resting pointer activates nothing).
     const lastPointRef = useRef<{ x: number; y: number; results: MentionResult[] } | null>(null);
+    // Set by the first `pointermove`: from then on mouse moves are compatibility events and skipped.
+    const pointerEventsSeenRef = useRef(false);
     const [isSearching, setIsSearching] = useState(false);
 
     // `onListOpenChange` on every change of the shown list, not on mount (closed).
@@ -1733,13 +1735,24 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
      * results changed, only records the position.
      */
     const handleListPointerMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+      // One physical movement counts once: where pointer events fire, the compatibility mouse event
+      // that follows each one (integer coordinates where the pointer event may carry 10.5) is skipped.
+      // Mouse events count only where no pointer event was ever seen.
+      if (event.type === 'pointermove') pointerEventsSeenRef.current = true;
+      else if (pointerEventsSeenRef.current) return;
       // A finger dragging the list scrolls it; it does not choose an entry.
       if ((event.nativeEvent as PointerEvent).pointerType === 'touch') return;
       const point = { x: event.clientX, y: event.clientY, results: searchResults };
       if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
       const last = lastPointRef.current;
+      if (!last || last.results !== searchResults) {
+        lastPointRef.current = point;
+        return;
+      }
+      // Movement is at least 1 CSS pixel on an axis. A smaller difference neither activates nor
+      // replaces the stored position, so slow real movement still adds up.
+      if (Math.abs(point.x - last.x) < 1 && Math.abs(point.y - last.y) < 1) return;
       lastPointRef.current = point;
-      if (!last || last.results !== searchResults || (last.x === point.x && last.y === point.y)) return;
       const entry = entryAt(event.target);
       if (entry && (entry.index !== selectedIndex || entry.action !== selectedAction || activeSource !== 'pointer')) {
         activateEntry(entry.index, entry.action);
