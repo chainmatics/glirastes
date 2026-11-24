@@ -544,6 +544,13 @@ function Composer() {
 ```
 
 A custom suggestion item spreads `optionProps` onto its clickable element.
+It needs no pointer code: the list makes the row under a moving pointer the
+active one (see [Keyboard and screen readers](#keyboard-and-screen-readers)).
+`onActivate()` (`MentionDropdownItemProps`) activates the row from the item
+itself; call it only on real pointer movement, never on `mouseenter` or
+`mouseover`. Scope an own hover style to
+`[data-component="mention-dropdown"][data-active-source="pointer"]`, so a
+resting pointer does not mark a second row after the arrow keys or a scroll.
 Never call `send(text)` without the editor's mentions and never pass an own
 `onSearch` next to `chatInteractions`: both bypass direct commands and entity
 actions. The legacy `mentions` composer ignores these props. The
@@ -644,6 +651,23 @@ then goes to the model.
   polite live region announces the number of suggestions.
 - ArrowUp/ArrowDown move between results, ArrowRight/ArrowLeft between an
   entity and its actions, Enter or Tab picks, Escape closes.
+- Real pointer movement over a result or an entity action makes it the
+  active entry (`aria-activedescendant`, `aria-selected`; Enter or Tab picks
+  it) without scrolling the list; the arrow keys go on from there. A list
+  that opens, scrolls or re-renders under a resting pointer keeps the
+  keyboard entry: `mouseenter`/`mouseover` and moves of less than 1 CSS
+  pixel are ignored, as is touch movement; a pointer event and its
+  compatibility mouse event count as one move. The listbox carries
+  `data-active-source="pointer"` while the active entry is the one under the
+  pointer, else `"keyboard"`: arrow keys, new results and any scroll of the
+  list (wheel, trackpad) set it back until the pointer really moves again.
+  The built-in stylesheet
+  shows a hover look (same as the selected look) only in pointer mode and
+  only on devices with hover.
+  `composer.pointerActivation: false` (`ComposerConfig`; the
+  `RichMentionInput` prop `pointerActivation`) restores the keyboard-only
+  list: no pointer or scroll handling, `onActivate` does nothing, no
+  `data-active-source` and no hover look.
 - Backspace behind a pill and Delete before it remove the whole pill; each
   pill's remove control is named by `locale.removeMentionLabel`.
 - A chip in an answer is a button named by `locale.openEntityLabel`.
