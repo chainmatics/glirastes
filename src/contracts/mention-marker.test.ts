@@ -333,7 +333,7 @@ function ordinaryLabel(next: () => number): string {
 
 describe('canonicalMentionLabel cut: value-safe never splits a value', () => {
   const SAFE = { cut: 'value-safe' } as const;
-  const pad = (length: number) => 'Notiz '.repeat(30).slice(0, length - 1);
+  const pad = (length: number) => 'notiz '.repeat(30).slice(0, length - 1);
   it.each<[string, string, string]>([
     ['email', `${pad(108)} max.mustermann@kanzlei-wendt.de Ende`, `${pad(108)}…`],
     ['email cut after the @', `${pad(100)} max.mustermann@kanzlei-wendt.de Ende`, `${pad(100)}…`],
@@ -371,6 +371,11 @@ describe('canonicalMentionLabel cut: value-safe never splits a value', () => {
 
   it('honours maxLength', () => {
     expect(canonicalMentionLabel('Tel +49 170 1234567', { maxLength: 8, ...SAFE })).toBe('Tel…');
+  });
+
+  it('cuts the id fallback as before in both modes (the id goes whole into the marker anyway)', () => {
+    expect(canonicalMentionLabel('', { id: '4711-0815-ab', maxLength: 8, ...SAFE })).toBe('4711-08…');
+    expect(canonicalMentionLabel('', { id: '4711-0815-ab', maxLength: 8 })).toBe('4711-08…');
   });
 
   it('ordinary labels are cut exactly as in 0.24.2 (difference probe, 60 000 seeded labels)', () => {

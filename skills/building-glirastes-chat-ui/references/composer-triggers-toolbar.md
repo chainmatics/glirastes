@@ -91,14 +91,16 @@ default `'canonical'`): ordinary labels, ids and types are byte-identical
 except the joiners, flag tags and selectors of ordinary names; NFC; edge
 whitespace trimmed, control runs one space; at most `maxLabelLength`
 (8-120, default 120) code points, cut at a grapheme boundary (`…`); a
-value the cut would split (a token with a digit, `@`, `/`, `:`, `+` … or a
-dot inside: e-mail, IBAN, phone number, URL) is left out whole, also with
-spaces (`+49 170 1234567`), so the server's PII shield never sees a
+value run the cut would split (tokens with a digit, `@`, `/`, `:`, `+` …
+or a dot inside, and upper-case groups of 1-4 letters next to them: e-mail,
+IBAN, phone number, URL) is left out whole, also with spaces (`+49 170
+1234567`, `GB29 NWBK 6016 …`), so the server's PII shield never sees a
 fragment it cannot recognise (`labelCut: 'value-safe'`, the chat's
-default; dates, prices, file names and versions at the edge go too, a
-label of only values becomes the id; `labelCut: 'grapheme'` keeps the
-0.24.2 cut, `MentionLabelCut`). Not covered: text stored by 0.24.2
-clients, names cut inside a word. A type
+default; dates, prices, file names, versions and `z.B.` at the edge go
+too, a label of only values becomes the id, CJK text with a digit can go
+whole; `labelCut: 'grapheme'` keeps the 0.24.2 cut, `MentionLabelCut`).
+Not covered: text stored by 0.24.2 clients, a postcode before a cut city
+name, names cut inside a word. A type
 or id with control, format, invisible, private-use or unassigned
 characters, `}`, `{{`, `<!`, `-->` or `--!>` gets no marker: the typed
 token stays and the model loses the id (console warning once per type,

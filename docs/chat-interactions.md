@@ -249,7 +249,7 @@ to labels only.
 | private use (icon fonts), noncharacters, U+2800, lone surrogates | removed |
 | unassigned code points | kept (what is unassigned depends on the engine's Unicode version; removing it would remove new emoji in older browsers) |
 | more than `maxLabelLength` code points (8-120, default 120; 1-7 means 8, anything else the default) | at most the first 119 and `…`, cut at a grapheme boundary with `Intl.Segmenter`, never inside an emoji, flag, keycap, conjunct or Thai cluster; without `Intl.Segmenter` the cut avoids marks, joiners, viramas, flags and keycaps but can split other clusters such as Thai Sara Am; a bare `…` becomes the id, and the label is never empty |
-| a value the cut would split: the token at the cut, or the first after it, has a digit, `@ / : + _ % = # & ~ \ |` or a dot between letters or digits (e-mail, IBAN, phone number, URL, but also a date, time, price, file name, path, case number or version; keycap emoji such as 1️⃣ do not count) | left out whole, with the value-like tokens and separators right before it (`+49 170 1234567`, `DE89 3704 0044 …`, `Tel. +49 (30) / 1234`), so the server's PII shield never gets a fragment it no longer recognises (`max.musterm…`). `… Office 365 …` at the edge becomes `… Office…`; a label full of numbers can shrink to its first word (`Messwerte 100 101 …` → `Messwerte…`); a label that is only values becomes the id. Since the release after 0.24.2, in the React chat's send path (`mentions: { serialize: { labelCut: 'value-safe' } }`, the default); `labelCut: 'grapheme'` keeps the cut of 0.24.2. Labels within `maxLabelLength`, and cuts in a plain word, are the same either way. The contract functions `canonicalMentionLabel` / `serializeMentionMarker` cut as in 0.24.2 unless called with `cut: 'value-safe'` / `labelCut: 'value-safe'` |
+| a value the cut would split (React chat, `labelCut: 'value-safe'`, the default) | left out whole, see [Cutting a long label](#cutting-a-long-label) |
 | nothing visible left | the id |
 
 The text is NFC. No NFKC: look-alikes such as `｛` stay, and they are
@@ -304,17 +304,66 @@ parses as a clarification answer. And a label can forge sibling entries
 default `react-markdown` renderer shows other HTML comments as text; a
 custom `Markdown` with `rehype-raw` hides them, while the model reads them.
 
+### Cutting a long label
+
+The PII shield runs on the server, over the sent text; the label is cut in
+the browser before that. A value cut in the middle (`max.musterm…`) is no
+longer recognised and would reach the model in plain text, so since the
+release after 0.24.2 the React chat cuts `value-safe`
+(`mentions: { serialize: { labelCut: 'value-safe' } }`, the default;
+`'grapheme'` is the cut of 0.24.2). The browser knows nothing of the
+shield's detectors; the rule is generic:
+
+1. A token is everything between two whitespace characters.
+2. A value token has a digit (any Unicode digit: also Arabic-Indic,
+   fullwidth and superscript digits), one of `@ / : + _ % = # & ~ \ |`, or a
+   dot between two letters or digits; punctuation at the start and end of
+   the token does not count, nor does a keycap emoji such as 1️⃣. So
+   `max@x.de`, `4711`, `9:30`, `12,50`, `/kunden`, `bericht.final.pdf`,
+   but also abbreviations with a dot inside (`z.B.`, `u.a.`, `Co.KG`) are
+   value tokens; `Tel.`, `Dr.`, `GmbH`, `Müller-Lüdenscheidt` are not.
+3. A value run is a sequence of value tokens, punctuation-only tokens
+   (`/`, `–`) and groups of 1-4 upper-case letters (`NWBK`, `AB`, `O`) with
+   at least one value token: `+49 170 1234567`, `GB29 NWBK 6016 1331`,
+   `M AB 1234`, `4 O 123/24`. An upper-case group among words (`ACME KG
+   Vertrag`, `EU`, `USA`) is a word.
+4. When the cut falls in a value run (inside one of its tokens, or right
+   before it), the part of the run before the cut is left out with the
+   whitespace before it, and `…` follows. Everything else is cut as before.
+
+What this means for ordinary labels: labels within `maxLabelLength`, and
+labels whose cut falls in a plain word, are byte-identical to 0.24.2. A
+label whose cut falls in a value run loses that run: dates, times, prices,
+percentages, file names, paths, case numbers and product versions at the
+edge go as well (`… Office 365 …` becomes `… Office…`), and the label can
+end on a preposition or conjunction (`… und…`, `… für…`). A label full of
+numbers can shrink to its first word (`Messwerte 100 101 …` becomes
+`Messwerte…`); a label that is only a value run becomes the id. Scripts
+without spaces (Chinese, Japanese) make a whole sentence one token: one
+digit in it (`第3回`, `2024年`) makes the token a value, so a long run can go
+whole and the label becomes the id. Measured on samples of labels over
+120 code points: about 15-25 % change in a mixed sample, 30-40 % in a
+sample with many numbers, losing 7-26 code points on average (at most
+about 115); in Japanese samples with digits 40-80 % of the over-long labels
+change and up to about one in ten becomes the id.
+
 Known limits of the value-safe cut (PII shield): text already stored by a
 0.24.2 client keeps its cut label (`…max.musterm…`), and the shield sees
 that fragment again in every later turn that sends the history; a 0.24.2
-client that still runs keeps cutting as before. A name or street without
-digits that the cut splits inside the word (`Maximilian Muster…`) stays a
-fragment for a name detector. A value a custom detector finds without a
-digit, a dot inside or one of `@ / : + _ % = # & ~ \ |` is not treated as a
-value. An own client or server that calls `canonicalMentionLabel` /
-`serializeMentionMarker` directly gets the 0.24.2 cut unless it passes
-`cut: 'value-safe'` / `labelCut: 'value-safe'`. Without upgrading,
-`labels: 'raw'` sends the label whole (without the canonical cleaning).
+client that still runs keeps cutting as before. A postcode stays when the
+cut falls in the city name after it (`… 80331 Mü…`): the city is a word,
+and the shield's address pattern no longer matches (the same as with the
+0.24.2 cut). A name or street without digits that the cut splits inside
+the word (`Maximilian Muster…`) stays a fragment for a name detector. A
+lower-case IBAN, and a value a custom detector finds without a digit, a
+dot inside or one of the characters above, is not treated as a value
+(the regex detector does not find a lower-case IBAN either). Values the
+detector does not recognise even whole (some compact IBANs, Norwegian
+IBANs) are not protected by the cut either. An own client or server that
+calls `canonicalMentionLabel` / `serializeMentionMarker` directly gets the
+0.24.2 cut unless it passes `cut: 'value-safe'` / `labelCut: 'value-safe'`.
+Without upgrading, `labels: 'raw'` sends the label whole (without the
+canonical cleaning).
 
 ## Custom composers
 
