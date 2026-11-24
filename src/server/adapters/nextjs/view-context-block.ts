@@ -176,9 +176,12 @@ export interface PreparedViewContext {
  * results: a pseudonym in a tool argument is restored to the original id
  * (`rehydrateArgs`), so tool calls still name the right record. Entity
  * types (declared names, no user data) and keys stay as they are, as in
- * tool results. Extra keys of the shield's result are never read. Throws
- * when the shield fails or returns no list of as many objects; each entry is
- * checked afterwards ({@link checkShielded}).
+ * tool results. The shield's result is read exactly once, by a JSON round
+ * trip into an own copy: a getter or proxy in it cannot show one value to
+ * the check and another to the renderer, and everything after works on
+ * plain JSON only. Extra keys are never used. Throws when the shield fails,
+ * its result cannot be serialized (a cycle, a BigInt) or is no list of as
+ * many objects; each entry is checked afterwards ({@link checkShielded}).
  */
 async function shieldEntries(
   entries: ReadonlyArray<ViewContextEntry>,
@@ -187,7 +190,8 @@ async function shieldEntries(
   const values = entries.map((entry) => ({
     id: entry.entity?.id, ids: entry.selection?.ids, label: entry.label, route: entry.route, facts: entry.facts,
   }));
-  const shielded = await shield.shield.anonymizeResult(values, shield.sessionId);
+  const result: unknown = await shield.shield.anonymizeResult(values, shield.sessionId);
+  const shielded: unknown = JSON.parse(JSON.stringify(result) ?? 'null');
   if (!Array.isArray(shielded) || shielded.length !== entries.length) throw new Error('unexpected shield result');
   return entries.map((entry, index) => {
     const value = shielded[index] as Partial<Record<'id' | 'ids' | 'label' | 'route' | 'facts', unknown>>;
@@ -210,7 +214,8 @@ async function shieldEntries(
  * need any other change is refused), and a route that is no longer a valid
  * route is left out, as the sanitizer leaves out an invalid one. Everything
  * else must pass `ViewContextEntrySchema` unchanged (ids, selection ids,
- * facts, types); the returned entry is the schema's checked copy.
+ * facts, types). `entry` is plain JSON of our own (see {@link shieldEntries}),
+ * so what the schema returns is what it checked.
  */
 function checkShielded(entry: ViewContextEntry): ViewContextEntry | undefined {
   let candidate: ViewContextEntry = entry;
