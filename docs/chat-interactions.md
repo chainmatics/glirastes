@@ -38,7 +38,11 @@ is dropped in each language: "Endgültig löschen" instead of "Aufgabe endgülti
 löschen"). Without them the label is verb plus object built from identifiers,
 in English and German ("Open task create dialog", "Task create dialog
 öffnen"); every other language needs a reviewed text or an override, the same
-rule as for commands. Synonyms, icons and what a title cannot
+rule as for commands. An entity without a reviewed singular is named after its
+route (`/api/files` → "File"), also when its type follows the declared
+identity (`media-file`), so that type change keeps the label; a declared source
+without `label` is named the same way, after its type only when its path names
+none (`/search`). Synonyms, icons and what a title cannot
 say come from `.glirastes/chat-interactions.json` (written by people, the
 `describing-glirastes-tools` or `curating-glirastes-chat-interactions` skill,
 never by the generator). The titles reach the derivation through
@@ -295,6 +299,38 @@ and aliases, per language:
 ```json
 "entities": { "project": { "label": { "de": "Projekt", "en": "Project", "pl": "Projekt" }, "aliases": { "en": ["proj"], "pl": ["proj"] } } }
 ```
+
+## List size
+
+The list shows at most 8 hits per provider and 12 in total, per trigger.
+`completionLimits` in `chatInteractions` sets both per trigger character:
+
+```tsx
+const chatInteractions = useMemo(() => ({
+  data,
+  completionLimits: { '/': { perProvider: 40, total: 40 }, '@': { perProvider: 20 } },
+}), [data]);
+```
+
+| Field | Default | Bounds |
+| --- | --- | --- |
+| `perProvider` | 8 | 1–100; each provider's search gets it as `limit` (an `@` entity search also as its `limitParam`) |
+| `total` | 12, or `perProvider` when that is larger | 1–200 |
+
+A value is truncated to an integer and kept within its bounds (`0` → 1,
+`500` → 100 or 200); a missing, non-number or non-finite one takes the
+default; nothing throws. A trigger without an entry keeps 8 and 12, so `@`
+stays as it was when only `/` is raised. The limits apply to every provider
+of that trigger in the composer, the app's own `completionProviders`
+included. On `@` the entity types share `perProvider` in turn (one hit of
+each type, then the next), so one type cannot fill the list; the type
+suggestions (at most 3) stay outside both caps. `@`'s `perProvider` also
+sizes the entity search of an argument field (8 without it). The list
+scrolls (at most `min(40vh, 16rem)` high in the shipped styles, the argument
+options 12rem). `<glirastes-chat>` takes the same `config.chatInteractions.completionLimits`.
+Outside the provider, pass the same map to
+`createCompletionSearch(providers, { limits })`; its `limitPerProvider` and
+`maxResults` (all triggers) now reach 100 and 200 as well.
 
 ## Pills in the composer
 

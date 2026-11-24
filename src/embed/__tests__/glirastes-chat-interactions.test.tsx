@@ -141,6 +141,24 @@ describe('<glirastes-chat> chat interactions', () => {
       .toEqual(['Release prüfen', 'Alice']));
   });
 
+  it('takes completionLimits from config.chatInteractions, with commands from the JS API', async () => {
+    const count = async (limits?: Record<string, { perProvider?: number; total?: number }>) => {
+      const { element, editor } = await mount((node) => {
+        if (limits) node.config = { chatInteractions: { completionLimits: limits } };
+        for (let index = 0; index < 30; index += 1) {
+          node.defineCommand({ id: `cmd.${index}`, label: `Command ${index}`, run: { kind: 'prompt', prompt: 'x' } });
+        }
+      });
+      typeInto(editor(), '/');
+      await waitFor(() => expect(element.shadowRoot!.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));
+      const options = element.shadowRoot!.querySelectorAll('[role="option"]').length;
+      await act(async () => { element.remove(); });
+      return options;
+    };
+    expect(await count()).toBe(8);
+    expect(await count({ '/': { perProvider: 30, total: 30 } })).toBe(30);
+  });
+
   it('refuses invalid definitions and reports interactions it cannot load', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     const { element, errors } = await mount((node) => {

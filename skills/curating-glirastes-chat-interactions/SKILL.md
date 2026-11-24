@@ -144,7 +144,9 @@ identifiers ("Open task create dialog", German "Task create dialog öffnen").
    the chat. A registry built by hand takes its headings as `texts`
    (`ChatInteractionTexts`); inside the provider they are the locale keys
    `completionCommandsGroupLabel`, `completionEntityTypesGroupLabel` and
-   `completionEntityTypeFilterLabel`.
+   `completionEntityTypeFilterLabel`. More than 8 commands or hits per
+   list: `completionLimits` per trigger in `chatInteractions`
+   (`CompletionLimits`, see `docs/chat-interactions.md`, List size).
 5. **Custom composer.** When the app replaces the input
    (`components.ChatInput`), first try the SDK `MentionInput` with its props:
    `initialMentions`, `initialValue`, `components={{ DropdownItem }}`,

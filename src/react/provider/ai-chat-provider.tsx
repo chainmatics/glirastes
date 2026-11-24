@@ -1140,15 +1140,18 @@ export function AiChatProvider({
   // What `session.save` gets as its third argument: only when a trigger claims `types`, so saves stay as before otherwise.
   const saveOptionsRef = useRef<{ mentionPrefix: (type: string) => string } | undefined>(undefined);
   saveOptionsRef.current = mentionPrefix === inferMentionPrefix ? undefined : { mentionPrefix };
+  // `chatInteractions.completionLimits` sizes every provider of its trigger, the app's own ones included.
+  const completionLimits = chatInteractions?.completionLimits;
   const completionSearch = useMemo(
     () => (allCompletionProviders.length > 0
       ? createCompletionSearch(allCompletionProviders, {
         context: completionContext,
+        ...(completionLimits ? { limits: completionLimits } : {}),
         onProviderError: (providerId, error) =>
           onCompletionProviderErrorRef.current?.(providerId, error),
       })
       : undefined),
-    [allCompletionProviders, completionContext],
+    [allCompletionProviders, completionContext, completionLimits],
   );
   const [pendingCommand, setPendingCommand] = useState<PendingChatCommand | null>(null);
   const [composerMentions, setComposerMentions] = useState<MentionData[]>([]);

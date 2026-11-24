@@ -259,10 +259,12 @@ describe('override patches for ids that are no longer derived', () => {
     expect(merged.commands).toEqual(data.commands);
     expect(merged.entities[0]!.actions!.map((entry) => entry.id)).toEqual(['task.tasks.assign']);
     expect(warn).toHaveBeenCalledTimes(2);
-    // The existing warning keeps its text and its ids.
-    expect(String(warn.mock.calls[0]![0])).toBe('[glirastes] .glirastes/chat-interactions.json: ignored patches for ids that are not derived '
+    // Both name the overrides wherever they come from: the file or an object passed in code.
+    const source = '[glirastes] chat interaction overrides (.glirastes/chat-interactions.json or the overrides passed in code): ';
+    expect(String(warn.mock.calls[0]![0])).toBe(`${source}ignored patches for ids that are not derived `
       + '(any more) and are no complete entries: commands.orphan. Remove them.');
     const hidden = String(warn.mock.calls[1]![0]);
+    expect(hidden.startsWith(`${source}hidden patches for ids or types that are not derived (any more) hide nothing: `)).toBe(true);
     for (const id of ['commands.gone.command', 'entities.gone', 'entities.task.actions.file.files.delete']) {
       expect(hidden).toContain(id);
     }

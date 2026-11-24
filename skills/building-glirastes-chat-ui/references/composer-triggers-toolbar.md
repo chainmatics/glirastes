@@ -75,6 +75,12 @@ const triggers = useMemo(() => [{ char: '#', label: 'Tickets', types: ['ticket']
   `onCompletionSelect` ignores items of type `mention-filter`. Names per
   language: see `curating-glirastes-chat-interactions` and
   `docs/chat-interactions.md`, Type filter.
+- List size: 8 hits per provider and 12 in total per trigger by default.
+  `chatInteractions.completionLimits` (`CompletionLimits` per trigger char,
+  e.g. `{ '/': { perProvider: 40, total: 40 } }`, at most 100 and 200)
+  raises them for every provider of that trigger, own `completionProviders`
+  included; outside the provider pass it as `createCompletionSearch(providers,
+  { limits })`. `docs/chat-interactions.md`, List size.
 
 ### Sent mentions and `types`
 

@@ -13,6 +13,7 @@ import {
   type ChatLocaleCode,
 } from '../../contracts/chat-interactions.js';
 import { pickLanguage } from '../../contracts/localized-text.js';
+import { resolveCompletionLimits, type CompletionLimits } from '../completions/completion-search.js';
 import type {
   ChatCompletionProvider,
   CompletionItem,
@@ -94,6 +95,14 @@ export interface ChatInteractionsConfig extends DerivedEntityOptions {
   readonly mentionContext?: ChatMentionContext | (() => ChatMentionContext | null | undefined);
   /** List headings and descriptions; built-in texts of `locale` otherwise. */
   readonly texts?: ChatInteractionTexts;
+  /**
+   * List size per trigger character, e.g. `{ '/': { perProvider: 30, total: 30 } }`.
+   * Default 8 per provider and 12 in total, as before; at most 100 and 200.
+   * The provider applies it to every provider of that trigger, the app's own
+   * `completionProviders` included; `@`'s `perProvider` also sizes the
+   * entity search of an argument field.
+   */
+  readonly completionLimits?: Readonly<Record<string, CompletionLimits>>;
 }
 
 /** A command or entity action that still needs arguments from the user. */
@@ -268,6 +277,9 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
   const commands = new Map<string, ChatCommandDefinition>();
   for (const command of config.data?.commands ?? []) commands.set(command.id, command);
   for (const command of config.commands ?? []) commands.set(command.id, command);
+
+  // An argument field searches one type: `@`'s per-provider cap when set, else 8 as before.
+  const argumentLimit = resolveCompletionLimits({ limits: config.completionLimits }, '@').perProvider;
 
   const builtInTexts = BUILT_IN_TEXTS[/^de(?:-|$)/i.test(locale) ? 'de' : 'en'];
   const text = (key: keyof ChatInteractionTexts): string => {
@@ -444,10 +456,10 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
       // One entity type must not fill the whole per-provider cap: take one hit per type in turn.
       const lists = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
       const interleaved: CompletionItem[] = [];
-      for (let index = 0; index < limit; index += 1) {
+      for (let index = 0; index < limit && interleaved.length < limit; index += 1) {
         for (const list of lists) {
           const item = list[index];
-          if (item) interleaved.push(item);
+          if (item && interleaved.length < limit) interleaved.push(item);
         }
       }
       return interleaved;
@@ -521,11 +533,11 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
       const entity = entities.get(type);
       if (!entity) return [];
       try {
-        const items = await entity.search(query, { signal, limit: 8, locale, context: config.context ?? {} });
+        const items = await entity.search(query, { signal, limit: argumentLimit, locale, context: config.context ?? {} });
         return (Array.isArray(items) ? items : [])
           .map(toChatEntityItem)
           .filter((item): item is ChatEntityItem => item !== undefined)
-          .slice(0, 8);
+          .slice(0, argumentLimit);
       } catch {
         return [];
       }

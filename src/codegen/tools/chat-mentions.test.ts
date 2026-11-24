@@ -513,7 +513,36 @@ describe('entity and action labels per language', () => {
     const { data } = analyze([{ ...FILES, labels }]);
     expect(data.entities[0]!.label).toEqual({ en: 'File', de: 'Datei', pl: 'Plik' });
     const templated: Labels = { en: { singular: 'List files', plural: 'List files', approval: 'List files' }, de: { singular: 'Dateien auflisten', plural: 'Dateien auflisten', approval: 'Dateien auflisten' } };
-    expect(analyze([{ ...FILES, labels: templated }]).data.entities[0]!.label).toEqual({ en: 'Media file', de: 'Media file' });
+    // Without a reviewed noun the label comes from the route (`/api/files`), also for the declared type `media-file`.
+    expect(analyze([{ ...FILES, labels: templated }]).data.entities[0]!.label).toEqual({ en: 'File', de: 'File' });
+  });
+
+  it('keeps the label of a derived entity when its type follows the declared identity', () => {
+    const withIdentity = analyze([FILES]).data.entities[0]!;
+    const withoutIdentity = analyze([undeclared(FILES)]).data.entities[0]!;
+    expect([withIdentity.type, withoutIdentity.type]).toEqual(['media-file', 'file']);
+    expect(withIdentity.label).toEqual(withoutIdentity.label);
+    expect(withIdentity.label).toEqual({ en: 'File', de: 'File' });
+
+    // A reviewed noun names the entity as before, with and without the declaration.
+    const labels: Labels = { en: reviewed('Media item', 'Media items'), de: reviewed('Medium', 'Medien') };
+    expect(analyze([{ ...FILES, labels }]).data.entities[0]!.label).toEqual({ en: 'Media item', de: 'Medium' });
+    expect(analyze([{ ...undeclared(FILES), labels }]).data.entities[0]!.label).toEqual({ en: 'Media item', de: 'Medium' });
+
+    // A pasted candidate of the adopted type is exactly the derived entity, label included.
+    const { findings } = analyze([FILES], { policy: 'declared' });
+    expect(Object.keys(findings[0]!.expected as object)).toEqual(['media-file']);
+    const pasted = analyze([FILES], { policy: 'declared', sources: findings[0]!.expected as Record<string, unknown> });
+    expect(pasted.data.entities).toEqual([withIdentity]);
+  });
+
+  it('names a declared source without a label after its route, else after its type', () => {
+    const source = { queryParam: 'q', idField: 'id', labelField: 'name' };
+    const routed = analyze([PEOPLE], { sources: { member: { tool: 'people.list', ...source } } }).data.entities[0]!;
+    expect([routed.type, routed.label]).toEqual(['member', { en: 'Person', de: 'Person' }]);
+    // `/search` names no type: the declared type is the label.
+    const bare = analyze([{ ...PEOPLE, path: '/search' }], { sources: { member: { tool: 'people.list', ...source } } }).data.entities[0]!;
+    expect([bare.type, bare.label]).toEqual(['member', { en: 'Member', de: 'Member' }]);
   });
 
   it('keeps every language of an action label and drops the noun in each', () => {

@@ -343,6 +343,7 @@ export {
 // Completion providers
 export {
   createCompletionSearch,
+  type CompletionLimits,
   type CompletionSearch,
   type CompletionSearchOptions,
 } from './completions/completion-search.js';

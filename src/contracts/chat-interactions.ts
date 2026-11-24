@@ -479,7 +479,7 @@ function overrideMap<T>(
   return result;
 }
 
-/** Validates `.glirastes/chat-interactions.json`; throws `ChatInteractionsError`. */
+/** Validates chat interaction overrides (`.glirastes/chat-interactions.json` or an object from code); throws `ChatInteractionsError`. */
 export function parseChatInteractionOverrides(value: unknown): ChatInteractionOverrides {
   const issues: Issues = [];
   if (!isRecord(value)) throw new ChatInteractionsError(['$: an object']);
@@ -522,6 +522,9 @@ function withoutHidden<T extends { hidden?: boolean }>(patch: T): Omit<T, 'hidde
 function hasFields(patch: object, required: ReadonlyArray<string>): boolean {
   return required.every((key) => (patch as Record<string, unknown>)[key] !== undefined);
 }
+
+/** Where overrides come from, as the warnings name it: the handler and app code take them as an object. */
+const OVERRIDES_SOURCE = 'chat interaction overrides (.glirastes/chat-interactions.json or the overrides passed in code)';
 
 /**
  * Applies overrides to derived data: a patch replaces the fields it names,
@@ -608,13 +611,13 @@ export function mergeChatInteractions(
   }
   if (ignored.length > 0) {
     console.warn(
-      '[glirastes] .glirastes/chat-interactions.json: ignored patches for ids that are not derived '
+      `[glirastes] ${OVERRIDES_SOURCE}: ignored patches for ids that are not derived `
       + `(any more) and are no complete entries: ${ignored.join(', ')}. Remove them.`,
     );
   }
   if (hiddenNothing.length > 0) {
     console.warn(
-      '[glirastes] .glirastes/chat-interactions.json: hidden patches for ids or types that are not derived '
+      `[glirastes] ${OVERRIDES_SOURCE}: hidden patches for ids or types that are not derived `
       + `(any more) hide nothing: ${hiddenNothing.join(', ')}. If the entry was renamed (an entity type that now follows `
       + 'its declared identity also renames its action ids), it is shown again: move the patch to the new name, or remove it.',
     );

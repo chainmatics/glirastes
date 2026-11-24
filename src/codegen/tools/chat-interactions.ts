@@ -105,11 +105,14 @@ function isReviewed(labels: ToolLabels[string]): boolean {
 /**
  * The entity's label in every language the search tool has a reviewed
  * label for (its `labels` per language), else in English and German from
- * the presentation noun or the type. A language whose labels are the
- * English ones is the English fallback, not a label of its own.
+ * the presentation noun or `name`. A language whose labels are the
+ * English ones is the English fallback, not a label of its own. `name` is
+ * the route's type (`file` for `/api/files`) where the path names one, so
+ * a type that follows the declared identity (`media-file`) keeps the label
+ * it had before; the entity type otherwise.
  */
-function entityLabel(tool: BoundTool, type: string): Record<string, string> {
-  const fallback = clamp(humanizeIdentifier(type));
+function entityLabel(tool: BoundTool, name: string): Record<string, string> {
+  const fallback = clamp(humanizeIdentifier(name));
   const labels = tool.labels ?? {};
   const english = labels.en;
   const own: Record<string, string> = {};
@@ -346,7 +349,8 @@ function searchEntity(tool: BoundTool): DerivedCandidate | undefined {
     const descriptionField = SEARCH_DESCRIPTION_FIELDS.find((name) => name !== labelField && isText(name));
     const entity: ChatEntityData = {
       type,
-      label: entityLabel(tool, type),
+      // Named after the route also when the type follows the identity: the type change keeps the label.
+      label: entityLabel(tool, routeType),
       search: {
         tool: tool.definitionId,
         path: tool.path!,
@@ -471,7 +475,8 @@ export function analyzeChatInteractions(input: DeriveChatInteractionsInput): {
     const routeType = route ? entityType(route.listName) : undefined;
     const entity: ChatEntityData = {
       type: source.type,
-      label: source.label ?? entityLabel(tool, source.type),
+      // As a derived entity of this tool would be named (a pasted candidate stays the same), else after the type.
+      label: source.label ?? entityLabel(tool, routeType ?? source.type),
       ...(source.aliases !== undefined ? { aliases: source.aliases } : {}),
       search: source.search,
     };
