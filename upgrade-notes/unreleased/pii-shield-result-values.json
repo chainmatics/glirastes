@@ -2,7 +2,7 @@
   "id": "pii-shield-result-values",
   "kind": "recommended",
   "summary": "Security fix, update soon with piiShield: up to 0.24.2 an e-mail, IBAN or phone number right after a line break, tab or other JSON-escaped character in a tool result (also result handles, approvals, view context) could reach the model in plain text.",
-  "howTo": "Nothing to change in code: update. Results without escaped characters are shielded exactly as before. A custom PiiDetector now gets real line breaks, tabs and control characters inside the JSON text instead of escape sequences (still one call per result); check a detector that relied on seeing \\n as two characters. Audit positions of results with escaped characters now count real characters. Unchanged limits: object keys and numbers are not pseudonymized; keep personal data out of keys and send phone numbers as strings.",
+  "howTo": "Nothing to change in code: update. Results without escaped characters are shielded exactly as before (one detector call, same text). For a result with escapes the detector is called a second time with the strings decoded (real line breaks, tabs, control characters); a remote detector costs two calls there, the audit entry lists the extra findings. Never less is replaced than before. Limits: a built-in pattern may take a following tab column into the pseudonym; object keys and numbers are not pseudonymized.",
   "skill": "integrating-glirastes-nextjs#built-in-tools",
   "affectedWhen": {
     "patterns": [

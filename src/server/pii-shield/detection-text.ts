@@ -2,26 +2,19 @@ const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
 
 /**
- * The text a detector reads for a tool result: its JSON text with every
- * string (value and key) in its real characters instead of JSON escapes.
+ * A JSON text with every string literal (value and key) decoded to its real
+ * characters, everything between the literals as it is.
  *
- * The shield replaces originals in the string values of the result, so a
- * detector must see those values as they are. In plain JSON text a line
- * break is the two characters `\n`: an e-mail after it is found as
- * `nmax@…` (no value contains that, so the original stays) and an IBAN or
- * phone number after it is not found at all. Decoding the literals in place
- * keeps everything else of the JSON text: one text and one detector call per
- * result, the same structure between strings, and - for a result without any
- * escaped character - exactly the text, positions and detections of
- * `JSON.stringify(result)`.
- *
- * `JSON.stringify` semantics stay as they were (`toJSON`, omitted
- * `undefined`, cycles and BigInt throw). A result JSON cannot represent
- * (`undefined`, a function) yields `undefined`, as before.
+ * `anonymizeResult` detects in the JSON text of a result and, when that has
+ * escapes, also in this text. In the JSON text a line break is the two
+ * characters `\n`: an e-mail after it is found as `nmax@…` (no value contains
+ * that) and an IBAN or phone number after it not at all. Here the detector sees
+ * the values as the result holds them. Without any escape the text is the JSON
+ * text itself (the caller then detects once). `undefined` (a result JSON
+ * cannot represent) is returned as it is.
  */
-export function detectionText(result: unknown): string {
-  const json = JSON.stringify(result) as string | undefined;
-  if (json === undefined || !json.includes('\\')) return json as string;
+export function decodeJsonStrings(json: string): string {
+  if (typeof json !== 'string' || !json.includes('\\')) return json;
   // One linear pass. Outside string literals JSON text has no quote and no
   // backslash, so every quote found here opens a literal.
   let text = '';

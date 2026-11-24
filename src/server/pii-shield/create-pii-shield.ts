@@ -7,7 +7,7 @@ import type {
 } from '../../types.js';
 import { createSessionStore } from './session-mapping.js';
 import { deepWalkReplace } from './deep-walk.js';
-import { detectionText } from './detection-text.js';
+import { decodeJsonStrings } from './detection-text.js';
 import { detectLeakage } from './leakage.js';
 
 interface SessionStats {
@@ -21,6 +21,20 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
   const store = createSessionStore(config.locale);
   const auditLog = new Map<string, PiiAuditEntry[]>();
   const sessionStats = new Map<string, SessionStats>();
+  /**
+   * Per session, the originals found in plain text (outbound) or in a result's
+   * JSON text, in the order they were learned. anonymizeResult replaces these
+   * first, in this order, and only then the originals found only in a result's
+   * decoded text: so it replaces at least what it replaced before those were
+   * learned, and an earlier decoded-only value never cuts into a later one.
+   */
+  const firstOrder = new Map<string, Set<string>>();
+
+  function learnFirst(sessionId: string, original: string): void {
+    let order = firstOrder.get(sessionId);
+    if (!order) firstOrder.set(sessionId, order = new Set());
+    order.add(original);
+  }
 
   function getStats(sessionId: string): SessionStats {
     let stats = sessionStats.get(sessionId);
@@ -84,6 +98,7 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
     let result = text;
     for (const entity of sorted) {
       const pseudonym = session.getOrCreatePseudonym(entity.text, entity.type);
+      learnFirst(sessionId, entity.text);
       result = result.slice(0, entity.start) + pseudonym + result.slice(entity.end);
     }
 
@@ -155,9 +170,19 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
     const stats = getStats(sessionId);
     stats.totalToolCalls++;
 
-    // Detect PII in the result's strings as they are, not in their JSON escapes
-    const text = typeof result === 'string' ? result : detectionText(result);
-    const detected = await config.detector.detect(text, [config.locale]);
+    // Detect PII in the JSON text (as always), and where it has escapes also in
+    // the same text with real characters (see decodeJsonStrings): a value right
+    // after an escaped line break is only found there. Learned: both, the JSON
+    // text's detections first, so its pseudonyms and replacements stay as they were.
+    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    let detected = await config.detector.detect(text, [config.locale]);
+    for (const entity of detected) learnFirst(sessionId, entity.text);
+    const decoded = typeof result === 'string' ? text : decodeJsonStrings(text);
+    if (decoded !== text) {
+      const known = new Set(detected.map((entity) => entity.text));
+      const more = await config.detector.detect(decoded, [config.locale]);
+      detected = [...detected, ...more.filter((entity) => !known.has(entity.text))];
+    }
 
     // Ensure pseudonyms exist for all detected entities
     for (const entity of detected) {
@@ -165,7 +190,8 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
     }
 
     // Deep-walk and replace originals with pseudonyms
-    const originals = session.allOriginals();
+    const first = firstOrder.get(sessionId) ?? new Set<string>();
+    const originals = [...first, ...session.allOriginals().filter((original) => !first.has(original))];
     const anonymized = deepWalkReplace(result, (s: string) => {
       let replaced = s;
       for (const original of originals) {
@@ -222,6 +248,7 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
 
   function clearSession(sessionId: string): void {
     store.clear(sessionId);
+    firstOrder.delete(sessionId);
     auditLog.delete(sessionId);
     sessionStats.delete(sessionId);
   }
