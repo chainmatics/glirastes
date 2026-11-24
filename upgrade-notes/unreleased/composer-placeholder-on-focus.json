@@ -1,0 +1,25 @@
+{
+  "id": "composer-placeholder-on-focus",
+  "kind": "recommended",
+  "summary": "Visible change: the placeholder of the pill composer (RichMentionInput in mention mode, the default composer with chatInteractions or completionProviders) now stays visible while the empty editor has focus, like a native placeholder. It used to disappear on focus.",
+  "howTo": "Nothing to do for the new default. To keep the earlier look, set composer={{ placeholderOnFocus: false }} on AiChatProvider, VercelAiChat or <glirastes-chat> (config.composer); it reaches the built-in composer and useChatComposerInput().inputProps. An own RichMentionInput takes the prop placeholderOnFocus={false}. The placeholder still hides as soon as text or a pill is in the editor. CSS on [data-element=\"placeholder\"] keeps working; a rule that assumed the placeholder is never shown on :focus-within may need a look. The plain text field (no completion) uses the browser placeholder and is unchanged. Tests that expected no [data-element=\"placeholder\"] after focusing the editor now find it.",
+  "skill": "building-glirastes-chat-ui#placeholder-on-focus",
+  "affectedWhen": {
+    "symbols": [
+      "RichMentionInput",
+      "MentionInput",
+      "useChatComposerInput",
+      "chatInteractions",
+      "completionProviders"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "\\bplaceholderOnFocus\\b"
+    ]
+  },
+  "surface": [
+    "glirastes/react#ComposerConfig.placeholderOnFocus",
+    "glirastes/react#RichMentionInputProps.placeholderOnFocus"
+  ]
+}

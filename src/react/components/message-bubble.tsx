@@ -2,6 +2,7 @@ import { Fragment, Suspense, lazy, useCallback, useContext, useState, useSyncExt
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
 import { ChatContext, useChatContext } from '../provider/chat-context.js';
+import { unescapeMarkerLabels } from '../entity-links/marker-text.js';
 import { markdownLoadingLimit, markdownModuleForLazy, markdownOverdue, markdownTimedOut, subscribeMarkdownTimeout } from '../markdown-module.js';
 import { loadingMarkdownSources } from '../utils/copy-message.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
@@ -841,9 +842,11 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
   );
   const timedOut = useSyncExternalStore(subscribe, () => waitFor !== null && markdownTimedOut(waitFor), onServer);
   if (timedOut) skeleton = false;
+  // The raw text reads mention labels without the escapes the SDK put in for react-markdown.
+  const raw = unescapeMarkerLabels(content);
   return (
     <div className={className} data-component="markdown">
-      <Suspense fallback={skeleton ? <MarkdownLoading content={content} label={chat?.locale.markdownLoadingLabel} /> : <>{content}</>}>
+      <Suspense fallback={skeleton ? <MarkdownLoading content={raw} label={chat?.locale.markdownLoadingLabel} /> : <>{raw}</>}>
         <ReactMarkdown
           components={links.enabled ? links.markdownComponents : undefined}
           remarkPlugins={remarkPlugins as ReactMarkdownOptions['remarkPlugins']}

@@ -350,7 +350,11 @@ default, see `languages` in `.glirastes/tools.json`) and a turn language
 (`requestLocale`, an explicitly set `locale`, else the language the chat UI
 sends as `Content-Language`) each label is the manifest's
 where it is in that language, else the generated label of that language or
-its fallback (another region, English, the first one). A
+its fallback (another region, English, the first one). A direct `/`
+command of a managed turn sends the same part ahead of its step, also when
+the approved command runs, so the confirmation card and the step name the
+tool by its label; without a managed turn no part is sent and the chat uses
+the app's `toolLabels` or the tool name. A
 custom `streamHandler` gets the per-step check as `authorizedToolNames` in
 its context and has to intersect its active tools with it. A legacy
 `intentRouter` gets only these tool names as well (as of the start of the

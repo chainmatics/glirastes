@@ -608,6 +608,74 @@ describe('createDoctorReport', () => {
     });
   });
 
+  // #26: without react-markdown every chat answer shows its raw Markdown source.
+  describe('react-markdown for the React chat', () => {
+    const install = async (rootDir: string, name: string) => {
+      await writeJson(rootDir, `node_modules/${name}/package.json`, { name, version: '1.0.0' });
+    };
+    const useChat = async (rootDir: string, specifier = 'glirastes/react') => {
+      await mkdir(join(rootDir, 'src'), { recursive: true });
+      await writeFile(join(rootDir, 'src/chat.tsx'),
+        `import { AiChat } from '${specifier}';\nexport function Chat() { return <AiChat />; }\n`);
+    };
+    const markdownCheck = async (rootDir: string) => (await createDoctorReport({ rootDir })).checks
+      .find(({ name }) => name === 'react-markdown');
+
+    it('warns when the app imports glirastes/react and react-markdown is not resolvable', async () => {
+      const rootDir = await fixture();
+      await useChat(rootDir);
+      await install(rootDir, 'glirastes');
+
+      const report = await createDoctorReport({ rootDir });
+
+      expect(report.checks).toContainEqual({
+        name: 'react-markdown', status: 'warn', code: 'E-SETUP-109', remediation: 'install-react-markdown',
+      });
+      const text = formatDoctorReport(report);
+      expect(text).toContain('React chat Markdown rendering');
+      expect(text).toContain('react-markdown');
+      expect(text).not.toMatch(/\b(?:npm|yarn|pnpm|bun) (?:install|add)\b/);
+    });
+
+    it('warns for glirastes/embed as well', async () => {
+      const rootDir = await fixture();
+      await useChat(rootDir, 'glirastes/embed');
+      await install(rootDir, 'glirastes');
+      expect((await markdownCheck(rootDir))?.status).toBe('warn');
+    });
+
+    it('passes when react-markdown is resolvable, also hoisted to a parent folder', async () => {
+      const rootDir = await fixture();
+      await useChat(rootDir);
+      await install(rootDir, 'glirastes');
+      await install(rootDir, 'react-markdown');
+      expect(await markdownCheck(rootDir)).toEqual({ name: 'react-markdown', status: 'pass', code: 'E-SETUP-109', remediation: 'none' });
+
+      const workspace = await mkdtemp(join(tmpdir(), 'glirastes-doctor-workspace-'));
+      const app = join(workspace, 'apps', 'web');
+      await mkdir(app, { recursive: true });
+      const fixtureRoot = await fixture();
+      await useChat(fixtureRoot);
+      await install(workspace, 'glirastes');
+      await install(workspace, 'react-markdown');
+      // The app folder sits under the workspace whose node_modules hold both packages.
+      await mkdir(join(workspace, 'apps'), { recursive: true });
+      const { cp } = await import('node:fs/promises');
+      await cp(fixtureRoot, app, { recursive: true });
+      expect((await markdownCheck(app))?.status).toBe('pass');
+    });
+
+    it('adds no check for an app without the React chat, nor before dependencies are installed', async () => {
+      const server = await fixture();
+      await install(server, 'glirastes');
+      expect(await markdownCheck(server)).toBeUndefined();
+
+      const fresh = await fixture();
+      await useChat(fresh);
+      expect(await markdownCheck(fresh)).toBeUndefined();
+    });
+  });
+
   describe('apps without Next.js', () => {
     const key = 'gl_abcdefghijklmnopqrstuvwxyz123456';
 

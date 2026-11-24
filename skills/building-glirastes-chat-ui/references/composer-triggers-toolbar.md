@@ -278,6 +278,22 @@ Stacked markup inside the form: the editor, then
 hint line (`composer.hint`) stays the last row. `components.ComposerToolbar`
 still replaces both layouts.
 
+### Placeholder on focus
+
+The pill composer (`RichMentionInput` in mention mode, the default composer
+with `chatInteractions` or `completionProviders`) keeps its placeholder
+(`locale.placeholder`) visible while the empty editor has focus, until text
+or a pill is in it, like a native placeholder. `composer.placeholderOnFocus:
+false` hides it as soon as the editor is focused (the earlier look). It
+reaches the built-in composer and `useChatComposerInput().inputProps`; an own
+`RichMentionInput` takes the prop `placeholderOnFocus`. The plain text field
+uses the browser placeholder and ignores it. The placeholder element is
+`[data-element="placeholder"]` inside `[data-component="rich-mention-input"]`.
+
+```tsx
+const composer = useMemo<ComposerConfig>(() => ({ placeholderOnFocus: false }), []);
+```
+
 ## Plus menu
 
 Put `'plus'` into `toolbar.start` or `toolbar.end` for a "+" button with a
