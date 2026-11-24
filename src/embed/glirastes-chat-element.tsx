@@ -13,7 +13,7 @@ import {
   type ChatCommandDefinition,
   type ChatEntityDefinition,
 } from '../react/interactions/definitions.js';
-import type { ChatInteractionsConfig } from '../react/interactions/registry.js';
+import type { ChatInteractionsConfig, ChatMentionContext } from '../react/interactions/registry.js';
 import { AiChatProvider } from '../react/provider/ai-chat-provider.js';
 import { useChatContext } from '../react/provider/chat-context.js';
 import { VercelAiChat } from '../react/transports/vercel/vercel-ai-chat.js';
@@ -155,7 +155,8 @@ const BaseElement = (typeof HTMLElement === 'undefined'
  * (preset name), `placeholder`, `welcome-message`, `voice`, `voice-language`,
  * `interactions` (load `@` entities and `/` commands with a GET from the
  * endpoint or the given URL; labels follow the nearest `lang`).
- * Properties: `config`, `transport`, `interactions`. Methods: `send(text)`,
+ * Properties: `config`, `transport`, `interactions`, `mentionContext` (the
+ * page's `@` context: preferred entity types and a preset). Methods: `send(text)`,
  * `defineEntity(definition)`, `defineCommand(definition)`,
  * `mentionEntity(type, id)`.
  * Events (bubbling, composed): `glirastes-chat:ready`, `:status`,
@@ -178,6 +179,7 @@ export class GlirastesChatElement extends BaseElement {
   #interactions: ChatInteractionsData | undefined;
   #interactionsFromProperty = false;
   #interactionsLoad: AbortController | null = null;
+  #mentionContext: ChatMentionContext | undefined;
   // The nearest `lang` the last render used; a page (or a region of it) may set or change it later.
   #renderedLang: string | null = null;
   #langObserver: MutationObserver | null = null;
@@ -217,6 +219,20 @@ export class GlirastesChatElement extends BaseElement {
     this.#interactionsLoad?.abort();
     this.#interactions = value ? parseChatInteractions(value) : undefined;
     this.#interactionsFromProperty = Boolean(value);
+    this.#render();
+  }
+
+  /**
+   * The page's `@` context: `preferredTypes` first in the `@` list,
+   * `presetType` starts a bare `@` as `@<name>:`. Wins over
+   * `config.mentionContext`; `null` clears it.
+   */
+  get mentionContext(): ChatMentionContext | undefined {
+    return this.#mentionContext;
+  }
+
+  set mentionContext(value: ChatMentionContext | null | undefined) {
+    this.#mentionContext = value ?? undefined;
     this.#render();
   }
 
@@ -365,6 +381,7 @@ export class GlirastesChatElement extends BaseElement {
       ...(statesLanguage ? { language: nearestLang } : {}),
       ...this.#config,
       ...(chatInteractions ? { chatInteractions } : {}),
+      ...(this.#mentionContext ? { mentionContext: this.#mentionContext } : {}),
       ...(placeholder
         ? { locale: { ...(this.#config.locale ?? {}), placeholder } }
         : {}),

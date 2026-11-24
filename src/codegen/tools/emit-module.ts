@@ -2,7 +2,7 @@ import { posix } from 'node:path';
 import type { AppSetupArtifact } from '../../contracts/index.js';
 import type { ToolSearchSemantics } from '../../runtime/tool-discovery.js';
 import { compareCodeUnits, sortKeysDeep } from './canonical.js';
-import { deriveChatInteractions } from './chat-interactions.js';
+import { deriveChatInteractions, type ChatMentionsConfig } from './chat-interactions.js';
 import type { RuntimeSchemaSource, ToolContract, ToolContractsEntry } from './types.js';
 
 export interface RenderGeneratedModuleInput {
@@ -13,6 +13,8 @@ export interface RenderGeneratedModuleInput {
   mcpCatalog?: boolean;
   /** `emit.moduleResolution` of a `.ts` module; `bundler` when absent. */
   moduleResolution?: 'bundler' | 'nodenext';
+  /** tools.json `mentions`: the declared `@` mention sources and their policy. */
+  mentions?: ChatMentionsConfig;
 }
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -158,7 +160,11 @@ export function renderGeneratedModule(input: RenderGeneratedModuleInput): string
     `export const toolCatalog = ${literal(tools.map(catalogEntry))}${typescript ? ' as const' : ''};`,
     '',
     '/** `@` entities and `/` commands derived from the tools; see `createChatInteractionsHandler`. */',
-    `export const chatInteractions = ${literal(deriveChatInteractions(input))}${typescript ? ' as const' : ''};`,
+    `export const chatInteractions = ${literal(deriveChatInteractions({
+      artifact: input.artifact,
+      contracts: input.contracts,
+      ...(input.mentions ? { mentions: input.mentions } : {}),
+    }))}${typescript ? ' as const' : ''};`,
     '',
   );
   if (typescript) {

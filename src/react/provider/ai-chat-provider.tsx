@@ -53,7 +53,10 @@ import { createCompletionSearch } from '../completions/completion-search.js';
 import { createMentionPrefixLookup, resolveChatTriggers } from '../completions/triggers.js';
 import { toChatEntityItem } from '../interactions/definitions.js';
 import {
+  BUILT_IN_CHAT_INTERACTION_TEXTS,
   createChatInteractionRegistry,
+  type ChatInteractionTexts,
+  type ChatMentionContext,
   type PendingChatCommand,
 } from '../interactions/registry.js';
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
@@ -199,6 +202,9 @@ export const DEFAULT_LOCALE: ChatLocale = {
   completionListLabel: 'Suggestions',
   completionResultsLabel: '{count} suggestions',
   completionEmptyLabel: 'No matches. @ for things, / for commands',
+  completionCommandsGroupLabel: 'Commands',
+  completionEntityTypesGroupLabel: 'Filter by type',
+  completionEntityTypeFilterLabel: 'Search only this type',
   commandArgumentsLabel: 'Details for {command}',
   commandArgumentsSubmit: 'Run',
   commandArgumentsInvalid: 'These values are too long.',
@@ -703,6 +709,7 @@ export function AiChatProvider({
   onCompletionProviderError,
   onCompletionSelect,
   chatInteractions,
+  mentionContext: mentionContextProp,
   entityLinks,
   markdown,
   onOpenRequest,
@@ -1054,12 +1061,57 @@ export function AiChatProvider({
 
   const onCompletionProviderErrorRef = useRef(onCompletionProviderError);
   onCompletionProviderErrorRef.current = onCompletionProviderError;
+  // The `@` context of the page: the `useMentionContext` with a value rendered last (highest render
+  // order, independent of effect order), else the prop, else `chatInteractions.mentionContext`.
+  // Read at search time, so a change rebuilds nothing.
+  const mentionContextPropRef = useRef(mentionContextProp);
+  mentionContextPropRef.current = mentionContextProp;
+  type MentionContextEntry = { read: () => ChatMentionContext | null | undefined; order: number };
+  const mentionContextStackRef = useRef<MentionContextEntry[]>([]);
+  const registerMentionContext = useCallback((read: () => ChatMentionContext | null | undefined, order: number) => {
+    const entry: MentionContextEntry = { read, order };
+    // Kept sorted by render order, so the last entry with a value wins.
+    mentionContextStackRef.current = [...mentionContextStackRef.current, entry]
+      .sort((left, right) => left.order - right.order);
+    return () => {
+      mentionContextStackRef.current = mentionContextStackRef.current.filter((candidate) => candidate !== entry);
+    };
+  }, []);
+  const chatInteractionsRef = useRef(chatInteractions);
+  chatInteractionsRef.current = chatInteractions;
+  const resolveMentionContext = useCallback((): ChatMentionContext | undefined => {
+    const stack = mentionContextStackRef.current;
+    for (let index = stack.length - 1; index >= 0; index -= 1) {
+      const value = stack[index]!.read();
+      if (value) return value;
+    }
+    if (mentionContextPropRef.current) return mentionContextPropRef.current;
+    const own = chatInteractionsRef.current?.mentionContext;
+    return (typeof own === 'function' ? own() : own) ?? undefined;
+  }, []);
+  // Only the app's own texts: a built-in one leaves the choice to the registry's `locale`, as before these keys.
+  const ownText = (value: string | undefined, key: keyof ChatInteractionTexts) => (
+    value !== undefined && !BUILT_IN_CHAT_INTERACTION_TEXTS[key].has(value) ? value : undefined
+  );
+  const commandsGroupText = ownText(locale.completionCommandsGroupLabel, 'commandsGroup');
+  const entityTypesGroupText = ownText(locale.completionEntityTypesGroupLabel, 'entityTypesGroup');
+  const entityTypeFilterText = ownText(locale.completionEntityTypeFilterLabel, 'entityTypeFilter');
   // Declarative `@` entities and `/` commands join the app's own providers.
   const interactionRegistry = useMemo(
     () => (chatInteractions
-      ? createChatInteractionRegistry({ ...chatInteractions, context: completionContext })
+      ? createChatInteractionRegistry({
+        ...chatInteractions,
+        context: completionContext,
+        mentionContext: resolveMentionContext,
+        texts: {
+          ...chatInteractions.texts,
+          ...(commandsGroupText !== undefined ? { commandsGroup: commandsGroupText } : {}),
+          ...(entityTypesGroupText !== undefined ? { entityTypesGroup: entityTypesGroupText } : {}),
+          ...(entityTypeFilterText !== undefined ? { entityTypeFilter: entityTypeFilterText } : {}),
+        },
+      })
       : undefined),
-    [chatInteractions, completionContext],
+    [chatInteractions, completionContext, resolveMentionContext, commandsGroupText, entityTypesGroupText, entityTypeFilterText],
   );
   const allCompletionProviders = useMemo(
     () => [...(completionProviders ?? []), ...(interactionRegistry?.providers ?? [])],
@@ -1088,15 +1140,18 @@ export function AiChatProvider({
   // What `session.save` gets as its third argument: only when a trigger claims `types`, so saves stay as before otherwise.
   const saveOptionsRef = useRef<{ mentionPrefix: (type: string) => string } | undefined>(undefined);
   saveOptionsRef.current = mentionPrefix === inferMentionPrefix ? undefined : { mentionPrefix };
+  // `chatInteractions.completionLimits` sizes every provider of its trigger, the app's own ones included.
+  const completionLimits = chatInteractions?.completionLimits;
   const completionSearch = useMemo(
     () => (allCompletionProviders.length > 0
       ? createCompletionSearch(allCompletionProviders, {
         context: completionContext,
+        ...(completionLimits ? { limits: completionLimits } : {}),
         onProviderError: (providerId, error) =>
           onCompletionProviderErrorRef.current?.(providerId, error),
       })
       : undefined),
-    [allCompletionProviders, completionContext],
+    [allCompletionProviders, completionContext, completionLimits],
   );
   const [pendingCommand, setPendingCommand] = useState<PendingChatCommand | null>(null);
   const [composerMentions, setComposerMentions] = useState<MentionData[]>([]);
@@ -2996,6 +3051,8 @@ export function AiChatProvider({
       onCompletionSelect,
       mentionPrefix,
       drafts,
+      registerMentionContext,
+      ...(interactionRegistry ? { completionPreset: interactionRegistry.completionPreset } : {}),
       turnWorkedMs,
       isTurnRunning: isLoading || awaitedOutcomes > 0,
       interactions: interactionRegistry,
@@ -3101,6 +3158,7 @@ export function AiChatProvider({
       onCompletionSelect,
       mentionPrefix,
       drafts,
+      registerMentionContext,
       interactionRegistry,
       pendingCommand,
       submitPendingCommand,

@@ -9,18 +9,36 @@ import {
   type ChatInteractionsData,
   type ChatText,
 } from '../../contracts/chat-interactions.js';
+import { entityIdFields, type OutputEntityDeclaration } from '../../contracts/entity-declaration.js';
 import { idParameterStem, isBareIdParameter, NAME_KEYS, searchIdFieldCandidates } from '../../contracts/entity-identity.js';
 import type { AppSetupArtifact } from '../../contracts/index.js';
 import { compareCodeUnits } from './canonical.js';
 import { actionLabel, commandLabel, humanizeIdentifier, singular, titleIn, type Label } from './chat-labels.js';
-import type { JsonSchemaLike, ToolContract, ToolContractsEntry, ToolTitle } from './types.js';
+import { TOOLS_PATHS } from './config.js';
+import { toolFinding } from './findings.js';
+import {
+  collectionOf,
+  declarationItemsPath,
+  resolveMentionSources,
+  sameItemsPath,
+  SEARCH_DESCRIPTION_FIELDS,
+  SEARCH_LIMIT_PARAMS,
+  type ChatMentionsConfig,
+  type MentionTool,
+} from './mention-sources.js';
+import type { JsonSchemaLike, ToolContract, ToolContractsEntry, ToolFinding, ToolTitle } from './types.js';
 
 export { humanizeIdentifier } from './chat-labels.js';
+export type { ChatMentionsConfig } from './mention-sources.js';
 
 export interface DeriveChatInteractionsInput {
   artifact: AppSetupArtifact;
   contracts: ReadonlyArray<ToolContractsEntry>;
+  /** `.glirastes/tools.json` `mentions`; without it every recognised search endpoint is offered, as before. */
+  mentions?: ChatMentionsConfig;
 }
+
+type ToolLabels = NonNullable<ToolContractsEntry['labels']>;
 
 interface BoundTool {
   definitionId: string;
@@ -30,6 +48,9 @@ interface BoundTool {
   title?: ToolTitle;
   riskClass: string;
   noun?: { language: 'de' | 'en'; text: string };
+  /** Labels per language of the tool contract (tools.json `languages`). */
+  labels?: ToolLabels;
+  outputEntities?: ReadonlyArray<OutputEntityDeclaration>;
 }
 
 /** Client actions of the chat itself; offering them inside the chat is noise. An override adds one back. */
@@ -37,9 +58,7 @@ export const CHAT_INTERNAL_ACTION = /^(?:ai-?chat|chat|assistant|command-?palett
 
 /** Query parameters that make a read endpoint an entity search, best first. */
 const SEARCH_PARAMS = ['search', 'q', 'query', 'term'];
-const LIMIT_PARAMS = ['limit', 'pageSize'];
 const LABEL_FIELDS: ReadonlyArray<string> = NAME_KEYS.search;
-const DESCRIPTION_FIELDS = ['description', 'email', 'status', 'subtitle', 'summary'];
 const FIELD = /^[A-Za-z_][\w-]{0,63}$/;
 const CONTROL = /[\u0000-\u001F]/;
 
@@ -74,8 +93,42 @@ function clampLabel(label: Label): Label {
   return Object.fromEntries(Object.entries(label).map(([language, text]) => [language, clamp(text)])) as Label;
 }
 
-function nounOf(entity: ChatEntityData, language: 'de' | 'en'): string | undefined {
+function nounOf(entity: ChatEntityData, language: string): string | undefined {
   return typeof entity.label === 'string' ? entity.label : entity.label[language];
+}
+
+/** A reviewed label names the thing; the templated fallback (and a title as label) repeats one text in all three. */
+function isReviewed(labels: ToolLabels[string]): boolean {
+  return !(labels.singular === labels.plural && labels.plural === labels.approval);
+}
+
+/**
+ * The entity's label in every language the search tool has a reviewed
+ * label for (its `labels` per language), else in English and German from
+ * the presentation noun or `name`. A language whose labels are the
+ * English ones is the English fallback, not a label of its own. `name` is
+ * the route's type (`file` for `/api/files`) where the path names one, so
+ * a type that follows the declared identity (`media-file`) keeps the label
+ * it had before; the entity type otherwise.
+ */
+function entityLabel(tool: BoundTool, name: string): Record<string, string> {
+  const fallback = clamp(humanizeIdentifier(name));
+  const labels = tool.labels ?? {};
+  const english = labels.en;
+  const own: Record<string, string> = {};
+  for (const [language, entry] of Object.entries(labels)) {
+    if (!isReviewed(entry)) continue;
+    if (language !== 'en' && english && entry.singular === english.singular
+      && entry.plural === english.plural && entry.approval === english.approval) continue;
+    const text = safe(entry.singular);
+    if (text) own[language] = text;
+  }
+  const noun = tool.noun;
+  return {
+    ...own,
+    en: own.en ?? (noun?.language === 'en' ? noun.text : fallback),
+    de: own.de ?? (noun?.language === 'de' ? noun.text : fallback),
+  };
 }
 
 /** Inside the entity's own menu a leading noun repeats the entity ("Aufgabe endgültig löschen" → "Endgültig löschen"). */
@@ -205,23 +258,67 @@ function carries(entities: ReadonlyArray<ChatEntityData>, commands: ReadonlyArra
 
 interface SearchCandidate {
   type: string;
+  /** The type the route names (`file` for `/api/files`): arguments named after it (`fileId`) refer to this entity. */
+  routeType?: string;
   entity: ChatEntityData;
   /** Path whose item endpoints become actions (`/api/users` for `/api/users/search`). */
   collection: string;
 }
 
-/** A read endpoint with a search parameter whose output is a list of objects with an id and a label. */
-function searchEntity(tool: BoundTool): SearchCandidate | undefined {
-  if ((tool.method !== 'GET' && tool.method !== 'HEAD') || !tool.path || tool.path.includes(':')) return undefined;
-  const query = new Set(tool.contract.params.query);
-  const segments = staticSegments(tool.path);
+/** The resource a read route lists: its last static segment, before a trailing `search`. */
+function listNameOf(path: string): { listName: string; isSearchPath: boolean } | undefined {
+  const segments = staticSegments(path);
   const isSearchPath = segments.at(-1) === 'search';
   if (isSearchPath && segments.length < 2) return undefined;
+  return { listName: segments.at(isSearchPath ? -2 : -1) ?? '', isSearchPath };
+}
+
+/**
+ * The tool's one identity declaration at the list a search reads (a
+ * declaration without a path counts when it is the tool's only one), when it
+ * has a type the chat can carry and a single id field.
+ */
+function declaredAtList(
+  tool: BoundTool,
+  itemsPath: ReadonlyArray<string>,
+): { type: string; id: string; name?: string } | undefined {
+  const all = tool.outputEntities ?? [];
+  const at = all.filter((declaration) => {
+    if (declaration.path === undefined) return all.length === 1;
+    const path = declarationItemsPath(declaration, tool.contract.output);
+    return path !== undefined && sameItemsPath(path, itemsPath);
+  });
+  if (at.length !== 1) return undefined;
+  const declaration = at[0]!;
+  const ids = entityIdFields(declaration);
+  if (!declaration.type || !CHAT_ENTITY_TYPE_PATTERN.test(declaration.type) || ids.length !== 1) return undefined;
+  return { type: declaration.type, id: ids[0]!, ...(declaration.name ? { name: declaration.name } : {}) };
+}
+
+/** A derived search entity; `fallback` is the route-typed entity (as before identity) when the declared type differs from the route's. */
+interface DerivedCandidate {
+  primary: SearchCandidate;
+  fallback?: SearchCandidate;
+  /** The declared identity type differs from the route type, so the candidate adopts a new type. */
+  adopts: boolean;
+}
+
+/**
+ * A read endpoint with a search parameter whose output is a list of objects
+ * with an id and a label. Its type is the one the tool's identity declares
+ * at that list, else the singular of the route; for a declared type other
+ * than the route's, the route-typed entity is kept as the fallback.
+ */
+function searchEntity(tool: BoundTool): DerivedCandidate | undefined {
+  if ((tool.method !== 'GET' && tool.method !== 'HEAD') || !tool.path || tool.path.includes(':')) return undefined;
+  const query = new Set(tool.contract.params.query);
+  const route = listNameOf(tool.path);
+  if (!route) return undefined;
+  const { listName, isSearchPath } = route;
   const queryParam = (isSearchPath ? [...SEARCH_PARAMS, 'name'] : SEARCH_PARAMS).find((name) => query.has(name));
   if (!queryParam) return undefined;
-  const listName = segments.at(isSearchPath ? -2 : -1) ?? '';
-  const type = entityType(listName);
-  if (!type) return undefined;
+  const routeType = entityType(listName);
+  if (!routeType) return undefined;
   const output = tool.contract.output;
   let itemsPath: string[] | undefined;
   let items: JsonSchemaLike | undefined;
@@ -237,31 +334,59 @@ function searchEntity(tool: BoundTool): SearchCandidate | undefined {
       items = (preferred[1] as Record<string, unknown>).items as JsonSchemaLike;
     }
   }
+  if (!itemsPath) return undefined;
   const fields = properties(items);
   const isText = (name: string) => isRecord(fields[name]) && (fields[name] as Record<string, unknown>).type === 'string';
-  const idField = searchIdFieldCandidates(type).find((name) => isRecord(fields[name]));
-  const labelField = LABEL_FIELDS.find((name) => name !== idField && isText(name));
-  if (!itemsPath || !idField || !labelField) return undefined;
-  const descriptionField = DESCRIPTION_FIELDS.find((name) => name !== labelField && isText(name));
-  const limitParam = LIMIT_PARAMS.find((name) => query.has(name));
-  const label = clamp(humanizeIdentifier(type));
-  const noun = tool.noun;
-  const entity: ChatEntityData = {
-    type,
-    label: { en: noun?.language === 'en' ? noun.text : label, de: noun?.language === 'de' ? noun.text : label },
-    search: {
-      tool: tool.definitionId,
-      path: tool.path,
-      queryParam,
-      itemsPath,
-      idField,
-      labelField,
-      ...(descriptionField ? { descriptionField } : {}),
-      ...(limitParam ? { limitParam } : {}),
-    },
+  const declared = declaredAtList(tool, itemsPath);
+  // Which lists become an entity is decided as before, by the field-name guess: a declaration
+  // names the type and the fields of such a list, it never adds one (that is `mentions.sources`).
+  const guessedId = searchIdFieldCandidates(routeType).find((name) => isRecord(fields[name]));
+  const guessedLabel = LABEL_FIELDS.find((name) => name !== guessedId && isText(name));
+  if (!guessedId || !guessedLabel) return undefined;
+  const limitParam = SEARCH_LIMIT_PARAMS.find((name) => query.has(name));
+  const collection = isSearchPath ? collectionOf(tool.path) : tool.path;
+  const build = (type: string, idField: string, labelField: string): SearchCandidate | undefined => {
+    const descriptionField = SEARCH_DESCRIPTION_FIELDS.find((name) => name !== labelField && isText(name));
+    const entity: ChatEntityData = {
+      type,
+      // Named after the route also when the type follows the identity: the type change keeps the label.
+      label: entityLabel(tool, routeType),
+      search: {
+        tool: tool.definitionId,
+        path: tool.path!,
+        queryParam,
+        itemsPath: itemsPath!,
+        idField,
+        labelField,
+        ...(descriptionField ? { descriptionField } : {}),
+        ...(limitParam ? { limitParam } : {}),
+      },
+    };
+    return carries([entity], []) ? { type, routeType, entity, collection } : undefined;
   };
-  const collection = isSearchPath ? tool.path.replace(/\/search\/?$/, '') : tool.path;
-  return carries([entity], []) ? { type, entity, collection } : undefined;
+  const byRoute = build(routeType, guessedId, guessedLabel);
+  if (!declared) return byRoute ? { primary: byRoute, adopts: false } : undefined;
+  const idField = declared.id;
+  const labelField = (declared.name !== undefined && isText(declared.name) ? declared.name : undefined)
+    ?? LABEL_FIELDS.find((name) => name !== idField && isText(name));
+  const byDeclaration = labelField ? build(declared.type, idField, labelField) : undefined;
+  if (!byDeclaration) return undefined;
+  if (declared.type === routeType) return { primary: byDeclaration, adopts: false };
+  return { primary: byDeclaration, ...(byRoute ? { fallback: byRoute } : {}), adopts: true };
+}
+
+/** A ready-to-paste `mentions.sources` entry for a derived candidate. */
+function sourceEntryOf(candidate: SearchCandidate): Record<string, unknown> {
+  const search = candidate.entity.search!;
+  return {
+    tool: search.tool,
+    queryParam: search.queryParam,
+    labelField: search.labelField,
+    idField: search.idField,
+    itemsPath: [...search.itemsPath],
+    ...(search.descriptionField ? { descriptionField: search.descriptionField } : {}),
+    ...(search.limitParam ? { limitParam: search.limitParam } : {}),
+  };
 }
 
 /**
@@ -282,6 +407,23 @@ function searchEntity(tool: BoundTool): SearchCandidate | undefined {
  * makes the generated module (and `tools refresh`) fail here.
  */
 export function deriveChatInteractions(input: DeriveChatInteractionsInput): ChatInteractionsData {
+  return analyzeChatInteractions(input).data;
+}
+
+/**
+ * `deriveChatInteractions` with its findings about tools.json `mentions`:
+ * invalid and undeclared sources, candidates a `declared` policy leaves
+ * out, and derived types that changed to the declared identity type.
+ *
+ * Entities come in the order of the `@` menu groups: the declared sources
+ * in the key order of `mentions.sources`, then (policy `derived`) the
+ * derived ones by type. A declared source replaces a derived candidate of
+ * its type or its tool; `mentions.ignore` drops derived types.
+ */
+export function analyzeChatInteractions(input: DeriveChatInteractionsInput): {
+  data: ChatInteractionsData;
+  findings: ToolFinding[];
+} {
   const contracts = new Map(input.contracts.map((entry) => [entry.toolId, entry] as const));
   const tools: BoundTool[] = input.artifact.tools
     .filter((tool) => tool.enabled)
@@ -299,22 +441,159 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
         definitionId: tool.name, method: tool.method, path: tool.path, contract: entry.contract, riskClass: tool.riskClass,
         ...(title ? { title } : {}),
         ...(language && noun ? { noun: { language, text: noun } } : {}),
+        ...(entry.labels ? { labels: entry.labels } : {}),
+        ...(entry.outputEntities ? { outputEntities: entry.outputEntities } : {}),
       }];
     })
     .sort((left, right) => compareCodeUnits(left.definitionId, right.definitionId));
 
-  const searches = new Map<string, SearchCandidate>();
-  for (const candidate of tools
+  const mentions = input.mentions ?? {};
+  const config = TOOLS_PATHS.config;
+  const findings: ToolFinding[] = [];
+
+  // Declared sources first, in their key order; checked against every tool, so a disabled one is named as such.
+  const mentionTools: MentionTool[] = input.artifact.tools.map((tool) => {
+    const entry = contracts.get(tool.toolId);
+    return {
+      definitionId: tool.name,
+      modelName: tool.modelName ?? tool.name.replace(/\./g, '_'),
+      enabled: tool.enabled,
+      executionKind: tool.executionKind,
+      ...(tool.method ? { method: tool.method } : {}),
+      ...(tool.path ? { path: tool.path } : {}),
+      ...(entry?.contract ? { contract: entry.contract } : {}),
+      ...(entry?.outputEntities ? { outputEntities: entry.outputEntities } : {}),
+    };
+  });
+  const declaredSources = resolveMentionSources(mentions.sources, mentionTools);
+  findings.push(...declaredSources.findings);
+  const boundById = new Map(tools.map((tool) => [tool.definitionId, tool] as const));
+  const declared: SearchCandidate[] = declaredSources.sources.flatMap((source) => {
+    const tool = boundById.get(source.tool.definitionId);
+    if (!tool) return [];
+    const route = listNameOf(source.search.path);
+    const routeType = route ? entityType(route.listName) : undefined;
+    const entity: ChatEntityData = {
+      type: source.type,
+      // As a derived entity of this tool would be named (a pasted candidate stays the same), else after the type.
+      label: source.label ?? entityLabel(tool, routeType ?? source.type),
+      ...(source.aliases !== undefined ? { aliases: source.aliases } : {}),
+      search: source.search,
+    };
+    return [{
+      type: source.type,
+      ...(routeType ? { routeType } : {}),
+      entity,
+      collection: route?.isSearchPath ? collectionOf(source.search.path) : source.search.path,
+    }];
+  });
+
+  // Derived candidates: a declared identity type is adopted only when it is unique among the
+  // final types of all derived candidates and no other tool's declared source; otherwise every
+  // candidate involved keeps its route type, as before identity. Then one per type (the first by path).
+  const declaredTypes = new Set(declared.map((candidate) => candidate.type));
+  const declaredTools = new Set(declared.map((candidate) => candidate.entity.search!.tool));
+  const ignored = new Set(mentions.ignore ?? []);
+  const candidates = tools
     .map(searchEntity)
-    .filter((entry): entry is SearchCandidate => entry !== undefined)
-    .sort((left, right) => compareCodeUnits(left.entity.search!.path, right.entity.search!.path))) {
+    .filter((entry): entry is DerivedCandidate => entry !== undefined)
+    .filter((entry) => !declaredTools.has(entry.primary.entity.search!.tool))
+    .sort((left, right) => compareCodeUnits(left.primary.entity.search!.path, right.primary.entity.search!.path));
+  const fallen = new Set<DerivedCandidate>();
+  const current = (candidate: DerivedCandidate): SearchCandidate | undefined =>
+    fallen.has(candidate) ? candidate.fallback : candidate.primary;
+  for (let changed = true; changed;) {
+    changed = false;
+    const counts = new Map<string, number>();
+    for (const candidate of candidates) {
+      const type = current(candidate)?.type;
+      if (type) counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+    for (const candidate of candidates) {
+      if (!candidate.adopts || fallen.has(candidate)) continue;
+      const type = candidate.primary.type;
+      if ((counts.get(type) ?? 0) > 1 || declaredTypes.has(type)) {
+        fallen.add(candidate);
+        changed = true;
+      }
+    }
+  }
+  const derived = new Map<string, SearchCandidate>();
+  for (const candidate of candidates) {
+    const chosen = current(candidate);
+    if (!chosen || declaredTypes.has(chosen.type) || ignored.has(chosen.type)) continue;
+    if (!derived.has(chosen.type)) derived.set(chosen.type, chosen);
+  }
+  const derivedByType = [...derived.values()].sort((left, right) => compareCodeUnits(left.type, right.type));
+  if (mentions.policy !== 'declared') {
+    const ambiguous = [...new Set([...fallen].map((candidate) => candidate.primary.type))].sort(compareCodeUnits);
+    for (const type of ambiguous) {
+      const involved = candidates.filter((candidate) => (fallen.has(candidate) && candidate.primary.type === type)
+        || current(candidate)?.type === type);
+      const named = involved.map((candidate) => {
+        const kept = current(candidate);
+        const search = candidate.primary.entity.search!;
+        return `${search.tool} (${search.path}${fallen.has(candidate) ? `, kept as ${kept ? kept.type : 'no entity'}` : ''})`;
+      });
+      const source = declared.find((candidate) => candidate.type === type);
+      findings.push(toolFinding('mention-type-ambiguous', 'warning', `${config}#mentions.sources.${type}`,
+        `The identity type ${type} is not unique among the @ entities: ${named.join(', ')}`
+        + `${source ? `; mentions.sources.${type} already names ${source.entity.search!.tool}` : ''}`
+        + (source
+          ? `. So the others keep their route types as before; to leave one of them out of the @ menu, add its route type to mentions.ignore.`
+          : `. So none of them adopts ${type} and each keeps its route type as before; to offer the wanted one as ${type}, declare it under mentions.sources.${type}.`)));
+    }
+  }
+  if (mentions.policy === 'declared') {
+    for (const candidate of derivedByType) {
+      const entry = sourceEntryOf(candidate);
+      findings.push({
+        ...toolFinding('mention-source-candidate', 'warning', `${config}#mentions.sources.${candidate.type}`,
+          `${candidate.entity.search!.tool} (${candidate.entity.search!.path}) can search the entity type ${candidate.type}, which policy "declared" does not offer; `
+          + `to offer it, add to mentions.sources: ${JSON.stringify({ [candidate.type]: entry })}.`),
+        expected: { [candidate.type]: entry },
+      });
+    }
+  } else {
+    const acknowledged = new Set(mentions.acknowledgedTypes ?? []);
+    for (const candidate of derivedByType) {
+      if (!candidate.routeType || candidate.routeType === candidate.type || acknowledged.has(candidate.type)) continue;
+      if (Object.hasOwn(mentions.sources ?? {}, candidate.type)) continue;
+      findings.push(toolFinding('mention-type-follows-identity', 'warning', `${config}#mentions.acknowledgedTypes.${candidate.type}`,
+        `The @ entity of ${candidate.entity.search!.tool} is now of the declared identity type ${candidate.type} instead of ${candidate.routeType}: `
+        + `its action ids change too (${candidate.routeType}.… → ${candidate.type}.…), so overrides under entities.${candidate.routeType} `
+        + `and under the old action ids in .glirastes/chat-interactions.json, hidden: true patches included, no longer apply, `
+        + `and stored {{mention:${candidate.routeType}:…}} markers refer to the old name.`));
+    }
+  }
+
+  const searches = new Map<string, SearchCandidate>();
+  for (const candidate of [...declared, ...(mentions.policy === 'declared' ? [] : derivedByType)]) {
     if (!searches.has(candidate.type)) searches.set(candidate.type, candidate);
   }
-  const entityOf = (name: string): string | undefined => {
-    const stem = idParameterStem(name);
-    const type = stem ? entityType(stem) : undefined;
-    return type && searches.has(type) ? type : undefined;
+  // A word names an entity by its type, or by the type its route names (`fileId` → `media-file`).
+  // A word that is one entity's type and another one's route name (`/api/files` declares
+  // `document`, `/api/documents` declares `archive`) names neither as an argument.
+  const byType = new Map<string, string>([...searches.keys()].map((type) => [type, type] as const));
+  const byRoute = new Map<string, string>();
+  for (const candidate of searches.values()) {
+    if (candidate.routeType && !byRoute.has(candidate.routeType)) byRoute.set(candidate.routeType, candidate.type);
+  }
+  const isAmbiguousWord = (word: string | undefined): boolean => {
+    const type = word ? entityType(word) : undefined;
+    return type !== undefined && byType.has(type) && byRoute.has(type) && byType.get(type) !== byRoute.get(type);
   };
+  const typeOf = (word: string | undefined): string | undefined => {
+    const type = word ? entityType(word) : undefined;
+    if (!type || isAmbiguousWord(word)) return undefined;
+    return byType.get(type) ?? byRoute.get(type);
+  };
+  /** A path segment is a route name first: `/documents/:id` is the entity searched at `/api/documents`. */
+  const typeOfSegment = (segment: string | undefined): string | undefined => {
+    const type = segment ? entityType(segment) : undefined;
+    return type ? byRoute.get(type) ?? byType.get(type) : undefined;
+  };
+  const entityOf = (name: string): string | undefined => typeOf(idParameterStem(name));
 
   const actions = new Map<string, ChatEntityActionData[]>();
   const destructive = new Set<string>();
@@ -339,7 +618,9 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
       }));
       addAction(type, {
         id: `${type}.${tool.definitionId}`,
-        label: { en: withoutNoun(label.en, nounOf(entity, 'en')), de: withoutNoun(label.de, nounOf(entity, 'de')) },
+        // Every language of the label; inside the entity's menu each drops the entity's noun in that language.
+        label: Object.fromEntries(Object.entries(label)
+          .map(([language, text]) => [language, withoutNoun(text, nounOf(entity, language))] as const)),
         entityArg,
         ...(args.length > 0 ? { args } : {}),
         run: { kind: 'tool', tool: tool.definitionId },
@@ -378,7 +659,9 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
         if (params.length !== 1) continue;
         const segments = path.split('/');
         const index = segments.indexOf(`:${params[0]}`);
-        const type = entityOf(params[0]!) ?? (isBareIdParameter(params[0]!) && index > 0 ? entityType(segments[index - 1]!) : undefined);
+        const stem = idParameterStem(params[0]!);
+        const type = entityOf(params[0]!)
+          ?? ((isBareIdParameter(params[0]!) || isAmbiguousWord(stem ?? undefined)) && index > 0 ? typeOfSegment(segments[index - 1]!) : undefined);
         if (!type || !searches.has(type)) continue;
         addAction(type, {
           id: `${type}.open`,
@@ -424,13 +707,13 @@ export function deriveChatInteractions(input: DeriveChatInteractionsInput): Chat
         .slice(0, CHAT_INTERACTION_LIMITS.actionsPerEntity);
       return list.length > 0 ? { ...entity, actions: list } : entity;
     })
-    .sort((left, right) => compareCodeUnits(left.type, right.type))
     .slice(0, CHAT_INTERACTION_LIMITS.entities);
-  return parseChatInteractions({
+  const data = parseChatInteractions({
     schemaVersion: 1,
     entities,
     commands: commands
       .sort((left, right) => compareCodeUnits(left.id, right.id))
       .slice(0, CHAT_INTERACTION_LIMITS.commands),
   });
+  return { data, findings };
 }

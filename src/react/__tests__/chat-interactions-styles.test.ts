@@ -62,6 +62,16 @@ describe('shipped styles for chat interactions', () => {
     expect(row).toContain('margin: 0');
   });
 
+  it('scrolls a long completion list and a long argument option list instead of growing', () => {
+    // `completionLimits` allows up to 200 entries; the lists stay bounded and scroll.
+    const dropdown = rule('[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-component="mention-dropdown"]');
+    expect(dropdown).toContain('max-height: min(40vh, 16rem)');
+    expect(dropdown).toContain('overflow-y: auto');
+    const options = rule('[data-component="command-arguments"] [data-element="options"]');
+    expect(options).toContain('max-height: 12rem');
+    expect(options).toContain('overflow-y: auto');
+  });
+
   it('ships the same rules inside <glirastes-chat>', () => {
     expect(CHAT_STYLES).toBe(css);
     expect(CHAT_STYLES).toContain('[data-component="command-arguments"]');

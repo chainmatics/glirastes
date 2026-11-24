@@ -6,13 +6,29 @@ import type {
 } from '../types.js';
 import { describeToolReference } from '../utils/mention-markup.js';
 
+/**
+ * List size of one trigger. Each value is truncated to an integer and kept
+ * within 1 and its maximum; a missing or non-finite value takes the default.
+ */
+export interface CompletionLimits {
+  /** Hits each provider of the trigger may return; its search gets it as `limit` (max 100). */
+  readonly perProvider?: number;
+  /** Hits across the trigger's providers (max 200); omitted: the larger of the overall `maxResults` and this `perProvider`. */
+  readonly total?: number;
+}
+
 export interface CompletionSearchOptions {
   /** Passed to every provider; it only hides entries, the server authorizes. */
   context?: CompletionPermissionContext;
-  /** Per-provider cap (default 8, max 20). */
+  /** Per-provider cap (default 8, max 100). */
   limitPerProvider?: number;
-  /** Overall cap across providers (default 12, max 50). */
+  /** Overall cap across providers (default 12, max 200). */
   maxResults?: number;
+  /**
+   * Caps of single triggers (`'/'`, `'@'`, …), over `limitPerProvider` and
+   * `maxResults`; they apply to every provider of that trigger.
+   */
+  limits?: Readonly<Record<string, CompletionLimits>>;
   /** A provider slower than this contributes nothing (default 3000 ms). */
   timeoutMs?: number;
   onProviderError?: (providerId: string, error: unknown) => void;
@@ -43,9 +59,39 @@ export function sourceSearchOf(search: unknown): SourceSearch | undefined {
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
-function clamp(value: number | undefined, fallback: number, max: number): number {
-  if (value === undefined || !Number.isFinite(value)) return fallback;
+function clamp(value: unknown, fallback: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.min(Math.max(Math.trunc(value), 1), max);
+}
+
+/** Upper bounds of `limitPerProvider` / `perProvider` and `maxResults` / `total`. */
+export const COMPLETION_LIMIT_BOUNDS = Object.freeze({ perProvider: 100, total: 200 });
+const DEFAULT_PER_PROVIDER = 8;
+const DEFAULT_TOTAL = 12;
+
+/** The limits configured for one trigger; an absent, inherited or non-object entry is none. */
+function limitsOf(limits: unknown, trigger: string): CompletionLimits | undefined {
+  if (typeof limits !== 'object' || limits === null || !Object.hasOwn(limits, trigger)) return undefined;
+  const entry = (limits as Record<string, unknown>)[trigger];
+  return typeof entry === 'object' && entry !== null ? entry as CompletionLimits : undefined;
+}
+
+/**
+ * The effective caps of one trigger: its `limits` entry over the overall
+ * `limitPerProvider` / `maxResults`, over the defaults 8 and 12. Never throws.
+ */
+export function resolveCompletionLimits(
+  options: Pick<CompletionSearchOptions, 'limitPerProvider' | 'maxResults' | 'limits'>,
+  trigger: string,
+): { perProvider: number; total: number } {
+  const basePerProvider = clamp(options.limitPerProvider, DEFAULT_PER_PROVIDER, COMPLETION_LIMIT_BOUNDS.perProvider);
+  const baseTotal = clamp(options.maxResults, DEFAULT_TOTAL, COMPLETION_LIMIT_BOUNDS.total);
+  const own = limitsOf(options.limits, trigger);
+  if (!own) return { perProvider: basePerProvider, total: baseTotal };
+  const perProvider = clamp(own.perProvider, basePerProvider, COMPLETION_LIMIT_BOUNDS.perProvider);
+  // Without an own total, a raised per-provider cap is not cut back by the overall one.
+  const total = clamp(own.total, Math.max(baseTotal, perProvider), COMPLETION_LIMIT_BOUNDS.total);
+  return { perProvider, total };
 }
 
 const ACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
@@ -80,7 +126,18 @@ function pickFields(item: CompletionItem): Pick<MentionResult, 'select' | 'inser
   };
 }
 
-const SELECT_KINDS = new Set<string>(['chip', 'text', 'run']);
+const SELECT_KINDS = new Set<string>(['chip', 'text', 'run', 'query']);
+
+/**
+ * `select: 'query'` entries (e.g. `@<type>:` suggestions) refine the search
+ * instead of being hits: they come first, at most this many per provider, and
+ * neither the per-provider nor the overall cap nor the hits' dedupe drops them.
+ */
+const MAX_REFINEMENTS_PER_PROVIDER = 3;
+
+function isRefinement(item: unknown): boolean {
+  return typeof item === 'object' && item !== null && (item as { select?: unknown }).select === 'query';
+}
 
 function groupOf(value: unknown): { group?: string } {
   if (typeof value !== 'string') return {};
@@ -131,8 +188,8 @@ export function createCompletionSearch(
     }
     ids.add(provider.id);
   }
-  const limit = clamp(options.limitPerProvider, 8, 20);
-  const maxResults = clamp(options.maxResults, 12, 50);
+  // Read once, like the other options: a later change of `options` does not reach this search.
+  const caps = new Map(providers.map((provider) => [provider.trigger, resolveCompletionLimits(options, provider.trigger)] as const));
   const timeoutMs = clamp(options.timeoutMs, 3_000, 30_000);
   const context = Object.freeze({ ...(options.context ?? {}) });
   let current: AbortController | null = null;
@@ -141,6 +198,7 @@ export function createCompletionSearch(
     current?.abort();
     const controller = new AbortController();
     current = controller;
+    const { perProvider: limit, total: maxResults } = caps.get(trigger) ?? resolveCompletionLimits(options, trigger);
     const sources = source === undefined ? undefined : new Set<string>(typeof source === 'string' ? [source] : source);
     const settled = await Promise.all(providers
       .filter((provider) => provider.trigger === trigger && (!sources || sources.has(provider.id)))
@@ -149,14 +207,48 @@ export function createCompletionSearch(
           const items = await withTimeout(Promise.resolve(provider.search({
             query, trigger, signal: controller.signal, context, limit,
           })), timeoutMs);
-          return { provider, items: Array.isArray(items) ? items.slice(0, limit) : [] };
+          const list: ReadonlyArray<unknown> = Array.isArray(items) ? items : [];
+          return {
+            provider,
+            refinements: list.filter(isRefinement).slice(0, MAX_REFINEMENTS_PER_PROVIDER),
+            items: list.filter((item) => !isRefinement(item)).slice(0, limit),
+          };
         } catch (error) {
           if (!controller.signal.aborted) options.onProviderError?.(provider.id, error);
-          return { provider, items: [] };
+          return { provider, refinements: [] as unknown[], items: [] as unknown[] };
         }
       }));
     if (controller.signal.aborted) return [];
     if (current === controller) current = null;
+
+    const toResult = (provider: ChatCompletionProvider, item: CompletionItem): MentionResult => ({
+      id: item.id,
+      key: `${provider.id}:${item.type}:${item.id}`,
+      type: item.type,
+      label: item.label.trim(),
+      ...(item.description ? { description: item.description } : {}),
+      ...(typeof item.icon === 'string' && item.icon ? { icon: item.icon } : {}),
+      ...(item.slug ? { slug: item.slug } : {}),
+      ...(item.definitionId ? { definitionId: item.definitionId } : {}),
+      ...(item.args ? { args: item.args } : {}),
+      ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
+      ...groupOf(item.group),
+      ...pickFields(item),
+    });
+
+    // Refinements first, outside the caps; the same one from two providers shows once.
+    const refined = new Set<string>();
+    const refinements: MentionResult[] = [];
+    for (const { provider, refinements: items } of settled) {
+      for (const item of items) {
+        if (!isItem(item)) continue;
+        const result = toResult(provider, item);
+        const identity = `${result.type}:${result.insertText ?? result.label}`;
+        if (refined.has(identity)) continue;
+        refined.add(identity);
+        refinements.push(result);
+      }
+    }
 
     const seen = new Set<string>();
     const results: MentionResult[] = [];
@@ -166,24 +258,11 @@ export function createCompletionSearch(
         const identity = `${item.type}:${item.id}`;
         if (seen.has(identity)) continue;
         seen.add(identity);
-        results.push({
-          id: item.id,
-          key: `${provider.id}:${item.type}:${item.id}`,
-          type: item.type,
-          label: item.label.trim(),
-          ...(item.description ? { description: item.description } : {}),
-          ...(typeof item.icon === 'string' && item.icon ? { icon: item.icon } : {}),
-          ...(item.slug ? { slug: item.slug } : {}),
-          ...(item.definitionId ? { definitionId: item.definitionId } : {}),
-          ...(item.args ? { args: item.args } : {}),
-          ...(item.actions?.length ? { actions: item.actions.map(({ id, label }) => ({ id, label: label.trim() })) } : {}),
-          ...groupOf(item.group),
-          ...pickFields(item),
-        });
+        results.push(toResult(provider, item));
         if (results.length >= maxResults) break collect;
       }
     }
-    return grouped(results);
+    return grouped([...refinements, ...results]);
   };
   const search: CompletionSearch = (query, trigger) => searchSources(query, trigger, undefined);
   return Object.assign(search, { [SOURCE_SEARCH]: searchSources });

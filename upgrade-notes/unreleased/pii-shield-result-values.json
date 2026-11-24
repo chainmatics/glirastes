@@ -1,7 +1,7 @@
 {
   "id": "pii-shield-result-values",
   "kind": "recommended",
-  "summary": "Security fix, update soon with piiShield: up to 0.24.2 an e-mail, IBAN or phone number right after a line break, tab or other JSON-escaped character in a tool result (also result handles, approvals, view context) could reach the model in plain text.",
+  "summary": "Security fix, update soon with piiShield: up to 0.25.0 an e-mail, IBAN or phone number right after a line break, tab or other JSON-escaped character in a tool result (also result handles, approvals, view context) could reach the model in plain text.",
   "howTo": "Nothing to change in code: update. For a result with escapes the detector is called a second time with the strings decoded (a remote detector: two calls); the audit entry lists the extra findings and run time grows with them. What was replaced before still is. Limits: a value only the decoded text found can cut into a pseudonym, so rehydrateArgs then sends an invented value to the backend; a tab column may join a pseudonym; keys and numbers are not pseudonymized.",
   "skill": "integrating-glirastes-nextjs#built-in-tools",
   "affectedWhen": {

@@ -67,6 +67,20 @@ const triggers = useMemo(() => [{ char: '#', label: 'Tickets', types: ['ticket']
   (default `['@', '/']`), e.g. `['@', { char: '#', prefix: 'tag:' }]`, and
   throws on an invalid entry like the provider.
 - The legacy `mentions` search (without `completionProviders`) stays `@` and `/` only.
+- With `chatInteractions`, `@<type>:<text>` searches one entity type and
+  typing after `@` suggests the types first; `useMentionContext({
+  preferredTypes, presetType })` (`ChatMentionContext`) orders the list by
+  the current page and presets the filter. An own composer gets this through
+  `useChatComposerInput().inputProps` (`completionPreset`); an own
+  `onCompletionSelect` ignores items of type `mention-filter`. Names per
+  language: see `curating-glirastes-chat-interactions` and
+  `docs/chat-interactions.md`, Type filter.
+- List size: 8 hits per provider and 12 in total per trigger by default.
+  `chatInteractions.completionLimits` (`CompletionLimits` per trigger char,
+  e.g. `{ '/': { perProvider: 40, total: 40 } }`, at most 100 and 200)
+  raises them for every provider of that trigger, own `completionProviders`
+  included; outside the provider pass it as `createCompletionSearch(providers,
+  { limits })`. `docs/chat-interactions.md`, List size.
 
 ### Sent mentions and `types`
 
