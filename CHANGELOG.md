@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-24
+
 ### Added
 
 - Declared `@` sources: `mentions` in `.glirastes/tools.json` (`policy: "derived" | "declared"`, `sources.<type>: { tool, queryParam, idField?, labelField?, itemsPath?, descriptionField?, limitParam?, label?, aliases? }`, `ignore`, `acknowledgedTypes`). The key is the entity type of the tool's declared identity, whose id, name and path are the defaults. With `declared` only these appear in `@`; `tools refresh` / `tools check` report every other derivable search as `mention-source-candidate` with the entry to paste. Declared sources come first in the `@` list, in their order. New findings `mention-source-candidate`, `mention-source-invalid`, `mention-source-undeclared-type`, `mention-type-follows-identity`, `mention-type-ambiguous` (all warnings). Without `mentions` the generated list is as before, except for the type change under Changed.
@@ -1274,3 +1276,4 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.25.0]: https://github.com/chainmatics/glirastes/compare/v0.24.2...v0.25.0
