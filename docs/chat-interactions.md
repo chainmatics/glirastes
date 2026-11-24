@@ -593,6 +593,13 @@ still does not fit is written as plain text. A message sent by an older
 release keeps its plain line (`/Assign @Release @Alice`) and is shown as
 before.
 
+The line follows the app's `mentions.serialize`: with `enabled: false` it
+stays plain text exactly as before (no markers), and `maxLabelLength` is the
+upper bound of each label in its markers (the line's limit can shorten a
+label further). `labels: 'raw'` does not apply here: the line is always
+written with canonical labels, since a raw label could end a marker early or
+break the command message.
+
 The picked object's name then counts like a name the user mentioned: the
 approval card of the command shows it (provenance `mention`) instead of
 warning that no name is known for the id. The model reads the label line of

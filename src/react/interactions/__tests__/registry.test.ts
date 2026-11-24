@@ -5,7 +5,7 @@ import type { ChatInteractionArg, ChatInteractionsData } from '../../../contract
 import { createCompletionSearch } from '../../completions/completion-search.js';
 import type { MentionData } from '../../types.js';
 import { defineChatCommand, defineChatEntity } from '../definitions.js';
-import { createChatInteractionRegistry } from '../registry.js';
+import { createChatInteractionRegistry, createChatInteractionRegistryWith } from '../registry.js';
 
 const data: ChatInteractionsData = {
   schemaVersion: 1,
@@ -346,6 +346,23 @@ describe('createChatInteractionRegistry', () => {
       expect(withNote.length).toBeLessThanOrEqual(CHAT_COMMAND_MAX_LABEL_LENGTH);
       expect(parseMentionMarkers(withNote).map(({ type }) => type)).toEqual(['command', 'task', 'person']);
       expect(withNote).toContain(` ${'n'.repeat(40)} {{mention:person:alice:Alice}}`);
+    });
+
+    it('writes the line as before without markers when the app turned mention markup off', () => {
+      const registry = createChatInteractionRegistryWith({ data, entities: [person], commands: [assign], locale: 'en' }, { labelMarkers: false });
+      const command = mention('command', 'tasks.assign', 'Assign', '/');
+      expect(labelOf(registry.planMessage('/assign @release-prüfen @alice-example', [command, mention('task', '7', 'Release prüfen'), mention('person', 'alice', 'Alice Example')])))
+        .toBe('/Assign @Release prüfen @Alice Example');
+      expect(labelOf(registry.planAction({ type: 'task', id: '7', label: 'Release' }, 'task.open'))).toBe('/Open @Release');
+    });
+
+    it('bounds marker labels by maxLabelLength, normalized like the mention serializer', () => {
+      const line = (maxLabelLength: number) => labelOf(createChatInteractionRegistryWith({ data, locale: 'en' }, { maxLabelLength })
+        .planAction({ type: 'task', id: '7', label: 'Release prüfen' }, 'task.open'));
+      expect(line(10)).toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release p…}}');
+      expect(line(3)).toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release…}}');
+      expect(line(500)).toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release prüfen}}');
+      expect(line(Number.NaN)).toBe('{{mention:command:task.open:Open}} {{mention:task:7:Release prüfen}}');
     });
 
     it('marks the target of an entity action with the type of its entity', () => {

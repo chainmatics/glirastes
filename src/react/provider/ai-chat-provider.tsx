@@ -54,7 +54,7 @@ import { createMentionPrefixLookup, resolveChatTriggers } from '../completions/t
 import { toChatEntityItem } from '../interactions/definitions.js';
 import {
   BUILT_IN_CHAT_INTERACTION_TEXTS,
-  createChatInteractionRegistry,
+  createChatInteractionRegistryWith,
   type ChatInteractionTexts,
   type ChatMentionContext,
   type PendingChatCommand,
@@ -1097,9 +1097,12 @@ export function AiChatProvider({
   const entityTypesGroupText = ownText(locale.completionEntityTypesGroupLabel, 'entityTypesGroup');
   const entityTypeFilterText = ownText(locale.completionEntityTypeFilterLabel, 'entityTypeFilter');
   // Declarative `@` entities and `/` commands join the app's own providers.
+  // A direct command's label line follows the app's mention markup (`raw` labels never: they could break the line).
+  const labelMarkers = mentions?.serialize?.enabled !== false;
+  const markerLabelLength = mentions?.serialize?.maxLabelLength;
   const interactionRegistry = useMemo(
     () => (chatInteractions
-      ? createChatInteractionRegistry({
+      ? createChatInteractionRegistryWith({
         ...chatInteractions,
         context: completionContext,
         mentionContext: resolveMentionContext,
@@ -1109,9 +1112,12 @@ export function AiChatProvider({
           ...(entityTypesGroupText !== undefined ? { entityTypesGroup: entityTypesGroupText } : {}),
           ...(entityTypeFilterText !== undefined ? { entityTypeFilter: entityTypeFilterText } : {}),
         },
-      })
+      }, { labelMarkers, ...(markerLabelLength !== undefined ? { maxLabelLength: markerLabelLength } : {}) })
       : undefined),
-    [chatInteractions, completionContext, resolveMentionContext, commandsGroupText, entityTypesGroupText, entityTypeFilterText],
+    [
+      chatInteractions, completionContext, resolveMentionContext, commandsGroupText, entityTypesGroupText, entityTypeFilterText,
+      labelMarkers, markerLabelLength,
+    ],
   );
   const allCompletionProviders = useMemo(
     () => [...(completionProviders ?? []), ...(interactionRegistry?.providers ?? [])],

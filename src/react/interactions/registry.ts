@@ -14,7 +14,7 @@ import {
   type ChatLocaleCode,
 } from '../../contracts/chat-interactions.js';
 import { pickLanguage } from '../../contracts/localized-text.js';
-import { serializeMentionMarker } from '../../contracts/mention-marker.js';
+import { MENTION_MARKER_MAX_LABEL_LENGTH, serializeMentionMarker } from '../../contracts/mention-marker.js';
 import { resolveCompletionLimits, type CompletionLimits } from '../completions/completion-search.js';
 import type {
   ChatCompletionProvider,
@@ -281,13 +281,19 @@ function oneLine(text: string): string {
 /** Shortest label length `serializeMentionMarker` writes (`maxLabelLength` below 8 means 8). */
 const MIN_MARKER_LABEL = 8;
 
+/** `mentions.serialize.maxLabelLength` as the marker writer reads it: 8-120, 1-7 means 8, anything else 120. */
+function markerLabelBound(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) return MENTION_MARKER_MAX_LABEL_LENGTH;
+  return Math.min(MENTION_MARKER_MAX_LABEL_LENGTH, Math.max(MIN_MARKER_LABEL, value));
+}
+
 /**
  * The marker of `mention` in at most `room` UTF-16 units, its label
  * shortened (canonically, with `…`) when needed; `undefined` when it cannot
  * be written, would not survive the label line's whitespace cleaning, or
  * does not fit. An id with `:` is refused: every reader splits it there.
  */
-function markerWithin(mention: NonNullable<LabelPiece['mention']>, room: number, longest = 120): string | undefined {
+function markerWithin(mention: NonNullable<LabelPiece['mention']>, room: number, longest: number): string | undefined {
   if (mention.id.includes(':')) return undefined;
   let max = longest;
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -310,7 +316,7 @@ function markerWithin(mention: NonNullable<LabelPiece['mention']>, room: number,
  * then each such marker keeps room for what comes after it up to the last
  * marker, so one long label does not push the others out.
  */
-function labelLine(pieces: ReadonlyArray<LabelPiece>): string {
+function labelLine(pieces: ReadonlyArray<LabelPiece>, maxLabelLength: number): string {
   const kept = pieces
     .map((piece) => ({ ...piece, plain: oneLine(piece.plain) }))
     .filter((piece) => piece.plain);
@@ -334,7 +340,7 @@ function labelLine(pieces: ReadonlyArray<LabelPiece>): string {
     reserved -= least[index]!;
     const separator = line ? 1 : 0;
     const room = CHAT_COMMAND_MAX_LABEL_LENGTH - line.length - separator - reserved;
-    const marker = planned[index] && piece.mention ? markerWithin(piece.mention, room) : undefined;
+    const marker = planned[index] && piece.mention ? markerWithin(piece.mention, room, maxLabelLength) : undefined;
     line += `${separator ? ' ' : ''}${marker ?? piece.plain}`;
   });
   return line;
@@ -351,6 +357,27 @@ function withoutToken(text: string, token: string): { text: string; found: boole
  * send plans. App definitions replace derived ones of the same id or type.
  */
 export function createChatInteractionRegistry(config: ChatInteractionsConfig): ChatInteractionRegistry {
+  return createChatInteractionRegistryWith(config, {});
+}
+
+/**
+ * How a direct command's label line writes mentions; the provider passes the
+ * app's `mentions.serialize` here. Internal: not exported from the package.
+ */
+export interface ChatCommandLabelOptions {
+  /** `false` (`mentions.serialize.enabled: false`): the plain line of releases before, no markers. Default `true`. */
+  readonly labelMarkers?: boolean;
+  /** Upper bound of a marker label (`mentions.serialize.maxLabelLength`); the line's limit can shorten it further. */
+  readonly maxLabelLength?: number;
+}
+
+/** `createChatInteractionRegistry` with the label options of the provider. Internal. */
+export function createChatInteractionRegistryWith(
+  config: ChatInteractionsConfig,
+  labelOptions: ChatCommandLabelOptions,
+): ChatInteractionRegistry {
+  const labelMarkers = labelOptions.labelMarkers !== false;
+  const maxMarkerLabel = markerLabelBound(labelOptions.maxLabelLength);
   const locale = config.locale ?? 'en';
   const entities = new Map<string, ChatEntityDefinition>();
   for (const entity of config.data ? entitiesFromData(config.data, config) : []) entities.set(entity.type, entity);
@@ -567,6 +594,24 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
     if (serializeChatCommandArgs(args) === undefined) {
       return { status: 'needs-args', request: { ...pending, values: merged, valueLabels, error: 'invalid' } };
     }
+    if (!labelMarkers) {
+      // Mention markup turned off by the app: the plain line, exactly as before markers.
+      const plainShown = pending.args
+        .filter((arg) => merged[arg.name])
+        .map((arg) => (arg.entity ? `@${valueLabels[arg.name] || merged[arg.name]}` : merged[arg.name]!));
+      const plainEntities = Object.entries(valueLabels)
+        .filter(([name]) => !pending.args.some((arg) => arg.name === name))
+        .map(([, label]) => `@${label}`);
+      return {
+        status: 'send',
+        text: formatChatCommandMessage({
+          commandId: pending.commandId,
+          tool: pending.tool,
+          args,
+          label: [`/${pending.label}`, ...plainEntities, ...plainShown].join(' '),
+        }),
+      };
+    }
     // A picked entity (type, id and label known) is shown as a mention pill; anything else as plain text.
     const entityPiece = (name: string, type: string | undefined, label: string | undefined): LabelPiece => {
       const id = merged[name];
@@ -594,7 +639,7 @@ export function createChatInteractionRegistry(config: ChatInteractionsConfig): C
         commandId: pending.commandId,
         tool: pending.tool,
         args,
-        label: labelLine([command, ...entityLabels, ...shown]),
+        label: labelLine([command, ...entityLabels, ...shown], maxMarkerLabel),
       }),
     };
   };

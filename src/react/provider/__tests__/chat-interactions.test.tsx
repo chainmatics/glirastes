@@ -7,7 +7,7 @@ import type { ChatInteractionsData } from '../../../contracts/chat-interactions.
 import { MessageBubble } from '../../components/message-bubble.js';
 import { defineChatCommand, defineChatEntity } from '../../interactions/definitions.js';
 import { useChatInteractionsData } from '../../interactions/use-chat-interactions-data.js';
-import type { ChatMessage, ChatTransport, MentionData } from '../../types.js';
+import type { ChatMessage, ChatTransport, MentionConfig, MentionData } from '../../types.js';
 import { AiChatProvider } from '../ai-chat-provider.js';
 import { useChatContext, type ChatContextValue } from '../chat-context.js';
 
@@ -52,7 +52,7 @@ function transport(messages: ChatMessage[] = []): ChatTransport & { sendMessage:
   };
 }
 
-function mount(chat: ChatTransport) {
+function mount(chat: ChatTransport, mentions?: MentionConfig) {
   let context: ChatContextValue | undefined;
   function Probe() {
     context = useChatContext();
@@ -60,7 +60,7 @@ function mount(chat: ChatTransport) {
   }
   function Harness({ children }: { children?: ReactNode }) {
     const interactions = useMemo(() => ({ data, entities: [person], commands: [standup] }), []);
-    return <AiChatProvider transport={chat} chatInteractions={interactions}><Probe />{children}</AiChatProvider>;
+    return <AiChatProvider transport={chat} chatInteractions={interactions} {...(mentions ? { mentions } : {})}><Probe />{children}</AiChatProvider>;
   }
   render(<Harness />);
   return () => context!;
@@ -131,6 +131,32 @@ describe('chat interactions in AiChatProvider', () => {
     const view = render(<AiChatProvider transport={transport([message])}><MessageBubble message={message} /></AiChatProvider>);
     expect(view.container.textContent).toContain('/Open Overview');
     expect(view.container.innerHTML).not.toContain('glirastes:command');
+  });
+
+  describe('label line and mentions.serialize', () => {
+    const withSerialize = (serialize: MentionConfig['serialize']): MentionConfig => ({
+      types: [], search: async () => [], resolve: async (id, type) => ({ id, type, label: id }), serialize,
+    });
+    const sentLabel = async (serialize: MentionConfig['serialize'], label = 'Release prüfen') => {
+      const chat = transport();
+      const context = mount(chat, withSerialize(serialize));
+      await act(async () => { context().runEntityAction({ type: 'task', id: '7', label }, 'task.tasks.complete'); });
+      return parseChatCommandMessage(chat.sendMessage.mock.calls[0]![0].text as string)?.label;
+    };
+
+    it('keeps the plain label line when the app turned mention markup off', async () => {
+      expect(await sentLabel({ enabled: false })).toBe('/Complete @Release prüfen');
+    });
+
+    it('bounds the labels in the markers by maxLabelLength', async () => {
+      expect(await sentLabel({ maxLabelLength: 8 }))
+        .toBe('{{mention:command:task.tasks.complete:Complete}} {{mention:task:7:Release…}}');
+    });
+
+    it('writes canonical markers also with labels: raw', async () => {
+      expect(await sentLabel({ labels: 'raw' }, 'A}}B <!-- x -->'))
+        .toBe('{{mention:command:task.tasks.complete:Complete}} {{mention:task:7:A｝｝B ‹!-- x --›}}');
+    });
   });
 
   it('shows the command and the picked objects of a sent command as pills', async () => {
