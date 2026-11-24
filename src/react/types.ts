@@ -73,8 +73,12 @@ export interface ChatTransport {
   status: 'ready' | 'submitted' | 'streaming' | 'error';
   /** Current error, if any */
   error: Error | null;
-  /** Send a user message; `files` only with a transport that supports attachments. */
-  sendMessage(opts: { text: string; files?: FilePart[] }): Promise<void>;
+  /**
+   * Send a user message; `files` only with a transport that supports attachments.
+   * `options.viewContext: false` (passed by a provider with `viewContext.enabled: false`):
+   * this message carries no view context. The provider passes no second argument otherwise.
+   */
+  sendMessage(opts: { text: string; files?: FilePart[] }, options?: { viewContext?: boolean }): Promise<void>;
   /** Stop the current generation */
   stop(): void;
   /** Replace the message list (for session restore, sanitization) */
@@ -113,12 +117,6 @@ export interface ChatTransport {
    * (`Content-Language`), or null for none (`sendLanguage: false`, unknown).
    */
   setRequestLanguage?(language: string | null): void;
-  /**
-   * Called by the provider (`viewContext.enabled`): whether a new user
-   * message carries the view context the page registered
-   * (`glirastesViewContext`). A transport without it sends none.
-   */
-  setRequestViewContext?(enabled: boolean): void;
 }
 
 /**

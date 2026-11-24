@@ -24,7 +24,8 @@ import { viewContextState } from './view-context-store.js';
 
 /**
  * Registers what the user looks at for `source` (a name the caller owns,
- * such as `'order-page'`), replacing that source's earlier entry in place;
+ * such as `'order-page'`; development builds show it in console warnings,
+ * so it holds no record id or personal data), replacing that source's earlier entry in place;
  * `null` unregisters it (registered again, it comes last). Returns a function
  * that unregisters this registration (and nothing a later call for the same
  * source registered).
@@ -90,7 +91,9 @@ function isDevelopment(): boolean {
   }
 }
 
+/** Source and reason pairs already named; bounded, so remounting sources do not grow it without end. */
 const warned = new Set<string>();
+const MAX_WARNED = 200;
 const WARNED_FIELD_REASONS = new Set(['facts-too-large', 'facts-invalid']);
 
 /** Development only, once per source and reason; names the source and reason codes, never a value. */
@@ -99,6 +102,7 @@ function warnDropped(sources: ReadonlyArray<string>, copies: ReadonlyArray<unkno
   const warn = (source: string, reasons: ReadonlyArray<string>) => {
     const fresh = reasons.filter((reason) => !warned.has(`${source}\u0000${reason}`));
     if (fresh.length === 0) return;
+    if (warned.size + fresh.length > MAX_WARNED) warned.clear();
     for (const reason of fresh) warned.add(`${source}\u0000${reason}`);
     console.warn(`[glirastes] View context of "${source}" not sent as registered: ${fresh.join(', ')}`);
   };

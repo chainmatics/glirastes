@@ -135,6 +135,19 @@ describe('registerViewContext', () => {
 });
 
 describe('the request body field', () => {
+  it('reading it for a send creates no global state on a page that never registered anything', () => {
+    const key = Symbol.for('glirastes.viewContext');
+    const scope = globalThis as Record<symbol, unknown>;
+    const saved = scope[key];
+    delete scope[key];
+    try {
+      expect(viewContextRequestBody()).toBeUndefined();
+      expect(key in scope).toBe(false);
+    } finally {
+      if (saved !== undefined) scope[key] = saved;
+    }
+  });
+
   it('fails closed: an entry without the cleaning snapshot is not sent', () => {
     const state = viewContextState();
     const saved = state.snapshot;
@@ -196,6 +209,28 @@ describe('development warnings', () => {
       register('late', { label: 'x' } as unknown as ViewContextEntry);
       currentViewContext();
       expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps a bounded memory of what it named: after many sources an early one is named again', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NODE_ENV', 'development');
+    const bad = { label: 'x' } as unknown as ViewContextEntry;
+    try {
+      const named = (source: string) => {
+        const off = registerViewContext(source, bad);
+        warn.mockClear();
+        currentViewContext();
+        off();
+        return warn.mock.calls.length;
+      };
+      expect(named('early')).toBe(1);
+      expect(named('early')).toBe(0);
+      for (let index = 0; index < 250; index += 1) named(`remount-${index}`);
+      expect(named('early')).toBe(1);
     } finally {
       vi.unstubAllEnvs();
       warn.mockRestore();

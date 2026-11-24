@@ -146,12 +146,6 @@ export function useVercelAiChatTransport(
     languageRef.current = language;
   }, []);
 
-  // Set by the provider (`viewContext.enabled`): whether a new message carries the page's view context.
-  const viewContextRef = useRef(true);
-  const setRequestViewContext = useCallback((enabled: boolean) => {
-    viewContextRef.current = enabled;
-  }, []);
-
   const onDataRef = useRef(onData);
   onDataRef.current = onData;
 
@@ -218,10 +212,10 @@ export function useVercelAiChatTransport(
   });
 
   const send = useCallback(
-    ({ text, files }: { text: string; files?: FilePart[] }) => {
-      // A new user message carries the view context as it is now; continuations
-      // (approval resume, continueTurn, budget) send none. No registration, no field.
-      const viewContext = viewContextRef.current ? viewContextRequestBody() : undefined;
+    ({ text, files }: { text: string; files?: FilePart[] }, sendOptions?: { viewContext?: boolean }) => {
+      // A new user message carries the view context as it is now, unless its provider has it off;
+      // continuations (approval resume, continueTurn, budget) send none. No registration, no field.
+      const viewContext = sendOptions?.viewContext === false ? undefined : viewContextRequestBody();
       const options = viewContext ? { body: viewContext } : undefined;
       if (!files || files.length === 0) return sendMessage({ text }, options);
       // Only the open metadata record differs from the SDK's JSON-typed one.
@@ -256,11 +250,10 @@ export function useVercelAiChatTransport(
       addToolApprovalResponse,
       subscribeToData,
       setRequestLanguage,
-      setRequestViewContext,
       continueAfterBudgetStop,
       ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
     [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
-      setRequestLanguage, setRequestViewContext, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
+      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
   );
 }

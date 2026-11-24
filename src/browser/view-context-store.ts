@@ -25,13 +25,18 @@ export interface ViewContextState {
 
 const STATE = Symbol.for('glirastes.viewContext');
 
+/** The state if a registration created it, without creating it. @internal */
+export function peekViewContextState(): ViewContextState | undefined {
+  const found = (globalThis as Record<symbol, unknown>)[STATE] as ViewContextState | undefined;
+  return found && found.entries instanceof Map ? found : undefined;
+}
+
 /** @internal */
 export function viewContextState(): ViewContextState {
-  const scope = globalThis as Record<symbol, unknown>;
-  const found = scope[STATE] as ViewContextState | undefined;
-  if (found && found.entries instanceof Map) return found;
+  const found = peekViewContextState();
+  if (found) return found;
   const state: ViewContextState = { entries: new Map() };
-  scope[STATE] = state;
+  (globalThis as Record<symbol, unknown>)[STATE] = state;
   return state;
 }
 
@@ -46,8 +51,9 @@ export const VIEW_CONTEXT_REQUEST_FIELD = 'glirastesViewContext';
  * and never sent. @internal
  */
 export function viewContextRequestBody(): Record<string, unknown> | undefined {
-  const state = viewContextState();
-  if (state.entries.size === 0 || typeof state.snapshot !== 'function') return undefined;
+  // Read only: a page that never registers anything gets no global state from a send.
+  const state = peekViewContextState();
+  if (!state || state.entries.size === 0 || typeof state.snapshot !== 'function') return undefined;
   let current: ViewContextEntry[];
   try {
     current = state.snapshot();

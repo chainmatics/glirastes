@@ -4,6 +4,7 @@ import {
   useCallback,
   useMemo,
   useEffect,
+  useLayoutEffect,
   type ReactNode,
   type CSSProperties,
 } from 'react';
@@ -697,6 +698,9 @@ function lastStepAwaitsApproval(messages: ReadonlyArray<{ role: string; parts: R
  * }
  * ```
  */
+/** A layout effect in the browser (it runs before any child's passive effect), a plain effect on the server. */
+const useCommitEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
 const ACTIVITY_DETAILS = new Set<ActivityLogDetails>(['auto', 'results', 'all', 'none']);
 
 export function AiChatProvider({
@@ -1333,15 +1337,21 @@ export function AiChatProvider({
     setRequestLanguage(requestLanguage);
     return () => setRequestLanguage(null);
   }, [setRequestLanguage, requestLanguage]);
-  // Whether a new user message carries the page's view context (default on: nothing goes while nothing is
-  // registered). Fail closed: "off" reaches the transport during this render, before any child effect can send;
-  // "on" only once committed, so a render React discards never turns it on.
+  // Whether this provider's new user messages carry the page's view context (default on: nothing goes while
+  // nothing is registered). Decided per send from this provider's committed setting, nothing is stored on the
+  // transport: providers sharing one do not affect each other, and a render React discards changes nothing.
+  // Set in a layout effect, so every passive effect of the same commit (a child sending on mount) sees it.
   const viewContextEnabled = viewContext?.enabled !== false;
-  const setRequestViewContext = resolvedTransport.setRequestViewContext;
-  if (!viewContextEnabled) setRequestViewContext?.(false);
-  useEffect(() => {
-    if (setRequestViewContext && viewContextEnabled) setRequestViewContext(true);
-  }, [setRequestViewContext, viewContextEnabled]);
+  const viewContextCommittedRef = useRef(viewContextEnabled);
+  useCommitEffect(() => {
+    viewContextCommittedRef.current = viewContextEnabled;
+  });
+  const sendToTransport = useCallback<ChatTransport['sendMessage']>(
+    (message) => (viewContextCommittedRef.current
+      ? sendMessage(message)
+      : sendMessage(message, { viewContext: false })),
+    [sendMessage],
+  );
   const setUiOutcomeReporting = resolvedTransport.setUiOutcomeReporting;
   useEffect(() => {
     if (!setUiOutcomeReporting) return undefined;
@@ -2047,7 +2057,7 @@ export function AiChatProvider({
       setPendingApprovalsMap(new Map());
     }
 
-    await sendMessage(files && files.length > 0 ? { text: processedMessage, files } : { text: processedMessage });
+    await sendToTransport(files && files.length > 0 ? { text: processedMessage, files } : { text: processedMessage });
     if (deliverOptions?.keepComposer) return true;
     setActiveMentions([]);
     setMentionQuery('');
@@ -2058,7 +2068,7 @@ export function AiChatProvider({
   }, [
     rawMessages,
     setMessages,
-    sendMessage,
+    sendToTransport,
     pendingApprovalsMap,
   ]);
 
@@ -2870,8 +2880,8 @@ export function AiChatProvider({
   // Truncation
   const continueTruncation = useCallback(async () => {
     setTruncation(null);
-    await sendMessage({ text: continueMessage });
-  }, [sendMessage, continueMessage]);
+    await sendToTransport({ text: continueMessage });
+  }, [sendToTransport, continueMessage]);
 
   const dismissTruncation = useCallback(() => {
     setTruncation(null);

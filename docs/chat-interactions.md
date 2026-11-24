@@ -267,6 +267,9 @@ const unregister = registerViewContext('order-page', { entity: { type: 'order', 
 // on leaving the page: unregister(), or registerViewContext('order-page', null)
 ```
 
+The source name shows in development console warnings: name the view
+(`'order-page'`), never put a record id or personal data in it.
+
 One entry per source (`useViewContext` takes one per component, with a
 source name of its own, also across several React roots); an update keeps
 its place, sources are sent in the order they first registered, and a
@@ -321,18 +324,28 @@ follow-up, the "continue" message after a cut-off answer, and a direct `/`
 command (the server adds no block for a direct command). A request without a
 new user message (approval resume, `continueTurn` after a UI action,
 "Continue" after a budget stop) carries none: the server would not use it
-there. Nothing registered, no field: the request is exactly as before. With
-an entry registered, the field replaces a `glirastesViewContext` the app
-puts into `bodyExtras`. `viewContext={{ enabled: false }}` on
-`AiChatProvider` / `VercelAiChat` (`config.viewContext` of
-`<glirastes-chat>`) sends none, also for a message sent in the same render
-(a child's mount effect, the element's `glirastes-chat:ready` event); the
-element renders a pending `enabled: false` before its `send()` and, when
-React cannot render at that moment, does not send (`send()` returns
-`false`). An own transport sends nothing unless it adds the field itself
-from `currentViewContext()`. The transport reaches the cleaning code only
-through `registerViewContext`: an app that never registers anything does
-not load it.
+there. Nothing registered, no field: the request is exactly as before. When
+it is on and the cleaned snapshot is not empty, the field replaces a
+`glirastesViewContext` the app puts into `bodyExtras`.
+
+`viewContext={{ enabled: false }}` on `AiChatProvider` / `VercelAiChat`
+(`config.viewContext` of `<glirastes-chat>`) sends none. The provider decides
+per message from its committed render and hands the transport
+`sendMessage(message, { viewContext: false })`; nothing is stored on the
+transport, so two providers sharing one do not affect each other, and a
+render React discards changes nothing. A child that sends in its mount
+effect already sees the setting. React semantics apply to a state change:
+`setOff(true); send()` in the same event handler sends with the setting of
+the last render (still on); turn it off a render before sending. For
+`<glirastes-chat>` set `config` before appending the element. A `send()`
+right after setting `config.viewContext.enabled: false` (in the
+`glirastes-chat:ready` handler or a host effect) returns `true` and is held
+until the chat rendered that config, then sent without the field; without
+that switch `send()` behaves as before. An own transport sends nothing
+unless it adds the field itself from `currentViewContext()` (and leaves it
+out when called with `{ viewContext: false }`). The transport reaches the
+cleaning code only through `registerViewContext`: an app that never
+registers anything does not load it and gets no global state from a send.
 
 Limits of this release:
 
