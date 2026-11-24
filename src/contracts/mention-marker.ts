@@ -48,7 +48,7 @@
  * | `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (single `<` `>` stay) |
  * | nothing left | the canonical id |
  * | over 120 (or `maxLength`) code points | cut at a grapheme boundary (`Intl.Segmenter`; without it, never before a mark, joiner or selector, after a joiner or virama, or inside a flag or keycap; other clusters such as Thai Sara Am can then be split) to at most 119 and `…`; a bare `…` becomes the id; never empty |
- * | a value the cut would split (the token at the cut or the first after it has a digit, `@ / : + _ % = # & ~ \ |` or a dot inside: email, IBAN, phone number, URL) | left out whole, with the value parts and separators right before it (`+49 170 1234567`, `DE89 3704 …`), so a PII detector on the server never gets a fragment it cannot recognise; `cut: 'grapheme'` keeps the 0.24.2 cut |
+ * | a value the cut would split (the token at the cut or the first after it has a digit, `@ / : + _ % = # & ~ \ |` or a dot inside: email, IBAN, phone number, URL) | left out whole, with the value parts and separators right before it (`+49 170 1234567`, `DE89 3704 …`), so a PII detector on the server never gets a fragment it cannot recognise. Only with `cut: 'value-safe'` (the React chat's send path); the default `grapheme` cuts as in 0.24.2 |
  *
  * No NFKC: look-alikes such as `｛` or fullwidth letters stay as they are.
  * They are visible to the user, so the chip still shows what the model reads.
@@ -189,13 +189,14 @@ export interface CanonicalMentionLabelOptions {
    */
   maxLength?: number;
   /**
-   * How a label over `maxLength` is cut. `value-safe` (default): at a
-   * grapheme boundary, and a value the cut would split (a token with a
-   * digit, `@`, `/`, `:`, `+` … or a dot inside, such as an email, IBAN,
-   * phone number or URL) is left out whole, with the value parts and
-   * separators right before it, so a PII detector on the server never gets
-   * a fragment it cannot recognise. `grapheme`: at a grapheme boundary
-   * only, as in 0.24.2. Labels within `maxLength` are the same either way.
+   * How a label over `maxLength` is cut. `grapheme` (default, unchanged
+   * since 0.24.2): at a grapheme boundary only. `value-safe`: at a grapheme
+   * boundary, and a value the cut would split (a token with a digit, `@`,
+   * `/`, `:`, `+` … or a dot inside, such as an email, IBAN, phone number
+   * or URL) is left out whole, with the value parts and separators right
+   * before it, so a PII detector on the server never gets a fragment it
+   * cannot recognise; the React chat sends mention labels with it. Labels
+   * within `maxLength` are the same either way.
    */
   cut?: MentionLabelCut;
 }
@@ -505,7 +506,7 @@ function truncated(visible: string, max: number, cut: MentionLabelCut): string {
  */
 export function canonicalMentionLabel(label: string, options?: CanonicalMentionLabelOptions): string {
   const max = labelLength(options?.maxLength);
-  const cut: MentionLabelCut = options?.cut === 'grapheme' ? 'grapheme' : 'value-safe';
+  const cut: MentionLabelCut = options?.cut === 'value-safe' ? 'value-safe' : 'grapheme';
   const fromId = () => (typeof options?.id === 'string' ? truncated(visibleLabel(options.id), max, cut) : '');
   const visible = visibleLabel(typeof label === 'string' ? label : '');
   // Never empty: a marker with an empty label is read by no reader.
@@ -645,7 +646,7 @@ export interface SerializeMentionMarkerOptions {
   labels?: 'canonical' | 'raw';
   /** Code points of a canonical label, 8-120 (default 120; 1-7 means 8, other values the default). */
   maxLabelLength?: number;
-  /** How an over-long canonical label is cut (`CanonicalMentionLabelOptions.cut`); default `value-safe`. */
+  /** How an over-long canonical label is cut (`CanonicalMentionLabelOptions.cut`); default `grapheme`, the React chat sends `value-safe`. */
   labelCut?: MentionLabelCut;
 }
 

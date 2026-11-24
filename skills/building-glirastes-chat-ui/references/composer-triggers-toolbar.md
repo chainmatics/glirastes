@@ -94,8 +94,11 @@ whitespace trimmed, control runs one space; at most `maxLabelLength`
 value the cut would split (a token with a digit, `@`, `/`, `:`, `+` … or a
 dot inside: e-mail, IBAN, phone number, URL) is left out whole, also with
 spaces (`+49 170 1234567`), so the server's PII shield never sees a
-fragment it cannot recognise (`labelCut: 'value-safe'`, the default;
-`labelCut: 'grapheme'` keeps the 0.24.2 cut, `MentionLabelCut`). A type
+fragment it cannot recognise (`labelCut: 'value-safe'`, the chat's
+default; dates, prices, file names and versions at the edge go too, a
+label of only values becomes the id; `labelCut: 'grapheme'` keeps the
+0.24.2 cut, `MentionLabelCut`). Not covered: text stored by 0.24.2
+clients, names cut inside a word. A type
 or id with control, format, invisible, private-use or unassigned
 characters, `}`, `{{`, `<!`, `-->` or `--!>` gets no marker: the typed
 token stays and the model loses the id (console warning once per type,
@@ -104,7 +107,8 @@ only in development).
 text shows as before).
 
 From `glirastes/contracts`, for own parsers and server code:
-`canonicalMentionLabel(label, { id?, maxLength?, cut? })` (`CanonicalMentionLabelOptions`),
+`canonicalMentionLabel(label, { id?, maxLength?, cut? })` (`CanonicalMentionLabelOptions`;
+`cut` defaults to `'grapheme'`, pass `'value-safe'` in an own client),
 `parseMentionMarkers(text)` (`ParsedMentionMarker`: `type`, `id`, `label`,
 `canonical`, `span`; same matches as the old regex, linear),
 `serializeMentionMarker({ type, id, label }, { labels?, maxLabelLength?, labelCut? })`

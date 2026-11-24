@@ -331,7 +331,8 @@ function ordinaryLabel(next: () => number): string {
   return parts.join(next() < 0.9 ? ' ' : '  ');
 }
 
-describe('canonicalMentionLabel: a cut never splits a value', () => {
+describe('canonicalMentionLabel cut: value-safe never splits a value', () => {
+  const SAFE = { cut: 'value-safe' } as const;
   const pad = (length: number) => 'Notiz '.repeat(30).slice(0, length - 1);
   it.each<[string, string, string]>([
     ['email', `${pad(108)} max.mustermann@kanzlei-wendt.de Ende`, `${pad(108)}…`],
@@ -344,31 +345,32 @@ describe('canonicalMentionLabel: a cut never splits a value', () => {
     ['URL', `${pad(100)} https://crm.kundenportal.de/kunden/4711 Ende`, `${pad(100)}…`],
     ['number', `${pad(113)} 1234567 Ende`, `${pad(113)}…`],
   ])('%s', (_name, label, expected) => {
-    const once = canonicalMentionLabel(label);
+    const once = canonicalMentionLabel(label, SAFE);
     expect(once).toBe(expected);
+    expect(canonicalMentionLabel(once, SAFE)).toBe(once);
     expect(canonicalMentionLabel(once)).toBe(once);
   });
 
   it('keeps a value that ends before the cut, and the word cut after it', () => {
     const label = `${pad(80)} max@kanzlei-wendt.de Rückrufbitte Rückrufbitte Rückrufbitte`;
-    expect(canonicalMentionLabel(label)).toBe(`${label.slice(0, 119)}…`);
+    expect(canonicalMentionLabel(label, SAFE)).toBe(`${label.slice(0, 119)}…`);
   });
 
   it('a label that is one value over the limit falls back to the id', () => {
-    expect(canonicalMentionLabel(`https://example.com/${'a'.repeat(200)}`, { id: 'doc-1' })).toBe('doc-1');
-    expect(canonicalMentionLabel('12345678901', { maxLength: 8 })).toBe('…');
+    expect(canonicalMentionLabel(`https://example.com/${'a'.repeat(200)}`, { id: 'doc-1', ...SAFE })).toBe('doc-1');
+    expect(canonicalMentionLabel('12345678901', { maxLength: 8, ...SAFE })).toBe('…');
   });
 
-  it('cut: grapheme keeps the cut of 0.24.2', () => {
+  it('the default of the contract functions stays the 0.24.2 cut; value-safe is opt-in', () => {
     const label = `${pad(108)} max.mustermann@kanzlei-wendt.de Ende`;
+    expect(canonicalMentionLabel(label)).toBe(`${label.slice(0, 119)}…`);
     expect(canonicalMentionLabel(label, { cut: 'grapheme' })).toBe(`${label.slice(0, 119)}…`);
-    expect(serializeMentionMarker({ type: 'c', id: '1', label }, { labelCut: 'grapheme' }))
-      .toBe(`{{mention:c:1:${label.slice(0, 119)}…}}`);
-    expect(serializeMentionMarker({ type: 'c', id: '1', label })).toBe(`{{mention:c:1:${pad(108)}…}}`);
+    expect(serializeMentionMarker({ type: 'c', id: '1', label })).toBe(`{{mention:c:1:${label.slice(0, 119)}…}}`);
+    expect(serializeMentionMarker({ type: 'c', id: '1', label }, { labelCut: 'value-safe' })).toBe(`{{mention:c:1:${pad(108)}…}}`);
   });
 
   it('honours maxLength', () => {
-    expect(canonicalMentionLabel('Tel +49 170 1234567', { maxLength: 8 })).toBe('Tel…');
+    expect(canonicalMentionLabel('Tel +49 170 1234567', { maxLength: 8, ...SAFE })).toBe('Tel…');
   });
 
   it('ordinary labels are cut exactly as in 0.24.2 (difference probe, 60 000 seeded labels)', () => {
@@ -377,7 +379,7 @@ describe('canonicalMentionLabel: a cut never splits a value', () => {
     for (let run = 0; run < 60_000; run += 1) {
       const label = ordinaryLabel(next);
       const maxLength = next() < 0.8 ? undefined : 8 + Math.floor(next() * 113);
-      const safe = canonicalMentionLabel(label, { id: 'id-1', maxLength });
+      const safe = canonicalMentionLabel(label, { id: 'id-1', maxLength, ...SAFE });
       if (safe.endsWith('…')) over += 1;
       expect(safe, JSON.stringify({ label, maxLength })).toBe(canonicalMentionLabel(label, { id: 'id-1', maxLength, cut: 'grapheme' }));
     }
@@ -395,10 +397,10 @@ describe('canonicalMentionLabel: a cut never splits a value', () => {
       }
       const label = parts.join(' ');
       const maxLength = 8 + Math.floor(next() * 113);
-      const once = canonicalMentionLabel(label, { id: 'id-1', maxLength });
+      const once = canonicalMentionLabel(label, { id: 'id-1', maxLength, ...SAFE });
       const context = JSON.stringify({ label, maxLength });
       expect(codePoints(once), context).toBeLessThanOrEqual(maxLength);
-      expect(canonicalMentionLabel(once, { id: 'id-1', maxLength }), context).toBe(once);
+      expect(canonicalMentionLabel(once, { id: 'id-1', maxLength, ...SAFE }), context).toBe(once);
       expect(canonicalMentionLabel(once), context).toBe(once);
     }
   }, 30_000);

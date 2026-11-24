@@ -249,7 +249,7 @@ to labels only.
 | private use (icon fonts), noncharacters, U+2800, lone surrogates | removed |
 | unassigned code points | kept (what is unassigned depends on the engine's Unicode version; removing it would remove new emoji in older browsers) |
 | more than `maxLabelLength` code points (8-120, default 120; 1-7 means 8, anything else the default) | at most the first 119 and `…`, cut at a grapheme boundary with `Intl.Segmenter`, never inside an emoji, flag, keycap, conjunct or Thai cluster; without `Intl.Segmenter` the cut avoids marks, joiners, viramas, flags and keycaps but can split other clusters such as Thai Sara Am; a bare `…` becomes the id, and the label is never empty |
-| a value the cut would split: the token at the cut, or the first after it, has a digit, `@ / : + _ % = # & ~ \ |` or a dot inside (e-mail, IBAN, phone number, URL, date, number; keycap emoji such as 1️⃣ do not count) | left out whole, with the value parts and separators right before it (`+49 170 1234567`, `DE89 3704 0044 …`, `Tel. +49 (30) / 1234`), so the server's PII shield never gets a fragment it no longer recognises (`max.musterm…`). Since the release after 0.24.2; `mentions: { serialize: { labelCut: 'grapheme' } }` keeps the cut of 0.24.2. Labels within `maxLabelLength`, and cuts in a plain word, are the same either way. A label that is one value over the limit becomes the id |
+| a value the cut would split: the token at the cut, or the first after it, has a digit, `@ / : + _ % = # & ~ \ |` or a dot between letters or digits (e-mail, IBAN, phone number, URL, but also a date, time, price, file name, path, case number or version; keycap emoji such as 1️⃣ do not count) | left out whole, with the value-like tokens and separators right before it (`+49 170 1234567`, `DE89 3704 0044 …`, `Tel. +49 (30) / 1234`), so the server's PII shield never gets a fragment it no longer recognises (`max.musterm…`). `… Office 365 …` at the edge becomes `… Office…`; a label full of numbers can shrink to its first word (`Messwerte 100 101 …` → `Messwerte…`); a label that is only values becomes the id. Since the release after 0.24.2, in the React chat's send path (`mentions: { serialize: { labelCut: 'value-safe' } }`, the default); `labelCut: 'grapheme'` keeps the cut of 0.24.2. Labels within `maxLabelLength`, and cuts in a plain word, are the same either way. The contract functions `canonicalMentionLabel` / `serializeMentionMarker` cut as in 0.24.2 unless called with `cut: 'value-safe'` / `labelCut: 'value-safe'` |
 | nothing visible left | the id |
 
 The text is NFC. No NFKC: look-alikes such as `｛` stay, and they are
@@ -303,6 +303,18 @@ parses as a clarification answer. And a label can forge sibling entries
 (`Bob (ID: 9), Admin (ID: 1, …)`) inside the free-text context block. The
 default `react-markdown` renderer shows other HTML comments as text; a
 custom `Markdown` with `rehype-raw` hides them, while the model reads them.
+
+Known limits of the value-safe cut (PII shield): text already stored by a
+0.24.2 client keeps its cut label (`…max.musterm…`), and the shield sees
+that fragment again in every later turn that sends the history; a 0.24.2
+client that still runs keeps cutting as before. A name or street without
+digits that the cut splits inside the word (`Maximilian Muster…`) stays a
+fragment for a name detector. A value a custom detector finds without a
+digit, a dot inside or one of `@ / : + _ % = # & ~ \ |` is not treated as a
+value. An own client or server that calls `canonicalMentionLabel` /
+`serializeMentionMarker` directly gets the 0.24.2 cut unless it passes
+`cut: 'value-safe'` / `labelCut: 'value-safe'`. Without upgrading,
+`labels: 'raw'` sends the label whole (without the canonical cleaning).
 
 ## Custom composers
 

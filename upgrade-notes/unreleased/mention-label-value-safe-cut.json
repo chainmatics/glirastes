@@ -1,20 +1,18 @@
 {
   "id": "mention-label-value-safe-cut",
   "kind": "recommended",
-  "summary": "Behavior change (fix since 0.24.2): a mention label over maxLabelLength is no longer cut inside an e-mail, IBAN, phone number or URL; the split value is left out whole, so the PII shield never gets an unrecognised fragment. Labels within the limit or cut in a plain word are unchanged.",
-  "howTo": "Nothing to do. With 0.24.2 a value that started shortly before the cut reached the model as a plain-text fragment (max.musterm…). Now, when the token at the cut or the first after it has a digit, @ / : + _ % = # & ~ \\ | or a dot inside, it is dropped with the value parts and separators before it (+49 170 1234567, DE89 3704 …); a label that is one value over the limit becomes the id. To keep the 0.24.2 cut: mentions: { serialize: { labelCut: 'grapheme' } } (contracts: canonicalMentionLabel(label, { cut: 'grapheme' }), serializeMentionMarker(m, { labelCut: 'grapheme' })). View context labels (60 code points) are cut the same way. Text stored by a 0.24.2 client keeps its cut label. See docs/chat-interactions.md, Mention markers.",
+  "summary": "Security fix, upgrade soon if you use piiShield (0.24.2 only): a mention label over 120 code points could send a fragment of an e-mail, IBAN or phone number past the shield. The chat now leaves a value at the cut out whole; labels within the limit or cut in a plain word are unchanged.",
+  "howTo": "Nothing to do in the React chat. Before: a value starting shortly before the cut reached the model as a plain-text fragment (max.musterm…, DE8937040…, +49 170 1…). Now, when the token at the cut or the first after it has a digit, @ / : + _ % = # & ~ \\ | or a dot inside, it is left out with the value parts and separators before it (+49 170 1234567, DE89 3704 …); dates, times, prices, file names, paths and versions at the edge go too, a label full of numbers can shrink to its first word, one that is only a value becomes the id. mentions: { serialize: { labelCut: 'grapheme' } } keeps the 0.24.2 cut. Own clients or servers that call canonicalMentionLabel / serializeMentionMarker directly keep the 0.24.2 cut by default and opt in with cut: 'value-safe' / labelCut: 'value-safe'. Without upgrading: mentions: { serialize: { labels: 'raw' } } sends labels whole as 0.24.1 did (without the canonical cleaning); a lower maxLabelLength does not help. Known limits: text stored by a 0.24.2 client keeps its cut label; names or streets without digits cut inside a word; values a custom detector finds without any of those characters; 0.24.2 clients still running. See docs/chat-interactions.md, Mention markers.",
   "skill": "building-glirastes-chat-ui#mention-markers",
   "affectedWhen": {
     "symbols": [
       "AiChatProvider",
       "serializeMentionsForSend",
-      "canonicalMentionLabel",
-      "serializeMentionMarker",
       "MentionSerializationConfig"
     ],
     "patterns": [
-      "maxLabelLength",
-      "piiShield"
+      "piiShield",
+      "maxLabelLength"
     ]
   },
   "adoptedWhen": {
