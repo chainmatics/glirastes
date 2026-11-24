@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `glirastes doctor` check `react-markdown` (`E-SETUP-109`, warning only): a non-test source file imports `glirastes/react` or `glirastes/embed`, dependencies are installed (`glirastes` is found under `node_modules` from the app folder upwards) and `react-markdown` is not, so every chat answer would show its raw Markdown source. Offline file lookup, no module resolution: under Yarn Plug'n'Play and before dependencies are installed the check is left out.
 - `composer.placeholderOnFocus` (`ComposerConfig`, on `AiChatProvider`, `VercelAiChat` and `<glirastes-chat>`) and the `RichMentionInput` prop `placeholderOnFocus`: `false` hides the placeholder of the pill composer as soon as the editor has focus, the earlier look. Passed on through `useChatComposerInput().inputProps`.
 
 ### Changed
 
+- The console warning without react-markdown names the package and no longer recommends `npm install`.
 - The placeholder of the pill composer (`RichMentionInput` in mention mode, the default composer with `chatInteractions` or `completionProviders`) stays visible while the empty editor has focus, until text or a pill is in it, like a native placeholder. It disappeared on focus before; `composer.placeholderOnFocus: false` keeps that.
 
 ### Fixed

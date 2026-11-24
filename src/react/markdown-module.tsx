@@ -22,7 +22,7 @@ export function loadMarkdownModule(): Promise<LoadedModule> {
     } catch {
       if (typeof console !== 'undefined') {
         console.warn(
-          '[MessageBubble] react-markdown is not installed — falling back to plain text. Install it with: npm install react-markdown',
+          '[MessageBubble] react-markdown is not installed — falling back to plain text. Add the package react-markdown (a peer dependency of glirastes) to the app with its package manager.',
         );
       }
       const Fallback: MarkdownModule['default'] = (({ children }) => (

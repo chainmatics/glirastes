@@ -12,6 +12,8 @@ import {
 import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import { inspectSkillsStaleness, skillsAutoUpdateDisabled } from './skills-auto-update.js';
 import { inspectVoiceWorklet } from './voice-worklet-check.js';
+import { inspectReactMarkdown } from './react-markdown-check.js';
+import { scanApp, type AppScan } from './upgrade/detect.js';
 export { formatDoctorReport } from './doctor-presentation.js';
 import {
   OBSOLETE_CONNECTION_VARIABLES,
@@ -153,10 +155,10 @@ async function agentSkillsCheck(rootDir: string, env: NodeJS.ProcessEnv): Promis
 }
 
 /** Only for apps that use voice input: without the served worklet every recording fails. */
-async function voiceWorkletCheck(rootDir: string): Promise<DoctorCheck | null> {
+async function voiceWorkletCheck(rootDir: string, scan: AppScan | undefined): Promise<DoctorCheck | null> {
   let inspection: Awaited<ReturnType<typeof inspectVoiceWorklet>>;
   try {
-    inspection = await inspectVoiceWorklet(rootDir);
+    inspection = await inspectVoiceWorklet(rootDir, scan);
   } catch {
     // An unreadable tree is reported by the project check.
     return null;
@@ -181,6 +183,25 @@ async function voiceWorkletCheck(rootDir: string): Promise<DoctorCheck | null> {
   return check('voice-worklet', 'fail', 'E-SETUP-034', 'provide-audio-worklet');
 }
 
+/**
+ * Only for apps that render the React chat once dependencies are installed:
+ * without react-markdown every answer shows its raw Markdown source. A hint,
+ * never a failure (the chat still works).
+ */
+async function reactMarkdownCheck(rootDir: string, scan: AppScan | undefined): Promise<DoctorCheck | null> {
+  let inspection: Awaited<ReturnType<typeof inspectReactMarkdown>>;
+  try {
+    inspection = await inspectReactMarkdown(rootDir, scan);
+  } catch {
+    // An unreadable tree is reported by the project check.
+    return null;
+  }
+  if (!inspection.chat || inspection.status === 'unknown') return null;
+  return inspection.status === 'pass'
+    ? check('react-markdown', 'pass', 'E-SETUP-109')
+    : check('react-markdown', 'warn', 'E-SETUP-109', 'install-react-markdown');
+}
+
 export async function createDoctorReport(
   options: CreateDoctorReportOptions,
 ): Promise<DoctorReport> {
@@ -197,7 +218,10 @@ export async function createDoctorReport(
     : hasConnectionDescriptor ? 'connected' : 'standalone';
   const checks: DoctorCheck[] = [];
   const skillsCheck = await agentSkillsCheck(rootDir, options.env ?? process.env);
-  const voiceCheck = await voiceWorkletCheck(rootDir);
+  // One scan of the app's sources for both checks; an unreadable tree lets each inspect on its own.
+  const scan = await scanApp(rootDir).catch(() => undefined);
+  const voiceCheck = await voiceWorkletCheck(rootDir, scan);
+  const markdownCheck = await reactMarkdownCheck(rootDir, scan);
   let profile: Awaited<ReturnType<typeof detectSetupProfile>>;
   try {
     profile = await detectSetupProfile({ rootDir, managed: options.managed });
@@ -212,6 +236,7 @@ export async function createDoctorReport(
         : 'repair-local-project-profile',
     ));
     if (voiceCheck) checks.push(voiceCheck);
+    if (markdownCheck) checks.push(markdownCheck);
     if (skillsCheck) checks.push(skillsCheck);
     return finish(mode, 0, checks);
   }
@@ -424,6 +449,7 @@ export async function createDoctorReport(
     : check('runtime-mode', 'fail', 'E-SETUP-009', 'align-explicit-runtime-mode'));
 
   if (voiceCheck) checks.push(voiceCheck);
+  if (markdownCheck) checks.push(markdownCheck);
   if (skillsCheck) checks.push(skillsCheck);
   return finish(mode, profile.toolCount, checks);
 }
