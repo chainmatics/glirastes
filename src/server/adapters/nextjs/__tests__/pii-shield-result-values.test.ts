@@ -106,3 +106,54 @@ describe('PII shield on tool-result values with JSON escapes', () => {
     expect(looked).toEqual([EMAIL]);
   });
 });
+
+describe('PII shield on two tool calls of one step at the same time', () => {
+  /** The model calls both tools in one step; the second result is only protected by a value of the first. */
+  async function parallelTurn(config: Partial<AiChatHandlerFullConfig>) {
+    let step = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        step += 1;
+        const chunks = step === 1
+          ? [
+            { type: 'tool-call', toolCallId: 'c1', toolName: 'a_get', input: '{}' },
+            { type: 'tool-call', toolCallId: 'c2', toolName: 'c_get', input: '{}' },
+          ]
+          : [{ type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'ok' }, { type: 'text-end', id: 't' }];
+        return {
+          stream: convertArrayToReadableStream([
+            { type: 'stream-start', warnings: [] },
+            ...chunks,
+            { type: 'finish', finishReason: { unified: step < 2 ? 'tool-calls' : 'stop', raw: undefined }, usage },
+          ] as never),
+        };
+      },
+    });
+    const tools = {
+      a_get: defineTool({ id: 'a.get', description: 'A.', inputSchema: z.object({}).strict(), execute: async () => ({ note: 'Tel 030 1234567\nRueckruf' }) }),
+      c_get: defineTool({
+        id: 'c.get', description: 'C.', inputSchema: z.object({}).strict(),
+        execute: async () => { await new Promise((resolve) => setTimeout(resolve, 5)); return { note: 'Tel030 1234567' }; },
+      }),
+    };
+    const inner = createRegexPiiDetector();
+    // A detector that answers after 20 ms, as a remote one does.
+    const piiShield = createPiiShield({
+      locale: 'de',
+      detector: { detect: async (text, locales) => { await new Promise((resolve) => setTimeout(resolve, 20)); return inner.detect(text, locales); } },
+    });
+    const handler = createAiChatHandler({ tools, model, systemPrompt: 'A', piiShield, ...config } as AiChatHandlerFullConfig);
+    await (await handler(post())).text();
+    return model.doStreamCalls.map((call) => promptStrings(call.prompt).join('\u0000'));
+  }
+
+  it.each([
+    ['with result handles', {}],
+    ['without result handles', { resultHandles: false }],
+  ] as const)('%s: neither result reaches the model with the number', async (_name, config) => {
+    const prompts = await parallelTurn(config);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('Rueckruf');
+    expect(prompts[1]).not.toContain('1234567');
+  });
+});

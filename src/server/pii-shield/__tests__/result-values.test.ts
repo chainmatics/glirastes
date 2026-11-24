@@ -168,6 +168,72 @@ describe('anonymizeResult never replaces less than the JSON-text detection did',
   });
 });
 
+/** The built-in detector, answering after `ms` (a remote detector, or one under load). */
+const slowDetector = (ms: number, inner: PiiDetector = createRegexPiiDetector()): PiiDetector => ({
+  detect: async (text, locales) => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return inner.detect(text, locales);
+  },
+});
+
+/** A: its JSON text finds the phone number, and it has an escape (a second detector call). C: only A's value protects it. */
+const A = { note: 'Tel 030 1234567\nRueckruf' };
+const C = { note: 'Tel030 1234567' };
+
+describe('results of one session shielded at the same time', () => {
+  it('a value one result learned from its JSON text protects a parallel result as before', async () => {
+    for (const detector of [createRegexPiiDetector(), slowDetector(20)]) {
+      const shield = shieldWith(detector);
+      const [a, c] = await Promise.all([shield.anonymizeResult(A, 's'), shield.anonymizeResult(C, 's')]);
+      expect(visible(a)).not.toContain('1234567');
+      expect(visible(c)).not.toContain('1234567');
+    }
+  });
+
+  it('only the second detector call fails: that result is refused, the next one is still protected', async () => {
+    const inner = createRegexPiiDetector();
+    let failed = false;
+    const detector: PiiDetector = {
+      detect: async (text, locales) => {
+        if (text.includes('\n') && !failed) { failed = true; throw new Error('detector timeout'); }
+        return inner.detect(text, locales);
+      },
+    };
+    const shield = shieldWith(detector);
+    await expect(shield.anonymizeResult(A, 's')).rejects.toThrow('detector timeout');
+    expect(visible(await shield.anonymizeResult(C, 's'))).not.toContain('1234567');
+  });
+});
+
+describe('the order of replacement across a session', () => {
+  /** `ab12cd` only right after a real line break (so only in decoded text); the longer value anywhere but not after a word character. */
+  const detector: PiiDetector = {
+    detect: (text) => [...text.matchAll(/(?<=\n)ab12cd|(?<![\\\w])erika ab12cd musterfrau/g)].map((m) => ({
+      type: 'person', start: m.index!, end: m.index! + m[0].length, score: 1, text: m[0],
+    })),
+  };
+
+  it('a value from a user message is replaced before a value found only in decoded text earlier', async () => {
+    const shield = shieldWith(detector);
+    await shield.anonymizeResult({ a: '\nab12cd' }, 's');
+    await shield.outbound('Bitte an erika ab12cd musterfrau', 's');
+    // Here the JSON text does not find the longer value (`n` before it); the user message taught it.
+    const out = await shield.anonymizeResult({ a: '\nerika ab12cd musterfrau' }, 's');
+    expect(visible(out)).not.toContain('musterfrau');
+  });
+
+  it('clearSession forgets the order too: the session then behaves like a new one', async () => {
+    const steps = async (shield: ReturnType<typeof shieldWith>) => [
+      await shield.anonymizeResult({ a: '\nab12cd' }, 's'),
+      await shield.anonymizeResult({ a: '\nerika ab12cd musterfrau' }, 's'),
+    ];
+    const used = shieldWith(detector);
+    await used.anonymizeResult({ a: 'erika ab12cd musterfrau' }, 's');
+    used.clearSession('s');
+    expect(await steps(used)).toEqual(await steps(shieldWith(detector)));
+  });
+});
+
 describe('the detector input', () => {
   function recording() {
     const texts: string[] = [];

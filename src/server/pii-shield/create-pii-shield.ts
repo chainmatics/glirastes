@@ -25,8 +25,9 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
    * Per session, the originals found in plain text (outbound) or in a result's
    * JSON text, in the order they were learned. anonymizeResult replaces these
    * first, in this order, and only then the originals found only in a result's
-   * decoded text: so it replaces at least what it replaced before those were
-   * learned, and an earlier decoded-only value never cuts into a later one.
+   * decoded text: an earlier decoded-only value cannot cut into an original
+   * learned this way before that original is replaced. It can still cut into
+   * a pseudonym already put in place (that pseudonym then no longer restores).
    */
   const firstOrder = new Map<string, Set<string>>();
 
@@ -176,7 +177,13 @@ export function createPiiShield(config: PiiShieldConfig): PiiShield {
     // text's detections first, so its pseudonyms and replacements stay as they were.
     const text = typeof result === 'string' ? result : JSON.stringify(result);
     let detected = await config.detector.detect(text, [config.locale]);
-    for (const entity of detected) learnFirst(sessionId, entity.text);
+    // Pseudonyms right away, before the next await, as before: a result shielded
+    // in parallel in this session must find them (and so must the next result
+    // when the second detector call fails).
+    for (const entity of detected) {
+      learnFirst(sessionId, entity.text);
+      session.getOrCreatePseudonym(entity.text, entity.type);
+    }
     const decoded = typeof result === 'string' ? text : decodeJsonStrings(text);
     if (decoded !== text) {
       const known = new Set(detected.map((entity) => entity.text));
