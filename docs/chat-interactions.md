@@ -592,8 +592,8 @@ plus its visible label. Missing arguments open a form first; a command with
 only optional arguments asks once. A command mixed with free text goes to the
 model as before, with the command as a tool reference.
 
-The visible label is one line of at most 200 characters. Since the release
-after 0.25.0 it carries [mention markers](#mention-markers): one for the
+The visible label is one line of at most 200 characters. Since 0.26.0
+it carries [mention markers](#mention-markers): one for the
 command (`{{mention:command:<id>:<label>}}`) and one for each picked object
 (`{{mention:<type>:<id>:<label>}}`), so the chat shows them as pills, like
 the composer did. A picked object of an entity argument has the type the

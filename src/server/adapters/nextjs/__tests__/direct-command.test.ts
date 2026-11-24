@@ -107,7 +107,7 @@ describe('stripChatCommandMessages', () => {
     ]);
   });
 
-  it('reads and keeps a label line with mention markers as the chat sends it since the release after 0.25.0', () => {
+  it('reads and keeps a label line with mention markers as the chat sends it since 0.26.0', () => {
     const label = '{{mention:command:task.tasks.complete:Complete}} {{mention:task:7:Release prüfen}}';
     const marked = formatChatCommandMessage({ commandId: 'task.tasks.complete', tool: 'tasks.complete', args: { taskId: '7' }, label });
     expect(resolveDirectCommand([user(marked)])).toEqual({

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-24
+
 ### Added
 
 - `glirastes doctor` check `react-markdown` (`E-SETUP-109`, warning only): a non-test source file imports `glirastes/react` or `glirastes/embed`, dependencies are installed (`glirastes` is found under `node_modules` from the app folder upwards) and `react-markdown` is not, so every chat answer would show its raw Markdown source. Offline file lookup, no module resolution: under Yarn Plug'n'Play and before dependencies are installed the check is left out.
@@ -1297,4 +1299,5 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.26.0]: https://github.com/chainmatics/glirastes/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/chainmatics/glirastes/compare/v0.24.2...v0.25.0
