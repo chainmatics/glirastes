@@ -1,10 +1,13 @@
 {
   "id": "pii-shield-longest-first",
   "kind": "recommended",
-  "summary": "PII shield fix: a known value that is part of a longer one (max@firma.de in johannes.max@firma.de) no longer leaves the rest of the longer one in plain text in tool results and the view context. Output is unchanged whenever no known value is part of another.",
-  "howTo": "Nothing to configure; upgrade if the app uses piiShield. anonymizeResult, inbound and rehydrateArgs now replace known values longest first in one pass; before, a shorter value learnt earlier broke the longer one (johannes.<pseudonym>, <pseudonym>/u/max.mustermann@firma.de) and a suffixed pseudonym (Anna Müller-1) was restored as the original of Anna Müller plus -1. Tests that pinned such pseudonymized output must expect the longer value's pseudonym now. Known limit: of two values that overlap without one containing the other (37/1571/24067 and 24067Z.huber@kanzlei-x.de), the rest of the shorter one stays in plain text.",
+  "summary": "Security fix for apps with piiShield (all versions since 0.1.0): a known value inside a longer one left the rest of the longer one in plain text for the model, and a suffixed pseudonym (Anna Müller-1) was restored to the wrong person. Upgrade now.",
+  "howTo": "No code change. Before: the user writes max@firma.de, a tool result holds johannes.max@firma.de, the model got johannes.<pseudonym>; https://firma.de known made https://firma.de/u/max.mustermann@firma.de <pseudonym>/u/max.mustermann@firma.de. Paths: everything through anonymizeResult (tool results, result handles, server approval subject records, view context values); not the message text (outbound). Back translation (inbound, rehydrateArgs): with more than about 100 people a suffixed pseudonym was restored as another person's original plus -1, so a tool call or the chat-memory summary could carry the wrong person's data. Now known values are replaced longest first in one pass, both ways. Pseudonyms are assigned as before; output is byte-identical unless one known value contains another. Sessions: the mapping lives only in process memory, so the upgrade starts with empty sessions as any restart did; within a process, text broken the old way is restored correctly. Check stored chat-memory summaries of large sessions written before the upgrade: they may name the wrong person. Tests that pinned broken output must expect the longer value's pseudonym. An empty original from a detector is now ignored (before, its pseudonym was inserted between every character). Known limit: of two values that overlap without one containing the other (37/1571/24067 known, then 37/1571/24067Z.huber@kanzlei-x.de), the rest of the shorter one (37/1571/) stays in plain text.",
   "skill": "integrating-glirastes-nextjs",
   "affectedWhen": {
-    "symbols": ["createPiiShield", "piiShield"]
+    "symbols": [
+      "createPiiShield",
+      "piiShield"
+    ]
   }
 }
