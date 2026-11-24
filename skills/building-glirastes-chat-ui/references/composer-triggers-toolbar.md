@@ -90,7 +90,12 @@ default `'canonical'`): ordinary labels, ids and types are byte-identical
 (bidi, zero-width, soft hyphen, default ignorables, tag runs, private use)
 except the joiners, flag tags and selectors of ordinary names; NFC; edge
 whitespace trimmed, control runs one space; at most `maxLabelLength`
-(8-120, default 120) code points, cut at a grapheme boundary (`…`). A type
+(8-120, default 120) code points, cut at a grapheme boundary (`…`); a
+value the cut would split (a token with a digit, `@`, `/`, `:`, `+` … or a
+dot inside: e-mail, IBAN, phone number, URL) is left out whole, also with
+spaces (`+49 170 1234567`), so the server's PII shield never sees a
+fragment it cannot recognise (`labelCut: 'value-safe'`, the default;
+`labelCut: 'grapheme'` keeps the 0.24.2 cut, `MentionLabelCut`). A type
 or id with control, format, invisible, private-use or unassigned
 characters, `}`, `{{`, `<!`, `-->` or `--!>` gets no marker: the typed
 token stays and the model loses the id (console warning once per type,
@@ -99,10 +104,10 @@ only in development).
 text shows as before).
 
 From `glirastes/contracts`, for own parsers and server code:
-`canonicalMentionLabel(label, { id?, maxLength? })` (`CanonicalMentionLabelOptions`),
+`canonicalMentionLabel(label, { id?, maxLength?, cut? })` (`CanonicalMentionLabelOptions`),
 `parseMentionMarkers(text)` (`ParsedMentionMarker`: `type`, `id`, `label`,
 `canonical`, `span`; same matches as the old regex, linear),
-`serializeMentionMarker({ type, id, label }, { labels?, maxLabelLength? })`
+`serializeMentionMarker({ type, id, label }, { labels?, maxLabelLength?, labelCut? })`
 (`MentionMarker`, `SerializeMentionMarkerOptions`; `undefined` for an
 hostile type or id), `isMentionMarkerType`, `isMentionMarkerId`,
 `MENTION_MARKER_MAX_LABEL_LENGTH` (120).

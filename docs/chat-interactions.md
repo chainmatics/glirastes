@@ -249,6 +249,7 @@ to labels only.
 | private use (icon fonts), noncharacters, U+2800, lone surrogates | removed |
 | unassigned code points | kept (what is unassigned depends on the engine's Unicode version; removing it would remove new emoji in older browsers) |
 | more than `maxLabelLength` code points (8-120, default 120; 1-7 means 8, anything else the default) | at most the first 119 and `…`, cut at a grapheme boundary with `Intl.Segmenter`, never inside an emoji, flag, keycap, conjunct or Thai cluster; without `Intl.Segmenter` the cut avoids marks, joiners, viramas, flags and keycaps but can split other clusters such as Thai Sara Am; a bare `…` becomes the id, and the label is never empty |
+| a value the cut would split: the token at the cut, or the first after it, has a digit, `@ / : + _ % = # & ~ \ |` or a dot inside (e-mail, IBAN, phone number, URL, date, number; keycap emoji such as 1️⃣ do not count) | left out whole, with the value parts and separators right before it (`+49 170 1234567`, `DE89 3704 0044 …`, `Tel. +49 (30) / 1234`), so the server's PII shield never gets a fragment it no longer recognises (`max.musterm…`). Since the release after 0.24.2; `mentions: { serialize: { labelCut: 'grapheme' } }` keeps the cut of 0.24.2. Labels within `maxLabelLength`, and cuts in a plain word, are the same either way. A label that is one value over the limit becomes the id |
 | nothing visible left | the id |
 
 The text is NFC. No NFKC: look-alikes such as `｛` stay, and they are

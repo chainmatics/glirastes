@@ -212,6 +212,7 @@ export {
 } from './mention-marker.js';
 export type {
   CanonicalMentionLabelOptions,
+  MentionLabelCut,
   MentionMarker,
   ParsedMentionMarker,
   SerializeMentionMarkerOptions,

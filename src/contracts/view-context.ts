@@ -289,7 +289,8 @@ function utf8Length(text: string): number {
  * The canonical form of a view context label: the canonical mention label
  * (`canonicalMentionLabel` with `maxLength` 60: `cleanDisplayText`, then
  * `{` `}` `<!` `-->` `--!>` replaced by visible look-alikes, cut at a
- * grapheme boundary with `…`), so a name reads the same in a chip, a marker
+ * grapheme boundary with `…`, never inside a value such as an e-mail
+ * address, IBAN or phone number), so a name reads the same in a chip, a marker
  * and this block. Empty when nothing visible is left (the label is then
  * dropped; a mention label would fall back to its id). Idempotent.
  */
