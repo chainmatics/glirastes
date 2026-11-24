@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Approval card: a chat attachment id (`att_…`) in the arguments of a write call, such as a client action that hands an attached file to the app, is named by the file name the user attached (from the file part, or its `[attachment <id>: <name>]` placeholder) instead of the warning that no name is known in this conversation. An id only the assistant wrote stays unknown.
+
 ## [0.26.0] - 2026-11-24
 
 ### Added

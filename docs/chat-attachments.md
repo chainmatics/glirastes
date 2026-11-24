@@ -167,6 +167,9 @@ useAiClientAction('tasks.attachChatFile', async ({ taskId, attachmentId }) => {
 Returning `false` reports failure to the model through the UI outcome
 protocol (`docs/ui-action-outcomes.md`).
 
+With `effect: 'write'` the chat asks first; the approval card names the
+attachment id by the file name the user attached.
+
 A derived server tool for a multipart upload route cannot work: the model
 cannot produce file bytes, and the executor sends JSON. Disable that tool
 with `glirastes tools policy` and use the client action instead.
