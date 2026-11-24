@@ -3,7 +3,9 @@ import { attachmentIdOf } from '../../contracts/attachments.js';
 import { fileToDataUrl, omitAttachmentData } from './attachments.js';
 import { createIndexedDbAttachmentStore, dataUrlToBlob, type AttachmentBlobStore } from './attachment-blob-store.js';
 import { sanitizeStoredMessages } from './sanitize-stored-messages.js';
-import { inferMentionPrefix, parseMentionSegments } from './mention-markup.js';
+import { inferMentionPrefix, parseMentionSegments, stripContextBlocks } from './mention-markup.js';
+import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
+import { stripClarificationMarkers } from '../../contracts/clarification.js';
 
 type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & Partial<Pick<Storage, 'length' | 'key'>>;
 
@@ -66,6 +68,7 @@ function randomId(): string {
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** The visible text of a message, as the bubble shows it. */
 function textOf(message: ChatMessage | WireChatMessage): string {
   const parts = (message as { parts?: unknown }).parts;
   if (Array.isArray(parts)) {
@@ -73,11 +76,16 @@ function textOf(message: ChatMessage | WireChatMessage): string {
       .filter((part): part is { type: 'text'; text: string } =>
         typeof part === 'object' && part !== null && (part as { type?: unknown }).type === 'text'
         && typeof (part as { text?: unknown }).text === 'string')
-      .map((part) => part.text)
+      .map((part) => visibleText(part.text))
       .join(' ');
   }
   const content = (message as { content?: unknown }).content;
-  return typeof content === 'string' ? content : '';
+  return typeof content === 'string' ? visibleText(content) : '';
+}
+
+/** A text part as the message bubble shows it (same strip order as `message-bubble.tsx`). */
+function visibleText(text: string): string {
+  return stripChatCommandMarkers(stripClarificationMarkers(stripContextBlocks(text)));
 }
 
 /**
@@ -100,6 +108,7 @@ function titleFrom(
   prefixOf: (type: string) => string,
 ): string | null {
   const first = messages.find((message) => message.role === 'user');
+  // The visible text: no command or clarification marker, no context block.
   const raw = first ? textOf(first) : '';
   // Mentions read as `@Name` and `/Command`, not as their markup.
   const text = parseMentionSegments(raw, prefixOf)

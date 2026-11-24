@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '../../types.js';
 import { clearLocalSessionStore, createLocalSessionStore } from '../local-session-store.js';
 import { createMemoryAttachmentStore, type AttachmentBlobStore } from '../attachment-blob-store.js';
+import { formatChatCommandMessage } from '../../../contracts/chat-command.js';
+import { formatClarificationAnswer } from '../../../contracts/clarification.js';
 
 function memory() {
   const data = new Map<string, string>();
@@ -75,6 +77,29 @@ describe('chats kept in the browser', () => {
     const sessions = store();
     await sessions.save!('default', [user('{{mention:command:tasks.summarize:Zusammenfassen}} {{mention:task:a65e:Release prüfen}} bitte')]);
     expect((await sessions.list!())[0]!.title).toBe('/Zusammenfassen @Release prüfen bitte');
+  });
+
+  // #19: the title is the visible label line, as the bubble shows it, not the marker of a direct command.
+  it('names a chat after the visible label of a direct command, without its marker', async () => {
+    const sessions = store();
+    const text = formatChatCommandMessage({
+      commandId: 'tasks.create',
+      tool: 'createTask',
+      args: { title: 'Release' },
+      label: '/Aufgabe anlegen Release',
+    });
+    await sessions.save!('default', [user(text)]);
+    expect((await sessions.list!())[0]!.title).toBe('/Aufgabe anlegen Release');
+  });
+
+  it('names a chat without context blocks and clarification markers', async () => {
+    const sessions = store();
+    await sessions.save!('default', [user('<!-- context: {"page":"tasks"} -->\nWelche Aufgaben sind offen?')]);
+    expect((await sessions.list!())[0]!.title).toBe('Welche Aufgaben sind offen?');
+
+    const other = store();
+    await other.save!('default', [user(formatClarificationAnswer({ toolCallId: 'call_1', answer: 'Nur meine' }))]);
+    expect((await other.list!())[0]!.title).toBe('Nur meine');
   });
 
   it('lists the chat used last first', async () => {
