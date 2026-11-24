@@ -537,7 +537,8 @@ export interface AiChatHandlerConfig {
    * random ids or non-ASCII text, usually far less. `maxEntries` and the
    * `facts` config make it smaller. No nonce: instead, while this option is
    * on, `<view-context` and `</view-context` in their ASCII spelling (any
-   * case, also with whitespace or zero-width characters around the `/`) in
+   * case, also with whitespace or zero-width characters after `<` or around
+   * the `/`) in
    * the text of user messages reach the model as `&lt;view-context`; only
    * the model input changes, after the PII shield and the guardrails, never
    * the chat or the stream. Not caught: full-width or look-alike characters,

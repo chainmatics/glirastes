@@ -424,6 +424,22 @@ describe.each<Mode>(['legacy', 'pipeline'])('a look-alike view context block in 
     expect(texts.at(-1)).toBe('go &lt;view-context>');
   });
 
+  it('leaves the seen-objects memo the SDK writes as it is, whatever a record name holds', async () => {
+    for (const name of ['Order &lt;view-context>', `Order <${' '.repeat(64)}view-context`]) {
+      const messages = [
+        say('u0', 'Show order'),
+        { id: 'a0', role: 'assistant', parts: [{ type: 'step-start' }, { type: 'tool-orders_get', toolCallId: 'c0', state: 'output-available', input: { orderId: 'ord-1' }, output: { id: 'ord-1', name } }, { type: 'text', text: 'Here.' }] },
+        say('u1', 'thanks'), { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Welcome.' }] },
+        say('u2', 'Rename it'),
+      ];
+      const history = { toolTurnCounting: 'all-turns' };
+      const on = await promptOf({ history } as never, {}, { mode, messages });
+      const off = await promptOf({ history, viewContext: false } as never, {}, { mode, messages });
+      expect(JSON.stringify(on.prompt)).toContain('<seen-objects>');
+      expect(JSON.stringify(on.prompt)).toBe(JSON.stringify(off.prompt));
+    }
+  });
+
   it('escapes it in the answer to a clarification', async () => {
     const messages = [
       say('u1', 'Show the order'),

@@ -122,7 +122,7 @@ import {
   createInternalApiCallerFromRequest,
 } from './context-helpers.js';
 import {
-  prepareModelMessages,
+  prepareHistoryMessages,
   wrapToolsForVercelAi,
   type HistoryOptions,
   type ModelInputBreakdown,
@@ -751,7 +751,9 @@ async function defaultStreamHandler(
     invalidToolInputTexts: [streamErrorTexts.invalidToolInput, ...configuredInvalidToolInputTexts],
     ...(ctx.onModelInput ? { onBreakdown: (value: ModelInputBreakdown) => { breakdown = value; } } : {}),
   };
-  const preparedMessages = await prepareModelMessages(
+  // With the view context on, the ASCII tag in typed or pasted text does not read as its block
+  // (model input only, the user's history only: never the seen-objects memo the SDK writes).
+  const preparedMessages = await prepareHistoryMessages(
     ctx.messages as UIMessage[],
     ctx.memory?.historyTokens
       // Chat memory decides what stays; counts no longer drop earlier turns.
@@ -766,13 +768,12 @@ async function defaultStreamHandler(
           ...historyExtras,
         }
       : { maxContextMessages: ctx.maxContextMessages, history: ctx.history, ...(toolEntities ? { entities: toolEntities } : {}), ...historyExtras },
+    request.escapeViewContextTags ? withViewContextTagsEscaped : undefined,
   );
-  // With the view context on, the ASCII tag in typed or pasted text does not read as its block (model input only).
-  const historyMessages = request.escapeViewContextTags ? withViewContextTagsEscaped(preparedMessages) : preparedMessages;
   // User role, not system: memory is background a user could have written.
   const withMemory = ctx.memory?.preamble
-    ? [{ role: 'user', content: ctx.memory.preamble }, ...historyMessages]
-    : historyMessages;
+    ? [{ role: 'user', content: ctx.memory.preamble }, ...preparedMessages]
+    : preparedMessages;
   // A budget continuation: what already ran and to do only the open steps (this request only, never part of the chat).
   const modelMessages = request.continuation === 'budget'
     ? [...withMemory, { role: 'user', content: budgetContinuationInstruction(callsBeforeStop, builtinSet) }]

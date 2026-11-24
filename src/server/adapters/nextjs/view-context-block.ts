@@ -192,16 +192,18 @@ function escapedPart(part: unknown): unknown {
 /**
  * Model messages with every `<` that may open or close a `<view-context>`
  * tag in the text of a user message escaped as `&lt;` (`escapeTagInText`:
- * any case, whitespace, zero-width characters or a soft hyphen around the
- * `/`, `<view-context-…>`; an `&lt;` already in front of the name becomes
- * `&amp;lt;`), so the tag a user typed or pasted in its ASCII spelling
- * does not read as the block the SDK renders. Not caught: full-width or
- * look-alike characters, a line break or invisible character inside the
- * name, entities such as `&#60;`, a tag split across parts or messages. Only user messages: string content and `text` parts;
- * other roles and parts stay as they are. The model still reads the text.
- * Messages without such a tag are returned as they are (the same objects,
- * byte-identical); never mutates. Apply to the history before the SDK's own
- * block is added (`withViewContextMessage`).
+ * any case, whitespace, zero-width characters or a soft hyphen between `<`
+ * and the name or around the `/`, `<view-context-…>`; an `&lt;` already
+ * in front of the name becomes `&amp;lt;`), so the tag a user typed or
+ * pasted in its ASCII spelling does not read as the block the SDK renders.
+ * Not caught: full-width or look-alike characters, a line break or
+ * invisible character inside the name, entities such as `&#60;`, a tag
+ * split across parts or messages. Only user messages: string content and
+ * `text` parts; other roles and parts stay as they are. The model still
+ * reads the text. Messages without such a tag are returned as they are (the
+ * same objects, byte-identical); never mutates. Apply to the user's history
+ * only, never to messages the SDK writes (the seen-objects memo, see
+ * `prepareHistoryMessages`, the chat memory, this block).
  */
 export function withViewContextTagsEscaped<T>(messages: T[]): T[] {
   let changed = false;
