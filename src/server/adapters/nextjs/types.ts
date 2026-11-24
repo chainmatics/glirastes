@@ -520,9 +520,18 @@ export interface AiChatHandlerConfig {
    * Only the built-in stream handler adds the block; a continuation (an
    * approval, a UI outcome, a budget stop), a request the pipeline
    * guardrails blocked and the answer to a clarification get none. With
-   * `piiShield` the values are shielded like tool results; a failing
-   * shield sends no block. `history` must be `'none'` for now (the newest
-   * message only). An invalid option throws here. See `ViewContextPolicy`
+   * `piiShield` the values are shielded like tool results (audit:
+   * `anonymize-result`, counted in `totalToolCalls`) and checked again; a
+   * failing shield or check sends no block. `history` must be `'none'`
+   * for now (the newest message only). An invalid option throws here.
+   *
+   * Size: the block has at most 2,966 characters (a hard bound); full, that
+   * is roughly 850 tokens at 3.5 characters per token, 1,000 to 1,500 with
+   * random ids or non-ASCII text, usually far less. `maxEntries` and the
+   * `facts` config make it smaller. No nonce: a user (or third-party data
+   * through a mention label) can write a look-alike block into their own
+   * message; no permission comes from it. The runtime container turns this
+   * off until its option `chat.viewContext` comes. See `ViewContextPolicy`
    * (`glirastes/contracts`).
    */
   viewContext?: ViewContextOption;

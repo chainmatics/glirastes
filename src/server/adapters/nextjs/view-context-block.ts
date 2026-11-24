@@ -29,9 +29,13 @@
  * @module
  */
 import { escapeJsonForBlock } from '../../../contracts/delimited-text.js';
+import { cleanDisplayText } from '../../../contracts/mention-marker.js';
 import {
+  canonicalViewContextLabel,
+  isViewContextRoute,
   sanitizeViewContext,
   VIEW_CONTEXT_LIMITS,
+  ViewContextEntrySchema,
   type ResolvedViewContextPolicy,
   type ViewContextDropReason,
   type ViewContextEntry,
@@ -172,7 +176,9 @@ export interface PreparedViewContext {
  * results: a pseudonym in a tool argument is restored to the original id
  * (`rehydrateArgs`), so tool calls still name the right record. Entity
  * types (declared names, no user data) and keys stay as they are, as in
- * tool results. Throws when the shield fails or returns another shape.
+ * tool results. Extra keys of the shield's result are never read. Throws
+ * when the shield fails or returns no list of as many objects; each entry is
+ * checked afterwards ({@link checkShielded}).
  */
 async function shieldEntries(
   entries: ReadonlyArray<ViewContextEntry>,
@@ -198,13 +204,41 @@ async function shieldEntries(
 }
 
 /**
+ * A shielded entry as the model may get it, or undefined. A pseudonym may be
+ * longer or hold a space where the original did not: a label is then cut at
+ * 60 code points like the sanitizer cuts it (only a cut; a label that would
+ * need any other change is refused), and a route that is no longer a valid
+ * route is left out, as the sanitizer leaves out an invalid one. Everything
+ * else must pass `ViewContextEntrySchema` unchanged (ids, selection ids,
+ * facts, types); the returned entry is the schema's checked copy.
+ */
+function checkShielded(entry: ViewContextEntry): ViewContextEntry | undefined {
+  let candidate: ViewContextEntry = entry;
+  const label: unknown = entry.label;
+  if (typeof label === 'string') {
+    const canonical = canonicalViewContextLabel(label);
+    const cutOnly = canonical !== label && canonical.endsWith('…') && cleanDisplayText(label) === label
+      && label.startsWith(canonical.slice(0, -1));
+    if (cutOnly) candidate = { ...candidate, label: canonical };
+  }
+  const route: unknown = entry.route;
+  if (typeof route === 'string' && !isViewContextRoute(route)) {
+    const { route: _left, ...rest } = candidate;
+    candidate = rest as ViewContextEntry;
+  }
+  const checked = ViewContextEntrySchema.safeParse(candidate);
+  return checked.success ? checked.data : undefined;
+}
+
+/**
  * The block for the `current` entries of a request: sanitized against the
  * types `tools` declare (the request's tools, so a type only a tool this
  * user cannot use declares is dropped) and the facts schemas of the policy,
- * the values through the PII shield (only when an entry is left), then
- * serialized and escaped. Undefined for a disabled policy. Never throws:
- * anything unexpected, a failing shield included, gives no block (never an
- * unshielded one).
+ * the values through the PII shield (only when an entry is left) and each
+ * shielded entry checked again ({@link checkShielded}), then serialized and
+ * escaped. Undefined for a disabled policy. Never throws: anything
+ * unexpected, a failing shield or a shielded entry that fails its check
+ * included, gives no block (never an unshielded one); the request runs on.
  */
 export async function prepareViewContext(
   field: { current: unknown },
@@ -218,7 +252,12 @@ export async function prepareViewContext(
   try {
     const result = sanitizeViewContext(field.current, { declaredTypes: declaredEntityTypes(options.tools), policy: options.policy });
     if (result.entries.length === 0) return { dropped: result.dropped };
-    const entries = options.shield ? await shieldEntries(result.entries, options.shield) : result.entries;
+    let entries = result.entries;
+    if (options.shield) {
+      const shielded = (await shieldEntries(entries, options.shield)).map(checkShielded);
+      if (shielded.some((entry) => entry === undefined)) return { dropped: result.dropped };
+      entries = shielded as ViewContextEntry[];
+    }
     const block = renderViewContextBlock(viewContextLines(entries));
     return { ...(block ? { text: block.text } : {}), dropped: result.dropped };
   } catch {
