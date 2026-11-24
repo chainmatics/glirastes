@@ -69,6 +69,8 @@ import {
   type IdLabels,
 } from './hide-ids.js';
 import { entityDeclarationsOfTools, TOOL_ENTITIES_PART_TYPE } from './tool-entities.js';
+import { prepareViewContext, readViewContextField, withViewContextMessage } from './view-context-block.js';
+import { resolveViewContextPolicy } from '../../../contracts/view-context.js';
 import { builtInStreamErrorTexts, createToolStreamErrorMask, streamErrorText, withStepFailureParts, type StreamErrorTexts } from './stream-error-text.js';
 import {
   budgetStopText,
@@ -606,6 +608,8 @@ interface RequestTurnState {
    * built-in stream handler serves it and the request is no direct command.
    */
   budgetContinuable?: boolean;
+  /** The view context block of the newest user message (`view-context-block.ts`), already through the PII shield. */
+  viewContext?: string;
 }
 
 /**
@@ -767,9 +771,12 @@ async function defaultStreamHandler(
     : withMemory;
   // Executed approvals are visible output for the stream and the metric alike.
   const resumedApprovals = resumesToolApprovals(modelMessages);
-  const promptMessages = promptCaching
-    ? withCacheBreakpoints(systemPrompt, modelMessages)
-    : modelMessages;
+  // The view context goes after the newest user message, behind its cache breakpoint:
+  // the next request (without this block) still finds this request's cached prefix.
+  const promptMessages = withViewContextMessage(
+    promptCaching ? withCacheBreakpoints(systemPrompt, modelMessages) : modelMessages,
+    request.continuation ? undefined : request.viewContext,
+  );
 
   let wasTruncated = false;
   // At a tool limit of the runtime budget the turn blocks further tools and
@@ -1322,6 +1329,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     budgetStopTexts: budgetStopTextsConfig,
     uiActionOutcomes = 'confirm',
     uiToolResultShape = 'auto',
+    viewContext: viewContextOption,
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
   assertToolMiddleware(toolMiddleware);
@@ -1340,6 +1348,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   }
   if (uiToolResultShape !== 'auto' && uiToolResultShape !== 'handoff' && uiToolResultShape !== 'legacy') {
     throw new Error("createAiChatHandler: uiToolResultShape must be 'auto', 'handoff' or 'legacy'");
+  }
+  // `null` counts as not set (config spreads); other wrong values throw.
+  const viewContextPolicy = resolveViewContextPolicy(viewContextOption ?? undefined);
+  if (viewContextPolicy.history !== 'none') {
+    throw new Error("viewContext: history must be 'none' for now; 'changes' and 'all' need view contexts bound to messages (a later release).");
   }
   const budgetStopTexts = resolveBudgetStopTexts(configuredLocale, budgetStopTextsConfig);
   assertChatServerLocales(localesConfig);
@@ -1741,6 +1754,25 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       }
       // A request without a new user message continues the turn (approvals, UI outcomes, a budget stop).
       const continuation = directCommand ? undefined : budgetContinuation ?? turnContinuationOf(requestMessages);
+      // The view context of the newest user message: only for a new user message the
+      // built-in stream handler answers (not a continuation, a clarification answer or a command).
+      const viewContextField = viewContextPolicy.enabled && !customStreamHandler && !directCommand && !continuation && !clarificationResume
+        ? readViewContextField(body.value)
+        : undefined;
+      /** The request state with the view context block for the tools this request offers, shielded like the history. */
+      const withViewContext = async (
+        state: RequestTurnState,
+        tools: Readonly<Record<string, unknown>>,
+        shieldSessionId: string,
+      ): Promise<RequestTurnState> => {
+        if (!viewContextField) return state;
+        const prepared = await prepareViewContext(viewContextField, {
+          policy: viewContextPolicy,
+          tools,
+          ...(piiShield ? { shield: { shield: piiShield, sessionId: shieldSessionId } } : {}),
+        });
+        return prepared?.text ? { ...state, viewContext: prepared.text } : state;
+      };
       // Only the built-in stream handler marks, stops and explains; others get no marker.
       const requestState: RequestTurnState = {
         ...(continuation ? { continuation } : {}),
@@ -2393,7 +2425,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           sessionId,
           requestStart,
           modelId: resolvedModelId,
-        } : undefined, requestState);
+        // A request the guardrails blocked gets no view context (fail closed).
+        } : undefined, pipelineResult.blocked ? requestState : await withViewContext(requestState, unscopedAiTools, sessionId));
 
         return clearWhenDone(await pipelineStreamHandler({
           tools: discoveryController
@@ -2526,6 +2559,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         legacyApprovals.verified,
       );
       let aiTools = await convertTools();
+      // Every tool this request offers, before intent scoping: the entity types the view context may name.
+      const offeredAiTools = aiTools;
 
       // Scope tools by intent
       if (routing?.toolNames && routing.toolNames.length > 0) {
@@ -2604,7 +2639,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const legacyStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
         sessionId: legacySessionId || sessionId,
         requestStart,
-      } : undefined, requestState);
+      } : undefined, await withViewContext(requestState, offeredAiTools, legacySessionId));
 
       // Delegate streaming to consumer's handler
       return clearWhenDone(await legacyStreamHandler({

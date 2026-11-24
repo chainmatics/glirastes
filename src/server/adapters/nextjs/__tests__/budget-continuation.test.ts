@@ -164,6 +164,26 @@ describe('continuing a stopped turn', () => {
     return { messages: [...first.messages, assistant], tools };
   }
 
+  it('sends no view context block with the continuation (the instruction stays the last message)', async () => {
+    const tools = registry();
+    tools.tools.orders_get = defineTool({
+      id: 'orders.get', description: 'Read one order.', method: 'GET',
+      inputSchema: z.object({ id: z.string() }).strict(),
+      outputEntities: [{ type: 'order', id: 'id' }],
+      execute: async () => ({ id: 'o1' }),
+    });
+    const { messages } = await stopped(stoppedSteps(), tools);
+    const view = { glirastesViewContext: { version: 1, current: [{ entity: { type: 'order', id: 'o1' }, label: 'Order 1' }] } };
+    const next = await run({ steps: [text('b', 'Fertig.')], messages, tools, body: { glirastesContinuation: 'budget', ...view } });
+    expect(next.response.status).toBe(200);
+    const prompt = next.model.doStreamCalls[0]!.prompt;
+    expect(JSON.stringify(prompt)).not.toContain('view-context');
+    expect(JSON.stringify(prompt.at(-1)!.content)).toContain('Do only the steps that are still open');
+    // A new message of the same chat does get it: the tool declares the type.
+    const fresh = await run({ steps: [text('c', 'Ok.')], tools, body: view });
+    expect(JSON.stringify(fresh.model.doStreamCalls[0]!.prompt)).toContain('<view-context>');
+  });
+
   it('runs the model again with an instruction listing the calls that ran and a fresh step budget', async () => {
     const { messages } = await stopped();
     const next = await run({
