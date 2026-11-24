@@ -62,11 +62,25 @@ const NEXT_ACTIONS = new Map([
     'The app uses voice input, but /audio-worklet-processor.js is not provided, so every recording fails. Run glirastes stt worklet (copies it into public/) and chain it in front of the predev and prebuild scripts, e.g. "predev": "glirastes stt worklet && <existing predev>", or just "predev": "glirastes stt worklet" when there is none; glirastes init does this for Next.js, Vite and Create React App. Serving it elsewhere: set workletUrl (voice config or adapter constructor).'],
   ['run-audio-worklet-copy',
     'Copy step configured but file not present yet: run it once (glirastes stt worklet). Note that yarn berry and pnpm may skip pre* scripts; if you start next or vite directly, run glirastes stt worklet first.'],
+  ['align-audio-worklet-url',
+    'workletUrl (voice config or adapter constructor) points to {workletUrl}, but the copy step writes {copyTarget}, so every recording fails. Point workletUrl at the copied file (public/audio-worklet-processor.js is served at /audio-worklet-processor.js), or copy to the configured folder with glirastes stt worklet --out public/<folder>.'],
   ['verify-audio-worklet-url',
     'Voice input loads its audio worklet from an absolute URL, or a script copies it outside public/, which this offline check cannot verify. Make sure the URL answers with the file of glirastes/react/audio-worklet-processor.js, or serve it from public/ with glirastes stt worklet.'],
   ['align-explicit-runtime-mode',
     'Ask your coding agent to align the local runtime settings with the intended connection. Do not silently switch a connected app to standalone.'],
 ]);
+
+/** A `{name}` in the text becomes the check's detail value; text with a missing value is not shown. */
+function fill(text: string | undefined, detail: Record<string, string> | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  let complete = true;
+  const filled = text.replace(/\{(\w+)\}/g, (_, name: string) => {
+    const value = detail?.[name];
+    if (value === undefined) complete = false;
+    return value ?? '';
+  });
+  return complete ? filled : undefined;
+}
 
 /** Human output uses fixed copy; machine diagnostics remain available as JSON. */
 export function formatDoctorReport(
@@ -97,7 +111,7 @@ export function formatDoctorReport(
   const issue = report.checks.find((item) => item.status === 'fail')
     ?? report.checks.find((item) => item.status === 'warn');
   const next = issue
-    ? NEXT_ACTIONS.get(issue.remediation)
+    ? fill(NEXT_ACTIONS.get(issue.remediation), issue.detail)
       ?? 'Ask your coding agent to inspect glirastes doctor --json for the required local repair.'
     : report.mode === 'standalone'
       ? 'Restart the application to activate local changes, then try a chat action.'

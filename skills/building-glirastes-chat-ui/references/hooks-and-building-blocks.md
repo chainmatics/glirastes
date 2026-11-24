@@ -472,14 +472,32 @@ existing app add it yourself, in front of the existing commands:
   `DeepgramSttAdapter` passed as `voice.adapter`) or the adapter's `workletUrl`.
 - yarn berry and pnpm may skip `pre*` scripts; when the app starts `next dev`
   or `vite` directly, run `glirastes stt worklet` once first.
-- The copy is a build output: `public/audio-worklet-processor.js` can be
-  Git-ignored; `glirastes init` adds it to an existing `.gitignore`.
+- The copy is a build output: `glirastes init` and `glirastes stt worklet`
+  add its path (`/public/audio-worklet-processor.js`, or the `--out` path) to an
+  existing `.gitignore` once and never create one; `--no-gitignore` skips it.
+  A `!` negation of the path is left alone, CRLF line ends are kept, and a
+  path with `[`, `]`, `*`, `?` or `\` gets no entry. An unwritable
+  `.gitignore` is only a warning (`--json`: `"gitignore": "failed"`).
+  `glirastes init --dry-run` lists each script it adds or changes and the
+  `.gitignore` entry.
 
 `glirastes doctor` (check `voice-worklet`) passes only when the file exists in
 `public/` at each literal `workletUrl` path, or at the default path when none is
-set. It fails (`E-SETUP-034`) without the file or a copy script, and warns
-(`E-SETUP-108`) when a copy script exists but has not run yet, copies outside
-`public/`, or the URL is absolute.
+set. It fails (`E-SETUP-034`) without the file or a copy script, and when a
+literal `workletUrl` points to a file no copy step creates (the copy writes
+`audio-worklet-processor.js` into `public/` or `--out`; e.g. `/custom/worklet.js`
+next to a plain `glirastes stt worklet`), naming both paths. It warns
+(`E-SETUP-108`) when the copy step that creates the configured file has not run
+yet, copies outside `public/`, the URL ends in the copied path under a base
+path (`/app/audio-worklet-processor.js` with Next.js `basePath` or Vite `base`),
+or the URL is absolute. `workletUrl` literals in test files (`*.test.*`,
+`*.spec.*`, `__tests__/`) are not checked.
+
+The mic, stop and retry buttons draw their own icon (`svg[data-icon="mic" |
+"stop" | "busy" | "retry"]`) and carry a localized `aria-label`; style them via
+`[data-component="voice-input-addon"][data-state]`. An app that hid the old
+words with CSS and drew an own icon (`::before`, `content:`) shows two icons:
+remove its own icon or hide the shipped `svg[data-icon]`.
 
 When the file cannot be loaded, the chat shows `voiceUnavailableText` as an
 alert next to the mic button and logs the URL with `console.error`; the

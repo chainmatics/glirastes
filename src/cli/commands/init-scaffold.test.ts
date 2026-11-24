@@ -29,6 +29,10 @@ describe('glirastes init scaffold', () => {
       appId: APP_ID,
       written: ['.glirastes/prompt-bundle.json', '.glirastes/tools.json', 'AGENTS.md', 'package.json'],
       notes: ['Set "locale" in .glirastes/tools.json to the language of the app (e.g. "de-DE").'],
+      changes: [
+        'package.json: add "predev": "glirastes stt worklet && glirastes tools refresh --keep-going"',
+        'package.json: add "prebuild": "glirastes stt worklet && glirastes tools refresh"',
+      ],
     });
     expect(ToolsConfigSchema.parse(JSON.parse(await app.read('.glirastes/tools.json')))).toMatchObject({
       appId: APP_ID, targetAppKey: 'task-board', locale: 'en', sources: ['next-app', 'next-pages', 'url-filters', 'react-actions'],
@@ -43,7 +47,7 @@ describe('glirastes init scaffold', () => {
     const deps = { cwd: app.root, env: {}, log: (line: string) => { out.push(line); }, error: () => undefined };
     expect(await runToolsCommand(['refresh'], deps)).toBe(0);
     expect(out.join('\n')).toContain('+ tasks.list  GET /api/tasks  [safe-read]');
-    expect(await scaffoldToolsInputs({ root: app.root, host: 'codex' })).toEqual({ appId: APP_ID, written: [], notes: [] });
+    expect(await scaffoldToolsInputs({ root: app.root, host: 'codex' })).toEqual({ appId: APP_ID, written: [], notes: [], changes: [] });
   }, 120_000);
 
   it('keeps the app id the local files already name and refuses two different ones', async () => {
@@ -105,6 +109,33 @@ describe('glirastes init scaffold', () => {
     });
     const again = await scaffoldToolsInputs({ root: vite.root, host: 'codex' });
     expect(again.written).not.toContain('package.json');
+  }, 60_000);
+
+  it('previews the script changes and the .gitignore entry in a dry run, as init writes them', async () => {
+    const vite = await createAppFixture({
+      'package.json': JSON.stringify({
+        name: 'vite-board',
+        dependencies: { react: '19' },
+        devDependencies: { vite: '7' },
+        scripts: { predev: 'node seed.mjs' },
+      }),
+      '.gitignore': 'node_modules\n',
+    }, { withoutToolsConfig: true, withoutPromptBundle: true });
+    const preview = await scaffoldToolsInputs({ root: vite.root, host: 'codex', dryRun: true, createAppId: () => APP_ID });
+    expect(preview.written).toEqual(expect.arrayContaining(['.gitignore', 'package.json']));
+    expect(preview.changes).toEqual([
+      'package.json: "predev": "node seed.mjs" -> "glirastes stt worklet && node seed.mjs"',
+      'package.json: add "prebuild": "glirastes stt worklet && glirastes tools refresh"',
+      '.gitignore: add /public/audio-worklet-processor.js',
+    ]);
+    expect(await vite.read('.gitignore')).toBe('node_modules\n');
+    const applied = await scaffoldToolsInputs({ root: vite.root, host: 'codex', createAppId: () => APP_ID });
+    expect(applied.changes).toEqual(preview.changes);
+    expect(JSON.parse(await vite.read('package.json')).scripts).toEqual({
+      predev: 'glirastes stt worklet && node seed.mjs',
+      prebuild: 'glirastes stt worklet && glirastes tools refresh',
+    });
+    expect((await scaffoldToolsInputs({ root: vite.root, host: 'codex', dryRun: true })).changes).toEqual([]);
   }, 60_000);
 
   it('lists the copied worklet in an existing .gitignore once, and creates none', async () => {
