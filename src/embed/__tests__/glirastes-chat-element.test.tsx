@@ -365,6 +365,42 @@ describe('<glirastes-chat>', () => {
     }
   });
 
+  it('sends no view context from the ready event with config.viewContext.enabled false', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Ok'));
+    vi.stubGlobal('fetch', fetchMock);
+    const off = registerViewContext('page', { entity: { type: 'order', id: 'ord-1' } });
+    try {
+      let sent: boolean | undefined;
+      await mount((node) => {
+        node.setAttribute('endpoint', '/api/chat');
+        node.config = { viewContext: { enabled: false } };
+        node.addEventListener('glirastes-chat:ready', () => { sent ??= node.send('Hi'); });
+      });
+      expect(sent).toBe(true);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).not.toHaveProperty('glirastesViewContext');
+    } finally {
+      off();
+    }
+  });
+
+  it('applies config.viewContext.enabled false set right before a synchronous send', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => sseResponse('Ok'));
+    vi.stubGlobal('fetch', fetchMock);
+    const off = registerViewContext('page', { entity: { type: 'order', id: 'ord-1' } });
+    try {
+      const { element } = await mount((node) => { node.setAttribute('endpoint', '/api/chat'); });
+      element.config = { viewContext: { enabled: false } };
+      let sent: boolean | undefined;
+      await act(async () => { sent = element.send('Again'); });
+      expect(sent).toBe(true);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).not.toHaveProperty('glirastesViewContext');
+    } finally {
+      off();
+    }
+  });
+
   it('maps the voice and voice-language attributes onto the composer microphone', async () => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,

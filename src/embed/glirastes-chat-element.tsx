@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   parseChatInteractions,
@@ -93,6 +94,7 @@ function EmbeddedChat({
   welcomeMessage,
   emit,
   onSendReady,
+  onCommit,
 }: {
   endpoint: string;
   transport?: ChatTransport;
@@ -101,7 +103,10 @@ function EmbeddedChat({
   welcomeMessage?: string;
   emit: Emit;
   onSendReady: (api: EmbedApi | null) => void;
+  onCommit: (config: GlirastesChatElementConfig) => void;
 }) {
+  // Every commit: the element knows which config the chat runs with.
+  useLayoutEffect(() => onCommit(config));
   const { headers, bodyExtras, onToolResult, onUiActionOutcome, ...providerConfig } = config;
   const shared = {
     ...providerConfig,
@@ -180,6 +185,8 @@ export class GlirastesChatElement extends BaseElement {
   #interactionsFromProperty = false;
   #interactionsLoad: AbortController | null = null;
   #mentionContext: ChatMentionContext | undefined;
+  // The config of the last commit; differs from #config while a render is pending.
+  #committedConfig: GlirastesChatElementConfig | null = null;
   // The nearest `lang` the last render used; a page (or a region of it) may set or change it later.
   #renderedLang: string | null = null;
   #langObserver: MutationObserver | null = null;
@@ -191,6 +198,14 @@ export class GlirastesChatElement extends BaseElement {
   readonly #onSendReady = (api: EmbedApi | null) => {
     this.#api = api;
   };
+
+  readonly #onCommit = (config: GlirastesChatElementConfig) => {
+    this.#committedConfig = config;
+  };
+
+  #committedViewContextOff(): boolean {
+    return this.#committedConfig?.viewContext?.enabled === false;
+  }
 
   get config(): GlirastesChatElementConfig {
     return this.#config;
@@ -258,6 +273,12 @@ export class GlirastesChatElement extends BaseElement {
   /** Sends a user message through the embedded chat. False before mount. */
   send(text: string): boolean {
     if (!this.#api || !text.trim()) return false;
+    // `config.viewContext.enabled: false` set just before applies to this message: render it first. Should
+    // React not render now (send called inside its commit), the message is not sent (fail closed).
+    if (this.#config.viewContext?.enabled === false && !this.#committedViewContextOff()) {
+      flushSync(() => this.#render());
+      if (!this.#committedViewContextOff()) return false;
+    }
     return this.#api.send(text);
   }
 
@@ -404,6 +425,7 @@ export class GlirastesChatElement extends BaseElement {
         welcomeMessage={this.getAttribute('welcome-message') ?? undefined}
         emit={this.#emit}
         onSendReady={this.#onSendReady}
+        onCommit={this.#onCommit}
       />,
     );
   }

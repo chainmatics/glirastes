@@ -1333,13 +1333,14 @@ export function AiChatProvider({
     setRequestLanguage(requestLanguage);
     return () => setRequestLanguage(null);
   }, [setRequestLanguage, requestLanguage]);
-  // Whether a new user message carries the page's view context (default on: nothing goes while nothing is registered).
+  // Whether a new user message carries the page's view context (default on: nothing goes while nothing is
+  // registered). Fail closed: "off" reaches the transport during this render, before any child effect can send;
+  // "on" only once committed, so a render React discards never turns it on.
   const viewContextEnabled = viewContext?.enabled !== false;
   const setRequestViewContext = resolvedTransport.setRequestViewContext;
+  if (!viewContextEnabled) setRequestViewContext?.(false);
   useEffect(() => {
-    if (!setRequestViewContext) return undefined;
-    setRequestViewContext(viewContextEnabled);
-    return () => setRequestViewContext(true);
+    if (setRequestViewContext && viewContextEnabled) setRequestViewContext(true);
   }, [setRequestViewContext, viewContextEnabled]);
   const setUiOutcomeReporting = resolvedTransport.setUiOutcomeReporting;
   useEffect(() => {

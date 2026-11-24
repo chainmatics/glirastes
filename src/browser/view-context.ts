@@ -1,14 +1,15 @@
 /**
  * Browser side of the view context: what the user currently looks at, as
  * the app declares it. Nothing is read from the page or the URL; only what a
- * page registers is sent, with the next chat message, to the app's own chat
- * endpoint (never to the Platform, telemetry, logs or storage).
+ * page registers is sent, with the next new chat message, to the app's own
+ * chat endpoint (never to the Platform, telemetry, logs or storage).
  *
  * One registry per page (on `globalThis`, so several copies of the SDK
  * share it): one entry per source, in the order the sources first
- * registered. The snapshot is cleaned and bounded with the contract
- * (`sanitizeViewContext`, `VIEW_CONTEXT_LIMITS`); the server checks it again
- * against the entity types and facts schemas it knows and stays the
+ * registered. The registry holds a reference to each entry; it is read and
+ * copied when a message is sent. The snapshot is cleaned and bounded with the
+ * contract (`sanitizeViewContext`, `VIEW_CONTEXT_LIMITS`); the server checks
+ * it again against the entity types and facts schemas it knows and stays the
  * authority.
  *
  * @module
@@ -17,40 +18,29 @@ import {
   sanitizeViewContext,
   type ViewContextEntry,
   type ViewContextFactsSchema,
+  type ViewContextSanitizeResult,
 } from '../contracts/view-context.js';
-
-const REGISTRY = Symbol.for('glirastes.viewContext');
-
-interface Registration {
-  readonly token: object;
-  readonly entry: ViewContextEntry;
-}
-
-function registry(): Map<string, Registration> {
-  const scope = globalThis as Record<symbol, unknown>;
-  let map = scope[REGISTRY] as Map<string, Registration> | undefined;
-  if (!(map instanceof Map)) {
-    map = new Map();
-    scope[REGISTRY] = map;
-  }
-  return map;
-}
+import { viewContextState } from './view-context-store.js';
 
 /**
  * Registers what the user looks at for `source` (a name the caller owns,
  * such as `'order-page'`), replacing that source's earlier entry in place;
- * `null` unregisters it. Returns a function that unregisters this
- * registration (and nothing a later call for the same source registered).
+ * `null` unregisters it (registered again, it comes last). Returns a function
+ * that unregisters this registration (and nothing a later call for the same
+ * source registered).
  *
  * The entry names a record of an entity type the server declares (tool
  * `outputEntities` / `inputEntities`) by its id exactly as the app has it,
  * and/or a selection of such records; optionally a short `label`, `facts`
  * (kept by the server only against a facts schema in its handler config),
- * `unsaved` and the route path. Read when a new chat message is sent.
+ * `unsaved` and the route path. The registry keeps a reference: it is read
+ * when a new chat message is sent.
  */
 export function registerViewContext(source: string, entry: ViewContextEntry | null): () => void {
   if (typeof source !== 'string' || source === '') throw new TypeError('registerViewContext needs a non-empty source name');
-  const map = registry();
+  const state = viewContextState();
+  state.snapshot = currentViewContext;
+  const map = state.entries;
   if (entry === null || entry === undefined) {
     map.delete(source);
     return () => {};
@@ -86,37 +76,71 @@ function typesOf(entries: ReadonlyArray<unknown>): Set<string> {
   return types;
 }
 
+function sanitize(plain: ReadonlyArray<unknown>): ViewContextSanitizeResult {
+  const types = typesOf(plain);
+  const factsSchemas = Object.fromEntries([...types].map((type) => [type, ANY_FACTS]));
+  return sanitizeViewContext(plain, { declaredTypes: types, factsSchemas });
+}
+
+function isDevelopment(): boolean {
+  try {
+    return process.env.NODE_ENV === 'development';
+  } catch {
+    return false;
+  }
+}
+
+const warned = new Set<string>();
+const WARNED_FIELD_REASONS = new Set(['facts-too-large', 'facts-invalid']);
+
+/** Development only, once per source and reason; names the source and reason codes, never a value. */
+function warnDropped(sources: ReadonlyArray<string>, copies: ReadonlyArray<unknown>, kept: ViewContextSanitizeResult): void {
+  const keptLines = new Set(kept.entries.map((entry) => JSON.stringify(entry)));
+  const warn = (source: string, reasons: ReadonlyArray<string>) => {
+    const fresh = reasons.filter((reason) => !warned.has(`${source}\u0000${reason}`));
+    if (fresh.length === 0) return;
+    for (const reason of fresh) warned.add(`${source}\u0000${reason}`);
+    console.warn(`[glirastes] View context of "${source}" not sent as registered: ${fresh.join(', ')}`);
+  };
+  sources.forEach((source, index) => {
+    const copy = copies[index];
+    if (copy === undefined) { warn(source, ['not-serializable']); return; }
+    const alone = sanitize([copy]);
+    const reasons = Object.keys(alone.dropped);
+    if (alone.entries.length === 0) { warn(source, reasons); return; }
+    const fieldReasons = reasons.filter((reason) => WARNED_FIELD_REASONS.has(reason));
+    if (fieldReasons.length > 0) warn(source, fieldReasons);
+    // Valid alone but not kept together: past the 8th entry, the size bound or a duplicate.
+    if (!keptLines.has(JSON.stringify(alone.entries[0]))) {
+      const together = ['over-limit', 'over-size', 'duplicate'].filter((reason) => reason in kept.dropped);
+      warn(source, together.length > 0 ? together : ['dropped']);
+    }
+  });
+}
+
 /**
  * The registered view context as it would be sent now: an own copy, cleaned
  * and bounded by the contract (at most 8 entries in registration order,
  * duplicates after the first dropped, 50 selection ids, labels of at most 60
  * code points, routes and ids that are not valid dropped). Empty when
- * nothing is registered; never throws.
+ * nothing is registered; never throws. In development a dropped entry is
+ * named once per source and reason in the console.
  */
 export function currentViewContext(): ViewContextEntry[] {
   try {
-    const plain = [...registry().values()]
-      .map((registration) => plainCopy(registration.entry))
-      .filter((entry) => entry !== undefined);
-    if (plain.length === 0) return [];
-    const types = typesOf(plain);
-    const factsSchemas = Object.fromEntries([...types].map((type) => [type, ANY_FACTS]));
-    return sanitizeViewContext(plain, { declaredTypes: types, factsSchemas }).entries;
+    const registrations = [...viewContextState().entries];
+    if (registrations.length === 0) return [];
+    const copies = registrations.map(([, registration]) => plainCopy(registration.entry));
+    const result = sanitize(copies.filter((entry) => entry !== undefined));
+    if (isDevelopment()) {
+      try {
+        warnDropped(registrations.map(([source]) => source), copies, result);
+      } catch {
+        // A warning never stops a message.
+      }
+    }
+    return result.entries;
   } catch {
     return [];
   }
-}
-
-/** The body field the chat handler reads (`createAiChatHandler`). @internal */
-export const VIEW_CONTEXT_REQUEST_FIELD = 'glirastesViewContext';
-
-/**
- * The body fields of a new user message: `glirastesViewContext` with the
- * current snapshot, or undefined when nothing is registered (the request
- * body then stays exactly as without the feature). `byMessage` is reserved
- * and never sent. @internal
- */
-export function viewContextRequestBody(): Record<string, unknown> | undefined {
-  const current = currentViewContext();
-  return current.length === 0 ? undefined : { [VIEW_CONTEXT_REQUEST_FIELD]: { version: 1, current } };
 }

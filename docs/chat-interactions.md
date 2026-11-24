@@ -267,13 +267,28 @@ const unregister = registerViewContext('order-page', { entity: { type: 'order', 
 // on leaving the page: unregister(), or registerViewContext('order-page', null)
 ```
 
-One entry per source (`useViewContext` takes one per component); an update
-keeps its place, sources are sent in the order they first registered. A
+One entry per source (`useViewContext` takes one per component, with a
+source name of its own, also across several React roots); an update keeps
+its place, sources are sent in the order they first registered, and a
+source withdrawn with `null` comes last when it registers again. A
 `ViewContextEntry` (`glirastes/contracts`) names a record (`entity`), a
 selection of records (`selection: { type, ids }`), or both, plus optionally
-`label`, `facts`, `unsaved` and `route`. `useViewContext` re-registers only
-when the content changes and withdraws on unmount (StrictMode included);
-`null` withdraws, on the server it does nothing.
+`label`, `facts`, `unsaved` and `route`. The registry keeps a reference to
+the entry; it is read and copied when a message is sent. `useViewContext`
+re-registers only when the content changes (it compares the entry as JSON on
+every render, so keep `facts` small) and withdraws on unmount (StrictMode
+included); `null` withdraws, on the server it does nothing.
+
+Order and the limit of 8: React runs the effects of children before those
+of their parents, so a page registers before the layout around it. Past 8
+entries the first 8 are sent and the rest is dropped without notice in
+production, so the entry of a layout or parent page can go. Register a few
+meaningful entries (one per view, a selection instead of one entry per
+row); a parent that must always count registers with `registerViewContext`
+before its children mount. In development (`NODE_ENV=development`) the
+console names each source whose entry is not sent as registered, once per
+source and reason (`over-limit`, `invalid-entity`, `not-serializable`,
+`facts-too-large` and the like), never a value.
 
 Rules (the server checks all of them again and drops what fails; it grants
 no permission):
@@ -300,14 +315,24 @@ The browser cleans and bounds each snapshot with the contract
 
 When it is sent: the bundled transport (`VercelAiChat`,
 `useVercelAiChatTransport`, `<glirastes-chat>`) adds
-`glirastesViewContext: { version: 1, current }` to the body of a new user
-message, read at that moment. A request without a new user message (approval
-resume, `continueTurn` after a UI action, "Continue" after a budget stop)
-carries none: the server would not use it there. Nothing registered, no
-field: the request is exactly as before. `viewContext={{ enabled: false }}`
-on `AiChatProvider` / `VercelAiChat` (`config.viewContext` of
-`<glirastes-chat>`) sends none. An own transport sends nothing unless it
-adds the field itself from `currentViewContext()`.
+`glirastesViewContext: { version: 1, current }` to the body of every new
+user message, read at that moment: a typed or queued message, a starter or
+follow-up, the "continue" message after a cut-off answer, and a direct `/`
+command (the server adds no block for a direct command). A request without a
+new user message (approval resume, `continueTurn` after a UI action,
+"Continue" after a budget stop) carries none: the server would not use it
+there. Nothing registered, no field: the request is exactly as before. With
+an entry registered, the field replaces a `glirastesViewContext` the app
+puts into `bodyExtras`. `viewContext={{ enabled: false }}` on
+`AiChatProvider` / `VercelAiChat` (`config.viewContext` of
+`<glirastes-chat>`) sends none, also for a message sent in the same render
+(a child's mount effect, the element's `glirastes-chat:ready` event); the
+element renders a pending `enabled: false` before its `send()` and, when
+React cannot render at that moment, does not send (`send()` returns
+`false`). An own transport sends nothing unless it adds the field itself
+from `currentViewContext()`. The transport reaches the cleaning code only
+through `registerViewContext`: an app that never registers anything does
+not load it.
 
 Limits of this release:
 

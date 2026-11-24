@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { StrictMode } from 'react';
+import React, { StrictMode, useEffect } from 'react';
+import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
@@ -12,6 +13,7 @@ import { useVercelAiChatTransport } from '../transports/vercel.js';
 import { useViewContext } from '../hooks/use-view-context.js';
 import { useViewContext as publicUseViewContext } from '../index.js';
 import { currentViewContext, registerViewContext } from '../../browser/index.js';
+import { viewContextState } from '../../browser/view-context-store.js';
 import type { ViewContextEntry } from '../../contracts/view-context.js';
 import type { AiChatProviderConfig, ChatMessage, ChatTransport } from '../types.js';
 import { createAiChatHandler } from '../../server/adapters/nextjs/create-ai-chat-handler.js';
@@ -191,7 +193,7 @@ describe('view context from a page to the model', () => {
   });
 
   it('keeps its registration when a re-render passes an equal new object', () => {
-    const map = () => (globalThis as Record<symbol, Map<string, unknown>>)[Symbol.for('glirastes.viewContext')]!;
+    const map = () => viewContextState().entries;
     const view = render(<Page entry={{ ...orderView }} />);
     const [registration] = [...map().values()];
     view.rerender(<Page entry={{ ...orderView, entity: { ...orderView.entity! } }} />);
@@ -219,6 +221,70 @@ describe('view context from a page to the model', () => {
     await act(async () => { await send('Hi'); });
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     expect(sendMessage).toHaveBeenCalledWith({ text: 'Hi' });
+  });
+});
+
+describe('the switch holds for a message sent early', () => {
+  function AutoSend() {
+    const { send: sendText } = useChatContext();
+    useEffect(() => { sendText('Hello on mount'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    return null;
+  }
+
+  it('a child sending in its mount effect with enabled false sends no field', async () => {
+    const off = registerViewContext('page', orderView);
+    try {
+      render(<Chat viewContext={{ enabled: false }}><AutoSend /></Chat>);
+      await waitFor(() => expect(bodies).toHaveLength(1));
+      expect(bodies[0]).not.toHaveProperty('glirastesViewContext');
+    } finally {
+      off();
+    }
+  });
+
+  it('the default (on) still sends with a message sent in a mount effect', async () => {
+    const off = registerViewContext('page', orderView);
+    try {
+      render(<Chat><AutoSend /></Chat>);
+      await waitFor(() => expect(bodies).toHaveLength(1));
+      expect(bodies[0]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
+    } finally {
+      off();
+    }
+  });
+
+  it('turning it off applies to a message a child sends in the same commit', async () => {
+    const off = registerViewContext('page', orderView);
+    try {
+      const view = render(<Chat />);
+      view.rerender(<Chat viewContext={{ enabled: false }}><AutoSend /></Chat>);
+      await waitFor(() => expect(bodies).toHaveLength(1));
+      expect(bodies[0]).not.toHaveProperty('glirastesViewContext');
+    } finally {
+      off();
+    }
+  });
+});
+
+describe('several React roots on one page', () => {
+  it('keep their own sources: a root unmounting removes only its own entry', async () => {
+    const hostA = document.createElement('div');
+    const hostB = document.createElement('div');
+    document.body.append(hostA, hostB);
+    // Two server-rendered roots hydrate with the same useId sequence.
+    hostA.innerHTML = renderToString(<Page entry={orderView} />);
+    hostB.innerHTML = renderToString(<Page entry={{ entity: { type: 'order', id: 'ord-2' } }} />);
+    let a!: ReturnType<typeof hydrateRoot>;
+    let b!: ReturnType<typeof hydrateRoot>;
+    act(() => { a = hydrateRoot(hostA, <Page entry={orderView} />); });
+    act(() => { b = hydrateRoot(hostB, <Page entry={{ entity: { type: 'order', id: 'ord-2' } }} />); });
+    expect(currentViewContext()).toEqual([orderView, { entity: { type: 'order', id: 'ord-2' } }]);
+    act(() => b.unmount());
+    expect(currentViewContext()).toEqual([orderView]);
+    act(() => a.unmount());
+    expect(currentViewContext()).toEqual([]);
+    hostA.remove();
+    hostB.remove();
   });
 });
 

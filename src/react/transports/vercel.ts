@@ -12,7 +12,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart } from 'ai';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
-import { viewContextRequestBody } from '../../browser/view-context.js';
+import { viewContextRequestBody } from '../../browser/view-context-store.js';
 import type {
   ChatTransport,
   ChatTransportConfig,

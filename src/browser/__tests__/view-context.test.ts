@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VIEW_CONTEXT_LIMITS, ViewContextSchema, type ViewContextEntry } from '../../contracts/view-context.js';
 import { currentViewContext, registerViewContext } from '../index.js';
-import { viewContextRequestBody, VIEW_CONTEXT_REQUEST_FIELD } from '../view-context.js';
+import { viewContextRequestBody, viewContextState, VIEW_CONTEXT_REQUEST_FIELD } from '../view-context-store.js';
 import { VIEW_CONTEXT_FIELD, VIEW_CONTEXT_WIRE_VERSION } from '../../server/adapters/nextjs/view-context-block.js';
 
 const cleanups: Array<() => void> = [];
@@ -122,11 +122,34 @@ describe('registerViewContext', () => {
   it('shares one registry between copies of the SDK on a page', () => {
     register('page', order('o-1'));
     const registry = (globalThis as Record<symbol, unknown>)[Symbol.for('glirastes.viewContext')];
-    expect(registry).toBeDefined();
+    expect(registry).toBe(viewContextState());
+  });
+
+  it('an entry unregistered with null comes last when registered again', () => {
+    register('a', order('o-1'));
+    register('b', order('o-2'));
+    register('a', null);
+    register('a', order('o-1'));
+    expect(currentViewContext()).toEqual([order('o-2'), order('o-1')]);
   });
 });
 
 describe('the request body field', () => {
+  it('fails closed: an entry without the cleaning snapshot is not sent', () => {
+    const state = viewContextState();
+    const saved = state.snapshot;
+    state.snapshot = undefined;
+    state.entries.set('raw', { token: {}, entry: order('o-1') });
+    try {
+      expect(viewContextRequestBody()).toBeUndefined();
+      state.snapshot = () => { throw new Error('boom'); };
+      expect(viewContextRequestBody()).toBeUndefined();
+    } finally {
+      state.entries.delete('raw');
+      state.snapshot = saved;
+    }
+  });
+
   it('is the field and version the server reads, with the current snapshot', () => {
     expect(VIEW_CONTEXT_REQUEST_FIELD).toBe(VIEW_CONTEXT_FIELD);
     register('page', order('o-1'));
@@ -135,8 +158,47 @@ describe('the request body field', () => {
     });
   });
 
+  it('sends no field when every registered entry is dropped', () => {
+    register('bad', { label: 'nothing' } as unknown as ViewContextEntry);
+    expect(viewContextRequestBody()).toBeUndefined();
+  });
+
   it('never carries byMessage (reserved)', () => {
     register('page', order('o-1'));
     expect(viewContextRequestBody()![VIEW_CONTEXT_REQUEST_FIELD]).not.toHaveProperty('byMessage');
+  });
+});
+
+describe('development warnings', () => {
+  it('names the source and reason once, never a value, and only in development', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NODE_ENV', 'development');
+    try {
+      for (let index = 0; index < 8; index += 1) register(`s${index}`, order(`o-${index}`));
+      register('ninth', order('secret-9'));
+      register('broken', { entity: { type: 'order', id: ' secret ' } } as ViewContextEntry);
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      register('cyclic', order('o-c', { facts: cyclic as never }));
+      register('s0', order('o-0', { facts: { note: 'secret'.repeat(500) } }));
+      currentViewContext();
+      currentViewContext();
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines).toEqual([
+        '[glirastes] View context of "s0" not sent as registered: facts-too-large',
+        '[glirastes] View context of "ninth" not sent as registered: over-limit',
+        '[glirastes] View context of "broken" not sent as registered: invalid-entity',
+        '[glirastes] View context of "cyclic" not sent as registered: not-serializable',
+      ]);
+      expect(lines.join()).not.toContain('secret');
+      warn.mockClear();
+      vi.stubEnv('NODE_ENV', 'production');
+      register('late', { label: 'x' } as unknown as ViewContextEntry);
+      currentViewContext();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      warn.mockRestore();
+    }
   });
 });
