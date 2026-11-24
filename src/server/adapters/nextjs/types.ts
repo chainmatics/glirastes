@@ -520,13 +520,17 @@ export interface AiChatHandlerConfig {
    * Only the built-in stream handler adds the block; a continuation (an
    * approval, a UI outcome, a budget stop), a request the pipeline
    * guardrails blocked and the answer to a clarification get none. With
-   * `piiShield` labels are cleaned and shielded uncut, then cut to 60
-   * characters (a value at the cut is replaced whole), and the other values
-   * are shielded like tool results: at most two `anonymizeResult` calls per
-   * request (audit: `anonymize-result`, counted in `totalToolCalls`), then
-   * checked again; a failing shield or check sends no block. With
+   * `piiShield` the labels of the kept entries are cleaned and shielded
+   * uncut, then cut to 60 characters (the cut leaves no fragment of a
+   * value), and the other values are shielded like tool results: at most
+   * two `anonymizeResult` calls per request (audit: `anonymize-result`,
+   * counted in `totalToolCalls`), then checked again; a failing shield or check sends no block. With
    * `piiShield` a label over 512 code points after cleaning (or 4,096
-   * before) is dropped.
+   * before) is dropped. Known limit of the PII shield (`anonymizeResult`,
+   * since 0.1.0, as for tool results; fixed in #197): a short value the
+   * session knows inside a longer one can leave part of the longer in
+   * plain text (label `Kunde max@firma.de`, id `johannes.max@firma.de`
+   * gives `johannes.<pseudonym>`).
    * `history` must be `'none'` for now (the newest message only). An
    * invalid option throws here.
    *

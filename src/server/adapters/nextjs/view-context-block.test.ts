@@ -508,6 +508,96 @@ describe('prepareViewContext', () => {
     expect(prepared!.text!.split('\n')[2]).toBe('{"entity":{"type":"order","id":7},"selection":{"type":"order","ids":["a","b"]},"label":"Seven","route":"/orders/7","facts":{"note":"n"}}');
   });
 
+  describe('which labels reach the shield', () => {
+    /** Records each call; labels become `short(label)`, other values stay. */
+    const labelShield = (short: (label: string, index: number) => string = (label) => `P(${label.length})`) => {
+      const labelCalls: string[][] = [];
+      let valueCalls = 0;
+      return {
+        labelCalls,
+        valueCalls: () => valueCalls,
+        shield: {
+          anonymizeResult: async (value: unknown) => {
+            if (isLabelCall(value)) { labelCalls.push([...value]); return value.map(short); }
+            valueCalls += 1;
+            return value;
+          },
+        },
+      };
+    };
+
+    it('shields only the labels of the entries the sanitizer keeps', async () => {
+      const { labelCalls, valueCalls, shield } = labelShield();
+      const prepared = await prepareViewContext({
+        current: [
+          { entity: { type: 'order', id: 1 }, label: 'Eins' },
+          { entity: { type: 'invoice', id: 1 }, label: 'Undeclared' },
+          { entity: { type: 'order', id: '' }, label: 'Invalid' },
+          { entity: { type: 'order', id: 1 }, label: 'Duplicate' },
+          7,
+          { entity: { type: 'order', id: 2 }, label: 'Zwei' },
+          { entity: { type: 'order', id: 3 } },
+        ],
+      }, { policy, tools, shield: { shield: shield as never, sessionId: 's1' } });
+      expect(labelCalls).toEqual([['Eins', 'Zwei']]);
+      expect(valueCalls()).toBe(1);
+      expect(prepared!.text!.split('\n').slice(2, -1).map((line) => JSON.parse(line).label)).toEqual(['P(4)', 'P(4)', undefined]);
+    });
+
+    it('never sends a raw label when entries shift between the two runs: duplicates by NFC', async () => {
+      const { labelCalls, shield } = labelShield();
+      const prepared = await prepareViewContext({
+        current: [
+          { entity: { type: 'order', id: `e${cp(0x301)}` }, label: 'RAW first' },
+          { entity: { type: 'order', id: 'é' }, label: 'RAW duplicate' },
+        ],
+      }, { policy, tools, shield: { shield: shield as never, sessionId: 's1' } });
+      expect(labelCalls).toEqual([['RAW first']]);
+      expect(prepared!.text).not.toContain('RAW');
+      expect(prepared!.text!.split('\n').slice(2, -1)).toHaveLength(1);
+    });
+
+    it('never sends a raw label when shorter pseudonyms let an entry fit the size bound it missed before', async () => {
+      const bigFacts = resolveViewContextPolicy({ facts: { order: z.object({ text: z.string() }) } });
+      const current = Array.from({ length: 12 }, (_, index) => ({
+        entity: { type: 'order', id: index }, label: `RAW ${index} ${'x'.repeat(50)}`, facts: { text: 'a'.repeat(240) },
+      }));
+      const probe = sanitizeViewContext(current, { declaredTypes: ['order'], policy: bigFacts });
+      expect(probe.entries.length).toBeLessThan(8);
+      expect(probe.dropped['over-size']).toBeGreaterThan(0);
+      const { labelCalls, shield } = labelShield(() => 'P');
+      const prepared = await prepareViewContext({ current }, { policy: bigFacts, tools, shield: { shield: shield as never, sessionId: 's1' } });
+      expect(labelCalls[0]).toHaveLength(probe.entries.length);
+      const lines = prepared!.text!.split('\n').slice(2, -1).map((line) => JSON.parse(line));
+      // The shorter labels free room: the next entry now fits, without its (never shielded) label.
+      expect(lines.length).toBeGreaterThan(probe.entries.length);
+      expect(lines.at(-1).label).toBeUndefined();
+      expect(prepared!.text).not.toContain('RAW');
+    });
+
+    it('never sends a raw label when longer pseudonyms push entries out (maxEntries and size)', async () => {
+      const current = Array.from({ length: 6 }, (_, index) => ({ entity: { type: 'order', id: index }, label: `RAW ${index}`, facts: { text: 'a'.repeat(300) } }));
+      const twoEntries = resolveViewContextPolicy({ maxEntries: 2, facts: { order: z.object({ text: z.string() }) } });
+      const { labelCalls, shield } = labelShield(() => 'Q'.repeat(60));
+      const prepared = await prepareViewContext({ current }, { policy: twoEntries, tools, shield: { shield: shield as never, sessionId: 's1' } });
+      expect(labelCalls).toEqual([['RAW 0', 'RAW 1']]);
+      expect(prepared!.text).not.toContain('RAW');
+      expect(prepared!.text!.split('\n').slice(2, -1)).toHaveLength(2);
+    });
+
+    it('never reads or shields the labels of entries after the first 32', async () => {
+      const current = [
+        ...Array.from({ length: 32 }, (_, index) => ({ entity: { type: 'invoice', id: index }, label: `RAW ${index}` })),
+        { entity: { type: 'order', id: 1 }, label: 'RAW 32' },
+      ];
+      const { labelCalls, valueCalls, shield } = labelShield();
+      const prepared = await prepareViewContext({ current }, { policy, tools, shield: { shield: shield as never, sessionId: 's1' } });
+      expect(prepared?.text).toBeUndefined();
+      expect(labelCalls).toEqual([]);
+      expect(valueCalls()).toBe(0);
+    });
+  });
+
   describe('with the shield of this package', () => {
     const shield = () => createPiiShield({ locale: 'de', detector: createRegexPiiDetector() });
     const factsPolicy = resolveViewContextPolicy({ facts: { order: z.record(z.string(), z.union([z.string(), z.array(z.string())])) } });
@@ -585,6 +675,29 @@ describe('prepareViewContext', () => {
         expect(pseudonym).not.toBe(value);
         expect(entry.label, where).toBe(canonicalViewContextLabel(label.split(value).join(pseudonym)));
       }
+    });
+
+    /** The id and label the model gets for `id` and `label`, with the shield of this package. */
+    const shieldedIdAndLabel = async (id: string, label: string) => {
+      const prepared = await prepareViewContext(
+        { current: [{ entity: { type: 'order', id }, label }] },
+        { policy, tools, shield: { shield: shield(), sessionId: 's1' } },
+      );
+      return JSON.parse(prepared!.text!.split('\n')[2]!) as { entity: { id: string }; label: string };
+    };
+
+    it('shields a longer value in the label whole when the id holds a shorter one inside it (wrong on main, right now)', async () => {
+      const entry = await shieldedIdAndLabel('max@firma.de', 'Kunde johannes.max@firma.de');
+      expect(entry.label).not.toContain('johannes');
+      expect(entry.entity.id).not.toContain('max@firma.de');
+    });
+
+    // Known limit of the PII shield (`anonymizeResult`, since 0.1.0; same class as tool results), fixed in #197:
+    // a short value the session knows first is replaced inside a longer one, so a part of the longer stays.
+    it.fails('shields a longer value in the id whole when the label holds a shorter one inside it (#197)', async () => {
+      const entry = await shieldedIdAndLabel('johannes.max@firma.de', 'Kunde max@firma.de');
+      expect(entry.label).not.toContain('max@firma.de');
+      expect(entry.entity.id).not.toContain('johannes');
     });
 
     it('cleans a label before shielding it: an address split by a zero-width space is recognised', async () => {
