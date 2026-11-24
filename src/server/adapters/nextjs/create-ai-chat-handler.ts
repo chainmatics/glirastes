@@ -2140,8 +2140,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (lancer?.approvals) {
           commandTools = wrapToolsWithLancerApprovals(commandTools, lancer.approvals, sessionId);
         }
+        const commandPresentation = await managedToolPresentation();
         return await runDirectCommand({
           command: directCommand,
+          ...(commandPresentation ? { toolPresentation: commandPresentation } : {}),
           registry,
           tools: commandTools,
           managedTurn,

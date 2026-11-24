@@ -412,4 +412,52 @@ describe('direct commands in createAiChatHandler', () => {
     expect(languageModel.doStreamCalls).toHaveLength(1);
     expect(JSON.stringify(languageModel.doStreamCalls[0]!.prompt)).not.toContain('glirastes:command');
   });
+
+  // #22: the chat names a tool by the manifest wording; a direct command sent no wording,
+  // so the confirmation card and the step showed the raw tool name.
+  describe('tool wording (data-tool-presentation)', () => {
+    const presentation = { locale: 'de-DE', singular: 'Aufgabe', plural: 'Aufgaben', approval: 'Aufgabe archivieren?' };
+    const worded = {
+      ...manifestRevision,
+      tools: manifestRevision.tools.map((tool) => (tool.toolId === ARCHIVE_TASK_ID
+        ? { ...tool, modelName: 'tasks_archive', presentation }
+        : tool)),
+    };
+    const wordedHandler = () => createAiChatHandler({
+      tools: tools().registry, model: model(), systemPrompt: 'Assistant', approvalSecret: 'direct-handler-secret-32-characters!',
+      managedRuntime: {
+        resolvePrincipal: async () => principal(),
+        resolveTurnSnapshot: async ({ turnId }) => createTurnSnapshot({
+          turnId, agentRevision, manifestRevision: worded, policyRevision: policyRevision(), principal: principal(), localLimits,
+        }),
+      },
+    });
+    const expected = {
+      type: 'data-tool-presentation',
+      transient: true,
+      data: { locale: 'de-DE', tools: { tasks_archive: { label: 'Aufgabe archivieren' } } },
+    };
+
+    it('is sent ahead of the step of a fresh command and of its approved continuation, as on the model path', async () => {
+      const handler = wordedHandler();
+      const first = await streamChunks(await handler(post([user(archiveCommand)])));
+      const types = first.map((chunk) => chunk.type);
+      expect(first.find((chunk) => chunk.type === 'data-tool-presentation')).toEqual(expected);
+      expect(types.indexOf('data-tool-presentation')).toBeLessThan(types.indexOf('start-step'));
+      const request = first.find((chunk) => chunk.type === 'tool-approval-request')!;
+
+      const approved = await streamChunks(await handler(post([
+        user(archiveCommand), approvalAnswer(true, request.toolCallId as string, request.approvalId as string),
+      ])));
+      const approvedTypes = approved.map((chunk) => chunk.type);
+      expect(approved.find((chunk) => chunk.type === 'data-tool-presentation')).toEqual(expected);
+      expect(approvedTypes.indexOf('data-tool-presentation')).toBeLessThan(approvedTypes.indexOf('tool-output-available'));
+    });
+
+    it('is not sent without a managed turn', async () => {
+      const handler = createAiChatHandler({ tools: tools().registry, model: model(), systemPrompt: 'Assistant' });
+      const output = await streamChunks(await handler(post([user(listCommand)])));
+      expect(output.some((chunk) => chunk.type === 'data-tool-presentation')).toBe(false);
+    });
+  });
 });

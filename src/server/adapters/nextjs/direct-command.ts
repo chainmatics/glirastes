@@ -207,6 +207,14 @@ export interface RunDirectCommandOptions {
   onError?: (error: unknown) => void;
   /** Suffix of the tool call and approval ids; default 20 random hex characters. */
   generateId?: () => string;
+  /**
+   * The wording of the turn's tools (`locale`, `tools: { [modelName]: { label } }`),
+   * sent as a transient `data-tool-presentation` part ahead of the step, as on
+   * the model path, so the chat names the command's tool by its label instead
+   * of its raw name. `createAiChatHandler` passes the managed turn's wording;
+   * without a managed turn there is none and no part is sent.
+   */
+  toolPresentation?: { locale: string; tools: Record<string, { label: string }> };
 }
 
 /**
@@ -241,6 +249,10 @@ export async function runDirectCommand(options: RunDirectCommandOptions): Promis
     execute: async ({ writer }) => {
       try {
         writer.write({ type: 'start' });
+        // Ahead of the step, as on the model path: the chat names the tool by its label, not its raw name.
+        if (options.toolPresentation) {
+          writer.write({ type: 'data-tool-presentation', data: options.toolPresentation, transient: true });
+        }
         if (command.settled) {
           writer.write({ type: 'finish' });
           record(0, 0);
