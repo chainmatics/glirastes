@@ -223,16 +223,15 @@ export interface ViewContextPolicy {
    * type. `[]` accepts none; a type that is not declared is ignored.
    */
   readonly types?: ReadonlyArray<string>;
-  /** Default `'none'`. The chat handler accepts only `'none'` so far (the others need view contexts bound to messages). */
+  /** Default `'none'`. */
   readonly history?: ViewContextHistory;
   /** Entries per message, 1 to 8. Default 8. */
   readonly maxEntries?: number;
   /**
    * Facts schemas by entity type. A listed type uses the schema given here
    * instead of the generated one, or `false` to drop facts of that type; an
-   * unlisted type keeps the generated schema (the chat handler has no
-   * generated schemas yet: only types listed here keep facts). `false` for
-   * the whole option drops all facts.
+   * unlisted type keeps the generated schema. `false` for the whole option
+   * drops all facts.
    */
   readonly facts?: false | Readonly<Record<string, ViewContextFactsSchema | false>>;
 }
@@ -765,73 +764,45 @@ export function sanitizeViewContext(input: unknown, options: ViewContextSanitize
 const MAX_SCHEMA_LIST_LENGTH = 10_000;
 
 /**
- * A value checked and copied by `check` in both directions (`parse` and
- * `z.encode`): the result is the copy `check` returned, never the input, so
- * a getter or proxy cannot show other content after the check. `check`
- * reads the input once; `undefined` means invalid: the issue `z.custom`
- * raises (`continue: false`, so a list holding it reports no further size
- * issue; the message comes from a `z.custom` instance, as before, so the
- * issue reads `{ code, path, message }` and an error map applies the same
- * way). Built as a codec, not a transform, so `z.encode` works.
+ * The first stage of a list schema: a new array holding the same elements
+ * (not copied themselves) of an array with an honest `length` (read once,
+ * `listLength`, at most 10,000), so the `z.array` after it reads a real
+ * array and never a length a proxy claims. Anything that is not an array is
+ * passed on unchanged, so `z.array` reports it as always.
  */
-function checkedCopy<T>(check: (value: unknown) => T | undefined, message: string): z.ZodType<T> {
-  const inst = z.custom<T>(() => true, { message });
-  const run = (value: unknown, payload: { issues: unknown[] }): T => {
-    const copy = check(value);
-    if (copy === undefined) payload.issues.push({ code: 'custom', input: value, inst, continue: false });
-    return copy as T;
-  };
-  return z.codec(z.unknown(), z.custom<T>(() => true), { decode: run, encode: run }) as unknown as z.ZodType<T>;
-}
-
-/**
- * A list schema: first a new array of the elements of an array with an
- * honest `length` (read once, `listLength`, at most 10,000; each index read
- * once), so `item` checks a real array and never a length a proxy claims.
- * Anything that is not an array is passed on unchanged, so `z.array` reports
- * it as always. Over 10,000 items is one `too_big` that does not abort the
- * parent, so a union reports it at its path instead of `invalid_union`.
- * The length check comes first in both directions: `parse` runs it before
- * `z.array`, `z.encode` (which runs a codec's output side first) through
- * the inner codec, so neither ever loops over a claimed length or throws.
- */
-function honestList<T>(item: z.ZodType<T>, minimum: number, maximum: number): z.ZodType<T[]> {
-  const run = (value: unknown, payload: { issues: unknown[] }): unknown => {
+function honestList(maximum: number) {
+  return z.unknown().transform((value, ctx) => {
     if (!Array.isArray(value)) return value;
     const length = listLength(value);
     if (length === undefined) {
-      payload.issues.push({ code: 'custom', message: 'Expected a list with a valid length', input: value });
-      return value;
+      ctx.addIssue({ code: 'custom', message: 'Expected a list with a valid length', input: value });
+      return z.NEVER;
     }
     if (length > MAX_SCHEMA_LIST_LENGTH) {
-      payload.issues.push({ code: 'too_big', origin: 'array', maximum, inclusive: true, input: value, continue: true });
-      return value;
+      ctx.addIssue({ code: 'too_big', origin: 'array', maximum, inclusive: true, input: value });
+      return z.NEVER;
     }
     return Array.from({ length }, (_, index) => value[index]);
-  };
-  const list = minimum > 0 ? z.array(item).min(minimum).max(maximum) : z.array(item).max(maximum);
-  const same = (value: unknown) => value;
-  // Encoding runs `encodeFirst` before `list`; parsing runs `run` before it.
-  const encodeFirst = z.codec(list, z.unknown(), { decode: same, encode: run as never });
-  return z.codec(z.unknown(), encodeFirst, { decode: run as never, encode: same }) as unknown as z.ZodType<T[]>;
+  });
 }
 
 const typeSchema = z.string().regex(ENTITY_TYPE_PATTERN);
-const idSchema = checkedCopy<ViewContextEntityId>(entityId, 'Expected an entity id');
+const idSchema = z.custom<ViewContextEntityId>((value) => entityId(value) !== undefined, { message: 'Expected an entity id' });
 const entitySchema = z.object({ type: typeSchema, id: idSchema }).strict();
 const selectionSchema = z.object({
   type: typeSchema,
-  ids: honestList(idSchema, 1, VIEW_CONTEXT_LIMITS.maxSelectionIds),
+  ids: honestList(VIEW_CONTEXT_LIMITS.maxSelectionIds)
+    .pipe(z.array(idSchema).min(1).max(VIEW_CONTEXT_LIMITS.maxSelectionIds)),
 }).strict();
 const entryFields = {
   label: z.string().min(1).refine((label) => canonicalViewContextLabel(label) === label, 'Expected a canonical label').optional(),
-  facts: checkedCopy<ViewContextFacts>((value) => {
-    // Read once: the copy is checked and returned, never `value` again (no second walk, no `toJSON`).
+  facts: z.custom<ViewContextFacts>((value) => {
+    // Read once: the copy is checked, never `value` again (no second walk, no `toJSON`).
     const raw = plainFacts(value, false);
-    if (!raw.ok) return undefined;
+    if (!raw.ok) return false;
     const cleaned = plainFacts(raw.value, true);
-    return cleaned.ok && !cleaned.changed ? raw.value : undefined;
-  }, 'Expected bounded, cleaned plain JSON facts').optional(),
+    return cleaned.ok && !cleaned.changed;
+  }, { message: 'Expected bounded, cleaned plain JSON facts' }).optional(),
   unsaved: z.boolean().optional(),
   route: z.custom<string>(isViewContextRoute, { message: 'Expected a route path' }).optional(),
 };
@@ -842,18 +813,10 @@ const entryFields = {
  * or a selection alone (`entity` absent or `undefined`). It rejects unknown
  * keys, an entry with neither, a label that is not canonical, an id or route
  * the policy does not allow, facts that are not bounded, cleaned plain JSON,
- * and `selection.ids` over 10,000 items before any item is checked. The
- * result holds no object of the input: lists, composite ids and facts are
- * the copies that were checked. Every list `length` is read once per check
- * and bounded before any item is read. The two variants (with an entity, a
- * list view without) each check and copy on their own, and the returned
- * copy comes from the variant that passed: an entry with a valid entity is
- * read once, a list-view entry or an entry with an invalid entity is read by
- * both variants (its lists twice). `z.encode` / `z.safeEncode` also bound
- * every list length before any loop, never throw on a lying length and
- * return checked copies, but may read an item more than once. It does not
- * know the declared types or facts schemas; input from the browser goes
- * through `sanitizeViewContext`.
+ * and `selection.ids` over 10,000 items before any item is checked. It
+ * promises no copy of the input: facts and composite ids in the result can
+ * be the input's own objects. It does not know the declared types or facts
+ * schemas; input from the browser goes through `sanitizeViewContext`.
  */
 export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
   z.object({ entity: entitySchema, selection: selectionSchema.optional(), ...entryFields }).strict(),
@@ -864,7 +827,8 @@ export const ViewContextEntrySchema: z.ZodType<ViewContextEntry> = z.union([
  * The shape of a sanitized view context, for trusted, stored data: at most 8
  * entries of {@link ViewContextEntrySchema}. A list whose `length` is not a
  * safe non-negative integer, or over 10,000, is refused before any entry is
- * checked. The result holds no object of the input (see the entry schema);
- * input from the browser goes through `sanitizeViewContext`.
+ * checked. It promises no copy of the input (see the entry schema); input
+ * from the browser goes through `sanitizeViewContext`.
  */
-export const ViewContextSchema: z.ZodType<ViewContextEntry[]> = honestList(ViewContextEntrySchema, 0, VIEW_CONTEXT_LIMITS.maxEntries);
+export const ViewContextSchema: z.ZodType<ViewContextEntry[]> = honestList(VIEW_CONTEXT_LIMITS.maxEntries)
+  .pipe(z.array(ViewContextEntrySchema).max(VIEW_CONTEXT_LIMITS.maxEntries));
