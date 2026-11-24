@@ -188,15 +188,17 @@ pointer when it really moves over a row or an entity action button. Arrow
 keys go on from there. `mouseenter`/`mouseover` and a move event at the same
 coordinates (the list opens, scrolls or re-renders under a resting pointer)
 change nothing, nor does a finger dragging the list. Pointer activation does
-not scroll the list. The listbox carries `data-active-source="pointer"` or
-`"keyboard"`.
+not scroll the list. The listbox carries `data-active-source="pointer"`
+while the active entry is the one under the pointer, else `"keyboard"`:
+arrow keys, new results and any scroll of the list (wheel, trackpad) set it
+back until the pointer really moves again.
 
 A custom `DropdownItem` needs no change: the list finds the row from the
 `optionProps` id (or, without it, from the row order when each result renders
 one element). It can call `onActivate()` itself, only on real pointer
 movement. An own hover style is best scoped to
-`[data-active-source="pointer"]`, or the hovered row and the keyboard row
-both look marked after the arrow keys. A custom item that scrolls itself on
+`[data-active-source="pointer"]`, or the hovered row and the active row
+both look marked after the arrow keys or a scroll. A custom item that scrolls itself on
 `isSelected` also scrolls on pointer activation.
 
 ## Opening a list from a button

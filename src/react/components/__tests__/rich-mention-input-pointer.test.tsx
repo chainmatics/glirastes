@@ -114,6 +114,38 @@ describe('completion list: the active entry follows real pointer movement', () =
     expect(selectedLabels()).toEqual(['Cleo']);
   });
 
+  it('hands the list back to the keyboard when it scrolls under a resting pointer', async () => {
+    const { editor } = await open();
+    const list = () => screen.getByRole('listbox');
+    move(option('Anna'), 4, 4);
+    move(option('Bert'), 4, 30);
+    expect(list().getAttribute('data-active-source')).toBe('pointer');
+    // Wheel or trackpad scroll: another row is under the pointer now.
+    fireEvent.scroll(list());
+    expect(list().getAttribute('data-active-source')).toBe('keyboard');
+    expect(selectedLabels()).toEqual(['Bert']);
+    // Same coordinates: the pointer rests, nothing changes.
+    move(option('Cleo'), 4, 30);
+    expect(selectedLabels()).toEqual(['Bert']);
+    expect(list().getAttribute('data-active-source')).toBe('keyboard');
+    // Real movement activates the row under the pointer again.
+    move(option('Cleo'), 4, 33);
+    expect(selectedLabels()).toEqual(['Cleo']);
+    expect(list().getAttribute('data-active-source')).toBe('pointer');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => expect(editor.querySelector('[data-mention-id="c"]')).toBeTruthy());
+  });
+
+  it('hands the list back to the keyboard when its results change under the pointer', async () => {
+    const { editor } = await open();
+    move(option('Anna'), 4, 4);
+    move(option('Bert'), 4, 30);
+    expect(screen.getByRole('listbox').getAttribute('data-active-source')).toBe('pointer');
+    typeInto(editor, '@e');
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
+    expect(screen.getByRole('listbox').getAttribute('data-active-source')).toBe('keyboard');
+  });
+
   it('continues arrow-key navigation from the pointer row', async () => {
     const { editor } = await open();
     move(option('Anna'), 1, 1);

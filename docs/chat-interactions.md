@@ -550,7 +550,7 @@ active one (see [Keyboard and screen readers](#keyboard-and-screen-readers)).
 itself; call it only on real pointer movement, never on `mouseenter` or
 `mouseover`. Scope an own hover style to
 `[data-component="mention-dropdown"][data-active-source="pointer"]`, so a
-resting pointer does not mark a second row after the arrow keys.
+resting pointer does not mark a second row after the arrow keys or a scroll.
 Never call `send(text)` without the editor's mentions and never pass an own
 `onSearch` next to `chatInteractions`: both bypass direct commands and entity
 actions. The legacy `mentions` composer ignores these props. The
@@ -657,7 +657,10 @@ then goes to the model.
   that opens, scrolls or re-renders under a resting pointer keeps the
   keyboard entry: `mouseenter`/`mouseover` and move events at unchanged
   coordinates are ignored, as is touch movement. The listbox carries
-  `data-active-source="pointer"` or `"keyboard"`; the built-in stylesheet
+  `data-active-source="pointer"` while the active entry is the one under the
+  pointer, else `"keyboard"`: arrow keys, new results and any scroll of the
+  list (wheel, trackpad) set it back until the pointer really moves again.
+  The built-in stylesheet
   shows a hover look (same as the selected look) only in pointer mode and
   only on devices with hover.
 - Backspace behind a pill and Delete before it remove the whole pill; each

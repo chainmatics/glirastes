@@ -637,6 +637,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           if (searchVersionRef.current !== version) return;
           if (removeArmed()) sourceRef.current = undefined;
           setSearchResults([]);
+          setActiveSource('keyboard');
           setDropdownOpen(false);
           setNoMatches(false);
         } finally {
@@ -1862,6 +1863,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
             onMouseDown={(event) => event.preventDefault()}
             onPointerMove={handleListPointerMove}
             onMouseMove={handleListPointerMove}
+            // `pointer` means "the active entry is the one under the pointer". After a scroll (wheel,
+            // trackpad, keyboard) another row may be under it: back to `keyboard`; the stored position
+            // stays, so a resting pointer re-activates nothing until it really moves.
+            onScroll={() => { if (activeSource === 'pointer') setActiveSource('keyboard'); }}
           >
             <PointerActiveContext.Provider value={activeSource === 'pointer'}>
             {searchResults.map((result, index) => {
