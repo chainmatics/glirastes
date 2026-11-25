@@ -36,6 +36,7 @@ export {
   type UiActionRejectionReason,
   type UiOutcomeCode,
 } from './ui-action-signals.js';
+export { currentViewContext, registerViewContext } from './view-context.js';
 export {
   defineQueryFilters,
   type QueryFilterScalar,

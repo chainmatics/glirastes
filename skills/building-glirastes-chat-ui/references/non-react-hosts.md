@@ -126,6 +126,8 @@ could not be performed. Use literal registrations in supported JS/TS sources so
 `glirastes tools refresh` can discover them. Unknown template formats need an
 ordinary scanned module; never fake a tool inventory.
 
+What the user has open goes with each new message once the page registers it: `registerViewContext(source, { entity: { type, id } })` from `glirastes/browser`, unregistered on leaving the page; `currentViewContext()` returns what would be sent (an own transport adds it as `glirastesViewContext`). Nothing is read from the URL. To turn it off, register nothing (or pass `null`), or set `viewContext: false` on the server; there is no switch per chat element.
+
 A navigation bridge maps execution to the app router; it does not discover
 pages. Return `false` from `push` when the navigation did not happen;
 vue-router resolves a failure, so pass `async (href) => !(await

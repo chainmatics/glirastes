@@ -32,6 +32,7 @@ current session id with every request.
 | `useMentions()` | `query`, `results`, `select`, `activeMentions`, `isSearching` |
 | `useSuggestions()` | follow-up `chips`, `select`, `refresh`, `isGenerating` |
 | `useChatContext()` | the whole provider state, including session list operations |
+| `useViewContext(entry \| null)` | nothing; declares what the component shows (`{ entity: { type, id }, label }`), sent with each new user message; works without a provider; off: register nothing or `viewContext: false` on the server (`docs/chat-interactions.md`, View context) |
 
 ## Components
 
