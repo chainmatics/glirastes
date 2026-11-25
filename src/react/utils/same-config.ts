@@ -22,6 +22,8 @@ export function sameConfig(a: unknown, b: unknown, depth = 0): boolean {
 
 function isPlain(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
+  // A React element counts by identity, the same in development and production.
+  if ('$$typeof' in value) return false;
   if (Array.isArray(value)) return true;
   const proto = Object.getPrototypeOf(value) as unknown;
   return proto === Object.prototype || proto === null;
