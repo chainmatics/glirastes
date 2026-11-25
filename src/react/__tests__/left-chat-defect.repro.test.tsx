@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 // REPRODUCTIONS (`it.fails`, red on main by design): a request of chat A that still runs when the host opens
 // chat B (`session.activeId`) writes into B, because one transport (one AI SDK `Chat`) serves every chat.
-// Design: docs/plans/2026-11-23-design-left-chat.md (variant V1, session pool + `transport.sessions`).
-// The pull requests of that design flip them to `it`: R1, R3 and R4 the transport pool and the provider policy
-// (PR2 and PR3 of the design's cut; the fake transport then gets the `sessions` capability), R5 the
-// `VercelAiChat` step (PR5). R2 (`clear()` during a run) is not here: it ships with its own fix (#171) as a
+// The planned fix: a pool of one AI SDK `Chat` per session inside the transport, offered to the provider as an
+// optional `transport.sessions` capability, so a left chat's request goes on in the background. Its pull requests
+// flip these to `it`: R1, R3 and R4 the transport pool and the provider policy (the fake transport then gets the
+// `sessions` capability), R5 the
+// `VercelAiChat` step (PR5). R2 (`clear()` during a run) is not here: it ships with its own fix (the clear() pull request) as a
 // passing test (clear-during-run.test.tsx).
 // The patterns the fix must keep are pinned in left-chat-patterns.test.tsx.
 

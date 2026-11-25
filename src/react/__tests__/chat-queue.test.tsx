@@ -593,8 +593,11 @@ describe('chat queue enabled', () => {
     expect(queuedTexts()).toEqual(['a']);
     await act(async () => { ctx.clear(); });
     expect(ctx.queue.items).toHaveLength(0);
-    await act(async () => { ctx.submit('b'); });
-    expect(queuedTexts()).toEqual(['b']);
+    // clear() stopped the run: the next message starts one, the one after it waits.
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    await startRun(chat, 'b');
+    await act(async () => { ctx.submit('c'); });
+    expect(queuedTexts()).toEqual(['c']);
     await act(async () => { view.rerender(<Host chat={chat} config={config('s2', 'de')} />); });
     expect(ctx.queue.items).toHaveLength(0);
     expect(events).toEqual(['added', 'cleared', 'added', 'cleared']);

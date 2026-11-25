@@ -1,0 +1,19 @@
+{
+  "id": "clear-stops-running-request",
+  "kind": "recommended",
+  "summary": "Behavior change: clear() while a request the provider has seen running now stops it; nothing of it is shown, stored or recorded, no continuation starts for it, and the chat stays busy and empty until the request ended. Before, the answer landed in the emptied chat.",
+  "howTo": "Nothing to do with useVercelAiChatTransport or the LangGraph transport, unless an app wrapper builds its own transport object listing the members explicitly: it passes discardActiveRun through. A custom ChatTransport is now stopped when the chat is cleared during a run: clear() calls the new optional discardActiveRun() and then stop(), both on the transport object, best effort. Until its status leaves submitted/streaming the chat stays busy and empty, then the provider calls setMessages([]); there is no timeout. A custom transport that continues by itself (after approvals or UI outcomes) implements discardActiveRun(): one call, no counterpart; it then starts nothing by itself at the end of the running request and drops its data parts, and ends the mark itself when that request ends (normal end, abort or error) or the next request starts. Without it the provider still hides the request and drops its data parts; continuing is up to the transport. A message sent in the window goes out into the emptied chat afterwards, with the checks of a direct send: without the queue the first is held and submitWithResult reports { status: 'queued' }, a further one is { status: 'rejected', reason: 'session' }; a held message dropped because the host opened another chat, attachments were turned off or it became a direct command sets lastRejection; a second clear() or an unmount drops it silently, and its text is not restored. A request started in the same tick as clear() is not stopped, as before. Two providers on one transport share its request: clear() in one stops it for both. Code that called clear() and then send() relied on two requests running at once; it now gets one fresh request. See docs/concepts.md, Turn outcomes.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "AiChatProvider",
+      "VercelAiChat"
+    ],
+    "patterns": [
+      "\\bclear\\(\\)"
+    ]
+  },
+  "surface": [
+    "glirastes/react#ChatTransport.discardActiveRun"
+  ]
+}

@@ -104,9 +104,9 @@ attachments are off, and refused with a direct command.
 | Member | Effect |
 | --- | --- |
 | `send(text, options?)` | Unchanged signature; with the queue true when sent or queued, false when refused. |
-| `submit(text, options?)` | `'sent'`, `'queued'` or `'rejected'`; also without the queue (`'sent'`/`'rejected'`). |
+| `submit(text, options?)` | `'sent'`, `'queued'` or `'rejected'`; also without the queue (`'sent'`/`'rejected'`, and `'queued'` for a message held while a request cleared with `clear()` still ends: it goes out into the emptied chat afterwards, see `docs/concepts.md`). |
 | `submitWithResult(text, options?)` | `submit` with the reason: `{ status: 'sent' \| 'queued' }` or `{ status: 'rejected', reason }` (below). |
-| `lastRejection` | `{ reason, at }` of the latest refused `send`/`submit` (also from the built-in composers), else null; null again after an accepted message, `clear()` or a conversation change. |
+| `lastRejection` | `{ reason, at }` of the latest refused `send`/`submit` (also from the built-in composers) or of a held message dropped after it was taken (`docs/concepts.md`), else null; null again after an accepted message, `clear()` or a conversation change. |
 | `queue` | `{ enabled, items, paused, restoring, editingId }`. |
 | `canCompose` | Whether a composer takes input: without the queue `!isLoading`; with it false only while the conversation loads or changes. |
 | `sendNow(id)`, `removeQueued(id)`, `editQueued(id, text)` | `boolean`: false for an unknown id (or an empty text). |
