@@ -671,3 +671,39 @@ describe('a click in a message that did not render since reaches the current cha
   });
 });
 
+describe('derived config passed inline by an app that renders on every chunk', () => {
+  it('inline toolLabels and triggers: no render of a finished message', async () => {
+    const chat = new StreamingChat();
+    chat.messages = conversation(TURNS);
+    liveChat = chat;
+    function App() {
+      const [, force] = useReducer((count: number) => count + 1, 0);
+      useEffect(() => chat.subscribe(force), []);
+      return (
+        <AiChatProvider
+          transport={chat.transport}
+          uiActionBus={bus}
+          entityLinks={LINKS}
+          entityDeclarations={DECLARED}
+          toolLabels={{ labels: { channels_list: { singular: 'List channels', plural: 'Listed channels' } } }}
+          triggers={[{ char: '#', label: 'Channel', prefix: '#', types: ['channel'] }]}
+          approvalDisplay={{ decided: 'entry', open: 'inline' }}
+        >
+          <Probe />
+          <AiChatPanel />
+        </AiChatProvider>
+      );
+    }
+    render(<App />);
+    await waitFor(() => expect(document.querySelectorAll('[data-component="mention-chip"]').length).toBe(TURNS * 6), { timeout: 5000 });
+    await settle();
+    await startAnswer(chat);
+    reset();
+    await streamChunks(chat, 10);
+    expect(byId(bubbleRenders, finishedIds())).toEqual({});
+    expect(byId(parses, finishedIds())).toEqual({});
+    // The labels and the prefix still apply.
+    expect(document.querySelector('[data-component="activity-log"]')?.textContent).toContain('List channels');
+    expect(document.querySelector('[data-mention-type="channel"] [data-element="prefix"]')?.textContent).toBe('#');
+  });
+});
