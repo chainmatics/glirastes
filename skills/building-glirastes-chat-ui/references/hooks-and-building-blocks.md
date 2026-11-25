@@ -172,8 +172,10 @@ Defaults keep today's markup; everything below is opt-in.
 - Renders: inside `MessageList` (`AiChatPanel`, the floating window,
   `<glirastes-chat>`) only the streaming message renders on each chunk. A
   finished message renders when something it shows changes: the message
-  object, the links, the provider's config (plain objects compared by value),
-  its turn outcome, its open approval. Components inside a message (custom
+  object, the links, the provider's config (plain objects compared by value;
+  functions, components and React elements by identity), its turn outcome,
+  its open approval. The chat functions a message calls (`approve`, `stop`,
+  …) always reach the current ones and render nothing. Components inside a message (custom
   bubble, `MessageParts`, `Markdown`, `MentionChip`, tool renderers, …) must
   not rely on rendering per chunk: keep `Date.now()`, relative times and
   external state in state, a subscription or a timer, not computed in render.
