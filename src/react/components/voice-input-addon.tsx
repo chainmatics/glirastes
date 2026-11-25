@@ -363,8 +363,21 @@ export function VoiceInputAddon({
   const iconState = phase === 'finalizing' ? 'transcribing' : state;
   const label = voiceButtonLabel(locale, iconState);
 
+  const recordingBar = (
+    <RecordingBar
+      isConnecting={isConnecting}
+      stream={stream}
+      transcript={displayTranscript}
+      onCancel={() => { void cancelRecording().catch(() => {}); }}
+      onStop={() => { void stopAndSubmit(); }}
+      variant={variant}
+    />
+  );
+
   return (
     <>
+      {/* The compact waveform reads before the mic that stops it. */}
+      {inEditor && active && recordingBar}
       <button
         type="button"
         onPointerDown={handlePointerDown}
@@ -398,16 +411,7 @@ export function VoiceInputAddon({
         </>
       )}
 
-      {showRecordingBar && active && (
-        <RecordingBar
-          isConnecting={isConnecting}
-          stream={stream}
-          transcript={displayTranscript}
-          onCancel={() => { void cancelRecording().catch(() => {}); }}
-          onStop={() => { void stopAndSubmit(); }}
-          variant={variant}
-        />
-      )}
+      {showRecordingBar && active && variant !== 'composer' && recordingBar}
     </>
   );
 }

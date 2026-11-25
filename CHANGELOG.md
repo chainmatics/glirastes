@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - In those text parts, `resolveAmbiguous` is called less often: a finished message is split again only when the known names or the config change, not on every chunk (in a 3-chunk test 9 calls instead of 12). In Markdown the number of calls is unchanged.
   - Known names and seen ids notice a change to a message only when something on the message or part level is new: a new message object, a new `parts` array, another `role` or number of parts, a new part object, or a new `type`, `text`, `state`, `toolName`, `input`, `output` or `result` value of a part; also new entity searches or declarations objects, or a `read_result` that now reads another result. A change made inside the same `input`, `output` or `result` object (an item pushed into the same array, a `resultId` set on the same `input`) or a key added to the same declarations object is not noticed until that message is replaced; 0.29.0 read everything again whenever the messages array was new. The AI SDK replaces a changed message with a new copy, so this concerns only apps that change messages in place.
 
+## [0.29.1] - 2026-11-25
+
+### Changed
+
+- `voice.recordingBar.variant: 'composer'`: the compact waveform sits before the mic button (left of it in a left-to-right toolbar), not after it. CSS that moved it there with `order` can go.
+
 ## [0.29.0] - 2026-11-25
 
 ### Added
@@ -1352,6 +1358,7 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.29.1]: https://github.com/chainmatics/glirastes/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/chainmatics/glirastes/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/chainmatics/glirastes/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/chainmatics/glirastes/compare/v0.26.1...v0.27.0
