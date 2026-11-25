@@ -15,7 +15,12 @@
       },
       "surface": [
         "glirastes/react#RichMentionInputProps.liveText"
-      ]
+      ],
+      "adoptedWhen": {
+        "patterns": [
+          "variant:\\s*['\"]composer['\"]"
+        ]
+      }
     }
   ]
 }

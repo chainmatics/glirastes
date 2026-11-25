@@ -6,6 +6,7 @@ import { readInstalledSkillsManifest } from '../installed-skills-manifest.js';
 import { planSkillsUpdate, type KeptSkill } from '../skills-auto-update.js';
 import { BASELINE_PATH, readBaseline, withDeferred, writeBaseline, type SdkBaseline } from './baseline.js';
 import { evaluateNote, scanApp, type AppScan } from './detect.js';
+import { createOffersList, formatOffersList } from './offers.js';
 import {
   compareVersions,
   findPackageUpgradeNotesDir,
@@ -259,6 +260,8 @@ export const UPGRADE_USAGE = [
   '         deferrals last until --undefer or until the note is detected as adopted or not affected',
   '         ack refuses while a breaking item is affected or unclear and not deferred; --force acknowledges anyway',
   '         (the intended path for an item already implemented in code that detection cannot recognize)',
+  '       glirastes upgrade offers [--json] [--since <version>] [--root <dir>]',
+  '         list every optional feature up to the installed SDK that the app does not use yet, also after ack (never changes your code)',
 ].join('\n');
 
 export const UPGRADE_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
@@ -268,6 +271,7 @@ export const UPGRADE_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
   },
   // `--defer` and `--undefer` repeat; takeRepeated reads them before parseToolArgs sees the rest.
   ack: { flags: ['--force'], values: ['--defer', '--undefer', '--root'] },
+  offers: { flags: ['--json'], values: ['--since', '--root'] },
 };
 
 /** Takes every `<flag> <id>` out of `argv`; the flag repeats, which `parseToolArgs` does not support. */
@@ -329,6 +333,22 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
   };
 
   try {
+    if (sub === 'offers') {
+      const since = args.values.get('--since');
+      if (since !== undefined && !isSemver(since)) {
+        error(`--since needs a version like 0.17.0, got '${since}'.\n${UPGRADE_USAGE}`);
+        return 2;
+      }
+      const list = await createOffersList({
+        rootDir,
+        sdkVersion,
+        ...(reportOptions.notesDir ? { notesDir: reportOptions.notesDir } : {}),
+        ...(since ? { since } : {}),
+      });
+      log(args.flags.has('--json') ? JSON.stringify(list, null, 2) : formatOffersList(list));
+      return 0;
+    }
+
     if (sub === 'report') {
       const failOn = args.values.get('--fail-on');
       if (failOn !== undefined && failOn !== 'breaking') {
@@ -411,6 +431,10 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>, io: Upgrade
     await writeBaseline(rootDir, withDeferred(baseline, reviewedThrough, entries));
     const kept = entries.length > 0 ? `; deferred ${entries.map((entry) => entry.id).sort().join(', ')}` : '';
     log(`Reviewed through ${reviewedThrough}${kept}.`);
+    const open = report.offer.filter((item) => !deferred.has(item.id)).length;
+    if (open > 0) {
+      log(`${open} optional ${open === 1 ? 'feature leaves' : 'features leave'} this report; \`glirastes upgrade offers\` lists them any time.`);
+    }
     return 0;
   } catch (cause) {
     error(`glirastes upgrade failed: ${(cause as Error).message}`);

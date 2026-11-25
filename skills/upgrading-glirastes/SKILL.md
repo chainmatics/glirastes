@@ -87,6 +87,12 @@ Run it:
    checked). Otherwise show the message to the developer instead of working
    around it. Then commit the app changes, the refreshed `.glirastes` outputs
    and `.glirastes/sdk-baseline.json`.
+10. Optional items leave the report with `ack`, but not the SDK:
+    `glirastes upgrade offers` lists every optional feature up to the installed
+    version that the code does not use yet, also from earlier reviews. Run it
+    when the developer asks what Glirastes offers or which features the app
+    skipped; present it like step 4. Notes marked `use not detectable` stay
+    listed even once adopted.
 
 ## Commands
 
@@ -97,6 +103,8 @@ glirastes upgrade report --fail-on breaking
 glirastes upgrade ack
 glirastes upgrade ack --defer <note-id> --defer <other-note-id>
 glirastes upgrade ack --undefer <note-id>
+glirastes upgrade offers
+glirastes upgrade offers --since <version> --json
 ```
 
 `--fail-on breaking` exits 1 while
