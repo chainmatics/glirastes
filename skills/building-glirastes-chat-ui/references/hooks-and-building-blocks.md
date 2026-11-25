@@ -180,8 +180,11 @@ Defaults keep today's markup; everything below is opt-in.
   `useMessageParts` and props are enough; a component that calls
   `useChatContext()` renders with every change of the chat (every chunk). If
   the component holding the provider renders per chunk, keep functions,
-  components, regexes and `entityLinks.matchers` stable (module scope,
-  `useMemo`/`useCallback`); replace changed messages, do not mutate them.
+  components, regexes and elements (`approvalDescription`, `components`,
+  `toolRenderers`, `entityLinks.matchers`, a trigger `icon`, `markdown`)
+  stable (module scope, `useMemo`/`useCallback`); plain objects (`locale`,
+  `toolLabels`, `triggers`, `entityDeclarations`) may be inline. Replace
+  changed messages, do not mutate them.
 - `continuation`: the "Continue" button (`locale.continueButton`, German "Weitermachen") under
   the latest answer when the server's stop notice ends it with a continuable `data-budget-stop`
   part; a `<button type="button" data-action="continue-after-stop">` in
