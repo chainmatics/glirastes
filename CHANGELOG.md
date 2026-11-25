@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `voice.recordingBar.variant: 'composer'`: the compact waveform sits before the mic button (left of it in a left-to-right toolbar), not after it. CSS that moved it there with `order` can go.
+
 ## [0.29.0] - 2026-11-25
 
 ### Added
