@@ -2229,8 +2229,6 @@ export function AiChatProvider({
       }
     }
     const queued = queueStore.itemsRef.current;
-    // Frozen now, at the user's send, whether it goes at once or waits in the queue (an edit keeps it).
-    const frozen = frozenViewContext();
     const resetComposer = () => {
       setActiveMentions([]);
       setMentionQuery('');
@@ -2243,7 +2241,8 @@ export function AiChatProvider({
     const busy = queueBusy || sendInFlightRef.current || pendingUiWorkRef.current > 0
       || queueStore.restoringRef.current || pendingCommand !== null || (queued.length > 0 && !clarificationOpen);
     if (!busy) {
-      // Idle: sent at once, so an open clarification is answered as before.
+      // Idle: sent at once, so an open clarification is answered as before. Frozen now, at the user's send.
+      const frozen = frozenViewContext();
       resetComposer();
       sendInFlightRef.current = true;
       void dispatchSend(message, { mentions: [...mentionsForSend], ...(files ? { files } : {}) }, { keepComposer: true, ...frozen })
@@ -2254,6 +2253,8 @@ export function AiChatProvider({
       return { status: 'sent' };
     }
     if (queued.length >= queueConfig.maxSize) return { status: 'rejected', reason: 'queue-full' };
+    // Frozen now, at the user's send (after every refusal); an edit keeps it.
+    const frozen = frozenViewContext();
     // The hint shows for the message that starts waiting for the card, not for every one after it.
     if (approvalWaiting && queued.length === 0) setApprovalReminder(true);
     queueStore.commit(

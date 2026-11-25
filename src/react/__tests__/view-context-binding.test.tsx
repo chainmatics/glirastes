@@ -13,6 +13,7 @@ import { VercelAiChat } from '../transports/vercel/index.js';
 import { defineChatCommand, defineChatEntity } from '../interactions/definitions.js';
 import { clarificationAnswerMessage } from '../utils/clarification.js';
 import { currentViewContext, registerViewContext } from '../../browser/index.js';
+import { viewContextState } from '../../browser/view-context-store.js';
 import type { ViewContextEntry } from '../../contracts/view-context.js';
 import type {
   AiChatProviderConfig,
@@ -230,6 +231,20 @@ describe('a queued message keeps the view context of the moment it was queued', 
       { text: 'two', viewContext: [viewB] },
       { text: 'three' },
     ]);
+  });
+
+  it('a message refused because the queue is full reads no view context', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={{ queue: { enabled: true, maxSize: 1 } }} />);
+    await startRun(chat);
+    show(viewA);
+    const state = viewContextState();
+    const read = vi.spyOn(state, 'snapshot');
+    await act(async () => { expect(ctx.submit('one')).toBe('queued'); });
+    expect(read).toHaveBeenCalledTimes(1);
+    await act(async () => { expect(ctx.submitWithResult('two')).toEqual({ status: 'rejected', reason: 'queue-full' }); });
+    expect(read).toHaveBeenCalledTimes(1);
+    read.mockRestore();
   });
 
   it('the queued snapshot is a copy: changing the registered entry object later does not change it', async () => {
@@ -607,6 +622,53 @@ describe('with the bundled transport and the real chat route', () => {
     await waitFor(() => expect(models[1]?.doStreamCalls).toHaveLength(1));
     expect(promptOf(models[1])).toContain('ord-1');
     expect(promptOf(models[1])).not.toContain('ord-2');
+  });
+
+  it('a queued copy is read only: changing it throws, and what goes out is cleaned right before sending', async () => {
+    render(<VercelHost config={queue} />);
+    holdNext = true;
+    await act(async () => { ctx.send('first'); });
+    await waitFor(() => expect(release).toBeDefined());
+    show(viewA);
+    await act(async () => { ctx.submit('Delete this'); });
+    show(null);
+    const copy = ctx.queue.items[0]!.viewContext as ViewContextEntry[];
+    expect(Object.isFrozen(copy)).toBe(true);
+    expect(() => { copy.push({ entity: { type: 'order', id: 'X' }, label: 'L'.repeat(500) }); }).toThrow(TypeError);
+    expect(() => { (copy[0] as { label?: string }).label = 'changed'; }).toThrow(TypeError);
+    await act(async () => { release!(); });
+    await waitFor(() => expect(bodies).toHaveLength(2));
+    expect(bodies[1]!.glirastesViewContext).toEqual({ version: 1, current: [viewA] });
+  });
+
+  it('a direct sendMessage with an invalid view context sends it cleaned, or no field', async () => {
+    render(<VercelHost />);
+    show(viewB);
+    const junk = [
+      { entity: { type: 'order', id: 'X' }, label: 'L'.repeat(500), evil: true },
+      { label: 'no entity' },
+    ] as unknown as ViewContextEntry[];
+    await act(async () => { await transport.sendMessage({ text: 'cleaned', viewContext: junk }); });
+    await act(async () => { await transport.sendMessage({ text: 'dropped', viewContext: [{ label: 'x' }] as unknown as ViewContextEntry[] }); });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]!.glirastesViewContext).toEqual({ version: 1, current: [{ entity: { type: 'order', id: 'X' }, label: `${'L'.repeat(59)}…` }] });
+    expect(bodies[1]).not.toHaveProperty('glirastesViewContext');
+  });
+
+  it('without the cleaner (no view context ever registered on the page) a direct sendMessage sends no field', async () => {
+    const key = Symbol.for('glirastes.viewContext');
+    const scope = globalThis as Record<symbol, unknown>;
+    const saved = scope[key];
+    delete scope[key];
+    try {
+      render(<VercelHost />);
+      await act(async () => { await transport.sendMessage({ text: 'Hi', viewContext: [viewA] }); });
+      expect(bodies[0]).not.toHaveProperty('glirastesViewContext');
+      expect(key in scope).toBe(false);
+    } finally {
+      cleanup();
+      if (saved !== undefined) scope[key] = saved;
+    }
   });
 
   it('the transport sends what the message carries, not what is registered when it sends', async () => {

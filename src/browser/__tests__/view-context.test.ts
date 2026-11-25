@@ -195,6 +195,65 @@ describe('the request body field', () => {
     expect(viewContextSnapshot()).toEqual([order('o-3')]);
   });
 
+  it('a frozen snapshot is read only (deeply frozen); currentViewContext() still returns a plain copy', () => {
+    register('page', { ...order('o-1'), selection: { type: 'order', ids: ['a'] }, facts: { n: { deep: 1 } } } as ViewContextEntry);
+    const frozen = viewContextSnapshot()!;
+    expect(Object.isFrozen(frozen)).toBe(true);
+    expect(Object.isFrozen(frozen[0])).toBe(true);
+    expect(Object.isFrozen(frozen[0]!.entity)).toBe(true);
+    expect(Object.isFrozen(frozen[0]!.selection!.ids)).toBe(true);
+    expect(() => { (frozen as ViewContextEntry[]).push(order('x')); }).toThrow(TypeError);
+    expect(Object.isFrozen(currentViewContext())).toBe(false);
+  });
+
+  it('cleans what it sends right before sending: a changed or forged view context is cleaned or dropped', () => {
+    register('page', order('o-1'));
+    const forged = [
+      order('o-1'),
+      { entity: { type: 'order', id: 'X' }, label: 'L'.repeat(500), evil: true },
+      { label: 'no entity' },
+      { entity: { type: 'order', id: 'bad id with /?#' }, route: 'https://evil.example/x' },
+    ] as unknown as ViewContextEntry[];
+    const body = viewContextRequestBody(forged)![VIEW_CONTEXT_REQUEST_FIELD] as { current: ViewContextEntry[] };
+    expect(body.current[0]).toEqual(order('o-1'));
+    expect(body.current[1]!.label).toHaveLength(60);
+    expect(body.current[1]).not.toHaveProperty('evil');
+    expect(JSON.stringify(body.current)).not.toContain('no entity');
+    expect(JSON.stringify(body.current)).not.toContain('evil.example');
+    expect(viewContextRequestBody([{ label: 'only junk' } as unknown as ViewContextEntry])).toBeUndefined();
+    expect(viewContextRequestBody('not an array' as unknown as ViewContextEntry[])).toBeUndefined();
+  });
+
+  it('cleaning is idempotent: a cleaned snapshot is sent byte-identically', () => {
+    register('page', { ...order('o-1'), label: `${'Ä'.repeat(70)}`, facts: { a: 1 } } as ViewContextEntry);
+    register('lines', { selection: { type: 'line', ids: Array.from({ length: 70 }, (_, i) => `l-${i}`) } });
+    const frozen = viewContextSnapshot()!;
+    const body = viewContextRequestBody(frozen)![VIEW_CONTEXT_REQUEST_FIELD] as { current: ViewContextEntry[] };
+    expect(JSON.stringify(body.current)).toBe(JSON.stringify(frozen));
+  });
+
+  it('fails closed without the cleaner (nothing ever registered) or when it throws', () => {
+    const key = Symbol.for('glirastes.viewContext');
+    const scope = globalThis as Record<symbol, unknown>;
+    const saved = scope[key];
+    delete scope[key];
+    try {
+      expect(viewContextRequestBody([order('o-1')])).toBeUndefined();
+      expect(key in scope).toBe(false);
+    } finally {
+      if (saved !== undefined) scope[key] = saved;
+    }
+    register('page', order('o-1'));
+    const state = viewContextState();
+    const cleaner = state.sanitize;
+    state.sanitize = () => { throw new Error('boom'); };
+    try {
+      expect(viewContextRequestBody([order('o-1')])).toBeUndefined();
+    } finally {
+      state.sanitize = cleaner;
+    }
+  });
+
   it('never carries byMessage (reserved)', () => {
     register('page', order('o-1'));
     expect(viewContextRequestBody(viewContextSnapshot())![VIEW_CONTEXT_REQUEST_FIELD]).not.toHaveProperty('byMessage');

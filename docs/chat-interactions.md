@@ -330,7 +330,8 @@ registry on the page if there is none yet). The authority stays the server
 
 A message carries the view context of the moment the user sends it: when
 it is sent at once or put into the queue, `AiChatProvider` takes a cleaned
-copy (`currentViewContext()`) and the message keeps it until it goes out,
+copy (the same cleaning as `currentViewContext()`, but without creating the
+registry) and the message keeps it until it goes out,
 wherever the user or the model navigates meanwhile. "Delete this" means what
 was open when the user sent it, also when the model opened another page
 before the message left the queue.
@@ -360,6 +361,13 @@ Two consequences, both on purpose:
   The copy is kept in memory only, like the files of a queued message, and
   never passed to `queue.storage`; after a reload the view it was written to
   is gone, and the view open then is not the one it was written to.
+
+The copy is read only: `QueuedMessage.viewContext` (in `queue.items` and
+`onQueueChange`) and the `viewContext` a transport gets are deeply frozen,
+so changing them throws. The bundled transport cleans the view context
+again right before it sends it, with the same contract (a cleaned copy
+stays byte-identical; anything changed or forged is cleaned or dropped,
+and without a registration on the page nothing is sent).
 
 The bundled transport (`VercelAiChat`, `useVercelAiChatTransport`,
 `<glirastes-chat>`) sends the copy of a new user message as
@@ -401,7 +409,11 @@ A wrapper passes the message on as it came (`sendMessage: (message) =>
 inner.sendMessage(message)`); one that builds a new object (`{ text:
 message.text }`) drops the view context. Calling `useVercelAiChatTransport`'s
 `sendMessage` directly, without `AiChatProvider`, sends a view context only
-when you pass one (`viewContext: currentViewContext()`).
+when you pass one (`viewContext: currentViewContext()`, the view open at
+that call). Before this, an own transport read `currentViewContext()` when
+it sent; take the `viewContext` of the message instead, or it sends the view
+of the send time again. An own transport sends what it is given; the server
+checks it again either way.
 
 Turning it off: register nothing, or pass `null` (`useViewContext(null)`,
 `registerViewContext(source, null)`), and nothing is sent; or set
