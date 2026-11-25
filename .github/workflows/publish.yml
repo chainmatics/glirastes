@@ -136,3 +136,36 @@ jobs:
       # Prereleases (x.y.z-id.n) go to the `next` dist-tag so `latest` stays on the stable line.
       - name: Publish to npm with provenance
         run: npm publish --access public --provenance --tag "$(node -p "['latest', 'next'][Number(require('./package.json').version.includes('-'))]")"
+  # The GitHub release follows the npm publish, with the CHANGELOG section as notes.
+  github-release:
+    needs: publish
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Create the GitHub release from the CHANGELOG section
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 { f = 1; next } f && /^## \[/ { exit } f' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $VERSION"
+            exit 1
+          fi
+          if [ "$VERSION" != "${VERSION#*-}" ]; then
+            gh release create "$TAG" --verify-tag --title "Glirastes $VERSION" --notes-file release-notes.md --prerelease --latest=false
+          else
+            gh release create "$TAG" --verify-tag --title "Glirastes $VERSION" --notes-file release-notes.md --latest
+          fi
