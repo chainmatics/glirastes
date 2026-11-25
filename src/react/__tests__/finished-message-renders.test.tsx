@@ -637,7 +637,7 @@ describe('a click in a message that did not render since reaches the current cha
     const seen: string[][] = [];
     const onBeforeSend = (text: string, mentions: Array<{ id: string }>) => { seen.push(mentions.map((mention) => mention.id)); return text; };
     const { chat } = await idleWithFollowups({ ...baseConfig(), suggestions: { placement: 'message' }, onBeforeSend });
-    await act(async () => { ctx.addActiveMention({ id: 't1', type: 'task', displayName: 'T1' }); });
+    await act(async () => { ctx.addActiveMention({ id: 't1', type: 'task', label: 'T1' }); });
     await followUp();
     expect(seen).toEqual([['t1']]);
     expect(chat.sent.at(-1)).toBe('Next one?');
