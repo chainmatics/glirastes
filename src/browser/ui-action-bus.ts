@@ -13,9 +13,11 @@ export interface UiAction {
 }
 
 /**
- * A bus handler. Returning (or resolving) `false` declines the action: the
- * dispatch rejects as for a handler that threw `UiActionRejectedError`, and
- * the chat reports `rejected-handler`. `true` and nothing count as carried out.
+ * A bus handler. Returning (or resolving) `false` declines the action: once
+ * every handler ran, the dispatch rejects with a `UiActionRejectedError` and
+ * the chat reports `rejected-handler`. `true` and nothing (`undefined`) count
+ * as carried out: a handler that only filters (an action that is not its
+ * own) returns nothing, not `false`.
  */
 export type UiActionHandler = (action: UiAction) => void | boolean | Promise<void | boolean>;
 
@@ -90,8 +92,10 @@ export class UiActionBus {
   /**
    * Runs every handler of the action's type and id one after another and
    * resolves the number that ran; `0` means nothing on the page handles it.
-   * The first handler that throws, or returns `false`, stops the rest and
-   * rejects the dispatch (`false`: with a `UiActionRejectedError`).
+   * The first handler that throws stops the rest and rejects the dispatch
+   * with its error. A handler that returns `false` declined: the others still
+   * run, then the dispatch rejects with a `UiActionRejectedError` (reason
+   * `handler`); a throw wins over an earlier `false`.
    */
   async dispatch(action: UiAction): Promise<number> {
     const typeHandlers = this.handlersByType.get(action.type);
@@ -104,10 +108,13 @@ export class UiActionBus {
       ...(idHandlers ? Array.from(idHandlers) : []),
     ]);
 
+    // Every handler runs, as before; one that returned `false` rejects once all ran.
+    let declined = false;
     for (const handler of allHandlers) {
-      if (await handler(action) === false) {
-        throw new UiActionRejectedError('handler', `UI action ${action.actionId ?? action.type} was not carried out`);
-      }
+      if (await handler(action) === false) declined = true;
+    }
+    if (declined) {
+      throw new UiActionRejectedError('handler', `UI action ${action.actionId ?? action.type} was not carried out`);
     }
     return allHandlers.size;
   }

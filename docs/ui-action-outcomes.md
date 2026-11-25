@@ -129,6 +129,14 @@ fires once with `code: 'unconfirmed'` and `reported: false`. The result stays
 without an outcome, so the next turn's request makes the server tell the model
 "not confirmed". A page load a reloading bridge prepares for the result is
 cancelled when Stop comes before its outcome is written (no `initiated`).
+Once an outcome is written (`initiated` while the page-load save runs), Stop
+no longer ends that wait: the page load goes on and it is reported as
+without Stop. Stop in the same task in which the handler resolves wins: the
+confirmed `ok` is discarded and the event says `unconfirmed`.
+
+`clear()`, a session switch and unmount end a pending wait the same way
+(nothing written, nothing continued) and the chat is idle at once; before,
+it stayed busy until the handler settled (at most the outcome timeout).
 
 Known limit: the handler gets no signal yet. An app dialog it opened can stay
 open; if the user confirms there afterwards, the app may still carry the
@@ -159,7 +167,12 @@ with `awaitsOutcome` there to not run them twice.
   once the effect is visible. This holds for every handler on the bus
   (`subscribeById`, `subscribeByType`, `useAiClientActionById`,
   `useAiClientActionByType`), not only `registerAiClientAction`: `false` is
-  reported as `rejected-handler`.
+  reported as `rejected-handler`. Every matching handler still runs; the
+  dispatch rejects after them. A handler that filters with `&&`
+  (`(a) => a.actionId === 'x' && run()`) returns `false` for every other
+  action and now declines it: return nothing for an action that is not
+  yours. With two SDK copies on a page, an older copy that created the shared
+  bus first keeps `false` = `ok`.
 - Code that reads `success` on UI tool results reads `handedOff` too (it
   gets `handedOff` only for requests with the flag, or with
   `uiToolResultShape: 'handoff'`).

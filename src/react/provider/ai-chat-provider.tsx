@@ -619,11 +619,11 @@ const PAGE_LOAD_SAVE_TIMEOUT_MS = 500;
  * settled; `released` once it no longer keeps the chat busy.
  */
 interface AwaitedUiRun {
+  toolCallId: string;
   controller: AbortController;
   stopped: boolean;
   settled: boolean;
   released: boolean;
-  untrack?: () => void;
 }
 
 /** Turns this page continued after a page load, by the ids of their results (also across providers). */
@@ -1777,7 +1777,7 @@ export function AiChatProvider({
     const untrack = queueEnabledRef.current ? trackUiWork() : undefined;
     // A result the chat waits for also ends on Stop and `sendNow` (`stopAwaitedUiRuns`), besides a reset.
     const wait: AwaitedUiRun | undefined = awaited
-      ? { controller: new AbortController(), stopped: false, settled: false, released: false, ...(untrack ? { untrack } : {}) }
+      ? { toolCallId, controller: new AbortController(), stopped: false, settled: false, released: false }
       : undefined;
     const onReset = () => wait?.controller.abort();
     if (wait) {
@@ -1881,6 +1881,9 @@ export function AiChatProvider({
     let stopped = false;
     for (const wait of awaitedUiRunsRef.current) {
       if (wait.settled || wait.stopped) continue;
+      // An outcome is written already (`initiated` while its page load is prepared): past the point of no
+      // return, the run goes on as without Stop.
+      if (reportedOutcomesRef.current.has(wait.toolCallId)) continue;
       wait.stopped = true;
       stopped = true;
       wait.controller.abort();
@@ -1888,7 +1891,6 @@ export function AiChatProvider({
         wait.released = true;
         setAwaitedOutcomes((count) => Math.max(0, count - 1));
       }
-      wait.untrack?.();
     }
     return stopped;
   }, []);

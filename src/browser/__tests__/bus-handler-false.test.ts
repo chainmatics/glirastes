@@ -62,14 +62,49 @@ describe('a bus handler that returns false (#179)', () => {
     }
   });
 
-  it('stops the handlers after the one that declined, as after one that throws', async () => {
+  it('runs every handler as before and rejects only after all ran when one returned false', async () => {
     const bus = new UiActionBus();
-    const after = vi.fn();
-    cleanups.push(bus.subscribeByType('glirastes.navigate', () => false));
-    cleanups.push(bus.subscribeById(GLIRASTES_NAVIGATE_ACTION_ID, after));
+    const order: string[] = [];
+    cleanups.push(bus.subscribeByType('glirastes.navigate', () => { order.push('type'); return false; }));
+    cleanups.push(bus.subscribeById(GLIRASTES_NAVIGATE_ACTION_ID, () => { order.push('id'); return true; }));
     await expect(bus.dispatch(navigate())).rejects.toSatisfy(
       (error: unknown) => isUiActionRejectedError(error) && error.reason === 'handler',
     );
+    expect(order).toEqual(['type', 'id']);
+  });
+
+  it('runs an id handler next to a filtering type handler that answers false for other ids', async () => {
+    // A type handler that filters by id: `a.actionId === 'x' && run()` returns false for every other id.
+    const bus = new UiActionBus();
+    const runX = vi.fn();
+    const runY = vi.fn();
+    cleanups.push(bus.subscribeByType('glirastes.action', (a) => a.actionId === 'x' && (runX(), true)));
+    cleanups.push(bus.subscribeById('y', runY));
+    const action = { type: 'glirastes.action', actionId: 'y', payload: {} };
+    await expect(bus.dispatch(action)).rejects.toSatisfy((error: unknown) => isUiActionRejectedError(error));
+    expect(runY).toHaveBeenCalledTimes(1);
+    expect(runX).not.toHaveBeenCalled();
+    const bus2 = new UiActionBus();
+    const runY2 = vi.fn();
+    cleanups.push(bus2.subscribeByType('glirastes.action', (a) => a.actionId === 'x' && (runX(), true)));
+    cleanups.push(bus2.subscribeById('y', runY2));
+    expect(await runToolResultUiActions(handedOff(action), bus2)).toMatchObject({ code: 'rejected-handler' });
+    expect(runY2).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a throw as before: it stops the rest and its error wins over an earlier false', async () => {
+    const bus = new UiActionBus();
+    const after = vi.fn();
+    const thrown = new Error('boom');
+    cleanups.push(bus.subscribeByType('glirastes.navigate', () => false));
+    cleanups.push(bus.subscribeById(GLIRASTES_NAVIGATE_ACTION_ID, () => { throw thrown; }));
+    const third = new UiActionBus();
+    await expect(bus.dispatch(navigate())).rejects.toBe(thrown);
+    expect(await runToolResultUiActions(handedOff(navigate()), bus)).toMatchObject({ code: 'failed', error: thrown });
+    // A throw first: the handlers after it do not run (as on base).
+    cleanups.push(third.subscribeByType('glirastes.navigate', () => { throw thrown; }));
+    cleanups.push(third.subscribeById(GLIRASTES_NAVIGATE_ACTION_ID, after));
+    await expect(third.dispatch(navigate())).rejects.toBe(thrown);
     expect(after).not.toHaveBeenCalled();
   });
 
