@@ -65,6 +65,28 @@ function InterimTranscript({ text }: { text?: string }) {
   );
 }
 
+const VISUALLY_HIDDEN = {
+  position: 'absolute', width: 1, height: 1, margin: -1, padding: 0,
+  overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+} as const;
+
+/** Waveform only; the editor shows the words, the mic button stops. */
+function ComposerRecordingBar({ isConnecting, stream, transcript, className }: RecordingBarProps) {
+  return (
+    <div
+      className={joinClassNames('glirastes-recording-bar', 'glirastes-recording-bar-composer', className)}
+      data-component="recording-bar"
+      data-variant="composer"
+      style={{ display: 'flex', alignItems: 'center', width: '4.5rem', height: '24px', flex: '0 1 4.5rem', minWidth: 0 }}
+    >
+      <div data-part="wave-container" style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
+        {isConnecting ? <LoadingDots /> : <StreamWaveform stream={stream} />}
+      </div>
+      <span data-part="interim-transcript" aria-live="polite" style={VISUALLY_HIDDEN}>{transcript?.trim() ?? ''}</span>
+    </div>
+  );
+}
+
 function RecordingBarInner({
   isConnecting,
   stream,
@@ -107,6 +129,7 @@ function RecordingBarInner({
 
 export function RecordingBar(props: RecordingBarProps) {
   const unstyled = useContext(ChatContext)?.unstyled ?? false;
+  if (props.variant === 'composer') return <ComposerRecordingBar {...props} />;
   if (props.variant === 'trigger') {
     if (typeof document === 'undefined') return null;
 

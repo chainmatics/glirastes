@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `voice.recordingBar.variant: 'composer'`: while recording, the live words stand in the editor where the text goes instead of in a bar, a compact waveform (`[data-component="recording-bar"][data-variant="composer"]`, 4.5rem wide) sits next to the mic, the mic button stops (its `data-state="recording"`) and Escape cancels; there is no cancel or stop button. In an empty editor the words take the place of the placeholder (`[data-element="placeholder"][data-live]` in the pill composer, `textarea[data-live]` with the words as `placeholder` in the plain one), below a typed draft they show as `[data-element="live-transcript"]`; the newest 240 characters (120 in the one-row textarea). The words stay out of the value until Stop, as before; screen readers hear them through a hidden live region. New optional `RichMentionInput` prop `liveText` and `VoiceInputAddon` prop `onLiveTranscript`; the legacy `mentions` composer keeps the `'inline'` bar. **Unchanged apps: nothing changes**: `'inline'` stays the default and its DOM is unchanged; the plain textarea gets an `aria-label` with the placeholder text (its accessible name is unchanged).
+
 ## [0.28.0] - 2026-11-25
 
 ### Changed

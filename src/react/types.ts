@@ -205,7 +205,11 @@ export interface RecordingBarProps {
   transcript?: string;
   onCancel: () => void;
   onStop: () => void;
-  variant: 'trigger' | 'inline';
+  /**
+   * `'composer'`: only a compact waveform next to the mic; the live words show
+   * in the editor (`RichMentionInput` `liveText`) and the mic button stops.
+   */
+  variant: 'trigger' | 'inline' | 'composer';
   className?: string;
 }
 
@@ -1001,7 +1005,13 @@ export interface VoiceInputConfig {
   routeKey?: string;
   recordingBar?: {
     enabled?: boolean;
-    variant?: 'trigger' | 'inline';
+    /**
+     * `'inline'` (default): cancel, waveform, live words and stop replace the
+     * toolbar. `'composer'`: the live words show in the editor where the text
+     * goes, a compact waveform sits next to the mic, the mic stops (Escape
+     * cancels). `'trigger'`: a bar portaled to the page.
+     */
+    variant?: 'trigger' | 'inline' | 'composer';
   };
   onError?: (error: string) => void;
 }
@@ -2558,6 +2568,12 @@ export interface RichMentionInputProps {
   wrapperClassName?: string;
   /** Shown instead of the list when a search finds nothing; without it an empty result shows nothing. */
   emptyLabel?: string;
+  /**
+   * Live speech while recording (`null` when not recording). In an empty
+   * editor it shows in place of the placeholder (`[data-element="placeholder"][data-live]`),
+   * otherwise below the text (`[data-element="live-transcript"]`). Never part of the value.
+   */
+  liveText?: string | null;
   onChange?: (nextValue: string) => void;
   /** Receives the text and the structured mentions (chips and commands) still in it. Return `false` to keep the text. */
   onSubmit?: (message: string, mentions: MentionData[]) => void | boolean;

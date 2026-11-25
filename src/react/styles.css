@@ -1237,6 +1237,25 @@
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="recording-bar"] {
   min-width: 0;
 }
+/* recordingBar variant 'composer': the live words stand where the text goes. */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] [data-element="placeholder"][data-live],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="live-transcript"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) textarea[data-live]::placeholder {
+  color: var(--cm-text-muted);
+  font-style: italic;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] [data-element="placeholder"][data-live] {
+  right: 0.75rem;
+  overflow: hidden;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="live-transcript"] {
+  padding: 0.25rem 0.75rem 0;
+  font-size: 0.875rem;
+}
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="recording-bar"][data-variant="composer"] {
+  align-self: center;
+  color: var(--cm-text-muted);
+}
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="voice-error"] {
   align-self: center;
   max-width: 16rem;
@@ -1249,7 +1268,7 @@
    non-auto flex-basis beats that width, so the bar takes a row of its own
    below them (form wraps; `order` moves it behind Send, which stays beside
    the editor). The row exists only while the bar is mounted. */
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"]:not([data-variant="composer"]) {
   flex: 1 1 100%;
   order: 1;
 }
