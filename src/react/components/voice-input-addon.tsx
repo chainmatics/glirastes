@@ -90,7 +90,12 @@ interface VoiceInputAddonProps {
   onTranscript: (text: string) => void;
   onError?: (error: string) => void;
   showRecordingBar?: boolean;
-  recordingBarVariant?: 'trigger' | 'inline';
+  recordingBarVariant?: 'trigger' | 'inline' | 'composer';
+  /**
+   * With `'composer'`: the live words while recording, `null` otherwise, for
+   * the editor to show. Without it `'composer'` falls back to `'inline'`.
+   */
+  onLiveTranscript?: (text: string | null) => void;
   /** Hold the button or hotkey to talk; false keeps tap-to-toggle only. */
   pushToTalk?: VoicePushToTalkConfig | false;
   /** A changed value (e.g. the pathname) stops and keeps speech as draft. */
@@ -115,6 +120,7 @@ export function VoiceInputAddon({
   onError,
   showRecordingBar = true,
   recordingBarVariant = 'inline',
+  onLiveTranscript,
   pushToTalk,
   routeKey,
   now = Date.now,
@@ -150,6 +156,14 @@ export function VoiceInputAddon({
   const active = isRecording || isConnecting;
   const activeRef = useRef(active);
   activeRef.current = active;
+  const variant = recordingBarVariant === 'composer' && !onLiveTranscript ? 'inline' : recordingBarVariant;
+  const inEditor = variant === 'composer' && showRecordingBar;
+
+  const liveCallback = useRef(onLiveTranscript);
+  liveCallback.current = onLiveTranscript;
+  const liveText = inEditor && active ? displayTranscript ?? '' : null;
+  useEffect(() => { liveCallback.current?.(liveText); }, [liveText]);
+  useEffect(() => () => { liveCallback.current?.(null); }, []);
 
   // Multiple controls and a visibility change may stop the same recording.
   // The controller coalesces cleanup; this boundary also inserts text once.
@@ -307,6 +321,18 @@ export function VoiceInputAddon({
     if (!isConnecting) start();
   };
 
+  // No cancel button in the composer variant: Escape discards the recording.
+  useEffect(() => {
+    if (!inEditor || !active) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      event.preventDefault();
+      void cancelRecording().catch(() => {});
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [inEditor, active, cancelRecording]);
+
   const hotkey = pushToTalk === false
     ? false
     : pushToTalk?.hotkey ?? DEFAULT_PUSH_TO_TALK_HOTKEY;
@@ -379,7 +405,7 @@ export function VoiceInputAddon({
           transcript={displayTranscript}
           onCancel={() => { void cancelRecording().catch(() => {}); }}
           onStop={() => { void stopAndSubmit(); }}
-          variant={recordingBarVariant}
+          variant={variant}
         />
       )}
     </>

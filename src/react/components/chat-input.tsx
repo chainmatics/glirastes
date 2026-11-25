@@ -98,6 +98,10 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
     [handleSubmit],
   );
 
+  const [liveText, setLiveText] = useState<string | null>(null);
+  // A one-row field shows the start of a long placeholder; keep the newest words.
+  const live = liveText === null ? null : liveText.trim().length > 120 ? `…${liveText.trim().slice(-119)}` : liveText.trim();
+
   const appendText = useCallback((text: string) => {
     setValue((prev) => (prev.length > 0 ? `${prev} ${text}` : text));
   }, []);
@@ -143,6 +147,7 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
               onError={voice.onError}
               showRecordingBar={voice.recordingBar?.enabled ?? true}
               recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
+              onLiveTranscript={setLiveText}
               adapter={voice.adapter}
               pushToTalk={voice.pushToTalk}
               routeKey={voice.routeKey}
@@ -166,17 +171,22 @@ function PlainChatInput({ className, onSubmit }: ChatInputProps) {
           ),
         }}
         editor={(
-          <textarea
-            ref={textareaRef}
-            autoFocus={visible}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={locale.placeholder}
-            disabled={!canCompose}
-            rows={1}
-            data-state={isLoading ? 'loading' : 'idle'}
-          />
+          <>
+            <textarea
+              ref={textareaRef}
+              autoFocus={visible}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={live || locale.placeholder}
+              aria-label={locale.placeholder}
+              disabled={!canCompose}
+              rows={1}
+              data-state={isLoading ? 'loading' : 'idle'}
+              data-live={live && !value ? 'true' : undefined}
+            />
+            {live && value && <div data-element="live-transcript" aria-hidden>{live}</div>}
+          </>
         )}
       />
       {hint && <ComposerHint />}

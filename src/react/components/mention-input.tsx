@@ -47,6 +47,7 @@ function ProviderMentionInput({
   });
   const { isLoading } = composer;
   const canCompose = composable ?? !isLoading;
+  const [liveText, setLiveText] = useState<string | null>(null);
   const InputExtra = components.InputExtra;
   const DropdownItem = inputComponents?.DropdownItem ?? components.MentionDropdownItem;
   const Tray = components.AttachmentTray ?? DefaultAttachmentTray;
@@ -88,6 +89,7 @@ function ProviderMentionInput({
                 onError={voice.onError}
                 showRecordingBar={voice.recordingBar?.enabled ?? true}
                 recordingBarVariant={voice.recordingBar?.variant ?? 'inline'}
+                onLiveTranscript={setLiveText}
                 adapter={voice.adapter}
                 pushToTalk={voice.pushToTalk}
                 routeKey={voice.routeKey}
@@ -114,6 +116,7 @@ function ProviderMentionInput({
             <RichMentionInput
               ref={composer.inputRef}
               {...composer.inputProps}
+              liveText={liveText}
               initialMentions={initialMentions}
               wrapperClassName={inputClassName}
               className={editorClassName}

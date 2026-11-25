@@ -288,6 +288,14 @@ function DefaultDropdownItem({ result, isSelected, onClick, optionProps }: Menti
   );
 }
 
+const MAX_LIVE_TEXT = 240;
+
+/** The newest words of a long live transcript. */
+function lastWords(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length > MAX_LIVE_TEXT ? `…${trimmed.slice(-(MAX_LIVE_TEXT - 1))}` : trimmed;
+}
+
 // ---------------------------------------------------------------------------
 // RichMentionInput
 // ---------------------------------------------------------------------------
@@ -321,6 +329,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
       completionPreset,
       placeholderOnFocus = true,
       pointerActivation = true,
+      liveText = null,
     },
     ref,
   ) {
@@ -1697,8 +1706,10 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
     }
 
     // Mention mode — wrapper with editor + dropdown
-    const isEmpty = (placeholderOnFocus || !isFocused) && getTextContent() === ''
-      && mentions.length === 0 && !editableRef.current?.querySelector('[data-mention-id]');
+    const hasContent = getTextContent() !== ''
+      || mentions.length > 0 || Boolean(editableRef.current?.querySelector('[data-mention-id]'));
+    const live = liveText === null ? null : lastWords(liveText);
+    const isEmpty = (placeholderOnFocus || !isFocused || live !== null) && !hasContent;
     const optionId = (index: number, action = -1) => (
       action >= 0 ? `${listboxId}-option-${index}-action-${action}` : `${listboxId}-option-${index}`
     );
@@ -1850,10 +1861,13 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
           suppressContentEditableWarning
         />
 
-        {isEmpty && placeholder && (
-          <div data-element="placeholder" aria-hidden>
-            {placeholder}
+        {isEmpty && (live || placeholder) && (
+          <div data-element="placeholder" data-live={live ? 'true' : undefined} aria-hidden>
+            {live || placeholder}
           </div>
+        )}
+        {live && hasContent && (
+          <div data-element="live-transcript" aria-hidden>{live}</div>
         )}
 
         <div data-element="completion-status" role="status" aria-live="polite" style={VISUALLY_HIDDEN}>

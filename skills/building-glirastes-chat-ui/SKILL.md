@@ -370,6 +370,13 @@ export const POST = createRecordingTranscriptionHandler({
 });
 ```
 
+`voice.recordingBar.variant` picks the recording look: `'inline'` (default;
+cancel, waveform, live words and stop take the toolbar), `'composer'` (the live
+words stand in the editor where the text goes, italic via
+`[data-element="placeholder"][data-live]` / `textarea[data-live]::placeholder` /
+`[data-element="live-transcript"]`, a compact waveform sits next to the mic, the
+mic stops, Escape cancels) or `'trigger'` (a bar portaled to the page).
+
 `useStt` is the hook, `VoiceInputButton` and `RecordingBar` the surface. Speech
 traffic goes directly between the target app's local provider adapter and its
 configured provider. Do not proxy transcripts through the Glirastes Control

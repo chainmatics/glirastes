@@ -38,7 +38,7 @@ describe('shipped styles for the new chat surfaces', () => {
     );
     expect(form).toContain('flex-wrap: wrap');
     const bar = rule(
-      '[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"]',
+      '[data-component="ai-chat-panel"] [data-component="mention-input"][data-mode="providers"] > form > [data-component="recording-bar"]:not([data-variant="composer"])',
     );
     expect(bar).toContain('flex: 1 1 100%;');
     expect(bar).toContain('order: 1;');
