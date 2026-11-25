@@ -128,7 +128,8 @@ Server, `attachments` on `createAiChatHandler`:
   for an id outside the active chat), posts the form and returns
   `response.ok`; `false` reports failure to the model. A derived server tool
   for a multipart route cannot work: disable it with `glirastes tools policy`.
-  Recipe: `docs/chat-attachments.md`, "Handing attachments to the app".
+  Recipe: `docs/chat-attachments.md`, "Handing attachments to the app". The approval card names
+  the attachment id by its file name.
 - The LangGraph transport throws on a message with files. `/` commands carry
   no files; the composer refuses that send and keeps text and files.
 - Custom composer on `useChatComposerInput()`: `attachments`,
