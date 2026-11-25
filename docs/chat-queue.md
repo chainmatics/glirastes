@@ -36,7 +36,7 @@ storage adapter are local; nothing goes to the Platform.
 | --- | --- | --- |
 | `enabled` | `false` | Opt-in: an app that does not set it sees no change. |
 | `autoFlush` | `true` | Send the next message once idle (FIFO, one run at a time, wait for idle again before the next). `false` keeps them until `sendNow`. |
-| `sendNowBehavior` | `'next'` | Non-destructive: `sendNow` moves the message to the head; it goes as soon as the chat is idle, also when the queue is paused or `autoFlush` is off. `'abort'` stops the running run first (`stop()`); that stop does not pause the queue. |
+| `sendNowBehavior` | `'abort'` | `sendNow` (the "Send now" button) stops the running run (`stop()`) and sends the message at once; that stop does not pause the queue. `'next'` is non-destructive: it moves the message to the head, and it goes as soon as the chat is idle, also when the queue is paused or `autoFlush` is off. |
 | `maxSize` | `10` | Every queued message is a model call nobody watches start. A full queue refuses the message (`'rejected'`, the composer keeps the draft). `Infinity` or `null` lifts the limit. |
 | `pauseOn` | `['error', 'aborted', 'safety-stop', 'truncation']` | A run that ended badly should not be followed by unattended runs. `truncation` covers a run that left a continue prompt: a flush would discard it. |
 | `sendNowDuringApproval` | `'refuse'` | The chat never treats a typed message as an approval decision. `'refuse'`: `sendNow` returns false and shows the approval hint. `'reject-approval'`: the open approvals are rejected through the normal reject path, then the message is sent. |

@@ -23,7 +23,7 @@ export interface ResolvedChatQueueConfig {
 export function useResolvedQueueConfig(config: ChatQueueConfig | undefined): ResolvedChatQueueConfig {
   const enabled = config?.enabled === true;
   const autoFlush = config?.autoFlush !== false;
-  const sendNowBehavior = config?.sendNowBehavior === 'abort' ? 'abort' : 'next';
+  const sendNowBehavior = config?.sendNowBehavior === 'next' ? 'next' : 'abort';
   const rawMax = config?.maxSize;
   const maxSize = rawMax === null || rawMax === Infinity
     ? Infinity
