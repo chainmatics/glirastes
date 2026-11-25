@@ -44,14 +44,13 @@ export function viewContextState(): ViewContextState {
 export const VIEW_CONTEXT_REQUEST_FIELD = 'glirastesViewContext';
 
 /**
- * The body fields of a new user message: `glirastesViewContext` with the
- * cleaned snapshot, or undefined when nothing is registered (the request
- * body then stays exactly as without the feature) or no cleaning snapshot
- * is there (fail closed: nothing uncleaned is sent). `byMessage` is reserved
- * and never sent. @internal
+ * The view context to freeze with a message the user submits: an own cleaned
+ * copy, or undefined when nothing is registered, nothing is left after
+ * cleaning, or no cleaning snapshot is there (fail closed: nothing uncleaned
+ * is sent). Read only: a page that never registers anything gets no global
+ * state from it. @internal
  */
-export function viewContextRequestBody(): Record<string, unknown> | undefined {
-  // Read only: a page that never registers anything gets no global state from a send.
+export function viewContextSnapshot(): ViewContextEntry[] | undefined {
   const state = peekViewContextState();
   if (!state || state.entries.size === 0 || typeof state.snapshot !== 'function') return undefined;
   let current: ViewContextEntry[];
@@ -60,7 +59,18 @@ export function viewContextRequestBody(): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+  return Array.isArray(current) && current.length > 0 ? current : undefined;
+}
+
+/**
+ * The body fields of a new user message for the view context it carries:
+ * `glirastesViewContext: { version: 1, current }`, or undefined without one
+ * (the request body then stays exactly as without the feature). Never reads
+ * the registry: a message carries what was frozen when the user submitted
+ * it. `byMessage` is reserved and never sent. @internal
+ */
+export function viewContextRequestBody(current: ReadonlyArray<ViewContextEntry> | undefined): Record<string, unknown> | undefined {
   return Array.isArray(current) && current.length > 0
-    ? { [VIEW_CONTEXT_REQUEST_FIELD]: { version: 1, current } }
+    ? { [VIEW_CONTEXT_REQUEST_FIELD]: { version: 1, current: [...current] } }
     : undefined;
 }

@@ -77,6 +77,8 @@ import {
   type UiActionPageLoadResult,
 } from '../../browser/ui-action-signals.js';
 import type { UiAction } from '../../browser/ui-action-bus.js';
+import { viewContextSnapshot } from '../../browser/view-context-store.js';
+import type { ViewContextEntry } from '../../contracts/view-context.js';
 import type { UiOutcome } from '../../contracts/ui-outcome.js';
 import { continuesAfterPageLoad, shouldContinueChat, waitingToolCallIds } from '../utils/ui-outcome-continuation.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
@@ -646,6 +648,24 @@ type PreparedSend =
   | { kind: 'needs-args'; request: PendingChatCommand }
   | { kind: 'command'; text: string }
   | { kind: 'message'; text: string; files?: FilePart[] };
+
+/** How `deliver` hands a message to the transport. */
+interface DeliverOptions {
+  keepComposer?: boolean;
+  /** The view context frozen when the user submitted the message. */
+  viewContext?: ReadonlyArray<ViewContextEntry>;
+}
+
+/**
+ * The view context to freeze with a message, read in the moment the user
+ * submits it (sent at once or queued): it travels with the message, wherever
+ * the user or the model navigates before it is sent. Empty when nothing is
+ * registered, so an unchanged app passes no field at all.
+ */
+function frozenViewContext(): { viewContext?: ReadonlyArray<ViewContextEntry> } {
+  const viewContext = viewContextSnapshot();
+  return viewContext ? { viewContext } : {};
+}
 
 /** How long the queue waits after an answered approval for the transport to send it on by itself. */
 const APPROVAL_RESEND_GRACE_MS = 1500;
@@ -2006,10 +2026,11 @@ export function AiChatProvider({
   // The shared tail of every send: transport hygiene, then the transport.
   // `keepComposer`: the composer state was handled already (queued and direct sends with the queue on),
   // so a request that ends later does not wipe what the user is composing meanwhile.
+  // `viewContext`: frozen when the user submitted the message (see `frozenViewContext`); never read here.
   const deliver = useCallback(async (
     processedMessage: string,
     files?: FilePart[],
-    deliverOptions?: { keepComposer?: boolean },
+    deliverOptions?: DeliverOptions,
   ): Promise<boolean> => {
     // An open approval is decided on its card. A typed "yes" must not count as
     // approval, and rejecting it on send dropped requests the user wanted.
@@ -2037,7 +2058,13 @@ export function AiChatProvider({
       setPendingApprovalsMap(new Map());
     }
 
-    await sendMessage(files && files.length > 0 ? { text: processedMessage, files } : { text: processedMessage });
+    // Without a frozen view context the argument is exactly `{ text }` or `{ text, files }`, as before.
+    const viewContext = deliverOptions?.viewContext;
+    await sendMessage({
+      text: processedMessage,
+      ...(files && files.length > 0 ? { files } : {}),
+      ...(viewContext && viewContext.length > 0 ? { viewContext } : {}),
+    });
     if (deliverOptions?.keepComposer) return true;
     setActiveMentions([]);
     setMentionQuery('');
@@ -2113,7 +2140,7 @@ export function AiChatProvider({
   const dispatchSend = useCallback(async (
     message: string,
     sendOptions?: { mentions?: MentionData[]; files?: FilePart[] },
-    deliverOptions?: { keepComposer?: boolean },
+    deliverOptions?: DeliverOptions,
   ): Promise<void> => {
     const prepared = prepareSend(message, sendOptions);
     if (prepared.kind === 'needs-args') {
@@ -2146,7 +2173,9 @@ export function AiChatProvider({
       const plan = interactionRegistry?.planMessage(message, sendOptions.mentions ?? activeMentions);
       if (plan?.status === 'send' || plan?.status === 'needs-args') return 'files-with-command';
     }
-    void dispatchSend(message, sendOptions);
+    // The view context is frozen now, at the user's send (see `frozenViewContext`).
+    const frozen = frozenViewContext();
+    void dispatchSend(message, sendOptions, frozen.viewContext ? frozen : undefined);
     return null;
   }, [sessionNotReady, pendingApprovalsMap, dispatchSend, attachmentOptions, interactionRegistry, activeMentions]);
 
@@ -2200,6 +2229,8 @@ export function AiChatProvider({
       }
     }
     const queued = queueStore.itemsRef.current;
+    // Frozen now, at the user's send, whether it goes at once or waits in the queue (an edit keeps it).
+    const frozen = frozenViewContext();
     const resetComposer = () => {
       setActiveMentions([]);
       setMentionQuery('');
@@ -2215,7 +2246,7 @@ export function AiChatProvider({
       // Idle: sent at once, so an open clarification is answered as before.
       resetComposer();
       sendInFlightRef.current = true;
-      void dispatchSend(message, { mentions: [...mentionsForSend], ...(files ? { files } : {}) }, { keepComposer: true })
+      void dispatchSend(message, { mentions: [...mentionsForSend], ...(files ? { files } : {}) }, { keepComposer: true, ...frozen })
         .finally(() => {
           sendInFlightRef.current = false;
           if (mountedRef.current) setFlushTick((tick) => tick + 1);
@@ -2226,7 +2257,7 @@ export function AiChatProvider({
     // The hint shows for the message that starts waiting for the card, not for every one after it.
     if (approvalWaiting && queued.length === 0) setApprovalReminder(true);
     queueStore.commit(
-      [...queued, createQueuedMessage(message, { mentions: mentionsForSend, ...(files ? { files } : {}) })],
+      [...queued, createQueuedMessage(message, { mentions: mentionsForSend, ...(files ? { files } : {}), ...frozen })],
       queueStore.pausedRef.current,
       'added',
     );
@@ -2270,7 +2301,8 @@ export function AiChatProvider({
       return plan.status !== 'needs-args';
     }
     setPendingCommand(null);
-    void deliver(plan.text, undefined, queueEnabled ? { keepComposer: true } : undefined);
+    // The view context of the form submit, also for a command that was queued: the user submits it now.
+    void deliver(plan.text, undefined, { ...(queueEnabled ? { keepComposer: true } : {}), ...frozenViewContext() });
     return true;
   }, [pendingCommand, interactionRegistry, sessionNotReady, deliver, queueEnabled, queueBusy]);
 
@@ -2289,7 +2321,8 @@ export function AiChatProvider({
       return;
     }
     setPendingCommand(null);
-    void deliver(plan.text, undefined, queueEnabled ? { keepComposer: true } : undefined);
+    // The view context of the click.
+    void deliver(plan.text, undefined, { ...(queueEnabled ? { keepComposer: true } : {}), ...frozenViewContext() });
   }, [interactionRegistry, sessionNotReady, deliver, queueEnabled, queueBusy]);
 
   const mentionEntity = useCallback(async (type: string, id: string): Promise<boolean> => {
@@ -2758,7 +2791,7 @@ export function AiChatProvider({
     void deliver(
       prepared.text,
       prepared.kind === 'message' ? prepared.files : undefined,
-      { keepComposer: true },
+      { keepComposer: true, ...(head.viewContext ? { viewContext: head.viewContext } : {}) },
     ).then((delivered) => {
       // Not taken after all (an approval opened): it goes first again.
       if (!delivered && mountedRef.current) {
@@ -2860,7 +2893,8 @@ export function AiChatProvider({
   // Truncation
   const continueTruncation = useCallback(async () => {
     setTruncation(null);
-    await sendMessage({ text: continueMessage });
+    // A new user message: the view context of the click goes with it.
+    await sendMessage({ text: continueMessage, ...frozenViewContext() });
   }, [sendMessage, continueMessage]);
 
   const dismissTruncation = useCallback(() => {

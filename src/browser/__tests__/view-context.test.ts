@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VIEW_CONTEXT_LIMITS, ViewContextSchema, type ViewContextEntry } from '../../contracts/view-context.js';
 import { currentViewContext, registerViewContext } from '../index.js';
-import { viewContextRequestBody, viewContextState, VIEW_CONTEXT_REQUEST_FIELD } from '../view-context-store.js';
+import { viewContextRequestBody, viewContextSnapshot, viewContextState, VIEW_CONTEXT_REQUEST_FIELD } from '../view-context-store.js';
 import { VIEW_CONTEXT_FIELD, VIEW_CONTEXT_WIRE_VERSION } from '../../server/adapters/nextjs/view-context-block.js';
 
 const cleanups: Array<() => void> = [];
@@ -22,7 +22,7 @@ function register(source: string, entry: ViewContextEntry | null) {
 describe('registerViewContext', () => {
   it('is empty until an app registers something', () => {
     expect(currentViewContext()).toEqual([]);
-    expect(viewContextRequestBody()).toBeUndefined();
+    expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
   });
 
   it('registers, updates in place and unregisters per source', () => {
@@ -141,7 +141,7 @@ describe('the request body field', () => {
     const saved = scope[key];
     delete scope[key];
     try {
-      expect(viewContextRequestBody()).toBeUndefined();
+      expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
       expect(key in scope).toBe(false);
     } finally {
       if (saved !== undefined) scope[key] = saved;
@@ -154,9 +154,9 @@ describe('the request body field', () => {
     state.snapshot = undefined;
     state.entries.set('raw', { token: {}, entry: order('o-1') });
     try {
-      expect(viewContextRequestBody()).toBeUndefined();
+      expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
       state.snapshot = () => { throw new Error('boom'); };
-      expect(viewContextRequestBody()).toBeUndefined();
+      expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
     } finally {
       state.entries.delete('raw');
       state.snapshot = saved;
@@ -166,19 +166,38 @@ describe('the request body field', () => {
   it('is the field and version the server reads, with the current snapshot', () => {
     expect(VIEW_CONTEXT_REQUEST_FIELD).toBe(VIEW_CONTEXT_FIELD);
     register('page', order('o-1'));
-    expect(viewContextRequestBody()).toEqual({
+    expect(viewContextRequestBody(viewContextSnapshot())).toEqual({
       [VIEW_CONTEXT_FIELD]: { version: VIEW_CONTEXT_WIRE_VERSION, current: [order('o-1')] },
     });
   });
 
   it('sends no field when every registered entry is dropped', () => {
     register('bad', { label: 'nothing' } as unknown as ViewContextEntry);
-    expect(viewContextRequestBody()).toBeUndefined();
+    expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
+  });
+
+  it('builds the body only from the view context the message carries, never from the registry', () => {
+    register('page', order('o-1'));
+    expect(viewContextRequestBody(undefined)).toBeUndefined();
+    expect(viewContextRequestBody([])).toBeUndefined();
+    expect(viewContextRequestBody([order('o-9')])).toEqual({
+      [VIEW_CONTEXT_REQUEST_FIELD]: { version: 1, current: [order('o-9')] },
+    });
+  });
+
+  it('a frozen snapshot is an own copy: a later change of the registered entry does not reach it', () => {
+    const entry = order('o-1');
+    register('page', entry);
+    const frozen = viewContextSnapshot()!;
+    (entry.entity as { id: string }).id = 'o-2';
+    register('page', order('o-3'));
+    expect(frozen).toEqual([order('o-1')]);
+    expect(viewContextSnapshot()).toEqual([order('o-3')]);
   });
 
   it('never carries byMessage (reserved)', () => {
     register('page', order('o-1'));
-    expect(viewContextRequestBody()![VIEW_CONTEXT_REQUEST_FIELD]).not.toHaveProperty('byMessage');
+    expect(viewContextRequestBody(viewContextSnapshot())![VIEW_CONTEXT_REQUEST_FIELD]).not.toHaveProperty('byMessage');
   });
 });
 

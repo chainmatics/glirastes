@@ -212,11 +212,13 @@ export function useVercelAiChatTransport(
   });
 
   const send = useCallback(
-    ({ text, files }: { text: string; files?: FilePart[] }) => {
-      // A new user message carries the view context as it is now. Continuations started after the stream
-      // (approval resume, continueTurn, budget) send none; one the AI SDK starts from the running request
-      // can repeat this body, which the server ignores for continuations. No registration, no field.
-      const viewContext = viewContextRequestBody();
+    ({ text, files, viewContext: frozen }: Parameters<ChatTransport['sendMessage']>[0]) => {
+      // A new user message carries the view context frozen when the user submitted it (`AiChatProvider`
+      // sets it); the registry is never read here, so a queued message keeps the view it was written to.
+      // Continuations started after the stream (approval resume, continueTurn, budget) send none; one the
+      // AI SDK starts from the running request can repeat this body, which the server ignores for
+      // continuations. No view context with the message, no field.
+      const viewContext = viewContextRequestBody(frozen);
       const options = viewContext ? { body: viewContext } : undefined;
       if (!files || files.length === 0) return sendMessage({ text }, options);
       // Only the open metadata record differs from the SDK's JSON-typed one.
