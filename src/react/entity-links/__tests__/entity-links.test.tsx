@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { useMemo } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UiActionBus } from '../../../browser/ui-action-bus.js';
+import { registerNavigationBridge } from '../../../browser/navigation.js';
 import type { ChatInteractionsData } from '../../../contracts/chat-interactions.js';
 import { AiChatPanel } from '../../components/ai-chat-panel.js';
 import { defineChatEntity } from '../../interactions/definitions.js';
@@ -170,6 +171,39 @@ describe('entity chips in answers', () => {
     expect(chips).toHaveLength(2);
     await act(async () => { fireEvent.click(chips[1]!); });
     expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ payload: { href: '/tasks/7' } }));
+  });
+
+  it.each([
+    ['a bus handler that returns false', (bus: UiActionBus) => bus.subscribeById('glirastes.navigate', () => false)],
+    ['a navigation bridge whose push returns false', (bus: UiActionBus) => registerNavigationBridge({ bus, push: () => false })],
+    ['a bus handler that throws', (bus: UiActionBus) => bus.subscribeById('glirastes.navigate', () => { throw new Error('guard'); })],
+  ])('a chip click through %s leaves no unhandled rejection', async (_name, register) => {
+    const bus = new UiActionBus();
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => { rejections.push(reason); };
+    process.on('unhandledRejection', onRejection);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unregister = register(bus);
+    try {
+      render(<Chat
+        bus={bus}
+        entityLinks={{}}
+        messages={[
+          { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Was ist mit {{mention:task:7:Release prüfen}}?' }] },
+          answer('Release prüfen ist offen.'),
+        ]}
+      />);
+      const chips = await screen.findAllByRole('button', { name: 'Open Release prüfen' });
+      await act(async () => { fireEvent.click(chips[1]!); });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+      expect(rejections).toEqual([]);
+      // No error UI: the chat shows nothing new for a declined navigation.
+      expect(document.querySelector('[role="alert"]')).toBeNull();
+    } finally {
+      unregister();
+      warn.mockRestore();
+      process.off('unhandledRejection', onRejection);
+    }
   });
 
   it('leaves answers as text without entityLinks, but keeps mention chips openable', async () => {
