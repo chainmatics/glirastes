@@ -169,7 +169,8 @@ export const UI_ACTION_OUTCOME_TIMEOUT_MS = 10_000;
 /**
  * What became of the UI actions of one tool result: an outcome code, or
  * `timeout` (a handler did not settle in time) or `unconfirmed` (a bus of
- * an older SDK copy that cannot tell whether a handler ran).
+ * an older SDK copy that cannot tell whether a handler ran, or the run was
+ * aborted through its `signal`).
  */
 export type UiActionRunCode = UiOutcomeCode | 'timeout' | 'unconfirmed';
 
@@ -189,8 +190,9 @@ export interface RunToolResultUiActionsOptions extends DispatchToolResultOptions
    */
   timeoutMs?: number;
   /**
-   * Stops the run before its next action (and before a page-bound action
-   * that waited for its page); the outcome is then `unconfirmed`.
+   * Ends the run: at once also while a handler is still pending (its late
+   * result is dropped), else before its next action; the outcome is then
+   * `unconfirmed`. The handler itself is not told and may still finish.
    */
   signal?: AbortSignal;
 }
@@ -320,10 +322,21 @@ export async function runToolResultUiActions(
       resolve({ code: 'timeout' });
     }, budgetMs);
   });
+  // Aborted while a handler is pending: the run ends now, not when the handler settles. One task
+  // later, so a handler that settled in the same task (or aborted from inside) still counts.
+  const signal = options.signal;
+  let onAbort: (() => void) | undefined;
+  let abortTimer: ReturnType<typeof setTimeout> | undefined;
+  const aborted = new Promise<Pick<UiActionRunResult, 'code'>>((resolve) => {
+    onAbort = () => { abortTimer = setTimeout(() => resolve({ code: 'unconfirmed' }), 0); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
   try {
-    const outcome = await Promise.race([run(), timeout]);
+    const outcome = await Promise.race([run(), timeout, aborted]);
     return { ...outcome, dispatched, durationMs: Date.now() - started };
   } finally {
     clearTimeout(timer);
+    clearTimeout(abortTimer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
   }
 }

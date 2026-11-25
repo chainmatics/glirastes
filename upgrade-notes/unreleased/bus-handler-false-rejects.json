@@ -1,0 +1,18 @@
+{
+  "id": "bus-handler-false-rejects",
+  "kind": "recommended",
+  "summary": "A UI action bus handler (subscribeById, subscribeByType, useAiClientActionById, useAiClientActionByType) that returns false is now reported as rejected-handler instead of ok; UiActionHandler may return boolean.",
+  "howTo": "Return false (or throw) from a bus handler only when the action did not happen; return nothing or true when it did. A handler that returned false by accident now makes the model read 'declined'. A direct bus.dispatch(...) call rejects with a UiActionRejectedError for such a handler, and dispatchToolResultUiActions rejects: catch it where the call is not awaited.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "UiActionBus",
+      "UiActionHandler",
+      "subscribeById",
+      "subscribeByType",
+      "useAiClientActionById",
+      "useAiClientActionByType",
+      "dispatchToolResultUiActions"
+    ]
+  }
+}

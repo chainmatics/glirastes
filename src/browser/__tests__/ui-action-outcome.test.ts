@@ -223,6 +223,32 @@ describe('runToolResultUiActions', () => {
     expect(second).not.toHaveBeenCalled();
   });
 
+  it('returns unconfirmed at once when its signal aborts while a handler is pending', async () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new UiActionBus();
+      const controller = new AbortController();
+      const second = vi.fn();
+      let settled = false;
+      // A handler that waits 5 s (an app dialog), far below the 10 s outcome timeout.
+      cleanups.push(bus.subscribeById('first', () => new Promise<void>((resolve) => { setTimeout(resolve, 5_000); })));
+      cleanups.push(bus.subscribeById('second', second));
+      const run = runToolResultUiActions(result([action('first'), action('second')]), bus, { signal: controller.signal })
+        .then((value) => { settled = true; return value; });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(settled).toBe(false);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(true);
+      expect(await run).toMatchObject({ code: 'unconfirmed', dispatched: 0 });
+      // The handler settles later: nothing after it runs.
+      await vi.advanceTimersByTimeAsync(UI_ACTION_OUTCOME_TIMEOUT_MS);
+      expect(second).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('stops a result array at the first failure and reports its code', async () => {
     const bus = new UiActionBus();
     const first = vi.fn();

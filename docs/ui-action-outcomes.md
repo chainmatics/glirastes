@@ -119,6 +119,21 @@ empty and nothing is continued. A bridge that reloads without `reloads` is
 caught on `pagehide` (outcome `initiated` for a running navigation, "not
 confirmed" for any other running action; saved as far as possible).
 
+## Stop while the chat waits
+
+The request already ended, so Stop (or `queue.sendNow` with `'abort'`, the
+default) ends the wait itself: the chat stops waiting at once, writes no
+outcome and starts no continuation, also when the handler settles later. The
+turn ends as `aborted` (`stopped`, or `send-now`), and `onUiActionOutcome`
+fires once with `code: 'unconfirmed'` and `reported: false`. The result stays
+without an outcome, so the next turn's request makes the server tell the model
+"not confirmed". A page load a reloading bridge prepares for the result is
+cancelled when Stop comes before its outcome is written (no `initiated`).
+
+Known limit: the handler gets no signal yet. An app dialog it opened can stay
+open; if the user confirms there afterwards, the app may still carry the
+action out, while the model reads "not confirmed".
+
 ## Never late
 
 A UI action runs only in the chat whose running request delivered it, until
@@ -141,7 +156,10 @@ with `awaitsOutcome` there to not run them twice.
   `registerNavigationBridge`, `registerDocumentNavigation`), otherwise
   navigation reports `unavailable`.
 - Handlers return `false` (or throw) instead of failing silently, and resolve
-  once the effect is visible.
+  once the effect is visible. This holds for every handler on the bus
+  (`subscribeById`, `subscribeByType`, `useAiClientActionById`,
+  `useAiClientActionByType`), not only `registerAiClientAction`: `false` is
+  reported as `rejected-handler`.
 - Code that reads `success` on UI tool results reads `handedOff` too (it
   gets `handedOff` only for requests with the flag, or with
   `uiToolResultShape: 'handoff'`).

@@ -4,13 +4,20 @@
  * generated navigation, filter or client action reaches the handler the app
  * registered, whatever framework it uses.
  */
+import { UiActionRejectedError } from './ui-action-signals.js';
+
 export interface UiAction {
   type: string;
   actionId?: string;
   [key: string]: unknown;
 }
 
-export type UiActionHandler = (action: UiAction) => void | Promise<void>;
+/**
+ * A bus handler. Returning (or resolving) `false` declines the action: the
+ * dispatch rejects as for a handler that threw `UiActionRejectedError`, and
+ * the chat reports `rejected-handler`. `true` and nothing count as carried out.
+ */
+export type UiActionHandler = (action: UiAction) => void | boolean | Promise<void | boolean>;
 
 function addHandler(
   map: Map<string, Set<UiActionHandler>>,
@@ -83,7 +90,8 @@ export class UiActionBus {
   /**
    * Runs every handler of the action's type and id one after another and
    * resolves the number that ran; `0` means nothing on the page handles it.
-   * The first handler that throws stops the rest and rejects the dispatch.
+   * The first handler that throws, or returns `false`, stops the rest and
+   * rejects the dispatch (`false`: with a `UiActionRejectedError`).
    */
   async dispatch(action: UiAction): Promise<number> {
     const typeHandlers = this.handlersByType.get(action.type);
@@ -97,7 +105,9 @@ export class UiActionBus {
     ]);
 
     for (const handler of allHandlers) {
-      await handler(action);
+      if (await handler(action) === false) {
+        throw new UiActionRejectedError('handler', `UI action ${action.actionId ?? action.type} was not carried out`);
+      }
     }
     return allHandlers.size;
   }

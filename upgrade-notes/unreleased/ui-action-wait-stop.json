@@ -1,0 +1,15 @@
+{
+  "id": "ui-action-wait-stop",
+  "kind": "recommended",
+  "summary": "Stop and queue.sendNow ('abort') now end the wait for a UI action outcome at once: no outcome is written, no continuation starts, the turn ends aborted and the next turn tells the model 'not confirmed'.",
+  "howTo": "Nothing to change for the fix. Read onUiActionOutcome events with code 'unconfirmed' and reported false as 'the user stopped waiting'. Known limit: the handler gets no signal yet, so a dialog it opened stays open after Stop; if the user confirms there afterwards the app may still carry the action out while the model is told 'not confirmed'. Close or disable such a dialog yourself if that matters (for example when the turn outcome becomes aborted, onTurnEnd). Own chats calling runToolResultUiActions with a signal: it now resolves 'unconfirmed' right after the abort, also while a handler is pending.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "onUiActionOutcome",
+      "runToolResultUiActions",
+      "sendNowBehavior",
+      "UiActionOutcomeEvent"
+    ]
+  }
+}
