@@ -346,6 +346,11 @@ before the message left the queue.
 | Entity action (`runEntityAction`) | the click; with a form, when the form is submitted |
 | "Continue" after a cut-off answer (`continueTruncation`) | the click |
 
+An app needs no code for this: every send path of `AiChatProvider` above
+freezes it, also for an own composer that calls `send`, `submit` or
+`submitWithResult`. Only a request without a new user message (approval
+resume, `continueTurn`, `continueAfterBudgetStop`) carries none.
+
 Two consequences, both on purpose:
 
 - **An edit keeps the view context of the moment the message was queued.**

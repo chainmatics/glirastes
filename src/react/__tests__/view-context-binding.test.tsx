@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
 import { useChatContext, type ChatContextValue } from '../provider/chat-context.js';
 import { useVercelAiChatTransport } from '../transports/vercel.js';
+import { ChatStarters, useChatQueue, useViewContext } from '../index.js';
+import { VercelAiChat } from '../transports/vercel/index.js';
 import { defineChatCommand, defineChatEntity } from '../interactions/definitions.js';
 import { clarificationAnswerMessage } from '../utils/clarification.js';
 import { currentViewContext, registerViewContext } from '../../browser/index.js';
@@ -551,6 +553,60 @@ describe('with the bundled transport and the real chat route', () => {
     expect(Object.keys(bodies[1]!)).toEqual(['glirastesClientActions', 'glirastesUiOutcomes', 'id', 'messages', 'trigger']);
     await waitFor(() => expect(models[1]?.doStreamCalls).toHaveLength(1));
     expect(promptOf(models[1])).not.toContain('view-context');
+  });
+
+  it('an app as on main (VercelAiChat, useViewContext, own composer on the public API, queue with maxSize and autoFlush) needs no change', async () => {
+    // Exactly the app code of main: nothing here knows about freezing.
+    function OrderPage({ entry }: { entry: ViewContextEntry | null }) {
+      useViewContext(entry);
+      return null;
+    }
+    let api!: ReturnType<typeof useChatQueue>;
+    let chat!: ChatContextValue;
+    function OwnComposer() {
+      api = useChatQueue();
+      chat = useChatContext();
+      return <ChatStarters />;
+    }
+    function App({ entry }: { entry: ViewContextEntry | null }) {
+      return (
+        <>
+          <OrderPage entry={entry} />
+          <VercelAiChat
+            endpoint="/api/chat"
+            queue={{ enabled: true, maxSize: 5, autoFlush: true }}
+            composer={{ starters: [{ label: 'Status', prompt: 'What is the status of this?', send: true }] }}
+          >
+            <OwnComposer />
+          </VercelAiChat>
+        </>
+      );
+    }
+    const view = render(<App entry={viewA} />);
+    holdNext = true;
+    // A starter click while A is open: sent at once, its answer stays open.
+    const starter = view.container.querySelector('[data-element="starter"]') as HTMLButtonElement;
+    await act(async () => { starter.click(); });
+    await waitFor(() => expect(release).toBeDefined());
+    await act(async () => { expect(api.submitWithResult('Delete this')).toEqual({ status: 'queued' }); });
+    // The model (or the user) navigates to B.
+    view.rerender(<App entry={viewB} />);
+    await act(async () => { expect(chat.send('And this one')).toBe(true); });
+    view.rerender(<App entry={null} />);
+    await act(async () => { expect(api.submit('And without a view')).toBe('queued'); });
+    expect(api.items.map((item) => item.viewContext)).toEqual([[viewA], [viewB], undefined]);
+    view.rerender(<App entry={viewB} />);
+    await act(async () => { release!(); });
+    await waitFor(() => expect(bodies).toHaveLength(4));
+    const sent = bodies.map((body) => (body.glirastesViewContext as { current?: ViewContextEntry[] } | undefined)?.current);
+    expect(sent).toEqual([[viewA], [viewA], [viewB], undefined]);
+    const lastUserText = (body: Record<string, unknown>) =>
+      JSON.stringify((body.messages as Array<{ role: string; parts: unknown[] }>).filter((m) => m.role === 'user').at(-1)?.parts);
+    expect(bodies.map(lastUserText).map((text) => /"text":"([^"]+)"/.exec(text)?.[1]))
+      .toEqual(['What is the status of this?', 'Delete this', 'And this one', 'And without a view']);
+    await waitFor(() => expect(models[1]?.doStreamCalls).toHaveLength(1));
+    expect(promptOf(models[1])).toContain('ord-1');
+    expect(promptOf(models[1])).not.toContain('ord-2');
   });
 
   it('the transport sends what the message carries, not what is registered when it sends', async () => {
