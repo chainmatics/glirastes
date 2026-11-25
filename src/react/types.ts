@@ -1653,7 +1653,9 @@ export interface UiActionOutcomeEvent {
   /**
    * `ok`, `rejected-contract`, `rejected-handler`, `unavailable`, `failed`,
    * `initiated` (a reloading navigation started), `timeout` (a handler did
-   * not settle in time) or `unconfirmed` (a bus of an older SDK copy).
+   * not settle in time) or `unconfirmed` (a bus of an older SDK copy, or
+   * the user stopped the wait: `stop()`, `sendNow` with `'abort'`; then
+   * `reported` is false and nothing is written).
    */
   code: UiActionRunCode;
   actions: Array<{ type: string; actionId?: string }>;

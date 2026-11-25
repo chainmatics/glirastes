@@ -367,7 +367,14 @@ sends `glirastesUiOutcomes: 1`; the server marks UI results `awaitsOutcome:
 true` and ends the request; the provider writes `outcome: { v: 1, code }` and
 the transport sends the history again once all marked results of the step
 have one (`shouldContinueChat`), so the model answers after it. The composer
-stays locked meanwhile (`isLoading`). A custom `ChatTransport` opts in with
+stays locked meanwhile (`isLoading`). `stop()` (and `sendNow` with `'abort'`)
+during that wait ends it at once: no outcome is written, no continuation
+starts (also when the handler settles later), the turn ends `aborted`, and
+the next turn's request tells the model "not confirmed". Once an outcome is
+written (`initiated` during the page-load save) Stop changes nothing for it.
+`clear()`, a session switch and unmount also end a pending wait at once. The handler is not
+told: a dialog it opened stays open, and confirming it afterwards may still
+carry the action out. A custom `ChatTransport` opts in with
 `addToolOutput`, `continueTurn` and `setUiOutcomeReporting`, and sends the
 flag itself. The activity log shows the outcome per step (locale keys
 `activityUiPendingLabel`, `activityUiRejectedContract`,
@@ -389,12 +396,12 @@ turn; an answered approval `'approval'`): count turns on the calls without
 | --- | --- |
 | `ok` | every handler resolved (resolve once the effect is visible) |
 | `rejected-contract` | the payload failed the contract, or an unsafe route or target |
-| `rejected-handler` | a handler or the bridge's `push` returned `false` |
+| `rejected-handler` | a handler (also one subscribed on the bus directly; all still run first) or the bridge's `push` returned `false`; a handler that only filters returns nothing, not `false` |
 | `failed` | a handler threw |
 | `unavailable` | no handler: no navigation bridge, unknown action, a page-bound action that never registered on its route |
 | `initiated` | a reloading navigation (`registerDocumentNavigation()`, `reloads: true`) started; nothing after it runs on the page |
 | `timeout` | not settled within `uiActionOutcomeTimeoutMs` (default 10000; a page-bound action gets the 5000 ms route wait on top) |
-| `unconfirmed` | a bus of an older SDK copy that does not count handlers |
+| `unconfirmed` | a bus of an older SDK copy that does not count handlers, or the user stopped the wait (`stop()`, `sendNow` with `'abort'`; `reported: false`) |
 
 The results of one answer run one after another in call order; a failed call
 does not stop the next one, and inside one result the first failure stops the

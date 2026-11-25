@@ -446,6 +446,17 @@ describe('the continuation after a reported outcome', () => {
     expect(sent).toContain(UI_OUTCOME_MODEL_TEXTS.ok);
   });
 
+  it('reads a result the user stopped waiting for (no outcome, a new user message follows) as not confirmed', async () => {
+    const next = [...reportedHistory({ ...handedOff, awaitsOutcome: true }), {
+      id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Something else' }],
+    }];
+    const { model } = await run({ model: scriptedModel() }, FLAG, next);
+    const sent = prompt(model);
+    expect(sent).toContain(UI_OUTCOME_MODEL_TEXTS.unconfirmed);
+    expect(sent).not.toContain(UI_OUTCOME_MODEL_TEXTS.ok);
+    expect(sent).not.toContain('awaitsOutcome');
+  });
+
   it('reads the outcome texts also without the flag (a later turn of an older client)', async () => {
     const later = [...reportedHistory({ ...handedOff, awaitsOutcome: true, outcome: { v: 1, code: 'unavailable' } }), {
       id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Did it work?' }],
