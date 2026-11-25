@@ -1,0 +1,21 @@
+{
+  "version": "0.29.0",
+  "notes": [
+    {
+      "id": "voice-composer-variant",
+      "kind": "optional",
+      "summary": "voice.recordingBar.variant 'composer' shows the live words in the editor where the text goes, with a compact waveform next to the mic; the mic stops, Escape cancels.",
+      "howTo": "Set voice.recordingBar.variant to 'composer'. Style the live words with [data-element=\"placeholder\"][data-live], textarea[data-live]::placeholder and [data-element=\"live-transcript\"]; the waveform is [data-component=\"recording-bar\"][data-variant=\"composer\"]. CSS that hid toolbar buttons while the inline bar was mounted no longer applies.",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "symbols": [
+          "RecordingBar",
+          "VoiceInputConfig"
+        ]
+      },
+      "surface": [
+        "glirastes/react#RichMentionInputProps.liveText"
+      ]
+    }
+  ]
+}

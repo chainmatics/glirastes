@@ -3150,6 +3150,7 @@
   "glirastes/react#RichMentionInputProps.emptyLabel",
   "glirastes/react#RichMentionInputProps.initialMentions",
   "glirastes/react#RichMentionInputProps.listLabel",
+  "glirastes/react#RichMentionInputProps.liveText",
   "glirastes/react#RichMentionInputProps.onBackspaceEmpty",
   "glirastes/react#RichMentionInputProps.onChange",
   "glirastes/react#RichMentionInputProps.onCompletionSelect",

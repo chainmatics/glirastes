@@ -1,2 +1,2 @@
 /** Kept equal to package.json#version by a test; bump both on release. */
-export const SDK_VERSION = '0.28.0';
+export const SDK_VERSION = '0.29.0';
