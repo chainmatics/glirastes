@@ -33,7 +33,18 @@ function isPlain(value: unknown): value is Record<string, unknown> {
  * passes an inline object with the same content on every render.
  */
 export function useEqualValue<T>(value: T): T {
-  const kept = useRef(value);
-  if (!sameConfig(kept.current, value)) kept.current = value;
-  return kept.current;
+  // Compared with a copy of what was taken over, not with it: an entry the app changes in place and passes
+  // in a new object is a change (the kept value shares the app's entries).
+  const kept = useRef<{ value: T; copy: unknown } | null>(null);
+  if (!kept.current || !sameConfig(kept.current.copy, value)) kept.current = { value, copy: copyConfig(value) };
+  return kept.current.value;
+}
+
+/** A copy of the plain objects and arrays `sameConfig` compares by value; everything else as it is. */
+export function copyConfig<T>(value: T, depth = 0): T {
+  if (depth > 4 || !isPlain(value)) return value;
+  if (Array.isArray(value)) return value.map((entry) => copyConfig(entry, depth + 1)) as T;
+  const copy: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) copy[key] = copyConfig((value as Record<string, unknown>)[key], depth + 1);
+  return copy as T;
 }

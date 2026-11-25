@@ -3,7 +3,7 @@ import { ChatContext, useChatContext, type ChatContextValue } from './chat-conte
 import type { ComposerContextValue } from './composer-context.js';
 import { readClarificationPart } from '../utils/clarification.js';
 import { turnStartId } from '../utils/turn-outcomes.js';
-import { sameConfig } from '../utils/same-config.js';
+import { copyConfig, sameConfig } from '../utils/same-config.js';
 import type { ChatMessage, PendingApproval } from '../types.js';
 
 type FullChat = ChatContextValue & ComposerContextValue;
@@ -119,7 +119,8 @@ export function createMessageChats() {
     });
   }
   let views = new Map<string, CachedView>();
-  let staticToken: unknown[] = [];
+  let staticToken: object = {};
+  let staticCopy: unknown[] | null = null;
   let settled: { messages: ReadonlyArray<ChatMessage>; token: object } = { messages: [], token: {} };
 
   return function messageChats(chat: FullChat, messages: ReadonlyArray<ChatMessage>): (message: ChatMessage, index: number) => MessageChat {
@@ -128,7 +129,12 @@ export function createMessageChats() {
     nextStatic.push(chat.suggestions?.placement, chat.suggestions?.count, chat.suggestions?.enabled);
     // Compared by value where they are plain data: an app that renders on every chunk with an inline
     // `locale={{ … }}` or `entityDeclarations={{ … }}` does not render every message again.
-    if (!sameConfig(staticToken, nextStatic)) staticToken = nextStatic;
+    // Compared with a copy of what was taken over: an entry the app changes in place and passes in a new
+    // object is a change.
+    if (!staticCopy || !sameConfig(staticCopy, nextStatic)) {
+      staticCopy = copyConfig(nextStatic);
+      staticToken = {};
+    }
     // The messages that are not streaming: all of them, without the latest one while a turn runs.
     const stable = chat.isLoading ? messages.slice(0, -1) : messages;
     if (!sameValues(settled.messages, stable)) settled = { messages: stable, token: {} };
