@@ -281,7 +281,7 @@ describe('chat queue enabled', () => {
 
   it("sendNow 'next' moves the message to the head without stopping the run", async () => {
     const chat = new FakeChat();
-    render(<Host chat={chat} config={enabled} />);
+    render(<Host chat={chat} config={{ queue: { enabled: true, sendNowBehavior: 'next' } }} />);
     await startRun(chat);
     await act(async () => { ctx.submit('a'); ctx.submit('b'); });
     await act(async () => { ctx.sendNow(ctx.queue.items[1]!.id); });
@@ -293,7 +293,7 @@ describe('chat queue enabled', () => {
 
   it("sendNow 'next' sends one message of a paused queue", async () => {
     const chat = new FakeChat();
-    render(<Host chat={chat} config={enabled} />);
+    render(<Host chat={chat} config={{ queue: { enabled: true, sendNowBehavior: 'next' } }} />);
     await startRun(chat);
     await act(async () => { ctx.submit('a'); ctx.submit('b'); ctx.pauseQueue(); });
     await act(async () => { chat.finish(); });
@@ -303,6 +303,16 @@ describe('chat queue enabled', () => {
     await act(async () => { chat.finish(); });
     expect(texts(chat)).toEqual(['first', 'b']);
     expect(ctx.queue.paused).toBe(true);
+  });
+
+  it('sendNow stops the running answer and sends by default', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={enabled} />);
+    await startRun(chat);
+    await act(async () => { ctx.submit('a'); });
+    await act(async () => { ctx.sendNow(ctx.queue.items[0]!.id); });
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(texts(chat)).toEqual(['first', 'a']));
   });
 
   it("sendNow 'abort' stops the run and sends without pausing", async () => {
@@ -868,6 +878,7 @@ describe('chat queue enabled', () => {
     render(<Host chat={chat} config={{
       queue: {
         enabled: true,
+        sendNowBehavior: 'next',
         onQueueChange: (event) => { reasons.push(event.reason); throw new Error('app bug'); },
       },
     }} />);
@@ -1217,6 +1228,32 @@ describe('ChatQueue component', () => {
     fireEvent.click(document.querySelector('[data-component="chat-queue"] [data-action="send-now"]')!);
     await act(async () => { chat.finish(); });
     await waitFor(() => expect(texts(chat)).toEqual(['first', 'two edited']));
+  });
+
+  it('focuses the edit with the caret at the end; Enter saves, Escape cancels, focus returns to Edit', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={enabled}><ChatQueue /></Host>);
+    await startRun(chat);
+    await act(async () => { ctx.submit('one'); });
+    const edit = () => document.querySelector<HTMLButtonElement>('[data-component="chat-queue"] [data-action="edit"]')!;
+    const editor = () => document.querySelector<HTMLTextAreaElement>('[data-component="chat-queue"] textarea')!;
+
+    fireEvent.click(edit());
+    expect(document.activeElement).toBe(editor());
+    expect(editor().selectionStart).toBe(3);
+    fireEvent.keyDown(editor(), { key: 'Enter', shiftKey: true });
+    expect(ctx.queue.editingId).not.toBeNull();
+    fireEvent.change(editor(), { target: { value: 'one more' } });
+    fireEvent.keyDown(editor(), { key: 'Enter' });
+    expect(queuedTexts()).toEqual(['one more']);
+    expect(document.activeElement).toBe(edit());
+
+    fireEvent.click(edit());
+    fireEvent.change(editor(), { target: { value: 'dropped' } });
+    fireEvent.keyDown(editor(), { key: 'Escape' });
+    expect(ctx.queue.editingId).toBeNull();
+    expect(queuedTexts()).toEqual(['one more']);
+    expect(document.activeElement).toBe(edit());
   });
 
   it('uses German texts, the classNames key and works unstyled', async () => {

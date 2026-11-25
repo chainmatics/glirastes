@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
 import type { ChatQueueApi, ChatQueueProps, QueuedMessage } from '../types.js';
 
@@ -43,6 +43,23 @@ function QueueItem({ item, queue }: { item: QueuedMessage; queue: ChatQueueApi }
   const editing = queue.editingId === item.id;
   const [draft, setDraft] = useState(item.text);
   const fileCount = item.files?.length ?? 0;
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const wasEditing = useRef(false);
+  // An opened edit takes the keyboard (caret after the text); save or cancel gives it back to Edit.
+  useEffect(() => {
+    if (editing && !wasEditing.current) {
+      const textarea = textareaRef.current;
+      textarea?.focus({ preventScroll: true });
+      textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+    } else if (!editing && wasEditing.current) {
+      editButtonRef.current?.focus({ preventScroll: true });
+    }
+    wasEditing.current = editing;
+  }, [editing]);
+  const save = () => {
+    if (draft.trim() !== '') queue.editQueued(item.id, draft);
+  };
   return (
     <li data-element="item" data-queue-id={item.id} data-state={editing ? 'editing' : 'queued'}>
       {editing ? (
@@ -50,13 +67,25 @@ function QueueItem({ item, queue }: { item: QueuedMessage; queue: ChatQueueApi }
           data-element="edit"
           onSubmit={(event) => {
             event.preventDefault();
-            queue.editQueued(item.id, draft);
+            save();
           }}
         >
           <textarea
             value={draft}
             aria-label={locale.queueEditLabel}
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                queue.cancelEdit();
+              } else if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                save();
+              }
+            }}
+            ref={textareaRef}
             rows={2}
           />
           <button type="submit" data-action="save" disabled={draft.trim() === ''}>{locale.queueSaveLabel}</button>
@@ -72,7 +101,7 @@ function QueueItem({ item, queue }: { item: QueuedMessage; queue: ChatQueueApi }
             <button type="button" data-action="send-now" onClick={() => queue.sendNow(item.id)}>
               {locale.queueSendNowLabel}
             </button>
-            <button type="button" data-action="edit" onClick={() => { setDraft(item.text); queue.beginEdit(item.id); }}>
+            <button type="button" data-action="edit" ref={editButtonRef} onClick={() => { setDraft(item.text); queue.beginEdit(item.id); }}>
               {locale.queueEditLabel}
             </button>
             <button type="button" data-action="remove" onClick={() => queue.removeQueued(item.id)}>

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Behaviour change: "Send now" in the queue sends right away.** `queue.sendNowBehavior` defaults to `'abort'`: `sendNow(id)` (and the queue's "Send now" button) stops the running answer and sends the message at once; that stop does not pause the queue. Before, the default `'next'` only moved the message to the head, so with one queued message the button did nothing visible until the answer ended. `sendNowBehavior: 'next'` keeps the old behaviour. With an open approval `sendNowDuringApproval` applies as before.
+- Editing a queued message (`ChatQueue`): the text field takes the focus with the caret after the text, Enter saves (Shift+Enter breaks the line, not while composing with an IME), Escape cancels, and after save or cancel the focus returns to the message's Edit button.
 - The recording waveform (`RecordingBar`, `AiTriggerButton`) shows the recent loudness as thin bars that fill the width and scroll from right to left, newest on the right, with a dotted baseline for silence and the oldest side fading out. Before, six bars moved with one level. It is drawn on a canvas in the text color (`currentColor`), so `color` on `[data-part="wave-container"]` (or any ancestor) themes it; the element stays `[data-element="waveform"]` (now `aria-hidden`, 24 px high). With `prefers-reduced-motion` the bars step instead of gliding. Styles that sized or colored the old `span` bars no longer apply. No API change; still no second microphone (it reads the recorder's stream).
 
 ### Security
