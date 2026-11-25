@@ -314,6 +314,21 @@ describe('entity link index against the 0.29.0 collectors', () => {
     expect(calls.prepared).toBe(3 * calls.released);
   });
 
+  it('a known name renamed in the streaming message (same count) is the new name', () => {
+    const index = createConversationEntityIndex();
+    const searches: Searches = [];
+    const settled: Message = { id: 'u', role: 'user', parts: [{ type: 'text', text: 'Is {{mention:channel:c1:Lobby}} live?' }] };
+    const streaming = (label: string): Message => ({ id: 'a', role: 'assistant', parts: [{ type: 'text', text: `Yes, {{mention:channel:c2:${label}}}` }] });
+    for (const label of ['Main', 'Main hall', 'Main hall', 'Back office']) {
+      const messages = [settled, streaming(label)];
+      expect(index.known(messages, searches)).toEqual(released.collectKnownEntities(messages, searches));
+      expect(index.known([...messages], searches).map((reference) => reference.label)).toEqual(['Lobby', label]);
+    }
+    // A settled message renamed by a new object (an edit) as well.
+    const edited: Message = { ...settled, parts: [{ type: 'text', text: 'Is {{mention:channel:c1:Lobby screens}} live?' }] };
+    expect(index.known([edited, streaming('Back office')], searches).map((reference) => reference.label)).toEqual(['Lobby screens', 'Back office']);
+  });
+
   it('the regex cache tells patterns apart by their flags', () => {
     const compile = createRegexCache();
     const plain = compile('lobby', 'gu');

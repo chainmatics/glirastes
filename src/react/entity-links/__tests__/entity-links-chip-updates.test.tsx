@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
-import { StrictMode, useEffect, type ReactNode } from 'react';
+import { StrictMode, Suspense, startTransition, use, useEffect, useState, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UiActionBus } from '../../../browser/ui-action-bus.js';
 import type { EntityDeclarationsByTool } from '../../../contracts/entity-declaration.js';
 import { AiChatPanel } from '../../components/ai-chat-panel.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import type { ChatMessage, ChatTransport, MentionChipProps } from '../../types.js';
-import { useChatEntityLinks } from '../entity-links-react.js';
+import { WithoutEntityLinks, useChatEntityLinks } from '../entity-links-react.js';
 import type { ChatEntityLinksConfig } from '../entity-links.js';
 
 /**
@@ -141,7 +141,136 @@ describe('a matcher chip follows its text while the answer streams', () => {
     const view = await streamed(entityLinks, 'See MAR-5', ['task:MAR-5=MAR-5'], []);
     act(() => { view.rerender(<Chat messages={answer('See MAR-5, again MAR-5')} entityLinks={entityLinks} />); });
     expect(chips()).toEqual(['task:MAR-5=MAR-5', 'task:MAR-5=MAR-5']);
-    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the first render resolves as 0.29.0 did (the cache is cleared once after mounting)', () => {
+  const MARKER = '{{mention:channel:c1:Lobby}}';
+  for (const [path, text] of [['EntityText', `${MARKER} see MAR-5`], ['Markdown', 'See MAR-5']] as const) {
+    it(`${path}: a hit still waiting is asked again: a resolve that answers differently each time ends on the second answer`, async () => {
+      let count = 0;
+      const entityLinks: ChatEntityLinksConfig = { matchers: [{ type: 'task', pattern: TASK, resolve: (key) => ({ id: `${key}#${++count}`, label: key }) }] };
+      render(<Chat messages={answer(text)} entityLinks={entityLinks} />);
+      await act(async () => { await new Promise((done) => setTimeout(done, 20)); });
+      expect(chips().filter((chip) => chip.startsWith('task:'))).toEqual(['task:MAR-5#2=MAR-5']);
+    });
+
+    it(`${path}: a resolve that throws once at mount still ends as a chip`, async () => {
+      let count = 0;
+      const entityLinks: ChatEntityLinksConfig = {
+        matchers: [{ type: 'task', pattern: TASK, resolve: (key) => { count += 1; if (count === 1) throw new Error('offline'); return { id: key, label: key }; } }],
+      };
+      render(<Chat messages={answer(text)} entityLinks={entityLinks} />);
+      await act(async () => { await new Promise((done) => setTimeout(done, 20)); });
+      expect(chips().filter((chip) => chip.startsWith('task:'))).toEqual(['task:MAR-5=MAR-5']);
+    });
+  }
+});
+
+describe('new matchers start every chip over, as in 0.29.0', () => {
+  it('a finished chip of the old matchers shows in the render that passes them, then starts over (0.29.0: [A-MAR-5], [], [], [])', async () => {
+    const conversation = (later: string): ChatMessage[] => [
+      ...answer('See MAR-5'),
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'And now?' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: later }] },
+    ];
+    const a: ChatEntityLinksConfig = { matchers: [{ type: 'task', pattern: TASK, resolve: (key) => ({ id: `A-${key}`, label: key }) }], open: vi.fn() };
+    const b: ChatEntityLinksConfig = {
+      matchers: [{ type: 'customer', pattern: TASK, resolve: () => new Promise<undefined>((done) => setTimeout(() => done(undefined), 60)) }],
+      open: a.open,
+    };
+    const view = render(<Chat messages={conversation('Working')} entityLinks={a} />);
+    await waitFor(() => expect(chips()).toEqual(['task:A-MAR-5=MAR-5']));
+    const seen: string[][] = [];
+    await act(async () => { view.rerender(<Chat messages={conversation('Working')} entityLinks={b} />); });
+    seen.push(chips());
+    for (const later of ['Working on', 'Working on it']) {
+      await act(async () => { view.rerender(<Chat messages={conversation(later)} entityLinks={b} />); });
+      seen.push(chips());
+    }
+    await act(async () => { await new Promise((done) => setTimeout(done, 100)); });
+    seen.push(chips());
+    expect(seen).toEqual([['task:A-MAR-5=MAR-5'], [], [], []]);
+  });
+});
+
+describe("one provider's markdownComponents rendered elsewhere link with that provider's links, as in 0.29.0", () => {
+  const ABC = /ABC-\d+/;
+  function Foreign({ children }: { children: ReactNode }) {
+    return <AiChatProvider transport={transport([])} entityLinks={{ matchers: [{ type: 'other', pattern: ABC }] }} uiActionBus={bus} components={COMPONENTS}>{children}</AiChatProvider>;
+  }
+  /** Renders the outer provider's `p` component inside `wrap`. */
+  function Grab({ wrap }: { wrap: (node: ReactNode) => ReactNode }) {
+    const P = useChatEntityLinks().markdownComponents.p!;
+    return <>{wrap(<div data-testid="grabbed"><P>{'See MAR-3 and ABC-4'}</P></div>)}</>;
+  }
+  const grabbed = () => [...document.querySelectorAll('[data-testid="grabbed"] [data-chip]')].map((chip) => chip.getAttribute('data-chip'));
+
+  it('under a foreign provider, from the first render, and after the outer matchers change', async () => {
+    const outer = (pattern: RegExp, type: string): ChatEntityLinksConfig => ({ matchers: [{ type, pattern }], open: vi.fn() });
+    const tree = (links: ChatEntityLinksConfig) => (
+      <Chat messages={[]} entityLinks={links}><Grab wrap={(node) => <Foreign>{node}</Foreign>} /></Chat>
+    );
+    const view = render(tree(outer(TASK, 'task')));
+    await waitFor(() => expect(grabbed()).toEqual(['task:MAR-3']));
+    await act(async () => { view.rerender(tree(outer(ABC, 'abc'))); });
+    await waitFor(() => expect(grabbed()).toEqual(['abc:ABC-4']));
+  });
+
+  it('under WithoutEntityLinks: a known name is still a chip (a matcher hit is resolved by the links around it, none there)', async () => {
+    const named: ChatMessage[] = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'What about {{mention:task:t7:Release prüfen}}?' }] }];
+    function GrabName({ wrap }: { wrap: (node: ReactNode) => ReactNode }) {
+      const P = useChatEntityLinks().markdownComponents.p!;
+      return <>{wrap(<div data-testid="grabbed"><P>{'Release prüfen and MAR-3'}</P></div>)}</>;
+    }
+    render(<Chat messages={named} entityLinks={{ matchers: [{ type: 'task', pattern: TASK }], open: vi.fn() }}>
+      <GrabName wrap={(node) => <WithoutEntityLinks>{node}</WithoutEntityLinks>} />
+    </Chat>);
+    await act(async () => { await new Promise((done) => setTimeout(done, 20)); });
+    expect(grabbed()).toEqual(['task:t7']);
+  });
+
+  it('a render React sets aside (a transition that suspends) does not leak into what the committed tree shows', async () => {
+    let setLinks: (links: ChatEntityLinksConfig) => void = () => {};
+    let setHold: (hold: boolean) => void = () => {};
+    let bump: () => void = () => {};
+    const never = new Promise<never>(() => {});
+    function Hold({ hold }: { hold: boolean }) {
+      if (hold) use(never);
+      return null;
+    }
+    function Probe() {
+      const [count, setCount] = useState(0);
+      bump = () => setCount((value) => value + 1);
+      const P = useChatEntityLinks().markdownComponents.p!;
+      return <div data-testid="grabbed" data-count={count}><P>{'See MAR-3 and ABC-4'}</P></div>;
+    }
+    function App() {
+      const [links, set] = useState<ChatEntityLinksConfig>({ matchers: [{ type: 'task', pattern: TASK }], open: () => {} });
+      const [hold, setHoldState] = useState(false);
+      setLinks = set;
+      setHold = setHoldState;
+      return (
+        <Chat messages={[]} entityLinks={links}>
+          <Suspense fallback={null}><Hold hold={hold} /></Suspense>
+          <Probe />
+        </Chat>
+      );
+    }
+    render(<App />);
+    await waitFor(() => expect(grabbed()).toEqual(['task:MAR-3']));
+    // New matchers in a transition that suspends: React renders them and sets that render aside.
+    await act(async () => {
+      startTransition(() => {
+        setLinks({ matchers: [{ type: 'abc', pattern: ABC }], open: () => {} });
+        setHold(true);
+      });
+    });
+    // An urgent update below the provider renders with the committed links.
+    await act(async () => { bump(); });
+    await act(async () => { await new Promise((done) => setTimeout(done, 20)); });
+    expect(document.querySelector('[data-testid="grabbed"]')?.getAttribute('data-count')).toBe('1');
+    expect(grabbed()).toEqual(['task:MAR-3']);
   });
 });
 

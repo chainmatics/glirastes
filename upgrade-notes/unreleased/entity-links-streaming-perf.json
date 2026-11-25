@@ -1,8 +1,8 @@
 {
   "id": "entity-links-streaming-perf",
   "kind": "optional",
-  "summary": "Entity links no longer slow a long chat while an answer streams, and a matcher chip follows its text when a chunk or new matchers change the hit under it.",
-  "howTo": "Nothing to do. What an app can notice: a custom components.MentionChip in a finished message is no longer unmounted and mounted again per streamed chunk (its state and effects stay), and useChatEntityLinks().markdownComponents keep one identity for the provider's lifetime. A matcher chip whose hit changes (MAR-5 to MAR-51) shows the new record, also in EntityText, where 0.29.0 kept the old one. Apps that change messages in place (not the AI SDK) should replace a changed output, input or result object rather than mutate it: changes inside the same object are not noticed. A custom Markdown renderer gets the full effect only when it passes markdownComponents (or stable components of its own) to react-markdown.",
+  "summary": "Entity links no longer slow a long chat while an answer streams: finished messages are not read or mounted again per chunk, and markdownComponents keep their identity.",
+  "howTo": "Nothing to do. What an app can notice (the CHANGELOG lists every difference): a custom components.MentionChip in a finished message is no longer unmounted and mounted again per chunk; useChatEntityLinks() and its markdownComponents keep their identity; in text parts rendered without Markdown (EntityText) a matcher chip follows a changed hit, new matchers apply to finished messages, and resolveAmbiguous is called less often. Apps that change messages in place (not the AI SDK) should replace a changed output, input or result object rather than mutate it.",
   "skill": "building-glirastes-chat-ui",
   "affectedWhen": {
     "symbols": [

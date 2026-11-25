@@ -98,8 +98,11 @@ function CountingChip({ mention, onOpen, openLabel }: MentionChipProps) {
 const COMPONENTS = { MentionChip: CountingChip };
 
 const seenParagraphs = new Set<unknown>();
+const seenLinks = new Set<unknown>();
 function ParagraphIdentity() {
-  seenParagraphs.add(useChatEntityLinks().markdownComponents.p);
+  const links = useChatEntityLinks();
+  seenParagraphs.add(links.markdownComponents.p);
+  seenLinks.add(links);
   return null;
 }
 
@@ -159,6 +162,20 @@ describe('entity links while an answer streams', () => {
       expect(seenParagraphs.size).toBe(1);
     });
 
+    it(`${name}: the links keep their identity over chunks that change no known name or seen id`, async () => {
+      const turns = 3;
+      streamingPrefix = `c${turns - 1}_`;
+      let messages = conversation(turns);
+      const view = render(<Chat messages={messages} entityLinks={entityLinks} />);
+      await waitFor(() => expect(document.querySelector(`[data-chip="c${turns - 1}_3"]`)).not.toBeNull(), { timeout: 5000 });
+      seenLinks.clear();
+      for (let chunk = 0; chunk < CHUNKS; chunk += 1) {
+        messages = nextChunk(messages, chunk);
+        await act(async () => { view.rerender(<Chat messages={messages} entityLinks={entityLinks} />); });
+      }
+      expect(seenLinks.size).toBe(1);
+    });
+
     it(`${name}: no chip of a finished message mounts again while a later message streams`, async () => {
       const { mounts: counted } = await stream(5, entityLinks);
       expect(counted.finished).toBe(0);
@@ -181,16 +198,44 @@ describe('entity links while an answer streams', () => {
     });
   }
 
-  it('an app that passes a new config object on every render keeps markdownComponents and the chips of finished messages', async () => {
+  it('a knownEntities hook that returns new objects with the same content keeps the links identity', async () => {
+    const turns = 3;
+    streamingPrefix = `c${turns - 1}_`;
+    const knownEntities = vi.fn(() => [{ type: 'room', id: 'r1', label: 'Back office', data: { floor: 2 } }]);
+    const entityLinks: ChatEntityLinksConfig = { mentionMarkers: 'markdown', knownEntities, open: () => {} };
+    let messages = conversation(turns);
+    const view = render(<Chat messages={messages} entityLinks={entityLinks} />);
+    await waitFor(() => expect(document.querySelector(`[data-chip="c${turns - 1}_3"]`)).not.toBeNull(), { timeout: 5000 });
+    seenLinks.clear();
+    const calls = knownEntities.mock.calls.length;
+    for (let chunk = 0; chunk < CHUNKS; chunk += 1) {
+      messages = nextChunk(messages, chunk);
+      await act(async () => { view.rerender(<Chat messages={messages} entityLinks={entityLinks} />); });
+    }
+    // Still asked on every change of the messages.
+    expect(knownEntities.mock.calls.length).toBeGreaterThanOrEqual(calls + CHUNKS);
+    expect(seenLinks.size).toBe(1);
+  });
+
+  it('an app that passes a new config object (same matchers) on every render keeps markdownComponents and the chips of finished messages', async () => {
+    seenParagraphs.clear();
+    const matchers = [{ type: 'task', pattern: /MAR-\d+/, resolve: resolveKey }];
+    const fresh = (): ChatEntityLinksConfig => ({ mentionMarkers: 'markdown', matchers, open: () => {} });
+    const { mounts: counted, compiled } = await stream(5, fresh(), fresh);
+    expect(seenParagraphs.size).toBe(1);
+    expect(counted.finished).toBe(0);
+    expect(compiled.all).toBe(0);
+  });
+
+  it('new matchers (a new array with new regexes) on every render: markdownComponents stay, nothing is compiled again, chips start over as in 0.29.0', async () => {
     seenParagraphs.clear();
     const fresh = (): ChatEntityLinksConfig => ({
       mentionMarkers: 'markdown',
       matchers: [{ type: 'task', pattern: new RegExp('MAR-\\d+'), resolve: resolveKey }],
       open: () => {},
     });
-    const { mounts: counted, compiled } = await stream(5, fresh(), fresh);
+    const { compiled } = await stream(5, fresh(), fresh);
     expect(seenParagraphs.size).toBe(1);
-    expect(counted.finished).toBe(0);
     // Only the app's own `new RegExp` per render; the label and matcher patterns are not compiled again.
     expect(compiled.labels).toBe(0);
     expect(compiled.all).toBe(CHUNKS);
