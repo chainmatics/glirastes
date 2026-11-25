@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMessageChats } from '../message-chat-context.js';
 import type { ChatContextValue } from '../chat-context.js';
 import type { ComposerContextValue } from '../composer-context.js';
@@ -184,5 +184,46 @@ describe('the view of each message (MessageList)', () => {
     const messages = [user('q1'), asked, user('q2'), answer('r2')];
     const edited = messages.map((message) => (message.id === 'q2' ? { ...message } : message));
     expect(changed(chatWith(messages), chatWith(edited))).toEqual(['r1', 'q2']);
+  });
+});
+
+describe('the functions of a view', () => {
+  const CALLABLE = [
+    'approve', 'reject', 'approvalDescription', 'mentionPrefix', 'stop', 'continueAfterBudgetStop', 'turnWorkedMs',
+    'send', 'selectSuggestion', 'isApprovalResendPending',
+  ] as const;
+
+  it('lists every function field of the view', () => {
+    const chats = createMessageChats();
+    const fns = Object.fromEntries(CALLABLE.map((key) => [key, () => {}]));
+    const [view] = viewsOf(chats, chatWith(base(), fns as Partial<Chat>));
+    const callable = Object.keys(Object.getPrototypeOf(view)).filter((key) => typeof (view as unknown as Record<string, unknown>)[key] === 'function');
+    expect(callable.sort()).toEqual([...CALLABLE].sort());
+  });
+
+  it.each(CALLABLE)('%s called after the provider passed a new one reaches the new one (finished and latest message)', (key) => {
+    const chats = createMessageChats();
+    const messages = base();
+    const first = vi.fn(() => 'first');
+    const views = viewsOf(chats, chatWith(messages, { [key]: first } as Partial<Chat>));
+    const finished = views[1]! as unknown as Record<string, (...args: unknown[]) => unknown>;
+    const latest = views[3]! as unknown as Record<string, (...args: unknown[]) => unknown>;
+    const held = { finished: finished[key]!, latest: latest[key]! };
+    const second = vi.fn(() => 'second');
+    // A new function only: the event functions are not compared, the others render the message again;
+    // either way the function taken from the old view (a click handler of the last render) calls the new one.
+    viewsOf(chats, chatWith(messages, { [key]: second } as Partial<Chat>));
+    expect(held.finished('x', 1)).toBe('second');
+    expect(held.latest('y', 2)).toBe('second');
+    expect(second.mock.calls).toEqual([['x', 1], ['y', 2]]);
+    expect(first).not.toHaveBeenCalled();
+    // A view keeps one function per field.
+    expect(finished[key]).toBe(held.finished);
+  });
+
+  it('an absent function reads as absent', () => {
+    const chats = createMessageChats();
+    const [view] = viewsOf(chats, chatWith(base(), { continueAfterBudgetStop: undefined }));
+    expect(view!.continueAfterBudgetStop).toBeUndefined();
   });
 });

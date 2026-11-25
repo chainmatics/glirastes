@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { StrictMode, useEffect, useReducer } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -612,3 +612,62 @@ describe('a finished message renders again when something it shows changes', () 
     for (const id of finishedIds()) expect(bubbleRenders.get(id) ?? 0, id).toBeLessThanOrEqual(1);
   });
 });
+
+describe('a click in a message that did not render since reaches the current chat', () => {
+  /** The latest answer offers follow-ups; the app's `onBeforeSend` tags what it sends. */
+  async function idleWithFollowups(config: Partial<AiChatProviderConfig>) {
+    const { chat, view } = await mount(config);
+    await startAnswer(chat);
+    await act(async () => {
+      chat.finish([
+        { type: 'text', text: streamingText(1) },
+        { type: 'tool-suggest_followups', toolCallId: 'f1', state: 'output-available', input: {}, output: { followups: ['Next one?'] } },
+      ]);
+    });
+    await settle();
+    expect(document.querySelectorAll('[data-action="follow-up"]').length).toBe(1);
+    return { chat, view };
+  }
+  const followUp = async () => {
+    await act(async () => { fireEvent.click(document.querySelector('[data-action="follow-up"]')!); });
+  };
+  const tagged = (page: string) => (text: string) => `${text} [${page}]`;
+
+  it('a mention added after the last render goes with a follow-up', async () => {
+    const seen: string[][] = [];
+    const onBeforeSend = (text: string, mentions: Array<{ id: string }>) => { seen.push(mentions.map((mention) => mention.id)); return text; };
+    const { chat } = await idleWithFollowups({ ...baseConfig(), suggestions: { placement: 'message' }, onBeforeSend });
+    await act(async () => { ctx.addActiveMention({ id: 't1', type: 'task', displayName: 'T1' }); });
+    await followUp();
+    expect(seen).toEqual([['t1']]);
+    expect(chat.sent.at(-1)).toBe('Next one?');
+  });
+
+  it.each([
+    ['without the queue', {}],
+    ['with the queue', { queue: { enabled: true } }],
+  ])('a new onBeforeSend of the app applies to a follow-up (%s)', async (_, queue) => {
+    const config = { ...baseConfig(), suggestions: { placement: 'message' as const }, ...queue };
+    const { chat, view } = await idleWithFollowups({ ...config, onBeforeSend: tagged('page-1') });
+    view.rerender(<Host chat={chat} config={{ ...config, onBeforeSend: tagged('page-2') }} />);
+    await followUp();
+    expect(chat.sent.at(-1)).toBe('Next one? [page-2]');
+    expect(ctx.queue.items).toEqual([]);
+  });
+
+  it('a new onBeforeSend of the app applies to the answer of a clarification', async () => {
+    const config = baseConfig();
+    const { chat, view } = await mount({ ...config, onBeforeSend: tagged('page-1') });
+    await replace(chat, 'r12', (message) => ({
+      ...message,
+      parts: [...message.parts, {
+        type: 'tool-ask_clarification', toolCallId: 'k12', state: 'output-available',
+        input: { question: 'Which channel?', options: [{ id: 'a', label: 'Alpha' }] }, output: {},
+      }],
+    } as ChatMessage));
+    view.rerender(<Host chat={chat} config={{ ...config, onBeforeSend: tagged('page-2') }} />);
+    await act(async () => { fireEvent.click(document.querySelector('[data-action="answer-option"]')!); });
+    expect(chat.sent.at(-1)).toMatch(/Alpha \[page-2\]$/);
+  });
+});
+
