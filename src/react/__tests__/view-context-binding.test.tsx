@@ -233,6 +233,19 @@ describe('a queued message keeps the view context of the moment it was queued', 
     ]);
   });
 
+  it('sendNow with the default (abort) stops the run and sends the view context of the moment it was queued', async () => {
+    const chat = new FakeChat();
+    render(<Host chat={chat} config={queue} />);
+    await startRun(chat);
+    show(viewA);
+    await act(async () => { ctx.submit('Delete this'); });
+    show(viewB);
+    await act(async () => { expect(ctx.sendNow(ctx.queue.items[0]!.id)).toBe(true); });
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(chat.sent).toHaveLength(2));
+    expect(chat.sent[1]).toEqual({ text: 'Delete this', viewContext: [viewA] });
+  });
+
   it('a message refused because the queue is full reads no view context', async () => {
     const chat = new FakeChat();
     render(<Host chat={chat} config={{ queue: { enabled: true, maxSize: 1 } }} />);

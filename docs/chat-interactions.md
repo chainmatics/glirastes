@@ -367,7 +367,13 @@ The copy is read only: `QueuedMessage.viewContext` (in `queue.items` and
 so changing them throws. The bundled transport cleans the view context
 again right before it sends it, with the same contract (a cleaned copy
 stays byte-identical; anything changed or forged is cleaned or dropped,
-and without a registration on the page nothing is sent).
+and as long as nothing was ever registered on the page nothing is sent;
+any `registerViewContext` call, also with `null`, installs the cleaner, and
+it stays after unregistering, so a frozen copy still goes out). The cleaner
+is installed by the copy of the package that registers, from this version
+on: when an older copy (without the binding) registers and a newer
+`AiChatProvider` or transport sends, nothing is sent (fail closed). Use one
+version of the package on a page.
 
 The bundled transport (`VercelAiChat`, `useVercelAiChatTransport`,
 `<glirastes-chat>`) sends the copy of a new user message as
@@ -410,7 +416,8 @@ inner.sendMessage(message)`); one that builds a new object (`{ text:
 message.text }`) drops the view context. Calling `useVercelAiChatTransport`'s
 `sendMessage` directly, without `AiChatProvider`, sends a view context only
 when you pass one (`viewContext: currentViewContext()`, the view open at
-that call). Before this, an own transport read `currentViewContext()` when
+that call); a `viewContext` built by hand is not sent while nothing was ever
+registered on the page. Before this, an own transport read `currentViewContext()` when
 it sent; take the `viewContext` of the message instead, or it sends the view
 of the send time again. An own transport sends what it is given; the server
 checks it again either way.

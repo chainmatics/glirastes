@@ -224,6 +224,18 @@ describe('the request body field', () => {
     expect(viewContextRequestBody('not an array' as unknown as ViewContextEntry[])).toBeUndefined();
   });
 
+  it('cleans the JSON form that goes on the wire: an entry with toJSON is cleaned as it serializes', () => {
+    register('page', order('o-1'));
+    const withJson = (json: unknown) => [{ ...order('o-1'), toJSON: () => json }] as unknown as ViewContextEntry[];
+    const sent = (value: ViewContextEntry[]) =>
+      (viewContextRequestBody(value)?.[VIEW_CONTEXT_REQUEST_FIELD] as { current: ViewContextEntry[] } | undefined)?.current;
+    expect(sent(withJson(order('o-2')))).toEqual([order('o-2')]);
+    expect(sent(withJson({ label: 'no entity' }))).toBeUndefined();
+    const cyclic: Record<string, unknown> = { ...order('o-1') };
+    cyclic.self = cyclic;
+    expect(sent([cyclic as unknown as ViewContextEntry])).toBeUndefined();
+  });
+
   it('cleaning is idempotent: a cleaned snapshot is sent byte-identically', () => {
     register('page', { ...order('o-1'), label: `${'Ä'.repeat(70)}`, facts: { a: 1 } } as ViewContextEntry);
     register('lines', { selection: { type: 'line', ids: Array.from({ length: 70 }, (_, i) => `l-${i}`) } });
