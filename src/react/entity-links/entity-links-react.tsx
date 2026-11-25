@@ -11,6 +11,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import type { ChatEntitySearchData } from '../../contracts/chat-interactions.js';
 import { GLIRASTES_NAVIGATE_ACTION_ID } from '../../browser/navigation.js';
 import { fillTemplate } from '../utils/fill-template.js';
 import { getDefaultUiActionBus, type UiActionBus } from '../../browser/ui-action-bus.js';
@@ -19,11 +20,12 @@ import { useChatContext } from '../provider/chat-context.js';
 import type { Mention } from '../types.js';
 import { MARKER_CHARS, MARKER_EDGE, MARKER_SPAN, escapeMarkerLabel } from './marker-text.js';
 import {
-  collectKnownEntities,
-  collectSeenReferenceKeys,
+  createConversationEntityIndex,
+  createEntityTextSplitter,
+  createRegexCache,
   entityNavigationHref,
   isSeenReference,
-  splitEntityText,
+  sameReferences,
   type ChatEntityLinksConfig,
   type ChatEntityReference,
   type ChatEntityTextSegment,
@@ -46,7 +48,10 @@ export interface ChatEntityLinks {
   cachedMatch(segment: Extract<ChatEntityTextSegment, { kind: 'match' }>): ChatEntityReference | null | undefined;
   /** Replaces references in the string children with chips. */
   linkify(children: ReactNode): ReactNode;
-  /** `react-markdown` `components` that linkify paragraphs, list items, cells and emphasis. */
+  /**
+   * `react-markdown` `components` that linkify paragraphs, list items, cells and emphasis.
+   * Components that read context: render them as JSX or call them inside a function component.
+   */
   readonly markdownComponents: Record<string, (props: Record<string, unknown>) => ReactNode>;
   /** `entityLinks.mentionMarkers`: `'markdown'` keeps Markdown for assistant text with markers. */
   readonly mentionMarkers?: 'plain' | 'markdown';
@@ -56,7 +61,43 @@ export interface ChatEntityLinks {
 
 const ChatEntityLinksContext = createContext<ChatEntityLinks | null>(null);
 
+/** A matcher hit's cache key: the matcher and the text its `resolve` gets. */
+function matchKey(segment: { matcher: number; text: string; match?: string }): string {
+  return `${segment.matcher}\u0000${segment.match ?? segment.text}`;
+}
+
+/**
+ * How often the provider cleared its matcher result cache (after the render
+ * that passes other `matchers`, and once after mounting, as 0.29.0 did). A
+ * matcher chip is keyed by it and by its hit, so it starts over as the chips
+ * 0.29.0 remounted on every render did: never with a result of other matchers
+ * or of another hit, and a chip still waiting asks again.
+ */
+const MATCH_CACHE_CLEARED = new WeakMap<ChatEntityLinks, { readonly current: number }>();
+
 const LINKIFIED_TAGS = ['p', 'li', 'td', 'th', 'strong', 'em', 'h1', 'h2', 'h3', 'h4'] as const;
+
+const NO_SEARCHES: ReadonlyArray<{ readonly type: string; readonly search: ChatEntitySearchData }> = [];
+const NO_REFERENCES: ReadonlyArray<ChatEntityReference> = [];
+
+/** The provider each links value came from, so its `markdownComponents` know their own value in the tree. */
+const LINKS_OWNER = new WeakMap<ChatEntityLinks, object>();
+
+/**
+ * `markdownComponents` of one provider: created once, so react-markdown keeps
+ * the rendered blocks (and their chips) while the messages change. Each one
+ * links with its provider's current links, as the components made per value
+ * did before: from the context where it is this provider's value (it
+ * re-renders when they change), elsewhere (under `WithoutEntityLinks`, another
+ * provider, outside the tree) with the value the provider rendered last.
+ */
+function linkifiedComponents(latest: { current: ChatEntityLinks }): ChatEntityLinks['markdownComponents'] {
+  return Object.fromEntries(LINKIFIED_TAGS.map((tag) => [tag, function Linkified({ node: _node, children, ...props }: Record<string, unknown>) {
+    const current = useContext(ChatEntityLinksContext);
+    const links = current && LINKS_OWNER.get(current) === latest ? current : latest.current;
+    return createElement(tag, props, linkifyChildren(children as ReactNode, links));
+  }]));
+}
 
 /** Rendered by `AiChatProvider`; reads the conversation and the chat interactions. */
 /**
@@ -83,32 +124,47 @@ export function ChatEntityLinksProvider({
   busRef.current = uiActionBus;
   const cache = useRef(new Map<string, Promise<ChatEntityReference | undefined>>());
   const settled = useRef(new Map<string, ChatEntityReference | null>());
+  const cleared = useRef(0);
+  // As in 0.29.0: cleared after the render that passes other matchers, and once after mounting.
   useEffect(() => {
     cache.current = new Map();
     settled.current = new Map();
+    cleared.current += 1;
   }, [config?.matchers]);
 
+  // Per message and weak: a streamed chunk reads the streaming message again, not the settled history.
+  const [index] = useState(createConversationEntityIndex);
+  const [compile] = useState(() => createRegexCache());
   const knownEnabled = !!config && config.known !== false;
-  const searches = interactions?.entitySearches;
+  const searches = interactions?.entitySearches ?? NO_SEARCHES;
   const knownHook = config?.knownEntities;
+  const lastKnown = useRef(NO_REFERENCES);
+  // The same array while the references stay the same, so the links (and the chips) are not rebuilt per chunk.
   const known = useMemo(() => {
-    if (!knownEnabled) return [];
-    const found = collectKnownEntities(messages, searches ?? [], entityDeclarations);
-    if (!knownHook) return found;
-    let extra: ReadonlyArray<ChatEntityReference> = [];
-    try {
-      extra = knownHook({ messages });
-    } catch {
-      extra = [];
+    if (!knownEnabled) return NO_REFERENCES;
+    const found = index.known(messages, searches, entityDeclarations);
+    let next = found;
+    if (knownHook) {
+      // Called on every change of the messages, as before: the app's hook may read anything in them.
+      let extra: ReadonlyArray<ChatEntityReference> = [];
+      try {
+        extra = knownHook({ messages });
+      } catch {
+        extra = [];
+      }
+      next = [...found, ...extra.filter((reference) => reference && typeof reference.id === 'string' && typeof reference.label === 'string')];
     }
-    return [...found, ...extra.filter((reference) => reference && typeof reference.id === 'string' && typeof reference.label === 'string')];
-  }, [knownEnabled, messages, searches, entityDeclarations, knownHook]);
+    if (!sameReferences(lastKnown.current, next)) lastKnown.current = next;
+    return lastKnown.current;
+  }, [index, knownEnabled, messages, searches, entityDeclarations, knownHook]);
 
   const verify = !!config && config.mentionMarkers === 'markdown' && config.verifyMentions !== false;
   const seenKeys = useMemo(
-    () => (verify ? collectSeenReferenceKeys(messages, searches ?? [], entityDeclarations) : undefined),
-    [verify, messages, searches, entityDeclarations],
+    () => (verify ? index.seen(messages, searches, entityDeclarations) : undefined),
+    [index, verify, messages, searches, entityDeclarations],
   );
+  const latest = useRef<ChatEntityLinks>(DISABLED_LINKS);
+  const [markdownComponents] = useState(() => linkifiedComponents(latest));
 
   const canOpen = useCallback((type: string) => {
     const current = configRef.current;
@@ -128,21 +184,32 @@ export function ChatEntityLinksProvider({
     });
   }, [interactions]);
 
+  // What the links read from the config, read on every render: an app that changes its `entityLinks`
+  // object in place (instead of passing a new one) sees the change from the next render, as in 0.29.0.
+  const configRead = useRef<{ fields: unknown[]; version: number }>({ fields: [], version: 0 });
+  const fields = configFields(config);
+  if (fields.length !== configRead.current.fields.length || fields.some((field, index) => field !== configRead.current.fields[index])) {
+    configRead.current = { fields, version: configRead.current.version + 1 };
+  }
+  const configVersion = configRead.current.version;
+
   const value = useMemo<ChatEntityLinks>(() => {
     const matchers = config?.matchers ?? [];
-    const keyOf = (segment: { matcher: number; text: string; match?: string }) => `${segment.matcher}\u0000${segment.match ?? segment.text}`;
+    const keyOf = matchKey;
+    // The names and patterns are prepared once per links value, on the first text; compiled patterns are cached.
+    const split = config
+      ? createEntityTextSplitter({
+        matchers,
+        known,
+        minLabelLength: config.minLabelLength,
+        ...(config.ambiguousNames ? { ambiguousNames: config.ambiguousNames } : {}),
+        ...(config.resolveAmbiguous ? { resolveAmbiguous: config.resolveAmbiguous } : {}),
+      }, compile)
+      : undefined;
     const links: ChatEntityLinks = {
       enabled: !!config,
       ...(config?.scope ? { scope: config.scope } : {}),
-      split: (text) => (config
-        ? splitEntityText(text, {
-          matchers,
-          known,
-          minLabelLength: config.minLabelLength,
-          ...(config.ambiguousNames ? { ambiguousNames: config.ambiguousNames } : {}),
-          ...(config.resolveAmbiguous ? { resolveAmbiguous: config.resolveAmbiguous } : {}),
-        })
-        : [{ kind: 'text', text }]),
+      split: (text) => (split ? split(text) : [{ kind: 'text', text }]),
       canOpen,
       open,
       openLabel: (reference) => fillTemplate(locale.openEntityLabel, { label: reference.label }),
@@ -173,7 +240,7 @@ export function ChatEntityLinksProvider({
         return pending;
       },
       linkify: (children) => linkifyChildren(children, links),
-      markdownComponents: {},
+      markdownComponents,
       ...(config?.mentionMarkers ? { mentionMarkers: config.mentionMarkers } : {}),
       // A marker names its record by id: another record with the same name does not matter (`ambiguousNames`
       // and `resolveAmbiguous` decide name matches only); `verifyMentions` still applies.
@@ -182,14 +249,26 @@ export function ChatEntityLinksProvider({
         return !seenKeys || isSeenReference(seenKeys, mention.type, mention.id);
       },
     };
-    (links as { markdownComponents: ChatEntityLinks['markdownComponents'] }).markdownComponents = Object.fromEntries(
-      LINKIFIED_TAGS.map((tag) => [tag, ({ node: _node, children, ...props }: Record<string, unknown>) =>
-        createElement(tag, props, linkifyChildren(children as ReactNode, links))]),
-    );
+    LINKS_OWNER.set(links, latest);
+    MATCH_CACHE_CLEARED.set(links, cleared);
     return links;
-  }, [config, known, seenKeys, canOpen, open, locale.openEntityLabel]);
+    // `config` is read through `configVersion`, which changes with the object and with each field the links read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configVersion, known, seenKeys, canOpen, open, locale.openEntityLabel, compile, markdownComponents]);
+  // In render, as the components made per value had it: also the first render and a foreign tree see it.
+  latest.current = value;
 
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
+}
+
+/** The config object and each of its fields the links value reads, matchers one by one. */
+function configFields(config: ChatEntityLinksConfig | undefined): unknown[] {
+  if (!config) return [config];
+  const fields: unknown[] = [
+    config, config.scope, config.mentionMarkers, config.minLabelLength, config.ambiguousNames, config.resolveAmbiguous, config.matchers,
+  ];
+  for (const matcher of config.matchers ?? []) fields.push(matcher, matcher.type, matcher.pattern, matcher.resolve);
+  return fields;
 }
 
 const DISABLED_LINKS: ChatEntityLinks = {
@@ -226,6 +305,7 @@ function linkifyChildren(children: ReactNode, links: ChatEntityLinks): ReactNode
 }
 
 function EntityTextSegments({ segments }: { segments: ChatEntityTextSegment[] }) {
+  const cleared = MATCH_CACHE_CLEARED.get(useChatEntityLinks())?.current ?? 0;
   return (
     <>
       {segments.map((segment, index) => (
@@ -234,7 +314,7 @@ function EntityTextSegments({ segments }: { segments: ChatEntityTextSegment[] })
             ? segment.text
             : segment.kind === 'entity'
               ? <EntityLinkChip reference={segment.reference} text={segment.text} />
-              : <MatchedEntityChip segment={segment} />}
+              : <MatchedEntityChip key={`${cleared}\u0000${matchKey(segment)}`} segment={segment} />}
         </Fragment>
       ))}
     </>
@@ -248,6 +328,7 @@ export function EntityText({ text }: { text: string }) {
   return <EntityTextSegments segments={segments} />;
 }
 
+/** A matcher hit, a chip once its `resolve` allows it (keyed by its hit and the cache clearings), as in 0.29.0. */
 function MatchedEntityChip({ segment }: { segment: Extract<ChatEntityTextSegment, { kind: 'match' }> }) {
   const links = useChatEntityLinks();
   const [reference, setReference] = useState<ChatEntityReference | null | undefined>(() => links.cachedMatch(segment));

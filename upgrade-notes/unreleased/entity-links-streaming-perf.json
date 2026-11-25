@@ -1,0 +1,16 @@
+{
+  "id": "entity-links-streaming-perf",
+  "kind": "optional",
+  "summary": "Entity links no longer slow a long chat while an answer streams: finished messages are not read or mounted again per chunk, and markdownComponents keep their identity.",
+  "howTo": "Use useChatEntityLinks().markdownComponents as JSX, in react-markdown components, or call them inside a function component: they now read React context, and a direct call elsewhere (class render, event handler) throws \"Invalid hook call\". Otherwise nothing to do. What an app can notice (the CHANGELOG lists every difference): a custom components.MentionChip in a finished message is no longer unmounted and mounted again per chunk; useChatEntityLinks() and its markdownComponents keep their identity; in text parts rendered without Markdown (EntityText) a matcher chip follows a changed hit, new matchers apply to finished messages, and resolveAmbiguous is called less often. Apps that change messages in place (not the AI SDK) should replace a changed output, input or result object rather than mutate it.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "useChatEntityLinks",
+      "ChatEntityLinksConfig"
+    ],
+    "patterns": [
+      "entityLinks\\s*[:=]"
+    ]
+  }
+}
