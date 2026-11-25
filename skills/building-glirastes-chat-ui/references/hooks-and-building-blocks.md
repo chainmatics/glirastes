@@ -169,6 +169,19 @@ Defaults keep today's markup; everything below is opt-in.
   in the default order) and `turnOutcome`. `useMessageParts(message)` returns the same nodes
   plus `visible` and `turnOutcome` for a custom `MessageBubble`. A layout that drops `children`
   places `continuation` itself, or the user loses the "Continue" button after a stop.
+- Renders: inside `MessageList` (`AiChatPanel`, the floating window,
+  `<glirastes-chat>`) only the streaming message renders on each chunk. A
+  finished message renders when something it shows changes: the message
+  object, the links, the provider's config (plain objects compared by value),
+  its turn outcome, its open approval. Components inside a message (custom
+  bubble, `MessageParts`, `Markdown`, `MentionChip`, tool renderers, …) must
+  not rely on rendering per chunk: keep `Date.now()`, relative times and
+  external state in state, a subscription or a timer, not computed in render.
+  `useMessageParts` and props are enough; a component that calls
+  `useChatContext()` renders with every change of the chat (every chunk). If
+  the component holding the provider renders per chunk, keep functions,
+  components, regexes and `entityLinks.matchers` stable (module scope,
+  `useMemo`/`useCallback`); replace changed messages, do not mutate them.
 - `continuation`: the "Continue" button (`locale.continueButton`, German "Weitermachen") under
   the latest answer when the server's stop notice ends it with a continuable `data-budget-stop`
   part; a `<button type="button" data-action="continue-after-stop">` in

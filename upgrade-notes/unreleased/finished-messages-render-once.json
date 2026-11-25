@@ -1,0 +1,21 @@
+{
+  "id": "finished-messages-render-once",
+  "kind": "recommended",
+  "summary": "While an answer streams, only that message renders and parses its Markdown; a finished message renders only when something it shows changes. No code change needed.",
+  "howTo": "Nothing to do for the speed-up. Check custom components rendered inside a message (components.MessageBubble with useMessageParts, MessageParts, Markdown, MentionChip, ToolResultBlock, tool renderers, ApprovalEntry, ApprovalCard, ClarificationCard, TurnNotice): they no longer render on every chunk of a later answer. A value that was only refreshed by those renders, such as Date.now() or a relative time computed in render, or state read in render without a subscription (a module variable, a ref, localStorage, an external store without useSyncExternalStore), stays as it was until the message renders again; keep it in state, a subscription or a timer. Effects without a dependency list and render logging run less often. A component that calls useChatContext() itself still renders on every change of the chat context. Apps that change message objects in place should replace them instead (the AI SDK does). An app that renders on every chunk should keep functions, components, regexes, entityLinks.matchers and the markdown option outside the component or memoized; plain config objects (locale, classNames, entityDeclarations, ...) may stay inline. The CHANGELOG lists every difference.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "useMessageParts",
+      "MessageBubble",
+      "MessagePartsProps",
+      "MessageBubbleProps",
+      "MarkdownProps",
+      "MentionChipProps"
+    ],
+    "patterns": [
+      "\\b(MessageBubble|MessageParts|Markdown|MentionChip|ToolResultBlock|ApprovalEntry|ApprovalCard|ClarificationCard|TurnNotice)\\s*:",
+      "toolRenderers\\s*[:=]"
+    ]
+  }
+}

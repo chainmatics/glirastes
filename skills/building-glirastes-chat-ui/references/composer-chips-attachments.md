@@ -97,6 +97,10 @@ const entityLinks = useMemo(() => ({
   hook call". Rendered under another provider, they use the links their own
   provider rendered last, which inside a suspended `startTransition` can be a
   render React later discards.
+- `useChatEntityLinks()` keeps its identity while the links' inputs are
+  equal, also for a new `entityLinks` object with the same fields. New
+  `matchers` restart the matcher chips right after the render that passes
+  them, also in finished messages.
 
 ## Attachments
 
