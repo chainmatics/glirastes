@@ -107,47 +107,13 @@ describe('the view of each message (MessageList)', () => {
     expect(changed(chatWith(messages, { continueAfterBudgetStop: () => {} }), chatWith(messages, { continueAfterBudgetStop: undefined }))).toHaveLength(4);
   });
 
-  it.each([
-    'classNames', 'locale', 'toolResults', 'toolLabels', 'activityLog', 'approvalDisplay', 'entityDeclarations', 'composer', 'messageFooter',
-  ] as const)('%s: a nested object changed in place and passed in a new object renders every message', (field) => {
+  it('config compares by identity: a new object with the same content renders every message, the same object none', () => {
     const messages = base();
-    const nested: { value: string; list: string[] } = { value: 'a', list: ['x'] };
-    const chats = createMessageChats();
-    const first = viewsOf(chats, chatWith(messages, { [field]: { nested } } as unknown as Partial<Chat>));
-    nested.value = 'b';
-    const second = viewsOf(chats, chatWith(messages, { [field]: { nested } } as unknown as Partial<Chat>));
-    expect(second.every((view, index) => view !== first[index])).toBe(true);
-    nested.list.push('y');
-    const third = viewsOf(chats, chatWith(messages, { [field]: { nested } } as unknown as Partial<Chat>));
-    expect(third.every((view, index) => view !== second[index])).toBe(true);
-    // Unchanged again: equal by value to what was taken over.
-    const fourth = viewsOf(chats, chatWith(messages, { [field]: { nested: { value: 'b', list: ['x', 'y'] } } } as unknown as Partial<Chat>));
-    expect(fourth.every((view, index) => view === third[index])).toBe(true);
-  });
-
-  it('React elements count by identity (development and production alike)', () => {
-    const messages = base();
-    const element = (key: string) => ({ $$typeof: Symbol.for('react.transitional.element'), type: 'b', key, props: {}, _owner: null });
-    const before = chatWith(messages, { composer: { icon: element('k') } as unknown as Chat['composer'] });
-    expect(changed(before, chatWith(messages, { composer: { icon: element('k') } as unknown as Chat['composer'] }))).toHaveLength(4);
-  });
-
-  it('config as plain data compares by value (an inline object on every render), functions by identity', () => {
-    const messages = base();
-    const declared = () => ({ list: { output: [{ type: 'channel', id: 'key', name: 'title', path: 'items[]' }] } });
-    const before = chatWith(messages, { locale: { a: 'A' } as unknown as Chat['locale'], entityDeclarations: declared() });
-    expect(changed(before, chatWith(messages, { locale: { a: 'A' } as unknown as Chat['locale'], entityDeclarations: declared() }))).toEqual([]);
-    expect(changed(before, chatWith(messages, { locale: { a: 'B' } as unknown as Chat['locale'], entityDeclarations: declared() }))).toHaveLength(4);
-    const other = declared();
-    other.list.output[0]!.path = 'other[]';
-    expect(changed(before, chatWith(messages, { locale: { a: 'A' } as unknown as Chat['locale'], entityDeclarations: other }))).toHaveLength(4);
-    const Bubble = () => null;
-    const withBubble = chatWith(messages, { components: { MessageBubble: Bubble } as unknown as Chat['components'] });
-    expect(changed(withBubble, chatWith(messages, { components: { MessageBubble: Bubble } as unknown as Chat['components'] }))).toEqual([]);
-    expect(changed(withBubble, chatWith(messages, { components: { MessageBubble: () => null } as unknown as Chat['components'] }))).toHaveLength(4);
-    const pattern = /x/;
-    const regex = chatWith(messages, { composer: { a: pattern } as unknown as Chat['composer'] });
-    expect(changed(regex, chatWith(messages, { composer: { a: /x/ } as unknown as Chat['composer'] }))).toHaveLength(4);
+    const locale = { a: 'A' } as unknown as Chat['locale'];
+    expect(changed(chatWith(messages, { locale }), chatWith(messages, { locale }))).toEqual([]);
+    expect(changed(chatWith(messages, { locale }), chatWith(messages, { locale: { a: 'A' } as unknown as Chat['locale'] }))).toHaveLength(4);
+    const declarations = { list: { output: [] } };
+    expect(changed(chatWith(messages, { entityDeclarations: declarations }), chatWith(messages, { entityDeclarations: { ...declarations } }))).toHaveLength(4);
   });
 
   it('the suggestions: by their placement, count and enabled, not by the object', () => {

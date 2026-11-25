@@ -273,50 +273,6 @@ describe('a finished message while a later answer streams (10 chunks)', () => {
     expect(counts.markdown.get(STREAMING)).toBeGreaterThanOrEqual(10);
   });
 
-  it('an app that renders on every chunk with inline config objects (same functions): no render of a finished message', async () => {
-    const chat = new StreamingChat();
-    chat.messages = conversation(TURNS);
-    liveChat = chat;
-    const seenLinks = new Set<unknown>();
-    function LinksIdentity() {
-      seenLinks.add(useChatEntityLinks());
-      return null;
-    }
-    function App() {
-      const [, force] = useReducer((count: number) => count + 1, 0);
-      useEffect(() => chat.subscribe(force), []);
-      return (
-        <AiChatProvider
-          transport={chat.transport}
-          uiActionBus={bus}
-          messageFooter
-          locale={{ copyMessageLabel: 'Copy' }}
-          classNames={{ messageBubble: 'bubble' }}
-          entityDeclarations={{ channels_list: { output: [{ type: 'channel', id: 'key', name: 'title', path: 'channels[]' }] } }}
-          entityLinks={{ mentionMarkers: 'markdown', matchers, open: LINKS.open }}
-          approvalDisplay={{ decided: 'entry', open: 'inline' }}
-        >
-          <LinksIdentity />
-          <Probe />
-          <AiChatPanel />
-        </AiChatProvider>
-      );
-    }
-    render(<App />);
-    await waitFor(() => expect(document.querySelectorAll('[data-component="mention-chip"]').length).toBe(TURNS * 6), { timeout: 5000 });
-    await settle();
-    const streamingId = await startAnswer(chat);
-    reset();
-    seenLinks.clear();
-    await streamChunks(chat, 10);
-    expect(byId(bubbleRenders, finishedIds())).toEqual({});
-    expect(byId(parses, finishedIds())).toEqual({});
-    expect(bubbleRenders.get(streamingId)).toBeGreaterThanOrEqual(10);
-    // A new `entityLinks` object with the same fields keeps the links.
-    expect(seenLinks.size).toBe(1);
-    expect(document.querySelectorAll('.bubble').length).toBe(TURNS * 2 + 2);
-  });
-
   it('VercelAiChat (AI SDK useChat, floating window): no render and no Markdown parse of any finished message', async () => {
     const { requests } = stubControlledFetch();
     try {
@@ -671,43 +627,6 @@ describe('a click in a message that did not render since reaches the current cha
   });
 });
 
-describe('derived config passed inline by an app that renders on every chunk', () => {
-  it('inline toolLabels and triggers: no render of a finished message', async () => {
-    const chat = new StreamingChat();
-    chat.messages = conversation(TURNS);
-    liveChat = chat;
-    function App() {
-      const [, force] = useReducer((count: number) => count + 1, 0);
-      useEffect(() => chat.subscribe(force), []);
-      return (
-        <AiChatProvider
-          transport={chat.transport}
-          uiActionBus={bus}
-          entityLinks={LINKS}
-          entityDeclarations={DECLARED}
-          toolLabels={{ labels: { channels_list: { singular: 'List channels', plural: 'Listed channels' } } }}
-          triggers={[{ char: '#', label: 'Channel', prefix: '#', types: ['channel'] }]}
-          approvalDisplay={{ decided: 'entry', open: 'inline' }}
-        >
-          <Probe />
-          <AiChatPanel />
-        </AiChatProvider>
-      );
-    }
-    render(<App />);
-    await waitFor(() => expect(document.querySelectorAll('[data-component="mention-chip"]').length).toBe(TURNS * 6), { timeout: 5000 });
-    await settle();
-    await startAnswer(chat);
-    reset();
-    await streamChunks(chat, 10);
-    expect(byId(bubbleRenders, finishedIds())).toEqual({});
-    expect(byId(parses, finishedIds())).toEqual({});
-    // The labels and the prefix still apply.
-    expect(document.querySelector('[data-component="activity-log"]')?.textContent).toContain('List channels');
-    expect(document.querySelector('[data-mention-type="channel"] [data-element="prefix"]')?.textContent).toBe('#');
-  });
-});
-
 describe('config changed in place inside a new object', () => {
   it.each([
     ['inline', 'inline' as const],
@@ -748,6 +667,41 @@ describe('config changed in place inside a new object', () => {
   });
 });
 
+describe('a toolLabels entry renamed in place, the same object passed again, later a new equal object', () => {
+  it('the description follows the new object (as on main); the finished log follows once the message renders', async () => {
+    const entry = { singular: 'Archive', plural: 'Archive' };
+    const toolLabels = { labels: { channel_archive: entry } };
+    const config = (labels: object, extra: Partial<AiChatProviderConfig> = {}): Partial<AiChatProviderConfig> => ({
+      ...baseConfig(), approvalDisplay: { decided: 'entry', open: 'inline' }, toolLabels: labels, ...extra,
+    });
+    const { chat, view } = await mount(config(toolLabels));
+    const finished = () => document.querySelectorAll('[data-component="message-bubble"]')[1]!;
+    const entryText = () => finished().querySelector('[data-component="approval-entry"]')?.textContent ?? '';
+    const logText = () => finished().querySelector('[data-component="activity-log"]')?.textContent ?? '';
+    expect(entryText()).toContain('Archive');
+    entry.singular = 'Archivieren';
+    entry.plural = 'Archivieren';
+    view.rerender(<Host chat={chat} config={config(toolLabels)} />);
+    await settle();
+    // The same object: the description is made from it again on neither side (main neither); the finished
+    // message did not render, so its log still shows the old label (main: the new one).
+    expect(entryText()).not.toContain('Archivieren');
+    expect(logText()).not.toContain('Archivieren');
+    view.rerender(<Host chat={chat} config={config({ labels: { channel_archive: { singular: 'Archivieren', plural: 'Archivieren' } } })} />);
+    await settle();
+    expect(entryText()).toContain('Archivieren');
+    expect(entryText()).not.toContain('Archive ');
+    expect(logText()).toContain('Archivieren');
+    await act(async () => { void chat.sendMessage({ text: 'ref-archive it' }); });
+    await act(async () => {
+      chat.stream([{ type: 'tool-channel_archive', toolCallId: 'nb', state: 'approval-requested', input: { key: 'c1_4' }, approval: { id: 'ap-b' } }]);
+    });
+    await settle();
+    const card = document.querySelector('[data-component="approval-card"]')?.textContent ?? '';
+    expect(card).toContain('Archivieren');
+  });
+});
+
 describe('pipeline step reports while an answer streams', () => {
   it('5 text chunks and 5 step reports: no render and no Markdown parse of a finished message', async () => {
     const { chat } = await mount(baseConfig());
@@ -760,5 +714,201 @@ describe('pipeline step reports while an answer streams', () => {
     expect(ctx.pipelineSteps.length).toBe(5);
     expect(byId(bubbleRenders, finishedIds())).toEqual({});
     expect(byId(parses, finishedIds())).toEqual({});
+  });
+});
+
+/** Config an app passes on every render of the component that holds the provider. */
+const INLINE: Array<[string, () => Partial<AiChatProviderConfig>, number]> = [
+  // A new object on every render: every message renders per chunk, as before this change.
+  ['locale', () => ({ locale: { copyMessageLabel: 'Copy' } }), 10],
+  ['classNames', () => ({ classNames: { messageBubble: 'bubble' } }), 10],
+  ['toolLabels', () => ({ toolLabels: { labels: { channels_list: { singular: 'List', plural: 'Lists' } } } }), 10],
+  ['triggers', () => ({ triggers: [{ char: '#', prefix: '#', types: ['channel'] }] }), 10],
+  ['components', () => ({ components: { TurnNotice: () => null } }), 10],
+  ['entityDeclarations', () => ({ entityDeclarations: { channels_list: { output: [{ type: 'channel', id: 'key', name: 'title', path: 'channels[]' }] } } }), 10],
+  ['entityLinks', () => ({ entityLinks: { mentionMarkers: 'markdown', matchers, open: LINKS.open } }), 10],
+  ['toolResults', () => ({ toolResults: { mode: 'default' } }), 10],
+  ['composer', () => ({ composer: { hint: false } }), 10],
+  // The provider keys these on their fields (as before): an inline object with the same fields is no change.
+  ['approvalDisplay', () => ({ approvalDisplay: { decided: 'entry', open: 'inline' } }), 0],
+  ['activityLog', () => ({ activityLog: { details: 'auto' } }), 0],
+  ['messageFooter', () => ({ messageFooter: { copy: true } }), 0],
+  ['suggestions', () => ({ suggestions: { placement: 'composer' } }), 0],
+];
+
+describe('config an app passes inline on every render (the component holding the provider renders per chunk)', () => {
+  it.each(INLINE)('inline %s: every finished message renders as pinned over 10 chunks', async (_, inline, expected) => {
+    const chat = new StreamingChat();
+    chat.messages = conversation(TURNS);
+    liveChat = chat;
+    function App({ fresh }: { fresh: boolean }) {
+      const [, force] = useReducer((count: number) => count + 1, 0);
+      useEffect(() => chat.subscribe(force), []);
+      return (
+        <AiChatProvider transport={chat.transport} {...baseConfig()} {...(fresh ? inline() : STABLE.get(inline)!)}>
+          <Probe />
+          <AiChatPanel />
+        </AiChatProvider>
+      );
+    }
+    const STABLE = new Map([[inline, inline()]]);
+    const view = render(<App fresh />);
+    await waitFor(() => expect(document.querySelectorAll('[data-component="markdown"]').length).toBeGreaterThan(0), { timeout: 5000 });
+    await settle();
+    await startAnswer(chat);
+    reset();
+    await streamChunks(chat, 10);
+    for (const id of finishedIds()) expect(bubbleRenders.get(id) ?? 0, id).toBe(expected);
+    // The same config kept as one object (a module constant, or `useMemo` when it depends on state): none.
+    view.rerender(<App fresh={false} />);
+    await streamChunks(chat, 1);
+    reset();
+    await streamChunks(chat, 3);
+    expect(byId(bubbleRenders, finishedIds())).toEqual({});
+  });
+});
+
+/**
+ * Config changed in place. What a finished message shows: after the app changed the config object in place
+ * and passed the SAME object again (the provider renders, a chunk streams), and after it passed a NEW object
+ * with that content. `MAIN` holds what main (0.29.1 with #229) shows at each step; head differs only where
+ * the same object is passed again and the finished message does not render (`differs`).
+ */
+interface InPlace {
+  field: string;
+  start: () => Record<string, unknown>;
+  change: (config: Record<string, unknown>) => void;
+  copy: (config: Record<string, unknown>) => Record<string, unknown>;
+  shows: (bubble: Element) => string;
+}
+const markA = () => null;
+function ChipB({ mention }: MentionChipProps) {
+  return <span data-chip-b={mention.id}>{mention.displayName}</span>;
+}
+const IN_PLACE: InPlace[] = [
+  {
+    field: 'classNames', start: () => ({ classNames: { messageBubble: 'before' } }),
+    change: (config) => { (config.classNames as { messageBubble: string }).messageBubble = 'after'; },
+    copy: (config) => ({ classNames: { ...(config.classNames as object) } }),
+    shows: (bubble) => bubble.className,
+  },
+  {
+    field: 'locale', start: () => ({ locale: { copyMessageLabel: 'before' } }),
+    change: (config) => { (config.locale as { copyMessageLabel: string }).copyMessageLabel = 'after'; },
+    copy: (config) => ({ locale: { ...(config.locale as object) } }),
+    shows: (bubble) => bubble.querySelector('[data-action="copy"]')?.textContent ?? '',
+  },
+  {
+    field: 'toolLabels', start: () => ({ toolLabels: { labels: { channels_list: { singular: 'before', plural: 'before' } } } }),
+    change: (config) => { Object.assign((config.toolLabels as { labels: Record<string, object> }).labels.channels_list!, { singular: 'after', plural: 'after' }); },
+    copy: (config) => ({ toolLabels: { ...(config.toolLabels as object) } }),
+    shows: (bubble) => bubble.querySelector('[data-element="activity-step"] [data-element="label"]')?.textContent ?? '',
+  },
+  {
+    field: 'components', start: () => ({ components: { TurnNotice: markA } }),
+    change: (config) => { (config.components as Record<string, unknown>).MentionChip = ChipB; },
+    copy: (config) => ({ components: { ...(config.components as object) } }),
+    shows: (bubble) => String(bubble.querySelectorAll('[data-chip-b]').length),
+  },
+  {
+    field: 'toolResults', start: () => ({ toolResults: { mode: 'hidden' } }),
+    change: (config) => { (config.toolResults as { mode: string }).mode = 'default'; },
+    copy: (config) => ({ toolResults: { ...(config.toolResults as object) } }),
+    shows: (bubble) => String(bubble.querySelectorAll('[data-component="tool-result"]').length),
+  },
+  {
+    field: 'messageFooter', start: () => ({ messageFooter: { copy: true } }),
+    change: (config) => { (config.messageFooter as { copy: boolean }).copy = false; },
+    copy: (config) => ({ messageFooter: { ...(config.messageFooter as object) } }),
+    shows: (bubble) => String(bubble.querySelectorAll('[data-action="copy"]').length),
+  },
+  {
+    field: 'activityLog', start: () => ({ activityLog: { details: 'none' } }),
+    change: (config) => { (config.activityLog as { details: string }).details = 'all'; },
+    copy: (config) => ({ activityLog: { ...(config.activityLog as object) } }),
+    shows: (bubble) => String(bubble.querySelectorAll('[data-element="detail"]').length),
+  },
+  {
+    field: 'approvalDisplay', start: () => ({ approvalDisplay: { decided: 'entry', open: 'inline' } }),
+    change: (config) => { (config.approvalDisplay as { decided: string }).decided = 'none'; },
+    copy: (config) => ({ approvalDisplay: { ...(config.approvalDisplay as object) } }),
+    shows: (bubble) => String(bubble.querySelectorAll('[data-component="approval-entry"]').length),
+  },
+  {
+    field: 'triggers', start: () => ({ triggers: [{ char: '#', prefix: '#', types: ['channel'] }] }),
+    change: (config) => { (config.triggers as Array<{ prefix: string }>)[0]!.prefix = '~'; },
+    copy: (config) => ({ triggers: [...(config.triggers as object[])] }),
+    shows: (bubble) => bubble.querySelector('[data-mention-type="channel"] [data-element="prefix"]')?.textContent ?? '',
+  },
+  {
+    field: 'entityDeclarations', start: () => ({ entityDeclarations: { channels_list: { output: [{ type: 'channel', id: 'key', name: 'title', path: 'channels[]' }] } } }),
+    change: (config) => { (config.entityDeclarations as { channels_list: { output: Array<{ type: string }> } }).channels_list.output[0]!.type = 'room'; },
+    copy: (config) => ({ entityDeclarations: { ...(config.entityDeclarations as object) } }),
+    shows: (bubble) => String(bubble.querySelectorAll('[data-mention-type="room"]').length),
+  },
+  {
+    field: 'entityLinks', start: () => ({ entityLinks: { mentionMarkers: 'markdown', matchers, open: LINKS.open } }),
+    change: (config) => { (config.entityLinks as { minLabelLength?: number }).minLabelLength = 100; },
+    copy: (config) => ({ entityLinks: { ...(config.entityLinks as object) } }),
+    shows: (bubble) => String(bubble.querySelectorAll('[data-component="mention-chip"]').length),
+  },
+];
+
+/** What main (8425a25b) shows: [before, after the same object is passed again, after a new object]. */
+const MAIN: Record<string, [string, string, string]> = {
+  classNames: ["before", "after", "after"],
+  locale: ["before", "before", "after"],
+  toolLabels: ["before", "after", "after"],
+  components: ["0", "5", "5"],
+  toolResults: ["0", "0", "2"],
+  messageFooter: ["1", "0", "0"],
+  activityLog: ["0", "1", "1"],
+  approvalDisplay: ["1", "0", "0"],
+  triggers: ["#", "#", "~"],
+  entityDeclarations: ["0", "0", "2"],
+  entityLinks: ["5", "3", "3"],
+};
+/**
+ * What this change shows. It differs from main only where the SDK hands the app's object to the message as it
+ * is (`classNames`, the entries of `toolLabels`, `components`): passed again as the same object, the finished
+ * message does not render, so it keeps showing the old value until it renders for another reason. The
+ * provider copies the others (`locale`, `triggers`, `toolResults`, ...) or keys them on their fields, as before.
+ */
+const EXPECTED: Record<string, [string, string, string]> = {
+  classNames: ["before", "before", "after"],
+  locale: ["before", "before", "after"],
+  toolLabels: ["before", "before", "after"],
+  components: ["0", "0", "5"],
+  toolResults: ["0", "0", "2"],
+  messageFooter: ["1", "0", "0"],
+  activityLog: ["0", "1", "1"],
+  approvalDisplay: ["1", "0", "0"],
+  triggers: ["#", "#", "~"],
+  entityDeclarations: ["0", "0", "2"],
+  entityLinks: ["5", "3", "3"],
+};
+const DIFFERS_FROM_MAIN = ['classNames', 'toolLabels', 'components'];
+
+describe('config changed in place (the same object passed again, then a new one)', () => {
+  it.each(IN_PLACE.map((entry) => [entry.field, entry] as const))('%s', async (field, entry) => {
+    const config = entry.start();
+    const { chat, view } = await mount({ ...baseConfig(), ...config });
+    // r0: a finished answer with a tool result, a decided approval, chips and a footer.
+    const finished = () => document.querySelectorAll('[data-component="message-bubble"]')[1]!;
+    const seen: string[] = [entry.shows(finished())];
+    entry.change(config);
+    // The same object again: the provider renders (as on every chunk); the finished message renders only for
+    // another reason.
+    view.rerender(<Host chat={chat} config={{ ...baseConfig(), ...config }} />);
+    await settle();
+    seen.push(entry.shows(finished()));
+    view.rerender(<Host chat={chat} config={{ ...baseConfig(), ...entry.copy(config) }} />);
+    await settle();
+    seen.push(entry.shows(finished()));
+    if (process.env.RECORD_MAIN) require('fs').appendFileSync(process.env.RECORD_MAIN, JSON.stringify([field, seen]) + '\n');
+    else expect(seen).toEqual(EXPECTED[field]);
+    // Equal to main except the step "same object again" of the fields the SDK does not copy.
+    if (DIFFERS_FROM_MAIN.includes(field)) expect([seen[0], seen[2]]).toEqual([MAIN[field]![0], MAIN[field]![2]]);
+    else expect(seen).toEqual(MAIN[field]);
   });
 });
