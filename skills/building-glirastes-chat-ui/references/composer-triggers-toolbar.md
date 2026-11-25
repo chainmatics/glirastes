@@ -13,6 +13,7 @@ All names below come from `glirastes/react` unless noted.
 - Opening a list from a button
 - Toolbar
   - Layout
+  - Recording look
 - Plus menu
   - Row descriptions and icons
 - End-to-end example
@@ -326,6 +327,16 @@ uses the browser placeholder and ignores it. The placeholder element is
 ```tsx
 const composer = useMemo<ComposerConfig>(() => ({ placeholderOnFocus: false }), []);
 ```
+
+### Recording look
+
+`voice.recordingBar.variant` picks what the mic shows while recording:
+`'inline'` (default; cancel, waveform, live words and stop take the toolbar),
+`'composer'` (the live words stand in the editor where the text goes, italic
+via `[data-element="placeholder"][data-live]`, `textarea[data-live]::placeholder`
+and `[data-element="live-transcript"]`; a compact waveform
+`[data-component="recording-bar"][data-variant="composer"]` sits next to the
+mic, the mic stops, Escape cancels) or `'trigger'` (a bar portaled to the page).
 
 ## Plus menu
 

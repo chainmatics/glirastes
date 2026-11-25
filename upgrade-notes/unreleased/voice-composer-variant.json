@@ -9,5 +9,8 @@
       "RecordingBar",
       "VoiceInputConfig"
     ]
-  }
+  },
+  "surface": [
+    "glirastes/react#RichMentionInputProps.liveText"
+  ]
 }
