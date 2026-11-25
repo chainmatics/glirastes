@@ -316,6 +316,102 @@ describe('canonicalMentionLabel: a cut never splits a joined sequence', () => {
   });
 });
 
+/** Words, punctuation, emoji and scripts of ordinary labels: nothing a PII detector looks for. */
+const ORDINARY_WORDS = [
+  'Kunde', 'Aufgabe', 'Müller-Lüdenscheidt', "O'Brien", 'GmbH', '(GmbH)', '&', 'Co.', 'KG', 'Straße,', 'zurück.',
+  'Ärger!', 'Frage?', '—', '–', '-', '😀', '👩\u200d💻', '\u{1f1e9}\u{1f1ea}', '1\ufe0f\u20e3', '✓', '€',
+  'नमस्ते', 'می\u200cخواهم', '東京', '株式会社', 'Ünïcödé', 'a<b>c', '‹!', 'Acme\u00a0GmbH', 'x->y', '"Zitat"',
+  'Release', 'final', 'Überweisung', 'Rechnung', 'bitte', 'Rückruf', 'Notiz', 'Ansprechpartnerin',
+];
+
+function ordinaryLabel(next: () => number): string {
+  const words = 1 + Math.floor(next() * 50);
+  const parts: string[] = [];
+  for (let i = 0; i < words; i += 1) parts.push(ORDINARY_WORDS[Math.floor(next() * ORDINARY_WORDS.length)]!);
+  return parts.join(next() < 0.9 ? ' ' : '  ');
+}
+
+describe('canonicalMentionLabel cut: value-safe never splits a value', () => {
+  const SAFE = { cut: 'value-safe' } as const;
+  const pad = (length: number) => 'notiz '.repeat(30).slice(0, length - 1);
+  it.each<[string, string, string]>([
+    ['email', `${pad(108)} max.mustermann@kanzlei-wendt.de Ende`, `${pad(108)}…`],
+    ['email cut after the @', `${pad(100)} max.mustermann@kanzlei-wendt.de Ende`, `${pad(100)}…`],
+    ['IBAN', `${pad(110)} DE89370400440532013000 Ende`, `${pad(110)}…`],
+    ['IBAN with spaces', `${pad(105)} DE89 3704 0044 0532 0130 00 Ende`, `${pad(105)}…`],
+    ['phone with spaces', `${pad(110)} +49 170 1234567 Ende`, `${pad(110)}…`],
+    ['phone with spaces, cut at a space', `${pad(111)} +49 170 1234567 Ende`, `${pad(111)}…`],
+    ['phone with a separator', `${pad(100)} Tel. +49 (30) / 1234 5678 Ende`, `${pad(100)} Tel.…`],
+    ['URL', `${pad(100)} https://crm.kundenportal.de/kunden/4711 Ende`, `${pad(100)}…`],
+    ['number', `${pad(113)} 1234567 Ende`, `${pad(113)}…`],
+  ])('%s', (_name, label, expected) => {
+    const once = canonicalMentionLabel(label, SAFE);
+    expect(once).toBe(expected);
+    expect(canonicalMentionLabel(once, SAFE)).toBe(once);
+    expect(canonicalMentionLabel(once)).toBe(once);
+  });
+
+  it('keeps a value that ends before the cut, and the word cut after it', () => {
+    const label = `${pad(80)} max@kanzlei-wendt.de Rückrufbitte Rückrufbitte Rückrufbitte`;
+    expect(canonicalMentionLabel(label, SAFE)).toBe(`${label.slice(0, 119)}…`);
+  });
+
+  it('a label that is one value over the limit falls back to the id', () => {
+    expect(canonicalMentionLabel(`https://example.com/${'a'.repeat(200)}`, { id: 'doc-1', ...SAFE })).toBe('doc-1');
+    expect(canonicalMentionLabel('12345678901', { maxLength: 8, ...SAFE })).toBe('…');
+  });
+
+  it('the default of the contract functions stays the 0.24.2 cut; value-safe is opt-in', () => {
+    const label = `${pad(108)} max.mustermann@kanzlei-wendt.de Ende`;
+    expect(canonicalMentionLabel(label)).toBe(`${label.slice(0, 119)}…`);
+    expect(canonicalMentionLabel(label, { cut: 'grapheme' })).toBe(`${label.slice(0, 119)}…`);
+    expect(serializeMentionMarker({ type: 'c', id: '1', label })).toBe(`{{mention:c:1:${label.slice(0, 119)}…}}`);
+    expect(serializeMentionMarker({ type: 'c', id: '1', label }, { labelCut: 'value-safe' })).toBe(`{{mention:c:1:${pad(108)}…}}`);
+  });
+
+  it('honours maxLength', () => {
+    expect(canonicalMentionLabel('Tel +49 170 1234567', { maxLength: 8, ...SAFE })).toBe('Tel…');
+  });
+
+  it('cuts the id fallback in the same mode (grapheme as on main)', () => {
+    expect(canonicalMentionLabel('', { id: '4711-0815-ab', maxLength: 8, ...SAFE })).toBe('…');
+    expect(canonicalMentionLabel('', { id: '4711-0815-ab', maxLength: 8 })).toBe('4711-08…');
+    expect(canonicalMentionLabel('', { id: 'Kunde Nord Filiale', maxLength: 8, ...SAFE })).toBe('Kunde N…');
+  });
+
+  it('ordinary labels are cut exactly as in 0.24.2 (difference probe, 60 000 seeded labels)', () => {
+    const next = random(0x0c07);
+    let over = 0;
+    for (let run = 0; run < 60_000; run += 1) {
+      const label = ordinaryLabel(next);
+      const maxLength = next() < 0.8 ? undefined : 8 + Math.floor(next() * 113);
+      const safe = canonicalMentionLabel(label, { id: 'id-1', maxLength, ...SAFE });
+      if (safe.endsWith('…')) over += 1;
+      expect(safe, JSON.stringify({ label, maxLength })).toBe(canonicalMentionLabel(label, { id: 'id-1', maxLength, cut: 'grapheme' }));
+    }
+    expect(over).toBeGreaterThan(20_000);
+  }, 60_000);
+
+  it('is idempotent on labels with values at the edge (property, 5000 seeded cases)', () => {
+    const next = random(0x7a1e);
+    const values = ['max@kanzlei-wendt.de', '+49 170 1234567', 'DE89 3704 0044 0532 0130 00', '030/12345678', 'https://a.example/x', '/', '–', '1\ufe0f\u20e3'];
+    for (let run = 0; run < 5_000; run += 1) {
+      const parts: string[] = [];
+      const count = 5 + Math.floor(next() * 40);
+      for (let i = 0; i < count; i += 1) {
+        parts.push(next() < 0.3 ? values[Math.floor(next() * values.length)]! : ORDINARY_WORDS[Math.floor(next() * ORDINARY_WORDS.length)]!);
+      }
+      const label = parts.join(' ');
+      const maxLength = 8 + Math.floor(next() * 113);
+      const once = canonicalMentionLabel(label, { id: 'id-1', maxLength, ...SAFE });
+      const context = JSON.stringify({ label, maxLength });
+      expect(codePoints(once), context).toBeLessThanOrEqual(maxLength);
+      expect(canonicalMentionLabel(once, { id: 'id-1', maxLength, ...SAFE }), context).toBe(once);
+      expect(canonicalMentionLabel(once), context).toBe(once);
+    }
+  }, 30_000);
+});
+
 describe('a cut right after a kept invisible character is stable', () => {
   it('a Mongolian vowel separator is not left before the ellipsis', () => {
     const label = 'ᠠᠠᠠᠠᠠᠠ\u180eᠠᠠ';

@@ -1,0 +1,32 @@
+{
+  "id": "mention-label-value-safe-cut",
+  "kind": "recommended",
+  "summary": "Security fix, upgrade soon if you use piiShield (0.24.2 only): a mention label over 120 code points could send a fragment of an e-mail, IBAN or phone number past the shield. The chat now leaves a value at the cut out whole; labels within the limit or cut in a plain word are unchanged.",
+  "howTo": "Nothing to do in the React chat. Before: a value the cut split reached the model as a plain-text fragment (max.musterm…, GB29 NWBK…, +49 170 1…). Now a token is everything between whitespace; a value token has a digit, @ / : + _ % = # & ~ \\ | or a dot inside; a value run is value tokens, punctuation-only tokens and upper-case groups of 1-4 letters next to them (NWBK); a run the cut falls in is left out whole. Side effect on labels over the limit: dates, times, prices, file names, paths, versions and abbreviations like z.B. at the edge go too a label full of numbers can shrink to its first word, one that is only values becomes the id (an over-long id is cut the same way), and a label without spaces (Chinese, Japanese) over the limit with a digit anywhere always becomes the id. mentions: { serialize: { labelCut: 'grapheme' } } keeps the 0.24.2 cut. Own clients or servers that call canonicalMentionLabel / serializeMentionMarker directly keep the 0.24.2 cut by default and opt in with cut: 'value-safe' / labelCut: 'value-safe'. Without upgrading: mentions: { serialize: { labels: 'raw' } } sends labels whole as 0.24.1 did (without the canonical cleaning); a lower maxLabelLength does not help. Known limits: text stored by a 0.24.2 client keeps its cut label; 0.24.2 clients still running; a postcode right before the cut or before a city cut after its first letter (80331 M…); names or streets without digits cut inside a word; letter groups of lower-case IBANs (nwbk) and values a custom detector finds without those characters; values the detector misses even whole. See docs/chat-interactions.md, Cutting a long label.",
+  "skill": "building-glirastes-chat-ui#mention-markers",
+  "affectedWhen": {
+    "symbols": [
+      "AiChatProvider",
+      "serializeMentionsForSend",
+      "MentionSerializationConfig",
+      "canonicalMentionLabel",
+      "serializeMentionMarker"
+    ],
+    "patterns": [
+      "piiShield",
+      "maxLabelLength"
+    ]
+  },
+  "adoptedWhen": {
+    "patterns": [
+      "labelCut",
+      "\\bcut\\s*:\\s*['\"](?:grapheme|value-safe)"
+    ]
+  },
+  "surface": [
+    "glirastes/contracts#CanonicalMentionLabelOptions.cut",
+    "glirastes/contracts#MentionLabelCut",
+    "glirastes/contracts#SerializeMentionMarkerOptions.labelCut",
+    "glirastes/react#MentionSerializationConfig.labelCut"
+  ]
+}

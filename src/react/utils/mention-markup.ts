@@ -314,7 +314,9 @@ export function serializeMentionsForSend(
 
   const cleaned = stripContextBlocks(text);
   const labels = options?.labels === 'raw' ? 'raw' : 'canonical';
-  const markerOptions = { labels, maxLabelLength: options?.maxLabelLength } as const;
+  // Mentions are cut value-safe unless the app asks for the 0.24.2 cut.
+  const labelCut = options?.labelCut === 'grapheme' ? 'grapheme' : 'value-safe';
+  const markerOptions = { labels, maxLabelLength: options?.maxLabelLength, labelCut } as const;
 
   // One command can arrive twice: as a chip read back from the editor DOM
   // (dataset only, so without definition id and arguments) and as the state
@@ -361,7 +363,7 @@ export function serializeMentionsForSend(
     if (claimedTokens.has(token)) return;
     claimedTokens.add(token);
     // Canonical once: the marker's own canonicalisation of a canonical label is cheap (idempotent).
-    const sentLabel = labels === 'raw' ? label : canonicalMentionLabel(label, { id, maxLength: options?.maxLabelLength });
+    const sentLabel = labels === 'raw' ? label : canonicalMentionLabel(label, { id, maxLength: options?.maxLabelLength, cut: labelCut });
     const marker = serializeMentionMarker({ type, id, label: sentLabel }, markerOptions);
     if (marker === undefined) warnRefusedMention(type);
     const serializable: SerializableMention = {

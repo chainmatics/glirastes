@@ -48,6 +48,7 @@
  * | `{` `}` `<!` `-->` `--!>` | `｛` `｝` `‹!` `--›` `--!›` (single `<` `>` stay) |
  * | nothing left | the canonical id |
  * | over 120 (or `maxLength`) code points | cut at a grapheme boundary (`Intl.Segmenter`; without it, never before a mark, joiner or selector, after a joiner or virama, or inside a flag or keycap; other clusters such as Thai Sara Am can then be split) to at most 119 and `…`; a bare `…` becomes the id; never empty |
+ * | a value the cut would split, only with `cut: 'value-safe'` (the React chat's send path; the default `grapheme` cuts as in 0.24.2) | the value run at the cut is left out whole: tokens (split at whitespace) with a digit, `@ / : + _ % = # & ~ \ |` or a dot inside, punctuation-only tokens, and groups of 1-4 upper-case letters next to them (`+49 170 1234567`, `GB29 NWBK 6016 …`), so a PII detector on the server never gets a fragment it cannot recognise; the id fallback is cut the same way |
  *
  * No NFKC: look-alikes such as `｛` or fullwidth letters stay as they are.
  * They are visible to the user, so the chip still shows what the model reads.
@@ -187,7 +188,22 @@ export interface CanonicalMentionLabelOptions {
    * above 120, 120.
    */
   maxLength?: number;
+  /**
+   * How a label over `maxLength` is cut. `grapheme` (default, unchanged
+   * since 0.24.2): at a grapheme boundary only. `value-safe`: at a grapheme
+   * boundary, and a value run the cut would split is left out whole: tokens
+   * with a digit, `@`, `/`, `:`, `+` … or a dot inside (email, IBAN, phone
+   * number, URL), punctuation-only tokens and groups of 1-4 upper-case
+   * letters next to them (`GB29 NWBK 6016 …`), so a PII detector on the
+   * server never gets a fragment it cannot recognise; the React chat sends
+   * mention labels with it, and an id fallback over `maxLength` is cut the
+   * same way. Labels within `maxLength` are the same either way.
+   */
+  cut?: MentionLabelCut;
 }
+
+/** How an over-long label is cut; see `CanonicalMentionLabelOptions.cut`. */
+export type MentionLabelCut = 'value-safe' | 'grapheme';
 
 /** The smallest `maxLength`: room for a short word and `…`, and never an empty label. */
 const MIN_LABEL_LENGTH = 8;
@@ -405,11 +421,98 @@ function cutAtBoundary(visible: string, budget: number): string {
   return prefix.join('');
 }
 
-function truncated(visible: string, max: number): string {
+/** Whitespace that separates words; all BMP, so a check per UTF-16 unit is exact. */
+const isSpace = (unit: string | undefined) => unit !== undefined && /\s/.test(unit);
+/**
+ * Punctuation at the edges of a token. Not linear: `\p{P}+$` is retried at
+ * each start inside a punctuation run, so a token of punctuation runs costs
+ * up to quadratic time in its length; a label is read to at most 4096 code
+ * points (`MAX_INPUT_CODE_POINTS`), which bounds it.
+ */
+const EDGE_PUNCTUATION = /^\p{P}+|\p{P}+$/gu;
+/** A keycap emoji (1️⃣, #️⃣): a digit or `#` `*` that is not a value. */
+const KEYCAP_EMOJI = /[0-9#*]\uFE0F?\u20E3/gu;
+/**
+ * A token that carries a value a PII detector may look for: a digit, one
+ * of `@ / : + _ % = # & ~ \ |`, or a dot between letters or digits (email,
+ * IBAN, phone number, URL, domain, date, id). Plain words, also with a
+ * hyphen, an apostrophe or punctuation at their edges, and emoji (also
+ * keycaps such as 1️⃣) are not.
+ */
+const VALUE_CHAR = /[\p{N}@/:+_%=#&~\\|]|[\p{L}\p{N}]\.[\p{L}\p{N}]/u;
+
+/**
+ * A group of 1-4 upper-case letters (`NWBK`, `ABNA`, `MALT`, `AB` of a
+ * licence plate, `O` of a case number): part of a value only when it is
+ * next to one, so an acronym among words (`KG`, `EU`, `USA`) stays a word.
+ */
+const UPPER_GROUP = /^\p{Lu}{1,4}$/u;
+
+type TokenKind = 'value' | 'separator' | 'group' | 'word';
+
+function tokenKind(token: string): TokenKind {
+  const core = token.replace(KEYCAP_EMOJI, '').replace(EDGE_PUNCTUATION, '');
+  if (!core) return 'separator';
+  if (VALUE_CHAR.test(core)) return 'value';
+  return UPPER_GROUP.test(core) ? 'group' : 'word';
+}
+
+/** Start of the token that ends at `end` (exclusive), after the whitespace before it. */
+function tokenStartBefore(text: string, end: number): number {
+  let start = end;
+  while (start > 0 && !isSpace(text[start - 1])) start -= 1;
+  return start;
+}
+
+/**
+ * `prefix` (a prefix of `full`, cut inside it) without a value the cut
+ * splits. A value run is a sequence of tokens (split at whitespace) that
+ * are values (`VALUE_CHAR`), separators (only punctuation) or upper-case
+ * groups of 1-4 letters (`UPPER_GROUP`), with at least one value. When the
+ * cut falls in such a run (in one of its tokens, or right before it), the
+ * part of the run before the cut is dropped, with the whitespace before
+ * it, so a value written with spaces (`+49 170 1234567`, `GB29 NWBK 6016
+ * …`) goes whole. A server-side PII detector never sees a value it can no
+ * longer recognise. Otherwise `prefix` is returned as it is. Linear in the
+ * label apart from `tokenKind` (see `EDGE_PUNCTUATION`).
+ */
+function withoutSplitValue(full: string, prefix: string): string {
+  const cut = prefix.length;
+  const inToken = cut > 0 && !isSpace(full[cut - 1]) && !isSpace(full[cut]);
+  let from = inToken ? tokenStartBefore(full, cut) : cut;
+  const dropFrom = from;
+  // The token the cut falls in, or the first after it; separators ("/", "–") and
+  // upper-case groups are skipped, so a run counts only when it holds a value.
+  for (;;) {
+    while (from < full.length && isSpace(full[from])) from += 1;
+    if (from >= full.length) return prefix;
+    let end = from;
+    while (end < full.length && !isSpace(full[end])) end += 1;
+    const kind = tokenKind(full.slice(from, end));
+    if (kind === 'word') return prefix;
+    if (kind === 'value') break;
+    from = end;
+  }
+  // Back over the run: values, separators and upper-case groups before the cut.
+  let keep = dropFrom;
+  for (;;) {
+    let end = keep;
+    while (end > 0 && isSpace(full[end - 1])) end -= 1;
+    if (end === 0) break;
+    const start = tokenStartBefore(full, end);
+    if (tokenKind(full.slice(start, end)) === 'word') break;
+    keep = start;
+  }
+  if (keep >= cut) return prefix;
+  return full.slice(0, keep).trimEnd();
+}
+
+function truncated(visible: string, max: number, cut: MentionLabelCut): string {
   // Compare UTF-16 units first: only a label that long can have too many code points.
   if (visible.length <= max) return visible;
   if (Array.from(visible).length <= max) return visible;
-  const prefix = cutAtBoundary(visible, max - 1);
+  const atBoundary = cutAtBoundary(visible, max - 1);
+  const prefix = cut === 'grapheme' ? atBoundary : withoutSplitValue(visible, atBoundary);
   return prefix ? `${prefix}…` : '';
 }
 
@@ -423,11 +526,13 @@ function truncated(visible: string, max: number): string {
  */
 export function canonicalMentionLabel(label: string, options?: CanonicalMentionLabelOptions): string {
   const max = labelLength(options?.maxLength);
-  const fromId = () => (typeof options?.id === 'string' ? truncated(visibleLabel(options.id), max) : '');
+  const cut: MentionLabelCut = options?.cut === 'value-safe' ? 'value-safe' : 'grapheme';
+  // The id fallback is cut in the same mode: a label that was only a value run must not bring a fragment back through the id.
+  const fromId = () => (typeof options?.id === 'string' ? truncated(visibleLabel(options.id), max, cut) : '');
   const visible = visibleLabel(typeof label === 'string' ? label : '');
   // Never empty: a marker with an empty label is read by no reader.
   if (!visible) return fromId() || '…';
-  return truncated(visible, max) || fromId() || '…';
+  return truncated(visible, max, cut) || fromId() || '…';
 }
 
 /**
@@ -562,6 +667,8 @@ export interface SerializeMentionMarkerOptions {
   labels?: 'canonical' | 'raw';
   /** Code points of a canonical label, 8-120 (default 120; 1-7 means 8, other values the default). */
   maxLabelLength?: number;
+  /** How an over-long canonical label is cut (`CanonicalMentionLabelOptions.cut`); default `grapheme`, the React chat sends `value-safe`. */
+  labelCut?: MentionLabelCut;
 }
 
 /**
@@ -577,6 +684,7 @@ export function serializeMentionMarker(
   const label = canonicalMentionLabel(mention.label, {
     id: mention.id,
     ...(options?.maxLabelLength === undefined ? {} : { maxLength: options.maxLabelLength }),
+    ...(options?.labelCut === undefined ? {} : { cut: options.labelCut }),
   });
   return `${MARKER_OPEN}${mention.type}:${mention.id}:${label}}}`;
 }

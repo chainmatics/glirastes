@@ -4,6 +4,7 @@ import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEv
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { UiActionRunCode } from '../browser/client-actions.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
+import type { MentionLabelCut } from '../contracts/mention-marker.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
 import type { ChatInteractionsConfig, ChatMentionContext, PendingChatCommand } from './interactions/registry.js';
 import type { AttachmentBlobStore } from './utils/attachment-blob-store.js';
@@ -535,6 +536,16 @@ export interface MentionSerializationConfig {
   labels?: 'canonical' | 'raw';
   /** Code points of a sent label with `labels: 'canonical'`; 8-120 (1-7 means 8), default 120 (also for any other value). */
   maxLabelLength?: number;
+  /**
+   * How a label over `maxLabelLength` is cut with `labels: 'canonical'`.
+   * `value-safe` (default): a value the cut would split (email, IBAN,
+   * phone number, URL: a token with a digit, `@`, `/`, `:`, `+` … or a dot
+   * inside, with upper-case groups of 1-4 letters next to it such as
+   * `NWBK`) is left out whole, so the server's PII shield never gets a
+   * fragment it cannot recognise. `grapheme`: the cut of 0.24.2, at a
+   * grapheme boundary only (a split value can then reach the model).
+   */
+  labelCut?: MentionLabelCut;
 }
 
 // ============================================================================
