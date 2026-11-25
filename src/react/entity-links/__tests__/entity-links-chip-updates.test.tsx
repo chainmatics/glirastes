@@ -167,6 +167,26 @@ describe('the first render resolves as 0.29.0 did (the cache is cleared once aft
   }
 });
 
+describe('an entityLinks object changed in place applies from the next render, as in 0.29.0', () => {
+  it('minLabelLength lowered and a matcher pushed onto the same matchers array, then a chunk', async () => {
+    const conversation = (later: string): ChatMessage[] => [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Is {{mention:room:r:Back office}} free?' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: later }] },
+    ];
+    const matchers: Array<{ type: string; pattern: RegExp }> = [];
+    const entityLinks = { minLabelLength: 20, matchers, open: vi.fn() };
+    const answerChips = () => [...document.querySelectorAll('[data-role="assistant"] [data-chip]')].map((chip) => `${chip.getAttribute('data-chip')}=${chip.textContent}`);
+    const view = render(<Chat messages={conversation('Back office and MAR-1')} entityLinks={entityLinks} />);
+    await waitFor(() => expect(document.body.textContent).toContain('Back office and MAR-1'));
+    expect(answerChips()).toEqual([]);
+    // The app changes its config object instead of passing a new one.
+    entityLinks.minLabelLength = 4;
+    matchers.push({ type: 'task', pattern: TASK });
+    await act(async () => { view.rerender(<Chat messages={conversation('Back office and MAR-1 now')} entityLinks={entityLinks} />); });
+    await waitFor(() => expect(answerChips()).toEqual(['room:r=Back office', 'task:MAR-1=MAR-1']));
+  });
+});
+
 describe('new matchers start every chip over, as in 0.29.0', () => {
   it('a finished chip of the old matchers shows in the render that passes them, then starts over (0.29.0: [A-MAR-5], [], [], [])', async () => {
     const conversation = (later: string): ChatMessage[] => [

@@ -122,6 +122,7 @@ const CONFIGS: Array<[string, ChatEntityLinksConfig]> = [
   ['known on, verifyMentions off', { mentionMarkers: 'markdown', verifyMentions: false, matchers: [{ type: 'task', pattern: /MAR-\d+/, resolve: resolveKey }], open: () => {} }],
   ['known off, verifyMentions on', { known: false, mentionMarkers: 'markdown', matchers: [{ type: 'task', pattern: /MAR-\d+/, resolve: resolveKey }], open: () => {} }],
   ['known off, verifyMentions off', { known: false, verifyMentions: false, mentionMarkers: 'markdown', matchers: [], open: () => {} }],
+  ['known off, verifyMentions on, no matchers', { known: false, mentionMarkers: 'markdown', matchers: [] }],
 ];
 
 const CHUNKS = 4;

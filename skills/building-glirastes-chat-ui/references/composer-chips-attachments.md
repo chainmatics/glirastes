@@ -91,6 +91,12 @@ const entityLinks = useMemo(() => ({
   the current links themselves: pass them as they are. Component functions
   created during render make react-markdown remount every answer and chip on
   each streamed chunk.
+- They are components that read React context: use them as JSX, in
+  react-markdown's `components`, or call them inside a function component.
+  A direct call elsewhere (class `render`, event handler) throws "Invalid
+  hook call". Rendered under another provider, they use the links their own
+  provider rendered last, which inside a suspended `startTransition` can be a
+  render React later discards.
 
 ## Attachments
 

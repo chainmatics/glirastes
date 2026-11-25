@@ -48,7 +48,10 @@ export interface ChatEntityLinks {
   cachedMatch(segment: Extract<ChatEntityTextSegment, { kind: 'match' }>): ChatEntityReference | null | undefined;
   /** Replaces references in the string children with chips. */
   linkify(children: ReactNode): ReactNode;
-  /** `react-markdown` `components` that linkify paragraphs, list items, cells and emphasis. */
+  /**
+   * `react-markdown` `components` that linkify paragraphs, list items, cells and emphasis.
+   * Components that read context: render them as JSX or call them inside a function component.
+   */
   readonly markdownComponents: Record<string, (props: Record<string, unknown>) => ReactNode>;
   /** `entityLinks.mentionMarkers`: `'markdown'` keeps Markdown for assistant text with markers. */
   readonly mentionMarkers?: 'plain' | 'markdown';
@@ -181,6 +184,15 @@ export function ChatEntityLinksProvider({
     });
   }, [interactions]);
 
+  // What the links read from the config, read on every render: an app that changes its `entityLinks`
+  // object in place (instead of passing a new one) sees the change from the next render, as in 0.29.0.
+  const configRead = useRef<{ fields: unknown[]; version: number }>({ fields: [], version: 0 });
+  const fields = configFields(config);
+  if (fields.length !== configRead.current.fields.length || fields.some((field, index) => field !== configRead.current.fields[index])) {
+    configRead.current = { fields, version: configRead.current.version + 1 };
+  }
+  const configVersion = configRead.current.version;
+
   const value = useMemo<ChatEntityLinks>(() => {
     const matchers = config?.matchers ?? [];
     const keyOf = matchKey;
@@ -240,11 +252,23 @@ export function ChatEntityLinksProvider({
     LINKS_OWNER.set(links, latest);
     MATCH_CACHE_CLEARED.set(links, cleared);
     return links;
-  }, [config, known, seenKeys, canOpen, open, locale.openEntityLabel, compile, markdownComponents]);
+    // `config` is read through `configVersion`, which changes with the object and with each field the links read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configVersion, known, seenKeys, canOpen, open, locale.openEntityLabel, compile, markdownComponents]);
   // In render, as the components made per value had it: also the first render and a foreign tree see it.
   latest.current = value;
 
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
+}
+
+/** The config object and each of its fields the links value reads, matchers one by one. */
+function configFields(config: ChatEntityLinksConfig | undefined): unknown[] {
+  if (!config) return [config];
+  const fields: unknown[] = [
+    config, config.scope, config.mentionMarkers, config.minLabelLength, config.ambiguousNames, config.resolveAmbiguous, config.matchers,
+  ];
+  for (const matcher of config.matchers ?? []) fields.push(matcher, matcher.type, matcher.pattern, matcher.resolve);
+  return fields;
 }
 
 const DISABLED_LINKS: ChatEntityLinks = {
