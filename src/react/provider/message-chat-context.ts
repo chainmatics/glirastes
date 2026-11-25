@@ -103,7 +103,19 @@ export function createMessageChats() {
   const live: { current: FullChat | null } = { current: null };
   const proto = {} as MessageChat;
   for (const key of MESSAGE_CHAT_KEYS) {
-    Object.defineProperty(proto, key, { enumerable: true, get: () => live.current?.[key] });
+    // A function field is one stable function that calls the chat's current one when it is called: a click
+    // handler made in a render the message did not repeat (it renders only when what it shows changes) never
+    // sends through an outdated `send` (its mentions, `onBeforeSend`, queue state). Absent stays absent.
+    let forward: ((...args: unknown[]) => unknown) | undefined;
+    Object.defineProperty(proto, key, {
+      enumerable: true,
+      get: () => {
+        const value = live.current?.[key];
+        if (typeof value !== 'function') return value;
+        forward ??= (...args: unknown[]) => (live.current?.[key] as ((...args: unknown[]) => unknown) | undefined)?.(...args);
+        return forward;
+      },
+    });
   }
   let views = new Map<string, CachedView>();
   let staticToken: unknown[] = [];
