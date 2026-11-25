@@ -1743,9 +1743,9 @@ export interface ChatQueueConfig {
   /** Default true: send the next queued message once the chat is idle, one run at a time. */
   autoFlush?: boolean;
   /**
-   * `sendNow(id)`: `'next'` (default) moves the message to the head and sends
-   * it once idle (also when paused or without `autoFlush`); `'abort'` also
-   * stops the running run first (that stop does not pause the queue).
+   * `sendNow(id)`: `'abort'` (default) stops the running run and sends the
+   * message right away (that stop does not pause the queue); `'next'` moves it
+   * to the head and sends it once idle (also when paused or without `autoFlush`).
    */
   sendNowBehavior?: 'next' | 'abort';
   /**
