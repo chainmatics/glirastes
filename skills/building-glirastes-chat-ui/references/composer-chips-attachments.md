@@ -87,6 +87,10 @@ const entityLinks = useMemo(() => ({
   `useChatEntityLinks().markdownComponents` (for `react-markdown`) or
   `linkify(children)`. `EntityText` renders one string, `EntityLinkChip` one
   chip.
+- `markdownComponents` keep one identity for the provider's lifetime and read
+  the current links themselves: pass them as they are. Component functions
+  created during render make react-markdown remount every answer and chip on
+  each streamed chunk.
 
 ## Attachments
 

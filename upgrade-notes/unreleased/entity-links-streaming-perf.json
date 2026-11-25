@@ -1,0 +1,16 @@
+{
+  "id": "entity-links-streaming-perf",
+  "kind": "recommended",
+  "summary": "Entity links no longer slow a long chat while an answer streams: a chunk reads only the changed message, patterns compile once, and markdownComponents keep their identity, so chips in finished messages are not remounted.",
+  "howTo": "Nothing to do; chips, their order and precedence are unchanged. What an app can notice: a custom components.MentionChip in a finished message is no longer unmounted and mounted again per streamed chunk (its state and effects stay), useChatEntityLinks().markdownComponents keep one identity for the provider's lifetime, and entityLinks.resolveAmbiguous is called once per set of known names instead of once per text. knownEntities is still called on every change of the messages. A custom Markdown renderer gets the full effect only when it passes markdownComponents (or stable components of its own) to react-markdown instead of components created during render.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": {
+    "symbols": [
+      "useChatEntityLinks",
+      "ChatEntityLinksConfig"
+    ],
+    "patterns": [
+      "entityLinks\\s*[:=]"
+    ]
+  }
+}
