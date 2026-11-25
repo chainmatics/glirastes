@@ -63,7 +63,6 @@ import { createToolResultRendererRegistry } from '../tool-renderers/registry.js'
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
 import { createComposerDraftController, type ComposerDraftController } from '../composer/composer-drafts.js';
 import { ChatMarkdownOptionsContext, NO_MARKDOWN_OPTIONS } from '../markdown-options.js';
-import { useEqualValue } from '../utils/same-config.js';
 import { ChatEntityLinksProvider } from '../entity-links/entity-links-react.js';
 import {
   runToolResultUiActions,
@@ -874,14 +873,13 @@ export function AiChatProvider({
     [userVoice],
   );
   // The labels of the turn's tools, each used for one call and for several; the caller's labels win.
-  // Equal labels keep their identity (an inline `toolLabels`), and so does the approval description made from them.
-  const toolLabels = useEqualValue(useMemo<ToolLabelConfig>(() => ({
+  const toolLabels = useMemo<ToolLabelConfig>(() => ({
     labels: {
       ...Object.fromEntries(Object.entries(toolPresentation?.labels ?? {})
         .map(([name, label]) => [name, { singular: label, plural: label }])),
       ...(userToolLabels?.labels ?? {}),
     },
-  }), [toolPresentation, userToolLabels]));
+  }), [toolPresentation, userToolLabels]);
 
   // Without the app's own description, an approval names the action by its
   // label and lists what the call states, instead of the raw tool name alone.
@@ -1146,11 +1144,10 @@ export function AiChatProvider({
     [completionProviders, interactionRegistry],
   );
   // Throws on an invalid or duplicate definition, so a bad config fails at once.
-  // Equal triggers keep their identity (inline `triggers`), and so does `mentionPrefix`.
-  const triggers = useEqualValue(useMemo(
+  const triggers = useMemo(
     () => resolveChatTriggers(triggerDefinitions, allCompletionProviders),
     [triggerDefinitions, allCompletionProviders],
-  ));
+  );
   const entityPrefix = triggers.find((trigger) => trigger.char === '@')?.prefix ?? '@';
   const mentionPrefix = useMemo(() => createMentionPrefixLookup(triggers), [triggers]);
   // Drafts live as long as this provider: an identity change remounts it and starts empty.

@@ -283,7 +283,7 @@ export function ChatEntityLinksProvider({
     LINKS_OWNER.set(links, latest);
     MATCH_CACHE_CLEARED.set(links, cleared);
     return links;
-    // `config` is read through `configVersion`, which changes with each field the links read (not with a new object of equal fields).
+    // `config` is read through `configVersion`, which changes with the object and with each field the links read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configVersion, known, seenKeys, canOpen, open, locale.openEntityLabel, compile, markdownComponents]);
   // In render, as the components made per value had it: also the first render and a foreign tree see it.
@@ -292,12 +292,11 @@ export function ChatEntityLinksProvider({
   return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
 }
 
-/** Whether there is a config and each of its fields the links value reads, matchers one by one. */
+/** The config object and each of its fields the links value reads, matchers one by one. */
 function configFields(config: ChatEntityLinksConfig | undefined): unknown[] {
-  if (!config) return [false];
-  // Not the object itself: an app that renders on every chunk with an inline `entityLinks={{ … }}` keeps the links.
+  if (!config) return [config];
   const fields: unknown[] = [
-    true, config.scope, config.mentionMarkers, config.minLabelLength, config.ambiguousNames, config.resolveAmbiguous, config.matchers,
+    config, config.scope, config.mentionMarkers, config.minLabelLength, config.ambiguousNames, config.resolveAmbiguous, config.matchers,
   ];
   for (const matcher of config.matchers ?? []) fields.push(matcher, matcher.type, matcher.pattern, matcher.resolve);
   return fields;

@@ -3,7 +3,6 @@ import { ChatContext, useChatContext, type ChatContextValue } from './chat-conte
 import type { ComposerContextValue } from './composer-context.js';
 import { readClarificationPart } from '../utils/clarification.js';
 import { turnStartId } from '../utils/turn-outcomes.js';
-import { copyConfig, sameConfig } from '../utils/same-config.js';
 import type { ChatMessage, PendingApproval } from '../types.js';
 
 type FullChat = ChatContextValue & ComposerContextValue;
@@ -121,8 +120,7 @@ export function createMessageChats() {
     });
   }
   let views = new Map<string, CachedView>();
-  let staticToken: object = {};
-  let staticCopy: unknown[] | null = null;
+  let staticToken: unknown[] = [];
   let settled: { messages: ReadonlyArray<ChatMessage>; token: object } = { messages: [], token: {} };
 
   return function messageChats(chat: FullChat, messages: ReadonlyArray<ChatMessage>): (message: ChatMessage, index: number) => MessageChat {
@@ -133,14 +131,8 @@ export function createMessageChats() {
       // The "Continue" button shows only while the chat can continue.
       chat.continueAfterBudgetStop !== undefined,
     );
-    // Compared by value where they are plain data: an app that renders on every chunk with an inline
-    // `locale={{ … }}` or `entityDeclarations={{ … }}` does not render every message again.
-    // Compared with a copy of what was taken over: an entry the app changes in place and passes in a new
-    // object is a change.
-    if (!staticCopy || !sameConfig(staticCopy, nextStatic)) {
-      staticCopy = copyConfig(nextStatic);
-      staticToken = {};
-    }
+    // Compared by identity, as React compares props: a new config object renders every message.
+    if (!sameValues(staticToken, nextStatic)) staticToken = nextStatic;
     // The messages that are not streaming: all of them, without the latest one while a turn runs.
     const stable = chat.isLoading ? messages.slice(0, -1) : messages;
     if (!sameValues(settled.messages, stable)) settled = { messages: stable, token: {} };
