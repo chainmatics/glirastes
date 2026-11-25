@@ -23,7 +23,7 @@ services:
       timeout: 3s
       retries: 10
   runtime:
-    image: ${GLIRASTES_RUNTIME_IMAGE:-ghcr.io/chainmatics/glirastes-runtime:0.26.0}
+    image: ${GLIRASTES_RUNTIME_IMAGE:-ghcr.io/chainmatics/glirastes-runtime:0.28.0}
     depends_on:
       state:
         condition: service_healthy
