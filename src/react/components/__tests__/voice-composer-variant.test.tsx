@@ -80,6 +80,8 @@ describe("recordingBar variant 'composer'", () => {
     expect(bar()?.querySelector('[data-element="waveform"]')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /cancel/i })).toBeNull();
     expect(mic().getAttribute('data-state')).toBe('recording');
+    // The waveform comes before the mic that stops it.
+    expect(bar()!.compareDocumentPosition(mic()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(mic());
     await waitFor(() => expect(editor.value).toBe('Angebot an Müller schicken'));
