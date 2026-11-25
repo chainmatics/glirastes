@@ -69,7 +69,7 @@ import {
   type IdLabels,
 } from './hide-ids.js';
 import { entityDeclarationsOfTools, TOOL_ENTITIES_PART_TYPE } from './tool-entities.js';
-import { prepareViewContext, readViewContextField, withViewContextMessage } from './view-context-block.js';
+import { prepareViewContext, readViewContextField, withViewContextMessage, withViewContextTagsEscaped } from './view-context-block.js';
 import { resolveViewContextPolicy } from '../../../contracts/view-context.js';
 import { builtInStreamErrorTexts, createToolStreamErrorMask, streamErrorText, withStepFailureParts, type StreamErrorTexts } from './stream-error-text.js';
 import {
@@ -122,7 +122,7 @@ import {
   createInternalApiCallerFromRequest,
 } from './context-helpers.js';
 import {
-  prepareModelMessages,
+  prepareHistoryMessages,
   wrapToolsForVercelAi,
   type HistoryOptions,
   type ModelInputBreakdown,
@@ -610,6 +610,12 @@ interface RequestTurnState {
   budgetContinuable?: boolean;
   /** The view context block of the newest user message (`view-context-block.ts`), already through the PII shield. */
   viewContext?: string;
+  /**
+   * Set when the `viewContext` option is on: `<view-context` in the text of user
+   * messages is escaped for the model (`withViewContextTagsEscaped`), after the PII
+   * shield and the guardrails, never in the chat or the stream.
+   */
+  escapeViewContextTags?: boolean;
 }
 
 /**
@@ -745,7 +751,9 @@ async function defaultStreamHandler(
     invalidToolInputTexts: [streamErrorTexts.invalidToolInput, ...configuredInvalidToolInputTexts],
     ...(ctx.onModelInput ? { onBreakdown: (value: ModelInputBreakdown) => { breakdown = value; } } : {}),
   };
-  const preparedMessages = await prepareModelMessages(
+  // With the view context on, the ASCII tag in typed or pasted text does not read as its block
+  // (model input only, the user's history only: never the seen-objects memo the SDK writes).
+  const preparedMessages = await prepareHistoryMessages(
     ctx.messages as UIMessage[],
     ctx.memory?.historyTokens
       // Chat memory decides what stays; counts no longer drop earlier turns.
@@ -760,6 +768,7 @@ async function defaultStreamHandler(
           ...historyExtras,
         }
       : { maxContextMessages: ctx.maxContextMessages, history: ctx.history, ...(toolEntities ? { entities: toolEntities } : {}), ...historyExtras },
+    request.escapeViewContextTags ? withViewContextTagsEscaped : undefined,
   );
   // User role, not system: memory is background a user could have written.
   const withMemory = ctx.memory?.preamble
@@ -1776,6 +1785,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // Only the built-in stream handler marks, stops and explains; others get no marker.
       const requestState: RequestTurnState = {
         ...(continuation ? { continuation } : {}),
+        ...(viewContextPolicy.enabled ? { escapeViewContextTags: true } : {}),
         budgetContinuable: !customStreamHandler && !directCommand,
         ...(!customStreamHandler && uiActionOutcomes !== 'off' && readUiOutcomesFlag(body.value)
           ? {
