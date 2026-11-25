@@ -3093,6 +3093,7 @@
   "glirastes/react#QueuedMessage.id",
   "glirastes/react#QueuedMessage.mentions",
   "glirastes/react#QueuedMessage.text",
+  "glirastes/react#QueuedMessage.viewContext",
   "glirastes/react#RecordedSttAdapter",
   "glirastes/react#RecordedSttAdapterOptions",
   "glirastes/react#RecordedSttAdapterOptions.capture",

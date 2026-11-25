@@ -370,8 +370,8 @@ stays byte-identical; anything changed or forged is cleaned or dropped,
 and as long as nothing was ever registered on the page nothing is sent;
 any `registerViewContext` call, also with `null`, installs the cleaner, and
 it stays after unregistering, so a frozen copy still goes out). The cleaner
-is installed by the copy of the package that registers, from the release
-after 0.27.0 on: when an older copy (0.27.0, without the binding) registers and a newer
+is installed by the copy of the package that registers, from 0.28.0 on:
+when an older copy (0.27.0, without the binding) registers and a newer
 `AiChatProvider` or transport sends, nothing is sent (fail closed). Use one
 version of the package on a page.
 

@@ -1,0 +1,24 @@
+{
+  "version": "0.28.0",
+  "notes": [
+    {
+      "id": "view-context-message-binding",
+      "kind": "recommended",
+      "summary": "Behaviour change against 0.27.0 for pages that register a view context: a message carries the view of the moment the user sends it, also while it waits in the queue (0.27.0 sent the view of the send time). Apps that register nothing: unchanged.",
+      "howTo": "No code change: an app on the bundled transport (VercelAiChat, useVercelAiChatTransport, <glirastes-chat>) that registers its view as before, also with an own composer that sends through send, submit, submitWithResult or ChatStarters and with the queue on, only bumps the version. What changes against 0.27.0: a queued message carries the view of the moment it was queued (not of its send time), and one restored after a reload goes without view context. AiChatProvider freezes a cleaned, read-only copy when the user sends a message, at once or into the queue (currentViewContext() returns the view open now); the transport cleans that copy again and sends it as glirastesViewContext: { version: 1, current }, never the registry at send time. An edit of a queued message keeps the view context of the moment it was queued (remove and send again for the view open now). The copy stays in memory (QueuedMessage.viewContext, read only, in onQueueChange and queue.items): queue.storage never gets it and a restored queued message goes without one. Chips and direct / commands freeze it when sent; a command form (also of a queued command) and an entity action when submitted or clicked; continue after a cut-off answer at the click. To do for a transport of your own that adds currentViewContext() when sending, as 0.27.0 documented: take this field instead (else it keeps sending the view of the send time): it gets the copy as an optional viewContext field in the one argument of sendMessage({ text, files?, viewContext? }), only when one was frozen; put it into your body as glirastesViewContext: { version: 1, current: viewContext }, or ignore it. A wrapper passes the message object on as it came. Use one package version on a page: a copy older than this one that registers installs no cleaner, and nothing is sent (fail closed). Type break only for a transport whose parameter declares its own viewContext field of another type: rename it. See docs/chat-interactions.md.",
+      "skill": "building-glirastes-chat-ui#configuration",
+      "affectedWhen": {
+        "patterns": [
+          "\\buseViewContext\\s*\\(",
+          "\\bregisterViewContext\\s*\\(",
+          "\\bglirastesViewContext\\b",
+          "\\bcurrentViewContext\\s*\\(",
+          "\\bQueuedMessage\\b"
+        ]
+      },
+      "surface": [
+        "glirastes/react#QueuedMessage.viewContext"
+      ]
+    }
+  ]
+}
