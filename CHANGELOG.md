@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-11-25
+
 ### Changed
 
 - `voice.recordingBar.variant: 'composer'`: the compact waveform sits before the mic button (left of it in a left-to-right toolbar), not after it. CSS that moved it there with `order` can go.
@@ -1337,6 +1339,7 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.29.1]: https://github.com/chainmatics/glirastes/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/chainmatics/glirastes/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/chainmatics/glirastes/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/chainmatics/glirastes/compare/v0.26.1...v0.27.0
