@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `glirastes upgrade offers [--since <version>] [--json] [--root <dir>]`: every optional feature up to the installed SDK that the app does not use yet, newest first, also those an earlier `upgrade ack` took out of the report. Stateless and read-only: nothing is stored at `ack`, detection (`adoptedWhen`) decides, so `.glirastes/sdk-baseline.json` is unchanged and needs no merge; a note without `adoptedWhen` stays listed, marked `use not detectable`, a deferred one `deferred`. `upgrade ack` now says how many optional items leave the report and points to `offers`. Skill `upgrading-glirastes` step 10.
+
 ### Fixed
 
 - **Upgrade hint:** `useChatEntityLinks().markdownComponents` are now components that read React context. Use them as JSX or pass them to react-markdown's `components`, or call them inside a function component's render; calling one as a plain function anywhere else (a class component's `render`, an event handler, outside React) throws "Invalid hook call". In 0.29.0 such a call returned an element.
@@ -25,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - In those text parts, new `matchers` now apply to finished messages from the next render on, as they do in Markdown; 0.29.0 kept the old results there.
   - In those text parts, `resolveAmbiguous` is called less often: a finished message is split again only when the known names or the config change, not on every chunk (in a 3-chunk test 9 calls instead of 12). In Markdown the number of calls is unchanged.
   - Known names and seen ids notice a change to a message only when something on the message or part level is new: a new message object, a new `parts` array, another `role` or number of parts, a new part object, or a new `type`, `text`, `state`, `toolName`, `input`, `output` or `result` value of a part; also new entity searches or declarations objects, or a `read_result` that now reads another result. A change made inside the same `input`, `output` or `result` object (an item pushed into the same array, a `resultId` set on the same `input`) or a key added to the same declarations object is not noticed until that message is replaced; 0.29.0 read everything again whenever the messages array was new. The AI SDK replaces a changed message with a new copy, so this concerns only apps that change messages in place.
+
+- Upgrade note `voice-composer-variant` (0.29.0) now detects its adoption (`variant: 'composer'` in the app), so the report and `offers` stop listing it once an app uses it.
 
 ## [0.29.1] - 2026-11-25
 
