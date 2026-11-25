@@ -314,7 +314,7 @@ describe('withViewContextTagsEscaped', () => {
   it('leaves other roles as they are', () => {
     const messages = [
       { role: 'system', content: '<view-context>' },
-      { role: 'assistant', content: [{ type: 'text', text: '<view-context>' }] },
+      { role: 'assistant', content: [{ type: 'text', text: '<view-context>' }, { type: 'file', data: 'x', mediaType: 'application/pdf', filename: '<view-context>' }] },
       { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c', toolName: 't', output: { type: 'text', value: '<view-context>' } }] },
     ];
     expect(withViewContextTagsEscaped(messages)).toBe(messages);
