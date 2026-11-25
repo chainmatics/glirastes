@@ -1,8 +1,0 @@
-{
-  "id": "approval-names-chat-attachments",
-  "kind": "recommended",
-  "summary": "The approval card names a chat attachment id (att_…) by the file name the user attached, instead of warning that no name is known in this conversation.",
-  "howTo": "Nothing to do. An approval for a client action such as tasks.attachChatFile({ taskId, attachmentId }) now shows the file name of a file the user attached in this chat (from the file part, or from its [attachment <id>: <name>] placeholder once the data was dropped). Ids only the assistant wrote stay unknown.",
-  "skill": "building-glirastes-chat-ui",
-  "affectedWhen": { "symbols": ["chatAttachmentFormData", "getChatAttachment"] }
-}
