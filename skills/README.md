@@ -62,7 +62,7 @@ not an unrelated registry package sharing its version number.
 ## Runtime and frontend choices in 0.14
 
 The released runtime image is public:
-`ghcr.io/chainmatics/glirastes-runtime:0.26.0` (Linux amd64). No registry account
+`ghcr.io/chainmatics/glirastes-runtime:0.27.0` (Linux amd64). No registry account
 is required; pin its approved digest and match artifact/browser SDK versions.
 Use these entry points when handing work to a coding agent:
 
