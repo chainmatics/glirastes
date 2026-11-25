@@ -165,37 +165,45 @@ export function splitEntityText(text: string, options: EntityTextSplitOptions = 
 }
 
 /**
- * `splitEntityText` for many texts with the same options: the names, their
- * order and the patterns are prepared once, on the first text.
+ * `splitEntityText` for many texts with the same options: the names and the
+ * matcher patterns are prepared once, on the first text. A name several known
+ * references share is decided on every text, as by `splitEntityText`
+ * (`resolveAmbiguous` is asked each time); the name pattern is compiled once
+ * per set of names that link.
  */
 export function createEntityTextSplitter(
   options: EntityTextSplitOptions,
   compile: CompileRegex = compileRegex,
 ): (text: string) => ChatEntityTextSegment[] {
-  let prepared: PreparedSplit | undefined;
+  let names: KnownNames | undefined;
   return (text) => {
-    prepared ??= prepareSplit(options, compile);
-    return splitPrepared(text, options, prepared);
+    names ??= knownNames(options, compile);
+    return splitPrepared(text, options, names.pick());
   };
 }
 
 interface PreparedSplit {
-  readonly byLabel: ReadonlyMap<string, ChatEntityReference>;
+  readonly byLabel: { get(label: string): ChatEntityReference | undefined };
   readonly patterns: ReadonlyArray<{ regex: RegExp; matcher?: number }>;
   readonly trailingLabel?: RegExp;
 }
 
-function prepareSplit(options: EntityTextSplitOptions, compile: CompileRegex): PreparedSplit {
+interface KnownNames {
+  /** The names that link for one text, with their patterns. */
+  pick(): PreparedSplit;
+}
+
+function knownNames(options: EntityTextSplitOptions, compile: CompileRegex): KnownNames {
   const minLength = options.minLabelLength ?? 4;
-  const byLabel = new Map<string, ChatEntityReference>();
   // Since 0.18.0 a name several records share stays text unless `ambiguousNames: 'first'` (the behaviour before).
   const decide = options.resolveAmbiguous !== undefined || options.ambiguousNames !== 'first';
+  const first = new Map<string, ChatEntityReference>();
   const candidates = new Map<string, ChatEntityReference[]>();
   for (const reference of options.known ?? []) {
     const label = reference.label.trim();
     if (label.length < minLength) continue;
     if (!decide) {
-      if (!byLabel.has(label)) byLabel.set(label, reference);
+      if (!first.has(label)) first.set(label, reference);
       continue;
     }
     const list = candidates.get(label) ?? [];
@@ -204,24 +212,52 @@ function prepareSplit(options: EntityTextSplitOptions, compile: CompileRegex): P
     if (!list.some(same)) list.push(reference);
     candidates.set(label, list);
   }
-  for (const [label, list] of candidates) {
-    if (list.length === 1) {
-      byLabel.set(label, list[0]!);
-      continue;
-    }
-    const picked = options.resolveAmbiguous?.(label, list);
-    if (picked) byLabel.set(label, picked);
-  }
-  const labels = [...byLabel.keys()].sort((a, b) => b.length - a.length).map(escapeRegex);
-  const patterns: Array<{ regex: RegExp; matcher?: number }> = (options.matchers ?? []).map((matcher, index) => ({
+  const matcherPatterns = (options.matchers ?? []).map((matcher, index) => ({
     regex: boundaryPattern(matcher.pattern.source, matcher.pattern.flags, compile),
     matcher: index,
   }));
-  if (labels.length > 0) patterns.push({ regex: boundaryPattern(labels.join('|'), '', compile) });
-  const trailingLabel = labels.length > 0
-    ? compile(`[ \\t]*(?:[:\u2013\u2014-][ \\t]*)?(?:${labels.join('|')})(?!${WORD})`, 'uy')
-    : undefined;
-  return { byLabel, patterns, ...(trailingLabel ? { trailingLabel } : {}) };
+  const withNames = (labels: ReadonlyArray<string>): Omit<PreparedSplit, 'byLabel'> => {
+    const sorted = [...labels].sort((a, b) => b.length - a.length).map(escapeRegex);
+    if (sorted.length === 0) return { patterns: matcherPatterns };
+    const alternatives = sorted.join('|');
+    return {
+      patterns: [...matcherPatterns, { regex: boundaryPattern(alternatives, '', compile) }],
+      trailingLabel: compile(`[ \\t]*(?:[:\u2013\u2014-][ \\t]*)?(?:${alternatives})(?!${WORD})`, 'uy'),
+    };
+  };
+  if (!decide) {
+    const fixed: PreparedSplit = { byLabel: first, ...withNames([...first.keys()]) };
+    return { pick: () => fixed };
+  }
+  const entries = [...candidates];
+  const ambiguous = entries.filter(([, list]) => list.length > 1);
+  const single = new Map(entries.filter(([, list]) => list.length === 1).map(([label, list]) => [label, list[0]!]));
+  if (ambiguous.length === 0 || !options.resolveAmbiguous) {
+    // Nobody to ask: a shared name stays text.
+    const fixed: PreparedSplit = { byLabel: single, ...withNames([...single.keys()]) };
+    return { pick: () => fixed };
+  }
+  const resolveAmbiguous = options.resolveAmbiguous;
+  // The patterns per set of picked names, keyed by which shared names link.
+  const bySet = new Map<string, Omit<PreparedSplit, 'byLabel'>>();
+  return {
+    pick() {
+      const picks = new Map<string, ChatEntityReference>();
+      let key = '';
+      for (const [label, list] of ambiguous) {
+        const picked = resolveAmbiguous(label, [...list]);
+        key += picked ? '1' : '0';
+        if (picked) picks.set(label, picked);
+      }
+      let patterns = bySet.get(key);
+      if (!patterns) {
+        patterns = withNames(entries.filter(([label, list]) => list.length === 1 || picks.has(label)).map(([label]) => label));
+        if (bySet.size >= 16) bySet.delete(bySet.keys().next().value!);
+        bySet.set(key, patterns);
+      }
+      return { byLabel: { get: (label) => single.get(label) ?? picks.get(label) }, ...patterns };
+    },
+  };
 }
 
 function splitPrepared(text: string, options: EntityTextSplitOptions, prepared: PreparedSplit): ChatEntityTextSegment[] {
@@ -501,11 +537,15 @@ function seenOfMessage(
  * `collectKnownEntities` and `collectSeenReferenceKeys` for a conversation
  * that changes one message at a time, as while an answer streams. What a
  * message contributes is kept per message object and read again only when
- * the message is a new object, its parts changed (by identity, or a part's
- * text, state, input or output replaced in place), the searches or
- * declarations changed, or a `read_result` it holds now reads another
- * producer. A result equal to the last one is returned as the same object.
- * The caches are weak: a message nobody holds any more is released.
+ * the message is a new object; its `parts` array, `role` or number of parts
+ * changed; a part is a new object or its `type`, `text`, `state`,
+ * `toolName`, `input`, `output` or `result` is a new value; the searches or
+ * declarations are new objects; or a `read_result` it holds now reads
+ * another producer. Not noticed: a change inside the same `input`, `output`
+ * or `result` object, or inside the same declarations object (the AI SDK
+ * replaces a changed message with a new copy). A result equal to the last
+ * one is returned as the same object. The caches are weak: a message nobody
+ * holds any more is released.
  */
 export interface ConversationEntityIndex {
   known(messages: ReadonlyArray<ConversationMessage>, searches: EntitySearches, declarations?: EntityDeclarationsByTool): ReadonlyArray<ChatEntityReference>;

@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -57,6 +58,19 @@ export interface ChatEntityLinks {
 }
 
 const ChatEntityLinksContext = createContext<ChatEntityLinks | null>(null);
+/** The provider's own links, not replaced by `WithoutEntityLinks`: what its `markdownComponents` link with. */
+const OwnLinksContext = createContext<ChatEntityLinks | null>(null);
+
+interface MatchCache {
+  readonly matchers: ReadonlyArray<unknown> | undefined;
+  readonly pending: Map<string, Promise<ChatEntityReference | undefined>>;
+  readonly settled: Map<string, ChatEntityReference | null>;
+}
+
+/** A matcher hit's cache key: the matcher and the text its `resolve` gets. */
+function matchKey(segment: { matcher: number; text: string; match?: string }): string {
+  return `${segment.matcher}\u0000${segment.match ?? segment.text}`;
+}
 
 const LINKIFIED_TAGS = ['p', 'li', 'td', 'th', 'strong', 'em', 'h1', 'h2', 'h3', 'h4'] as const;
 
@@ -69,13 +83,18 @@ const LINKS_OWNER = new WeakMap<ChatEntityLinks, object>();
 /**
  * `markdownComponents` of one provider: created once, so react-markdown keeps
  * the rendered blocks (and their chips) while the messages change. Each one
- * reads the provider's current links: from the context inside the provider
- * (it re-renders when they change), else the latest value the provider made.
+ * links with its provider's current links, as the components made per value
+ * did before: inside the provider from the context (also under
+ * `WithoutEntityLinks`; it re-renders when they change), outside it with the
+ * last value the provider committed.
  */
 function linkifiedComponents(latest: { current: ChatEntityLinks }): ChatEntityLinks['markdownComponents'] {
   return Object.fromEntries(LINKIFIED_TAGS.map((tag) => [tag, function Linkified({ node: _node, children, ...props }: Record<string, unknown>) {
     const current = useContext(ChatEntityLinksContext);
-    const links = current && LINKS_OWNER.get(current) === latest ? current : latest.current;
+    const own = useContext(OwnLinksContext);
+    const links = current && LINKS_OWNER.get(current) === latest ? current
+      : own && LINKS_OWNER.get(own) === latest ? own
+        : latest.current;
     return createElement(tag, props, linkifyChildren(children as ReactNode, links));
   }]));
 }
@@ -103,12 +122,9 @@ export function ChatEntityLinksProvider({
   configRef.current = config;
   const busRef = useRef(uiActionBus);
   busRef.current = uiActionBus;
-  const cache = useRef(new Map<string, Promise<ChatEntityReference | undefined>>());
-  const settled = useRef(new Map<string, ChatEntityReference | null>());
-  useEffect(() => {
-    cache.current = new Map();
-    settled.current = new Map();
-  }, [config?.matchers]);
+  // Matcher results, kept until the app passes other `matchers` (a new array). Decided in render, so a
+  // chip rendered with new matchers never reads a result of the old ones.
+  const matches = useRef<MatchCache>({ matchers: undefined, pending: new Map(), settled: new Map() });
 
   // Per message and weak: a streamed chunk reads the streaming message again, not the settled history.
   const [index] = useState(createConversationEntityIndex);
@@ -164,7 +180,11 @@ export function ChatEntityLinksProvider({
 
   const value = useMemo<ChatEntityLinks>(() => {
     const matchers = config?.matchers ?? [];
-    const keyOf = (segment: { matcher: number; text: string; match?: string }) => `${segment.matcher}\u0000${segment.match ?? segment.text}`;
+    if (matches.current.matchers !== config?.matchers) {
+      matches.current = { matchers: config?.matchers, pending: new Map(), settled: new Map() };
+    }
+    const { pending: cache, settled } = matches.current;
+    const keyOf = matchKey;
     // The names and patterns are prepared once per links value, on the first text; compiled patterns are cached.
     const split = config
       ? createEntityTextSplitter({
@@ -182,11 +202,11 @@ export function ChatEntityLinksProvider({
       canOpen,
       open,
       openLabel: (reference) => fillTemplate(locale.openEntityLabel, { label: reference.label }),
-      cachedMatch: (segment) => settled.current.get(keyOf(segment)),
+      cachedMatch: (segment) => settled.get(keyOf(segment)),
       resolveMatch(segment) {
         const key = keyOf(segment);
         const hit = segment.match ?? segment.text;
-        let pending = cache.current.get(key);
+        let pending = cache.get(key);
         if (!pending) {
           const matcher = matchers[segment.matcher];
           pending = Promise.resolve()
@@ -200,11 +220,11 @@ export function ChatEntityLinksProvider({
               }
               : undefined))
             .catch(() => {
-              cache.current.delete(key);
+              cache.delete(key);
               return undefined;
             });
-          pending.then((reference) => { settled.current.set(key, reference ?? null); });
-          cache.current.set(key, pending);
+          pending.then((reference) => { settled.set(key, reference ?? null); });
+          cache.set(key, pending);
         }
         return pending;
       },
@@ -221,9 +241,14 @@ export function ChatEntityLinksProvider({
     LINKS_OWNER.set(links, latest);
     return links;
   }, [config, known, seenKeys, canOpen, open, locale.openEntityLabel, compile, markdownComponents]);
-  latest.current = value;
+  // After the commit: a render React discards never becomes the value markdownComponents fall back to.
+  useLayoutEffect(() => { latest.current = value; }, [value]);
 
-  return <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>;
+  return (
+    <OwnLinksContext.Provider value={value}>
+      <ChatEntityLinksContext.Provider value={value}>{children}</ChatEntityLinksContext.Provider>
+    </OwnLinksContext.Provider>
+  );
 }
 
 const DISABLED_LINKS: ChatEntityLinks = {
@@ -282,15 +307,32 @@ export function EntityText({ text }: { text: string }) {
   return <EntityTextSegments segments={segments} />;
 }
 
+/**
+ * A matcher hit as a chip once its `resolve` allows it. It follows its hit:
+ * when a chunk changes the hit ("MAR-5" to "MAR-51") or the app passes other
+ * matchers, it shows the result for the hit it has now, read from the cache
+ * in the same render when known. While a new result for the same hit is on
+ * its way (other matchers) it keeps showing the last one.
+ */
 function MatchedEntityChip({ segment }: { segment: Extract<ChatEntityTextSegment, { kind: 'match' }> }) {
   const links = useChatEntityLinks();
-  const [reference, setReference] = useState<ChatEntityReference | null | undefined>(() => links.cachedMatch(segment));
+  const key = matchKey(segment);
+  const cached = links.cachedMatch(segment);
+  const shown = useRef<{ key: string; reference: ChatEntityReference | null } | undefined>(undefined);
+  const [, settle] = useState(0);
+  const reference = cached !== undefined ? cached : shown.current?.key === key ? shown.current.reference : undefined;
   useEffect(() => {
-    if (reference !== undefined) return;
+    if (reference !== undefined) shown.current = { key, reference };
+  });
+  useEffect(() => {
+    if (links.cachedMatch(segment) !== undefined) return;
     let live = true;
-    void links.resolveMatch(segment).then((found) => { if (live) setReference(found ?? null); });
+    // `resolveMatch` puts the result into the cache before this runs: the next render reads it there.
+    void links.resolveMatch(segment).then(() => { if (live) settle((count) => count + 1); });
     return () => { live = false; };
-  }, [links, segment, reference]);
+    // `segment` is a new object per render; `key` is what it stands for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [links, key]);
   if (!reference) return <>{segment.text}</>;
   return <EntityLinkChip reference={reference} text={segment.text} />;
 }

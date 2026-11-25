@@ -7,6 +7,7 @@ import {
   createConversationEntityIndex,
   createEntityTextSplitter,
   createRegexCache,
+  sameReferences,
   splitEntityText,
   type ChatEntityReference,
 } from '../entity-links.js';
@@ -285,4 +286,115 @@ describe('entity link index against the 0.29.0 collectors', () => {
       }
     }
   });
+
+  it('resolveAmbiguous is asked on every split, as in 0.29.0: a picker reading outside state switches with it', () => {
+    const known: ChatEntityReference[] = [
+      { type: 'playlist', id: '1', label: 'Lobby Loop' },
+      { type: 'playlist', id: '2', label: 'Lobby Loop' },
+      { type: 'channel', id: '3', label: 'Main Hall' },
+    ];
+    let choice = 0;
+    const calls = { released: 0, prepared: 0 };
+    const picker = (counter: 'released' | 'prepared') => (_label: string, candidates: ReadonlyArray<ChatEntityReference>) => {
+      calls[counter] += 1;
+      return candidates[choice];
+    };
+    const split = createEntityTextSplitter({ known, resolveAmbiguous: picker('prepared') }, createRegexCache());
+    const ids = (segments: ReturnType<typeof splitEntityText>) => segments.flatMap((segment) => (segment.kind === 'entity' ? [segment.reference.id] : []));
+    const text = 'Lobby Loop runs in Main Hall';
+    for (const next of [0, 1, 1, 0, 5]) {
+      choice = next;
+      const expected = released.splitEntityText(text, { known, resolveAmbiguous: picker('released') });
+      expect(split(text)).toEqual(expected);
+      expect(ids(split(text))).toEqual(ids(expected));
+      split(text);
+    }
+    expect(ids(released.splitEntityText(text, { known, resolveAmbiguous: () => known[1] }))).toEqual(['2', '3']);
+    // Once per split and ambiguous name, like 0.29.0 (three splits per round here, one there).
+    expect(calls.prepared).toBe(3 * calls.released);
+  });
+
+  it('the regex cache tells patterns apart by their flags', () => {
+    const compile = createRegexCache();
+    const plain = compile('lobby', 'gu');
+    const folded = compile('lobby', 'giu');
+    expect(plain.flags).toBe('gu');
+    expect(folded.flags).toBe('giu');
+    expect(compile('lobby', 'gu')).toBe(plain);
+  });
+
+  it('sameReferences compares data too', () => {
+    const base = { type: 'slot', id: 'a/b', label: 'Lobby' };
+    expect(sameReferences([{ ...base, data: { idValues: ['a', 'b'] } }], [{ ...base, data: { idValues: ['a', 'b'] } }])).toBe(true);
+    expect(sameReferences([{ ...base, data: { idValues: ['a', 'b'] } }], [{ ...base, data: { idValues: ['a', 'c'] } }])).toBe(false);
+    expect(sameReferences([base], [{ ...base, data: { floor: 2 } }])).toBe(false);
+    const when = new Date(0);
+    expect(sameReferences([{ ...base, data: { when } }], [{ ...base, data: { when: new Date(0) } }])).toBe(false);
+  });
 });
+
+/**
+ * A part changed in place on the same message object, with a new messages
+ * array: each field the cache's shape check reads, one at a time.
+ */
+describe('entity link index notices a part changed in place', () => {
+  const declarations: EntityDeclarationsByTool = {
+    channels_list: { output: [{ type: 'channel', id: 'key', name: 'title', path: 'channels[]' }] },
+    rooms_list: { output: [{ type: 'room', id: 'key', name: 'title', path: 'channels[]' }] },
+    report: { output: [{ type: 'task', id: 'id', name: 'title' }] },
+  };
+  const channels = { channels: [{ key: 'c1', title: 'Lobby screens' }] };
+
+  // One searches array for every call, as the provider passes it: a new one would read every message again.
+  const searches: Searches = [];
+
+  function check(messages: Message[], change: () => void) {
+    const index = createConversationEntityIndex();
+    const run = () => {
+      const current = [...messages];
+      expect(index.known(current, searches, declarations)).toEqual(released.collectKnownEntities(current, searches, declarations));
+      expect([...index.seen(current, searches, declarations)].sort())
+        .toEqual([...released.collectSeenReferenceKeys(current, searches, declarations)].sort());
+      return [released.collectKnownEntities(current, searches, declarations), [...released.collectSeenReferenceKeys(current, searches, declarations)]];
+    };
+    const before = JSON.stringify(run());
+    change();
+    const after = JSON.stringify(run());
+    // The change must matter, or the case proves nothing.
+    expect(after).not.toBe(before);
+  }
+
+  it('state', () => {
+    const part: Part = { type: 'tool-channels_list', toolCallId: 't', state: 'input-available', input: {}, output: channels };
+    check([{ id: 'a', role: 'assistant', parts: [part] }], () => { part.state = 'output-available'; });
+  });
+
+  it('input (a read_result reading another result)', () => {
+    const producer = (id: string, title: string): Part => ({
+      type: 'tool-report', toolCallId: id, state: 'output-available', input: {},
+      output: { _result: { id, arrays: { items: 1 } }, items: [{ id, title }] },
+    });
+    const read: Part = { type: 'tool-read_result', toolCallId: 'read', state: 'output-available', input: { resultId: 'r1' }, output: { items: [{ id: 'x', title: 'Read row' }] } };
+    const messages: Message[] = [
+      { id: 'p', role: 'assistant', parts: [producer('r1', 'One'), { ...producer('r2', 'Two'), type: 'tool-rooms_list' }] },
+      { id: 'a', role: 'assistant', parts: [read] },
+    ];
+    check(messages, () => { read.input = { resultId: 'r2' }; });
+  });
+
+  it('role', () => {
+    const message: Message = { id: 'm', role: 'assistant', parts: [{ type: 'text', text: 'See {{mention:channel:c9:Lobby}}' }] };
+    check([message], () => { message.role = 'user'; });
+  });
+
+  it('result (a part with toolName and result)', () => {
+    const part: Part = { type: 'tool-result', toolName: 'channels_list', result: { channels: [] } };
+    check([{ id: 'a', role: 'assistant', parts: [part] }], () => { part.result = channels; });
+  });
+
+  it('toolName', () => {
+    const part: Part = { type: 'tool-result', toolName: 'channels_list', result: channels };
+    check([{ id: 'a', role: 'assistant', parts: [part] }], () => { part.toolName = 'rooms_list'; });
+  });
+});
+
