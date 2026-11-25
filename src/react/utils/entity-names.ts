@@ -21,6 +21,7 @@ import {
   type EntityIdKind,
 } from '../../contracts/entity-declaration.js';
 import { parseMentionSegments } from './mention-markup.js';
+import { attachmentIdOf } from '../../contracts/attachments.js';
 
 export { entityIdKey, isUuidLike } from '../../contracts/entity-identity.js';
 
@@ -183,6 +184,9 @@ function resultToolOf(part: Record<string, unknown>, tools: ReadonlyMap<string, 
  *
  * Messages are read newest first, so the bounded walk keeps the recent ones.
  */
+/** `[attachment <id>: <name>]`, the text that stands in for a file part (`attachmentPlaceholderText`). */
+const ATTACHMENT_PLACEHOLDER = /\[attachment (att_[A-Za-z0-9_-]{16,64}): ([^\]\n]+)\]/g;
+
 export function collectEntitySightings(
   messages: ReadonlyArray<unknown>,
   declarations?: EntityDeclarationsByTool,
@@ -290,6 +294,13 @@ export function collectEntitySightings(
     }
   };
 
+  /** A file the user attached in this chat: its id is named by its file name. */
+  const nameAttachment = (id: unknown, filename: unknown) => {
+    if (typeof id !== 'string' || typeof filename !== 'string' || !filename.trim()) return;
+    add(id, filename, 'attachment');
+    addKind(id, declarations ? 'attachment' : kindOfField('attachment'), filename);
+  };
+
   for (let m = messages.length - 1; m >= 0; m -= 1) {
     const message = messages[m];
     if (!isRecord(message) || !Array.isArray(message.parts)) continue;
@@ -298,7 +309,10 @@ export function collectEntitySightings(
       if (!isRecord(part) || typeof part.type !== 'string') continue;
       if (part.type.startsWith('tool-') && part.state === 'output-available') {
         walk(part.output, 0, undefined, false, kindOfToolName(resultToolOf(part, tools)), declaredOf(part, tools, declarations, outputs));
+      } else if (message.role === 'user' && part.type === 'file') {
+        nameAttachment(attachmentIdOf(part), part.filename);
       } else if (message.role === 'user' && part.type === 'text' && typeof part.text === 'string') {
+        for (const match of part.text.matchAll(ATTACHMENT_PLACEHOLDER)) nameAttachment(match[1], match[2]);
         for (const segment of parseMentionSegments(part.text)) {
           if (segment.kind !== 'mention' || segment.mention.type === 'command') continue;
           add(segment.mention.id, segment.mention.displayName, segment.mention.type, true);
