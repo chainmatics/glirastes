@@ -23,12 +23,15 @@
  * strings. The PII shield replaces values before serializing, never in the
  * serialized line. The block has no nonce: nothing in it depends on a
  * secret, so guessing one gains nothing, and it stays byte-identical for the
- * same entries; a user can type a look-alike block in their own message,
- * which grants nothing either.
+ * same entries. Instead, `<view-context` in its ASCII spelling in the text
+ * of user messages is escaped for the model (`withViewContextTagsEscaped`),
+ * so the usual way of typing or pasting the tag does not read as the block;
+ * look-alike characters and the other gaps listed there are not caught, and
+ * the block grants nothing either way.
  *
  * @module
  */
-import { escapeJsonForBlock } from '../../../contracts/delimited-text.js';
+import { escapeJsonForBlock, escapeTagInText } from '../../../contracts/delimited-text.js';
 import { cleanDisplayText } from '../../../contracts/mention-marker.js';
 import {
   canonicalViewContextLabel,
@@ -160,6 +163,79 @@ export function withViewContextMessage<T>(messages: T[], text: string | undefine
   const last = messages.at(-1) as { role?: unknown } | undefined;
   if (last?.role !== 'user') return messages;
   return [...messages, { role: 'user', content: text } as T];
+}
+
+/** The tag name of the block, for `escapeTagInText`. */
+const VIEW_CONTEXT_TAG = 'view-context';
+
+/**
+ * Whether `text` names the tag at all. `escapeTagInText` only matches the
+ * name as one contiguous run (its `i` flag without `u`, the same as here), so
+ * text without it is never changed; skipping it also skips the escape's
+ * rule that a `<` before 64 or more whitespace or zero-width characters
+ * counts as a tag, and its scan of such runs.
+ */
+const NAMES_TAG = /view-context/i;
+
+/** `text` with `<view-context` escaped; the same string without the tag name. */
+function escapeUserText(text: string): string {
+  return NAMES_TAG.test(text) ? escapeTagInText(text, VIEW_CONTEXT_TAG) : text;
+}
+
+/**
+ * A text part with `<view-context` escaped in its text, a file part in its
+ * `filename` (providers may pass it to the model), or the part itself when
+ * nothing changed.
+ */
+function escapedPart(part: unknown): unknown {
+  if (!isRecord(part)) return part;
+  if (part.type === 'text' && typeof part.text === 'string') {
+    const text = escapeUserText(part.text);
+    return text === part.text ? part : { ...part, text };
+  }
+  if (part.type === 'file' && typeof part.filename === 'string') {
+    const filename = escapeUserText(part.filename);
+    return filename === part.filename ? part : { ...part, filename };
+  }
+  return part;
+}
+
+/**
+ * Model messages with every `<` that may open or close a `<view-context>`
+ * tag in the text of a user message escaped as `&lt;` (`escapeTagInText`:
+ * any case, whitespace, zero-width characters or a soft hyphen between `<`
+ * and the name or around the `/`, `<view-context-…>`; an `&lt;` already
+ * in front of the name becomes `&amp;lt;`), so the tag a user typed or
+ * pasted in its ASCII spelling does not read as the block the SDK renders.
+ * Not caught: full-width or look-alike characters, a line break or
+ * invisible character inside the name, entities such as `&#60;`, a tag
+ * split across parts or messages. Only user messages: string content,
+ * `text` parts and the `filename` of `file` parts; other roles and parts
+ * stay as they are. The model still
+ * reads the text. Messages without such a tag are returned as they are (the
+ * same objects, byte-identical); never mutates. Apply to the user's history
+ * only, never to messages the SDK writes (the seen-objects memo, see
+ * `prepareHistoryMessages`, the chat memory, this block, the budget
+ * continuation and the final summary instruction).
+ */
+export function withViewContextTagsEscaped<T>(messages: T[]): T[] {
+  let changed = false;
+  const result = messages.map((message) => {
+    if (!isRecord(message) || message.role !== 'user') return message;
+    const { content } = message;
+    if (typeof content === 'string') {
+      const text = escapeUserText(content);
+      if (text === content) return message;
+      changed = true;
+      return { ...message, content: text } as T;
+    }
+    if (!Array.isArray(content)) return message;
+    const parts = content.map(escapedPart);
+    if (parts.every((part, index) => part === content[index])) return message;
+    changed = true;
+    return { ...message, content: parts } as T;
+  });
+  return changed ? result : messages;
 }
 
 /** What a request's view context became: the block (when anything is left) and content-free drop counts. */

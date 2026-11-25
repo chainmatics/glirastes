@@ -1,0 +1,12 @@
+{
+  "id": "view-context-escape-user-text",
+  "kind": "optional",
+  "summary": "With viewContext on (the default), createAiChatHandler sends <view-context and </view-context in the text of user messages and their file names to the model as &lt;view-context (ASCII spelling and its listed variants). Text and file names without the name view-context are byte-identical.",
+  "howTo": "Nothing to do. Only the model input changes, and only for user text or a file name that contains the name view-context: there for every tag the pattern matches (any case, whitespace, zero-width characters or a soft hyphen between < and the name or around the /, <view-context-…>; a typed &lt; before the name becomes &amp;lt;; in such text also a < before 64 or more whitespace or zero-width characters). The file name of a file part is escaped the same way, in the part and in its placeholder text. The PII shield and the intent classification of the pipeline mode get the original text (no file names); the guardrails, a custom streamHandler, the chat and the stream get the original text and file names. Not caught: full-width or look-alike characters (＜, homoglyphs, other hyphens), a line break or invisible character inside the name, control and bidi characters between < and the name (such as U+0001, U+007F, U+0085, U+200E, U+202E, U+2066; issue #218), entities such as &#60;, a tag split across text parts or messages, the content of file attachments, tool call arguments of an approval continuation, the imitated header without tags, chat memory notes and summaries, tool results and assistant text. Messages the SDK writes itself (seen-objects memo, chat memory, view context block, budget continuation, final summary instruction) are never escaped. The block grants no permission either way: the server checks types, ids and facts on its own. With viewContext: false (and in the runtime container) nothing changes. Tests that assert the exact model input for user text containing <view-context need the escaped form.",
+  "skill": "integrating-glirastes-nextjs#history-and-answers",
+  "affectedWhen": {
+    "symbols": [
+      "createAiChatHandler"
+    ]
+  }
+}

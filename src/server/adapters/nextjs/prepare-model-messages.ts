@@ -198,6 +198,20 @@ export async function prepareModelMessages(
   uiMessages: UIMessage[],
   options?: PrepareModelMessagesOptions,
 ): Promise<unknown[]> {
+  return prepareHistoryMessages(uiMessages, options);
+}
+
+/**
+ * `prepareModelMessages` with `historyOnly` applied to the messages that
+ * come from `uiMessages` only, before the seen-objects memo (written by the
+ * SDK) is put ahead of them; the memo is built from the unchanged messages.
+ * Internal: not part of the public options.
+ */
+export async function prepareHistoryMessages(
+  uiMessages: UIMessage[],
+  options?: PrepareModelMessagesOptions,
+  historyOnly?: <T>(messages: T[]) => T[],
+): Promise<unknown[]> {
   const maxCtx = options?.maxContextMessages ?? 12;
 
   // A failed call keeps only the chat's text in the browser; the model gets an instruction instead.
@@ -238,7 +252,8 @@ export async function prepareModelMessages(
         options.entities, seenObjects, options.invalidToolInputTexts,
       )
     : undefined;
-  const result = seen ? [seen.message as (typeof stripped)[number], ...stripped] : stripped;
+  const fromHistory = historyOnly ? historyOnly(stripped) : stripped;
+  const result = seen ? [seen.message as (typeof stripped)[number], ...fromHistory] : fromHistory;
   if (options?.onBreakdown) {
     try {
       const unresolvedMentionMarkers = await unresolvedMarkerCount(raw as ModelMessageLike[], options.earlierMessages, options.entities);
