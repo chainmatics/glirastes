@@ -41,6 +41,7 @@ export function registerViewContext(source: string, entry: ViewContextEntry | nu
   if (typeof source !== 'string' || source === '') throw new TypeError('registerViewContext needs a non-empty source name');
   const state = viewContextState();
   state.snapshot = currentViewContext;
+  state.sanitize = sanitizeForSend;
   const map = state.entries;
   if (entry === null || entry === undefined) {
     map.delete(source);
@@ -120,6 +121,12 @@ function warnDropped(sources: ReadonlyArray<string>, copies: ReadonlyArray<unkno
       warn(source, together.length > 0 ? together : ['dropped']);
     }
   });
+}
+
+/** Cleans what the transport sends, whatever it got: a plain JSON copy, bounded by the contract; never warns. */
+function sanitizeForSend(value: unknown): ViewContextEntry[] {
+  const copy = plainCopy(value);
+  return Array.isArray(copy) ? sanitize(copy).entries : [];
 }
 
 /**

@@ -52,7 +52,7 @@ function queueId(): string {
 
 export function createQueuedMessage(
   text: string,
-  options: { mentions?: QueuedMessage['mentions']; files?: QueuedMessage['files'] },
+  options: { mentions?: QueuedMessage['mentions']; files?: QueuedMessage['files']; viewContext?: QueuedMessage['viewContext'] },
 ): QueuedMessage {
   return {
     id: queueId(),
@@ -60,6 +60,7 @@ export function createQueuedMessage(
     createdAt: new Date().toISOString(),
     ...(options.mentions && options.mentions.length > 0 ? { mentions: [...options.mentions] } : {}),
     ...(options.files && options.files.length > 0 ? { files: [...options.files] } : {}),
+    ...(options.viewContext && options.viewContext.length > 0 ? { viewContext: options.viewContext } : {}),
   };
 }
 
@@ -84,9 +85,19 @@ function readStoredItems(value: unknown): QueuedMessage[] {
   return items;
 }
 
-/** What `queue.storage` keeps: items with files cannot survive a reload. */
+/**
+ * What `queue.storage` keeps: items with files cannot survive a reload, and
+ * the view context of an item stays in memory (a restored message goes
+ * without one). An item without one is passed on as it is.
+ */
 function persistable(items: ReadonlyArray<QueuedMessage>): QueuedMessage[] {
-  return items.filter((item) => !item.files || item.files.length === 0);
+  return items
+    .filter((item) => !item.files || item.files.length === 0)
+    .map((item) => {
+      if (!('viewContext' in item)) return item;
+      const { viewContext: _inMemoryOnly, ...kept } = item;
+      return kept;
+    });
 }
 
 export interface MessageQueueStore {

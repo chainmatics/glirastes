@@ -4,6 +4,7 @@ import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEv
 import type { UiActionBus } from '../browser/ui-action-bus.js';
 import type { UiActionRunCode } from '../browser/client-actions.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
+import type { ViewContextEntry } from '../contracts/view-context.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
 import type { ChatInteractionsConfig, ChatMentionContext, PendingChatCommand } from './interactions/registry.js';
 import type { AttachmentBlobStore } from './utils/attachment-blob-store.js';
@@ -73,8 +74,17 @@ export interface ChatTransport {
   status: 'ready' | 'submitted' | 'streaming' | 'error';
   /** Current error, if any */
   error: Error | null;
-  /** Send a user message; `files` only with a transport that supports attachments. */
-  sendMessage(opts: { text: string; files?: FilePart[] }): Promise<void>;
+  /**
+   * Send a user message; `files` only with a transport that supports
+   * attachments. `viewContext`: the cleaned view context frozen when the
+   * user submitted this message (`AiChatProvider` sets it only when a page
+   * registered one; never empty; read only, deeply frozen). The bundled
+   * transport cleans it again and sends it as
+   * `glirastesViewContext: { version: 1, current: viewContext }`; a
+   * transport of your own puts it into its request body the same way, or
+   * ignores it. A wrapper passes the object on as it came.
+   */
+  sendMessage(opts: { text: string; files?: FilePart[]; viewContext?: ReadonlyArray<ViewContextEntry> }): Promise<void>;
   /** Stop the current generation */
   stop(): void;
   /** Replace the message list (for session restore, sanitization) */
@@ -1686,6 +1696,14 @@ export interface QueuedMessage {
   readonly mentions?: ReadonlyArray<MentionData>;
   /** Attachments queued with it; never persisted through `queue.storage`. */
   readonly files?: ReadonlyArray<FilePart>;
+  /**
+   * The view context registered when it was queued (cleaned copy, only when
+   * one was registered): sent with it, also after an edit. Read only (deeply
+   * frozen: changing it throws). In memory only:
+   * never persisted through `queue.storage`, so a restored message goes
+   * without one.
+   */
+  readonly viewContext?: ReadonlyArray<ViewContextEntry>;
 }
 
 /** Run endings that pause the queue (`queue.pauseOn`). `truncation`: the run left a continue prompt. */

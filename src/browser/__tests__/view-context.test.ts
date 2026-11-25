@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VIEW_CONTEXT_LIMITS, ViewContextSchema, type ViewContextEntry } from '../../contracts/view-context.js';
 import { currentViewContext, registerViewContext } from '../index.js';
-import { viewContextRequestBody, viewContextState, VIEW_CONTEXT_REQUEST_FIELD } from '../view-context-store.js';
+import { viewContextRequestBody, viewContextSnapshot, viewContextState, VIEW_CONTEXT_REQUEST_FIELD } from '../view-context-store.js';
 import { VIEW_CONTEXT_FIELD, VIEW_CONTEXT_WIRE_VERSION } from '../../server/adapters/nextjs/view-context-block.js';
 
 const cleanups: Array<() => void> = [];
@@ -22,7 +22,7 @@ function register(source: string, entry: ViewContextEntry | null) {
 describe('registerViewContext', () => {
   it('is empty until an app registers something', () => {
     expect(currentViewContext()).toEqual([]);
-    expect(viewContextRequestBody()).toBeUndefined();
+    expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
   });
 
   it('registers, updates in place and unregisters per source', () => {
@@ -141,7 +141,7 @@ describe('the request body field', () => {
     const saved = scope[key];
     delete scope[key];
     try {
-      expect(viewContextRequestBody()).toBeUndefined();
+      expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
       expect(key in scope).toBe(false);
     } finally {
       if (saved !== undefined) scope[key] = saved;
@@ -154,9 +154,9 @@ describe('the request body field', () => {
     state.snapshot = undefined;
     state.entries.set('raw', { token: {}, entry: order('o-1') });
     try {
-      expect(viewContextRequestBody()).toBeUndefined();
+      expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
       state.snapshot = () => { throw new Error('boom'); };
-      expect(viewContextRequestBody()).toBeUndefined();
+      expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
     } finally {
       state.entries.delete('raw');
       state.snapshot = saved;
@@ -166,19 +166,109 @@ describe('the request body field', () => {
   it('is the field and version the server reads, with the current snapshot', () => {
     expect(VIEW_CONTEXT_REQUEST_FIELD).toBe(VIEW_CONTEXT_FIELD);
     register('page', order('o-1'));
-    expect(viewContextRequestBody()).toEqual({
+    expect(viewContextRequestBody(viewContextSnapshot())).toEqual({
       [VIEW_CONTEXT_FIELD]: { version: VIEW_CONTEXT_WIRE_VERSION, current: [order('o-1')] },
     });
   });
 
   it('sends no field when every registered entry is dropped', () => {
     register('bad', { label: 'nothing' } as unknown as ViewContextEntry);
-    expect(viewContextRequestBody()).toBeUndefined();
+    expect(viewContextRequestBody(viewContextSnapshot())).toBeUndefined();
+  });
+
+  it('builds the body only from the view context the message carries, never from the registry', () => {
+    register('page', order('o-1'));
+    expect(viewContextRequestBody(undefined)).toBeUndefined();
+    expect(viewContextRequestBody([])).toBeUndefined();
+    expect(viewContextRequestBody([order('o-9')])).toEqual({
+      [VIEW_CONTEXT_REQUEST_FIELD]: { version: 1, current: [order('o-9')] },
+    });
+  });
+
+  it('a frozen snapshot is an own copy: a later change of the registered entry does not reach it', () => {
+    const entry = order('o-1');
+    register('page', entry);
+    const frozen = viewContextSnapshot()!;
+    (entry.entity as { id: string }).id = 'o-2';
+    register('page', order('o-3'));
+    expect(frozen).toEqual([order('o-1')]);
+    expect(viewContextSnapshot()).toEqual([order('o-3')]);
+  });
+
+  it('a frozen snapshot is read only (deeply frozen); currentViewContext() still returns a plain copy', () => {
+    register('page', { ...order('o-1'), selection: { type: 'order', ids: ['a'] }, facts: { n: { deep: 1 } } } as ViewContextEntry);
+    const frozen = viewContextSnapshot()!;
+    expect(Object.isFrozen(frozen)).toBe(true);
+    expect(Object.isFrozen(frozen[0])).toBe(true);
+    expect(Object.isFrozen(frozen[0]!.entity)).toBe(true);
+    expect(Object.isFrozen(frozen[0]!.selection!.ids)).toBe(true);
+    expect(() => { (frozen as ViewContextEntry[]).push(order('x')); }).toThrow(TypeError);
+    expect(Object.isFrozen(currentViewContext())).toBe(false);
+  });
+
+  it('cleans what it sends right before sending: a changed or forged view context is cleaned or dropped', () => {
+    register('page', order('o-1'));
+    const forged = [
+      order('o-1'),
+      { entity: { type: 'order', id: 'X' }, label: 'L'.repeat(500), evil: true },
+      { label: 'no entity' },
+      { entity: { type: 'order', id: 'bad id with /?#' }, route: 'https://evil.example/x' },
+    ] as unknown as ViewContextEntry[];
+    const body = viewContextRequestBody(forged)![VIEW_CONTEXT_REQUEST_FIELD] as { current: ViewContextEntry[] };
+    expect(body.current[0]).toEqual(order('o-1'));
+    expect(body.current[1]!.label).toHaveLength(60);
+    expect(body.current[1]).not.toHaveProperty('evil');
+    expect(JSON.stringify(body.current)).not.toContain('no entity');
+    expect(JSON.stringify(body.current)).not.toContain('evil.example');
+    expect(viewContextRequestBody([{ label: 'only junk' } as unknown as ViewContextEntry])).toBeUndefined();
+    expect(viewContextRequestBody('not an array' as unknown as ViewContextEntry[])).toBeUndefined();
+  });
+
+  it('cleans the JSON form that goes on the wire: an entry with toJSON is cleaned as it serializes', () => {
+    register('page', order('o-1'));
+    const withJson = (json: unknown) => [{ ...order('o-1'), toJSON: () => json }] as unknown as ViewContextEntry[];
+    const sent = (value: ViewContextEntry[]) =>
+      (viewContextRequestBody(value)?.[VIEW_CONTEXT_REQUEST_FIELD] as { current: ViewContextEntry[] } | undefined)?.current;
+    expect(sent(withJson(order('o-2')))).toEqual([order('o-2')]);
+    expect(sent(withJson({ label: 'no entity' }))).toBeUndefined();
+    const cyclic: Record<string, unknown> = { ...order('o-1') };
+    cyclic.self = cyclic;
+    expect(sent([cyclic as unknown as ViewContextEntry])).toBeUndefined();
+  });
+
+  it('cleaning is idempotent: a cleaned snapshot is sent byte-identically', () => {
+    register('page', { ...order('o-1'), label: `${'Ä'.repeat(70)}`, facts: { a: 1 } } as ViewContextEntry);
+    register('lines', { selection: { type: 'line', ids: Array.from({ length: 70 }, (_, i) => `l-${i}`) } });
+    const frozen = viewContextSnapshot()!;
+    const body = viewContextRequestBody(frozen)![VIEW_CONTEXT_REQUEST_FIELD] as { current: ViewContextEntry[] };
+    expect(JSON.stringify(body.current)).toBe(JSON.stringify(frozen));
+  });
+
+  it('fails closed without the cleaner (nothing ever registered) or when it throws', () => {
+    const key = Symbol.for('glirastes.viewContext');
+    const scope = globalThis as Record<symbol, unknown>;
+    const saved = scope[key];
+    delete scope[key];
+    try {
+      expect(viewContextRequestBody([order('o-1')])).toBeUndefined();
+      expect(key in scope).toBe(false);
+    } finally {
+      if (saved !== undefined) scope[key] = saved;
+    }
+    register('page', order('o-1'));
+    const state = viewContextState();
+    const cleaner = state.sanitize;
+    state.sanitize = () => { throw new Error('boom'); };
+    try {
+      expect(viewContextRequestBody([order('o-1')])).toBeUndefined();
+    } finally {
+      state.sanitize = cleaner;
+    }
   });
 
   it('never carries byMessage (reserved)', () => {
     register('page', order('o-1'));
-    expect(viewContextRequestBody()![VIEW_CONTEXT_REQUEST_FIELD]).not.toHaveProperty('byMessage');
+    expect(viewContextRequestBody(viewContextSnapshot())![VIEW_CONTEXT_REQUEST_FIELD]).not.toHaveProperty('byMessage');
   });
 });
 

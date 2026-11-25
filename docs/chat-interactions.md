@@ -279,7 +279,8 @@ selection of records (`selection: { type, ids }`), or both in one entry
 (an order with its selected lines), plus optionally `label`, `facts`,
 `unsaved` (its own field: the user has unsaved changes in this view) and
 `route`. The registry keeps a reference to
-the entry; it is read and copied when a message is sent. `useViewContext`
+the entry; it is read and copied when the user sends a message (see
+[when it is frozen](#when-the-view-context-is-frozen)). `useViewContext`
 re-registers only when the content changes (it compares the entry as JSON on
 every render, so keep `facts` small) and withdraws on unmount (StrictMode
 included); `null` withdraws, on the server it does nothing. The hook
@@ -325,38 +326,117 @@ registry on the page if there is none yet). The authority stays the server
 (`createAiChatHandler` option `viewContext`, on by default; see the
 [handler options](../skills/integrating-glirastes-nextjs/references/handler-options.md)).
 
-When it is sent: the bundled transport (`VercelAiChat`,
-`useVercelAiChatTransport`, `<glirastes-chat>`) adds
-`glirastesViewContext: { version: 1, current }` to the body of every new
-user message, read at that moment: a typed or queued message, a starter or
-follow-up, the "continue" message after a cut-off answer, the answer to a
-clarification and a direct `/` command (the server adds no block for the
-last two). A request without a new user message that starts after the
+### When the view context is frozen
+
+A message carries the view context of the moment the user sends it: when
+it is sent at once or put into the queue, `AiChatProvider` takes a cleaned
+copy (the same cleaning as `currentViewContext()`, but without creating the
+registry) and the message keeps it until it goes out,
+wherever the user or the model navigates meanwhile. "Delete this" means what
+was open when the user sent it, also when the model opened another page
+before the message left the queue.
+
+| Send path | Frozen when |
+| --- | --- |
+| Typed message, `send`/`submit`/`submitWithResult`, `<glirastes-chat>` `send()` | the user sends it (sent at once or queued) |
+| Queued message (`queue`) | it is queued; it goes out with that copy, also with `sendNow` |
+| Edited queued message (`editQueued`) | still when it was queued: an edit keeps the copy |
+| Starter, follow-up chip (`selectSuggestion`), clarification chip or answer | the click or send (they go through `send`) |
+| Direct `/` command | the user sends it (sent at once or queued) |
+| Command form (`submitPendingCommand`), also of a queued command that opens one | the form is submitted |
+| Entity action (`runEntityAction`) | the click; with a form, when the form is submitted |
+| "Continue" after a cut-off answer (`continueTruncation`) | the click |
+
+An app needs no code for this: every send path of `AiChatProvider` above
+freezes it, also for an own composer that calls `send`, `submit` or
+`submitWithResult`. Only a request without a new user message (approval
+resume, `continueTurn`, `continueAfterBudgetStop`) carries none.
+
+Two consequences, both on purpose:
+
+- **An edit keeps the view context of the moment the message was queued.**
+  The user wrote it about that view. To send it about the view open now,
+  remove the queued message and send it again.
+- **A queued message restored after a reload goes without view context.**
+  The copy is kept in memory only, like the files of a queued message, and
+  never passed to `queue.storage`; after a reload the view it was written to
+  is gone, and the view open then is not the one it was written to.
+
+The copy is read only: `QueuedMessage.viewContext` (in `queue.items` and
+`onQueueChange`) and the `viewContext` a transport gets are deeply frozen,
+so changing them throws. The bundled transport cleans the view context
+again right before it sends it, with the same contract (a cleaned copy
+stays byte-identical; anything changed or forged is cleaned or dropped,
+and as long as nothing was ever registered on the page nothing is sent;
+any `registerViewContext` call, also with `null`, installs the cleaner, and
+it stays after unregistering, so a frozen copy still goes out). The cleaner
+is installed by the copy of the package that registers, from the release
+after 0.27.0 on: when an older copy (0.27.0, without the binding) registers and a newer
+`AiChatProvider` or transport sends, nothing is sent (fail closed). Use one
+version of the package on a page.
+
+The bundled transport (`VercelAiChat`, `useVercelAiChatTransport`,
+`<glirastes-chat>`) sends the copy of a new user message as
+`glirastesViewContext: { version: 1, current }` in the request body, and
+only that copy: it does not read the registry itself, so a message sent
+with nothing registered goes without the field even if a view registered
+before it left the queue, and a message sent with a view goes with it even
+if that view unregistered since. A request without a new user message that starts after the
 stream ended (approval resume, `continueTurn` after a UI action, "Continue"
 after a budget stop) carries none. An automatic continuation the AI SDK
 starts from the running request (an approval answered or a UI outcome
 written while the answer still streams) can repeat the field of the first
 send, also an entry unregistered since; the server ignores the field for
 every continuation (no block, the model input as without it), and it goes
-only to the chat route. Nothing registered (or nothing left after cleaning), no field: the
+only to the chat route. Nothing registered when the user sent it (or nothing left after cleaning), no field: the
 request is exactly as before. When it is sent, the field replaces a
 `glirastesViewContext` the app puts into `bodyExtras`.
+
+A transport of your own (`ChatTransport`) gets the copy in the message:
+`sendMessage({ text, files?, viewContext? })`, with `viewContext` only when
+one was frozen (never empty), so with nothing registered the argument is
+exactly `{ text }` or `{ text, files }` as before. Put it into your request
+body, or ignore it:
+
+```ts
+const transport: ChatTransport = {
+  // …
+  sendMessage: async ({ text, files, viewContext }) => {
+    await post('/api/chat', {
+      text,
+      files,
+      ...(viewContext ? { glirastesViewContext: { version: 1, current: viewContext } } : {}),
+    });
+  },
+};
+```
+
+A wrapper passes the message on as it came (`sendMessage: (message) =>
+inner.sendMessage(message)`); one that builds a new object (`{ text:
+message.text }`) drops the view context. Calling `useVercelAiChatTransport`'s
+`sendMessage` directly, without `AiChatProvider`, sends a view context only
+when you pass one (`viewContext: currentViewContext()`, the view open at
+that call); a `viewContext` built by hand is not sent while nothing was ever
+registered on the page. In 0.27.0 an own transport read `currentViewContext()` when
+it sent; take the `viewContext` of the message instead, or it sends the view
+of the send time again. An own transport sends what it is given; the server
+checks it again either way.
 
 Turning it off: register nothing, or pass `null` (`useViewContext(null)`,
 `registerViewContext(source, null)`), and nothing is sent; or set
 `viewContext: false` on the server (`createAiChatHandler`), which then
 ignores the field. There is no switch per chat instance: two chats on one
 page share the registry, so only their server endpoints can turn it off
-separately. An own transport sends nothing unless it adds the field itself
-from `currentViewContext()`. The transport reaches the cleaning code only
-through `registerViewContext`: an app that never registers anything does
-not load it and gets no global state from a send.
+separately. An own transport sends nothing unless it puts the `viewContext`
+of the message into its body (see above). The chat reaches the cleaning
+code only through `registerViewContext`: an app that never registers
+anything does not load it and gets no global state from a send.
 
 Limits of this release:
 
-- A queued message (`queue`) carries the view context of the moment it is
-  sent, not of the moment it was queued. Binding the view context to a
-  message (queue, history) follows.
+- Only the message being sent carries its view context; earlier messages
+  of the history do not keep theirs (`byMessage` stays reserved and is not
+  sent).
 - The view context goes only to the app's chat route: never to the
   Platform, telemetry, logs or storage, and it is not stored with the chat.
 - A record of the view context does not yet count as seen for

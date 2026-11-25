@@ -190,17 +190,22 @@ describe('view context from a page to the model', () => {
     expect(publicUseViewContext).toBe(useViewContext);
   });
 
-  it('a custom transport is called exactly as on main: one argument, no view context', async () => {
-    const sendMessage = vi.fn(async () => {});
+  it('a custom transport is called exactly as on main without a registration, and gets the frozen view context with one', async () => {
+    const sendMessage = vi.fn(async (_message: unknown) => {});
     const transport: ChatTransport = {
       messages: [], status: 'ready', error: null, sendMessage, stop: vi.fn(), setMessages: vi.fn(),
       addToolApprovalResponse: vi.fn(async () => {}),
     };
-    render(<AiChatProvider transport={transport}><Send /><Page entry={orderView} /></AiChatProvider>);
+    const view = render(<AiChatProvider transport={transport}><Send /></AiChatProvider>);
     await act(async () => { await send('Hi'); });
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
-    expect(sendMessage).toHaveBeenCalledWith({ text: 'Hi' });
-    expect((sendMessage.mock.calls[0] as unknown[]).length).toBe(1);
+    expect(sendMessage.mock.calls[0]).toEqual([{ text: 'Hi' }]);
+    expect(Object.keys(sendMessage.mock.calls[0]![0] as object)).toEqual(['text']);
+    view.rerender(<AiChatProvider transport={transport}><Send /><Page entry={orderView} /></AiChatProvider>);
+    await act(async () => { await send('Hi'); });
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    // Still one argument: the view context travels in the message object.
+    expect(sendMessage.mock.calls[1]).toEqual([{ text: 'Hi', viewContext: [orderView] }]);
   });
 
   function AutoSend() {
@@ -276,7 +281,7 @@ describe('continuations without a new user message', () => {
       { type: 'finish-step' }, { type: 'finish' },
     ]];
     render(<Probe />);
-    await act(async () => { await transport.sendMessage({ text: 'Open it' }); });
+    await act(async () => { await transport.sendMessage({ text: 'Open it', viewContext: currentViewContext() }); });
     expect(bodies[0]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
     await waitFor(() => expect((transport.messages.at(-1) as ChatMessage | undefined)?.role).toBe('assistant'));
     await act(async () => { await transport.addToolApprovalResponse({ id: 'ap-1', approved: true }); });
@@ -288,9 +293,9 @@ describe('continuations without a new user message', () => {
     expect(bodies[2]).not.toHaveProperty('glirastesViewContext');
     expect(bodies[3]).toMatchObject({ glirastesContinuation: 'budget' });
     expect(bodies[3]).not.toHaveProperty('glirastesViewContext');
-    // A new user message sends it again, as it is at send time.
+    // A new user message sends it again, with what was frozen for it (`AiChatProvider` freezes it at the user's send).
     act(() => { registerViewContext('other', { entity: { type: 'order', id: 'ord-2' } }); });
-    await act(async () => { await transport.sendMessage({ text: 'And this?' }); });
+    await act(async () => { await transport.sendMessage({ text: 'And this?', viewContext: currentViewContext() }); });
     expect(bodies[4]!.glirastesViewContext).toEqual({ version: 1, current: [orderView, { entity: { type: 'order', id: 'ord-2' } }] });
     registerViewContext('other', null);
   });
@@ -315,7 +320,7 @@ describe('continuations without a new user message', () => {
     const off = registerViewContext('page', orderView);
     render(<Bare />);
     let first!: Promise<void>;
-    act(() => { first = transportOnly.sendMessage({ text: 'Open it' }); });
+    act(() => { first = transportOnly.sendMessage({ text: 'Open it', viewContext: currentViewContext() }); });
     await waitFor(() => expect(controller).toBeDefined());
     for (const chunk of [{ type: 'start' }, { type: 'start-step' },
       { type: 'tool-input-available', toolCallId: 'c1', toolName: 'orders_get', input: { orderId: 'ord-1' } },
@@ -362,7 +367,7 @@ describe('continuations without a new user message', () => {
   it('is sent with a message that has files too', async () => {
     render(<Probe />);
     const file = { type: 'file' as const, mediaType: 'text/plain', url: 'data:text/plain;base64,aGk=', filename: 'a.txt' };
-    await act(async () => { await transport.sendMessage({ text: 'Look', files: [file] }); });
+    await act(async () => { await transport.sendMessage({ text: 'Look', files: [file], viewContext: currentViewContext() }); });
     expect(bodies[0]!.glirastesViewContext).toEqual({ version: 1, current: [orderView] });
   });
 });

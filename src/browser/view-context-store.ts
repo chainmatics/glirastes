@@ -21,6 +21,12 @@ export interface ViewContextState {
   readonly entries: Map<string, ViewContextRegistration>;
   /** The cleaned snapshot, set by `registerViewContext`; without it nothing is sent. */
   snapshot?: () => ViewContextEntry[];
+  /**
+   * Cleans any value with the contract (a plain JSON copy, bounded), set by
+   * `registerViewContext`; the transport runs it on what it sends. Without it
+   * nothing is sent.
+   */
+  sanitize?: (value: unknown) => ViewContextEntry[];
 }
 
 const STATE = Symbol.for('glirastes.viewContext');
@@ -44,14 +50,13 @@ export function viewContextState(): ViewContextState {
 export const VIEW_CONTEXT_REQUEST_FIELD = 'glirastesViewContext';
 
 /**
- * The body fields of a new user message: `glirastesViewContext` with the
- * cleaned snapshot, or undefined when nothing is registered (the request
- * body then stays exactly as without the feature) or no cleaning snapshot
- * is there (fail closed: nothing uncleaned is sent). `byMessage` is reserved
- * and never sent. @internal
+ * The view context to freeze with a message the user submits: an own cleaned
+ * copy, or undefined when nothing is registered, nothing is left after
+ * cleaning, or no cleaning snapshot is there (fail closed: nothing uncleaned
+ * is sent). Read only: a page that never registers anything gets no global
+ * state from it. @internal
  */
-export function viewContextRequestBody(): Record<string, unknown> | undefined {
-  // Read only: a page that never registers anything gets no global state from a send.
+export function viewContextSnapshot(): ViewContextEntry[] | undefined {
   const state = peekViewContextState();
   if (!state || state.entries.size === 0 || typeof state.snapshot !== 'function') return undefined;
   let current: ViewContextEntry[];
@@ -60,7 +65,41 @@ export function viewContextRequestBody(): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
-  return Array.isArray(current) && current.length > 0
-    ? { [VIEW_CONTEXT_REQUEST_FIELD]: { version: 1, current } }
+  return Array.isArray(current) && current.length > 0 ? deepFreeze(current) : undefined;
+}
+
+/** Freezes a plain JSON value in place, all the way down: a frozen view context is read only. */
+function deepFreeze<T>(value: T): T {
+  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * The body fields of a new user message for the view context it carries:
+ * `glirastesViewContext: { version: 1, current }`, cleaned again right before
+ * sending (whatever the caller passed: a changed copy is cleaned or dropped;
+ * a cleaned one stays byte-identical), or undefined without one (the request
+ * body then stays exactly as without the feature). Never reads the registry:
+ * a message carries what was frozen when the user submitted it. Fails
+ * closed: without the cleaner (nothing ever registered on the page), when it
+ * throws or leaves nothing, no field. `byMessage` is reserved and never
+ * sent. @internal
+ */
+export function viewContextRequestBody(current: ReadonlyArray<ViewContextEntry> | undefined): Record<string, unknown> | undefined {
+  if (!Array.isArray(current) || current.length === 0) return undefined;
+  // Read only: a page that never registers anything gets no global state from a send.
+  const clean = peekViewContextState()?.sanitize;
+  if (typeof clean !== 'function') return undefined;
+  let cleaned: ViewContextEntry[];
+  try {
+    cleaned = clean(current);
+  } catch {
+    return undefined;
+  }
+  return Array.isArray(cleaned) && cleaned.length > 0
+    ? { [VIEW_CONTEXT_REQUEST_FIELD]: { version: 1, current: cleaned } }
     : undefined;
 }

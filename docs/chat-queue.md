@@ -86,6 +86,7 @@ not paused (except for the one `sendNow` message).
 | A queued message with files when attachments were turned off meanwhile | Not sent; the queue pauses and keeps it. |
 | `clear()` or `clearQueue()` while the stored queue still loads | The late load is dropped and an empty queue is saved. |
 | An emptied queue | No longer paused. |
+| A view context registered when the message was queued (`useViewContext`, `registerViewContext`) | Sent with it, whatever is registered when it goes out; an edit keeps it; nothing registered when queued, none sent. Remove and send again for the view open now. Exception: a queued `/` command that opens its form takes the view context of the moment the form is submitted. See `docs/chat-interactions.md`, View context. |
 | A message open in an editor (`beginEdit`) | The queue holds when it reaches it: neither it nor a later message is sent until `editQueued` (saves and ends the edit), `cancelEdit` or removing it. Messages before it still go. `sendNow` refuses it while open. |
 | `queue.storage` still reading the conversation's queue (`queue.restoring`) | Nothing is sent; a message sent meanwhile is queued behind the stored ones. |
 | Conversation left before its stored queue was read | What was queued meanwhile is added to that conversation's stored queue (read, appended, saved); it comes back, paused, on return. |
@@ -230,6 +231,11 @@ const queueStorage: ChatQueueStorage = {
   A conversation is read again only after its pending write landed.
 - Messages with files are never saved (file data and object URLs do not
   survive a reload) and are skipped when loaded.
+- The view context of a queued message (`QueuedMessage.viewContext`) stays
+  in memory: `save` gets the item without it, a `viewContext` field that
+  `load` returns is dropped, and a restored message goes without one.
+  `onQueueChange` and `queue.items` show it; an app that keeps those itself
+  leaves it out the same way.
 - A restored queue starts paused (`'restored'`): nothing is sent after a
   reload until the user resumes or sends one with `sendNow`.
 - Switching conversations keeps the stored queue of the one left;
