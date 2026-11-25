@@ -238,10 +238,134 @@ that keep this state themselves. Types the chat does not know are ignored;
 without any of them the order is the declared one. The value is read when a
 search runs and never sent anywhere.
 
-This is the one host indication for `@`. The planned view context
-(`ViewContextEntry`, `useViewContext`) will feed it from the entity and
+This is the one host indication for `@`. The [view context](#view-context)
+does not feed it yet; a later release will feed it from the entity and
 selection types of the registered view, and an explicit `useMentionContext`
 keeps winning; there will be no second channel.
+
+## View context
+
+What the user has open (an order, the selected rows of a list) goes with
+each new message to the app's chat route, so the model knows what "this"
+means. The app declares it; nothing is read from the page or the URL.
+
+```tsx
+import { useViewContext } from 'glirastes/react';
+
+function OrderPage({ order }) {
+  useViewContext({ entity: { type: 'order', id: order.id }, label: order.number, route: `/orders/${order.id}` });
+  …
+}
+```
+
+Outside React (Vue, Angular, plain JS, next to `<glirastes-chat>`):
+
+```ts
+import { registerViewContext } from 'glirastes/browser';
+
+const unregister = registerViewContext('order-page', { entity: { type: 'order', id: '42' } });
+// on leaving the page: unregister(), or registerViewContext('order-page', null)
+```
+
+The source name shows in development console warnings: name the view
+(`'order-page'`), never put a record id or personal data in it.
+
+One entry per source (`useViewContext` takes one per component, with a
+source name of its own, also across several React roots); an update keeps
+its place, sources are sent in the order they first registered, and a
+source withdrawn with `null` comes last when it registers again. A
+`ViewContextEntry` (`glirastes/contracts`) names a record (`entity`), a
+selection of records (`selection: { type, ids }`), or both in one entry
+(an order with its selected lines), plus optionally `label`, `facts`,
+`unsaved` (its own field: the user has unsaved changes in this view) and
+`route`. The registry keeps a reference to
+the entry; it is read and copied when a message is sent. `useViewContext`
+re-registers only when the content changes (it compares the entry as JSON on
+every render, so keep `facts` small) and withdraws on unmount (StrictMode
+included); `null` withdraws, on the server it does nothing. The hook
+registers a new entry after its commit, so an update and a send in the same
+event handler (`setSelected(b); send()`) still send the previous entry; call
+`registerViewContext` before sending, or send after the commit.
+
+Order and the limit of 8: React runs the effects of children before those
+of their parents, so a page registers before the layout around it. Past 8
+entries the first 8 are sent and the rest is dropped without notice in
+production, so the entry of a layout or parent page can go. Register a few
+meaningful entries (one per view, a selection instead of one entry per
+row); a parent that must always count registers with `registerViewContext`
+before its children mount. In development (`NODE_ENV=development`) the
+console names each source whose entry is not sent as registered, once per
+source and reason (`over-limit`, `invalid-entity`, `not-serializable`,
+`facts-too-large` and the like), never a value.
+
+Rules (the server checks all of them again and drops what fails; it grants
+no permission):
+
+- The type must be declared on the server: an entity type of the request's
+  tools (`outputEntities` / `inputEntities`). A selection of a type the
+  server does not declare is dropped; its entry stays when it has an entity.
+- Ids exactly as the app has them, never reformatted (2 to 4 parts for a
+  composite key); a selection keeps at most 50 ids, and at most 100 are
+  looked at.
+- `facts` are kept only for a type with a schema in the handler's
+  `viewContext.facts`; without one the server drops them.
+- `route` only as an explicit decoded path (`/orders/42`): no query, hash,
+  `%` escapes or host. It is a hint only; state the page keeps in the URL
+  query (a filter, a tab) belongs in `facts`, with a schema on the server.
+- At most 8 entries and labels of at most 60 characters. Keep personal data
+  out of long labels: with `piiShield` the server cuts a label to 60
+  characters before the shield sees it, so a value at the cut (an e-mail
+  address, IBAN or phone number) may not be recognised (known limit,
+  changelog 0.25.0). The browser cuts the same way; that does not change it.
+
+The browser cleans and bounds each snapshot with the contract
+(`sanitizeViewContext`, `VIEW_CONTEXT_LIMITS`); `currentViewContext()`
+(`glirastes/browser`) returns it (unlike sending, a call creates the shared
+registry on the page if there is none yet). The authority stays the server
+(`createAiChatHandler` option `viewContext`, on by default; see the
+[handler options](../skills/integrating-glirastes-nextjs/references/handler-options.md)).
+
+When it is sent: the bundled transport (`VercelAiChat`,
+`useVercelAiChatTransport`, `<glirastes-chat>`) adds
+`glirastesViewContext: { version: 1, current }` to the body of every new
+user message, read at that moment: a typed or queued message, a starter or
+follow-up, the "continue" message after a cut-off answer, the answer to a
+clarification and a direct `/` command (the server adds no block for the
+last two). A request without a new user message that starts after the
+stream ended (approval resume, `continueTurn` after a UI action, "Continue"
+after a budget stop) carries none. An automatic continuation the AI SDK
+starts from the running request (an approval answered or a UI outcome
+written while the answer still streams) can repeat the field of the first
+send, also an entry unregistered since; the server ignores the field for
+every continuation (no block, the model input as without it), and it goes
+only to the chat route. Nothing registered (or nothing left after cleaning), no field: the
+request is exactly as before. When it is sent, the field replaces a
+`glirastesViewContext` the app puts into `bodyExtras`.
+
+Turning it off: register nothing, or pass `null` (`useViewContext(null)`,
+`registerViewContext(source, null)`), and nothing is sent; or set
+`viewContext: false` on the server (`createAiChatHandler`), which then
+ignores the field. There is no switch per chat instance: two chats on one
+page share the registry, so only their server endpoints can turn it off
+separately. An own transport sends nothing unless it adds the field itself
+from `currentViewContext()`. The transport reaches the cleaning code only
+through `registerViewContext`: an app that never registers anything does
+not load it and gets no global state from a send.
+
+Limits of this release:
+
+- A queued message (`queue`) carries the view context of the moment it is
+  sent, not of the moment it was queued. Binding the view context to a
+  message (queue, history) follows.
+- The view context goes only to the app's chat route: never to the
+  Platform, telemetry, logs or storage, and it is not stored with the chat.
+- A record of the view context does not yet count as seen for
+  `entityLinks.verifyMentions`.
+- The runtime container (`glirastes-runtime`) turns the server side off until
+  its option `chat.viewContext` comes; a browser that sends the field
+  changes nothing there.
+- A chat on a route of its own has no page that registers anything, so it
+  sends none.
 
 ## Type filter
 
