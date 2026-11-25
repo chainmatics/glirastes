@@ -158,8 +158,8 @@ Off by default; `queue={{ enabled: true }}` on the provider (`config.queue` on
   and sent once idle, FIFO, one run at a time; commands, mentions and
   `onBeforeSend` apply when it is sent. Never sent as a clarification answer
   by itself; never decides an approval.
-- `ChatQueueConfig`: `autoFlush` (true), `sendNowBehavior` (`'next'` /
-  `'abort'`), `maxSize` (10; `null`/`Infinity` lifts it), `pauseOn`
+- `ChatQueueConfig`: `autoFlush` (true), `sendNowBehavior` (`'abort'`, the
+  default, sends at once / `'next'`), `maxSize` (10; `null`/`Infinity` lifts it), `pauseOn`
   (`ChatQueuePauseTrigger[]`, default `error`, `aborted`, `safety-stop`,
   `truncation`), `sendNowDuringApproval` (`'refuse'` / `'reject-approval'`),
   `storage` (`ChatQueueStorage` `{ load, save }`; file items are never saved;
