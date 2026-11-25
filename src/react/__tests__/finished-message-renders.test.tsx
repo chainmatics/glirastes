@@ -707,3 +707,58 @@ describe('derived config passed inline by an app that renders on every chunk', (
     expect(document.querySelector('[data-mention-type="channel"] [data-element="prefix"]')?.textContent).toBe('#');
   });
 });
+
+describe('config changed in place inside a new object', () => {
+  it.each([
+    ['inline', 'inline' as const],
+    ['in the panel', 'panel' as const],
+  ])('a toolLabels entry renamed in place and passed in a new object applies everywhere, card %s', async (_, open) => {
+    const entry = { singular: 'Archive', plural: 'Archive' };
+    const config = (extra: Partial<AiChatProviderConfig> = {}): Partial<AiChatProviderConfig> => ({
+      ...baseConfig(), approvalDisplay: { decided: 'entry', open }, toolLabels: { labels: { channel_archive: entry } }, ...extra,
+    });
+    const { chat, view } = await mount(config());
+    const finished = () => document.querySelectorAll('[data-component="message-bubble"]')[1]!.textContent ?? '';
+    const renamed = (text: string) => text.includes('Archivieren') && !text.includes('Archive');
+    expect(finished()).toContain('Archive');
+    entry.singular = 'Archivieren';
+    entry.plural = 'Archivieren';
+    view.rerender(<Host chat={chat} config={config()} />);
+    expect(renamed(finished())).toBe(true);
+    await startAnswer(chat);
+    await act(async () => { chat.finish([{ type: 'text', text: streamingText(1) }]); });
+    await settle();
+    expect(renamed(finished())).toBe(true);
+    view.rerender(<Host chat={chat} config={config({ locale: { copyMessageLabel: 'Kopieren' } })} />);
+    expect(renamed(finished())).toBe(true);
+    await act(async () => { void chat.sendMessage({ text: 'ref-archive it' }); });
+    await act(async () => {
+      chat.stream([
+        { type: 'tool-channel_archive', toolCallId: 'na', state: 'approval-requested', input: { key: 'c1_4' }, approval: { id: 'ap-new' } },
+      ]);
+    });
+    await settle();
+    const card = document.querySelector('[data-component="approval-card"]');
+    expect(card).not.toBeNull();
+    expect(renamed(card!.textContent ?? '')).toBe(true);
+    const latest = [...document.querySelectorAll('[data-component="message-bubble"]')].at(-1)!;
+    expect(renamed(latest.querySelector('[data-component="activity-log"]')?.textContent ?? '')).toBe(true);
+    expect(ctx.pendingApprovals.map((approval) => approval.toolName)).toEqual(['channel_archive']);
+    expect(renamed(finished())).toBe(true);
+  });
+});
+
+describe('pipeline step reports while an answer streams', () => {
+  it('5 text chunks and 5 step reports: no render and no Markdown parse of a finished message', async () => {
+    const { chat } = await mount(baseConfig());
+    await startAnswer(chat);
+    reset();
+    for (let chunk = 1; chunk <= 5; chunk += 1) {
+      await act(async () => { chat.stream([{ type: 'text', text: streamingText(chunk) }]); });
+      await act(async () => { chat.emit({ type: 'data-step-report', data: { stepNumber: chunk - 1, toolCalls: [], finishReason: 'tool-calls' } }); });
+    }
+    expect(ctx.pipelineSteps.length).toBe(5);
+    expect(byId(bubbleRenders, finishedIds())).toEqual({});
+    expect(byId(parses, finishedIds())).toEqual({});
+  });
+});

@@ -84,12 +84,52 @@ describe('the view of each message (MessageList)', () => {
 
   it.each([
     'classNames', 'components', 'locale', 'language', 'toolResults', 'toolRendererRegistry', 'toolLabels', 'activityLog',
-    'approve', 'reject', 'approvalDescription', 'approvalSubjects', 'approvalDisplay', 'entityDeclarations', 'mentionPrefix',
-    'composer', 'messageFooter', 'stop', 'continueAfterBudgetStop', 'turnWorkedMs',
+    'approvalDescription', 'approvalSubjects', 'approvalDisplay', 'entityDeclarations', 'mentionPrefix',
+    'composer', 'messageFooter',
   ] as const)('a new %s: every message', (field) => {
     const messages = base();
     const value = typeof chatWith(messages)[field] === 'function' ? () => {} : { changed: true };
     expect(changed(chatWith(messages), chatWith(messages, { [field]: value } as Partial<Chat>))).toEqual(['q1', 'r1', 'q2', 'r2']);
+  });
+
+  it.each(['approve', 'reject', 'stop', 'continueAfterBudgetStop', 'turnWorkedMs'] as const)(
+    'a new %s (only called, never shown): no message',
+    (field) => {
+      const messages = base();
+      const before = chatWith(messages, { [field]: () => {} } as Partial<Chat>);
+      expect(changed(before, chatWith(messages, { [field]: () => {} } as Partial<Chat>))).toEqual([]);
+    },
+  );
+
+  it('"Continue" offered or not (continueAfterBudgetStop there or not): every message', () => {
+    const messages = base();
+    expect(changed(chatWith(messages, { continueAfterBudgetStop: undefined }), chatWith(messages, { continueAfterBudgetStop: () => {} }))).toHaveLength(4);
+    expect(changed(chatWith(messages, { continueAfterBudgetStop: () => {} }), chatWith(messages, { continueAfterBudgetStop: undefined }))).toHaveLength(4);
+  });
+
+  it.each([
+    'classNames', 'locale', 'toolResults', 'toolLabels', 'activityLog', 'approvalDisplay', 'entityDeclarations', 'composer', 'messageFooter',
+  ] as const)('%s: a nested object changed in place and passed in a new object renders every message', (field) => {
+    const messages = base();
+    const nested: { value: string; list: string[] } = { value: 'a', list: ['x'] };
+    const chats = createMessageChats();
+    const first = viewsOf(chats, chatWith(messages, { [field]: { nested } } as unknown as Partial<Chat>));
+    nested.value = 'b';
+    const second = viewsOf(chats, chatWith(messages, { [field]: { nested } } as unknown as Partial<Chat>));
+    expect(second.every((view, index) => view !== first[index])).toBe(true);
+    nested.list.push('y');
+    const third = viewsOf(chats, chatWith(messages, { [field]: { nested } } as unknown as Partial<Chat>));
+    expect(third.every((view, index) => view !== second[index])).toBe(true);
+    // Unchanged again: equal by value to what was taken over.
+    const fourth = viewsOf(chats, chatWith(messages, { [field]: { nested: { value: 'b', list: ['x', 'y'] } } } as unknown as Partial<Chat>));
+    expect(fourth.every((view, index) => view === third[index])).toBe(true);
+  });
+
+  it('React elements count by identity (development and production alike)', () => {
+    const messages = base();
+    const element = (key: string) => ({ $$typeof: Symbol.for('react.transitional.element'), type: 'b', key, props: {}, _owner: null });
+    const before = chatWith(messages, { composer: { icon: element('k') } as unknown as Chat['composer'] });
+    expect(changed(before, chatWith(messages, { composer: { icon: element('k') } as unknown as Chat['composer'] }))).toHaveLength(4);
   });
 
   it('config as plain data compares by value (an inline object on every render), functions by identity', () => {
