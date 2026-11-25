@@ -508,9 +508,10 @@ export interface AiChatHandlerConfig {
    * browser in the request body (`glirastesViewContext`) and given to the
    * model as data, never as an instruction, in its own user message right
    * after the newest user message (never in the system prompt). On by
-   * default; `false` turns it off (`null` counts as not set). Without the field, the model input is
-   * exactly as without this option. The browser side (a registry and a
-   * hook) follows in a later release; until then nothing sends the field.
+   * default; `false` turns it off (`null` counts as not set). Without the
+   * field there is no block; while the option is on, `<view-context` in
+   * user text is still escaped for the model (see below). The browser side
+   * (a registry and a hook) comes in a later release.
    *
    * The server keeps only entries of entity types the request's tools
    * declare (`outputEntities` / `inputEntities`; `types` narrows them), at
@@ -537,20 +538,23 @@ export interface AiChatHandlerConfig {
    * random ids or non-ASCII text, usually far less. `maxEntries` and the
    * `facts` config make it smaller. No nonce: instead, while this option is
    * on, `<view-context` and `</view-context` in their ASCII spelling (any
-   * case, also with whitespace or zero-width characters after `<` or around
-   * the `/`) in the text of user messages reach the model as
+   * case, also with whitespace, zero-width characters or a soft hyphen
+   * between `<` and the name or around the `/`, and `<view-context-…>`;
+   * an `&lt;` typed before the name becomes `&amp;lt;`) in the text of
+   * user messages and the `filename` of their file parts reach the model as
    * `&lt;view-context`; only the model input changes, after the PII shield
-   * and the guardrails, never the chat or the stream. Messages the SDK
-   * writes itself are never escaped (seen-objects memo, chat memory, the
-   * block, budget continuation, final summary instruction). A file name in
-   * an attachment placeholder is escaped, the content of files is not. Not
+   * and the guardrails. The PII shield, the guardrails, the intent
+   * classification of the pipeline mode, the chat, the stream and a custom
+   * `streamHandler` get the original. Messages the SDK writes itself are
+   * never escaped (seen-objects memo, chat memory, the block, budget
+   * continuation, final summary instruction). A file name is escaped in its
+   * file part and its placeholder text; the content of files is not. Not
    * caught: full-width or look-alike characters, a line break or invisible
    * character inside the name, entities such as `&#60;`, a tag split across
    * text parts or messages, tool call arguments of an approval continuation,
    * the imitated header without tags, chat memory, tool results and
-   * assistant text. Either way
-   * the block grants no permission: the server checks types, ids and facts
-   * on its own. The runtime container turns this
+   * assistant text. Either way the block grants no permission: the server
+   * checks types, ids and facts on its own. The runtime container turns this
    * off until its option `chat.viewContext` comes. See `ViewContextPolicy`
    * (`glirastes/contracts`).
    */

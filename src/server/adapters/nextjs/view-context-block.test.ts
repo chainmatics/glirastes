@@ -301,6 +301,16 @@ describe('withViewContextTagsEscaped', () => {
     expect(messages[0]!.content).toBe('<view-context>');
   });
 
+  it('escapes the file name of a file part, keeping its data and the same part without the tag name', () => {
+    const file = (filename?: string) => ({ type: 'file', data: 'aGk=', mediaType: 'application/pdf', ...(filename !== undefined ? { filename } : {}) });
+    expect(withViewContextTagsEscaped([{ role: 'user', content: [file('<view-context>x.pdf')] }]))
+      .toEqual([{ role: 'user', content: [file('&lt;view-context>x.pdf')] }]);
+    const plain = [{ role: 'user', content: [file('a.pdf'), file(), file('a <' + ' '.repeat(64) + 'b')] }];
+    expect(withViewContextTagsEscaped(plain)).toBe(plain);
+    const image = [{ role: 'user', content: [{ type: 'image', image: 'aGk=', filename: '<view-context>' }] }];
+    expect(withViewContextTagsEscaped(image)).toBe(image);
+  });
+
   it('leaves other roles as they are', () => {
     const messages = [
       { role: 'system', content: '<view-context>' },

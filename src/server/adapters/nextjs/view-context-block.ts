@@ -182,11 +182,22 @@ function escapeUserText(text: string): string {
   return NAMES_TAG.test(text) ? escapeTagInText(text, VIEW_CONTEXT_TAG) : text;
 }
 
-/** A text part with `<view-context` escaped, or the part itself when nothing changed. */
+/**
+ * A text part with `<view-context` escaped in its text, a file part in its
+ * `filename` (providers may pass it to the model), or the part itself when
+ * nothing changed.
+ */
 function escapedPart(part: unknown): unknown {
-  if (!isRecord(part) || part.type !== 'text' || typeof part.text !== 'string') return part;
-  const text = escapeUserText(part.text);
-  return text === part.text ? part : { ...part, text };
+  if (!isRecord(part)) return part;
+  if (part.type === 'text' && typeof part.text === 'string') {
+    const text = escapeUserText(part.text);
+    return text === part.text ? part : { ...part, text };
+  }
+  if (part.type === 'file' && typeof part.filename === 'string') {
+    const filename = escapeUserText(part.filename);
+    return filename === part.filename ? part : { ...part, filename };
+  }
+  return part;
 }
 
 /**
@@ -198,8 +209,9 @@ function escapedPart(part: unknown): unknown {
  * pasted in its ASCII spelling does not read as the block the SDK renders.
  * Not caught: full-width or look-alike characters, a line break or
  * invisible character inside the name, entities such as `&#60;`, a tag
- * split across parts or messages. Only user messages: string content and
- * `text` parts; other roles and parts stay as they are. The model still
+ * split across parts or messages. Only user messages: string content,
+ * `text` parts and the `filename` of `file` parts; other roles and parts
+ * stay as they are. The model still
  * reads the text. Messages without such a tag are returned as they are (the
  * same objects, byte-identical); never mutates. Apply to the user's history
  * only, never to messages the SDK writes (the seen-objects memo, see

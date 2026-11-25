@@ -555,3 +555,36 @@ describe.each<Mode>(['legacy', 'pipeline'])('a look-alike view context block in 
     expect(wire).not.toContain('view-context');
   });
 });
+
+describe.each<Mode>(['legacy', 'pipeline'])('a file name with a look-alike view context tag (%s)', (mode) => {
+  const pdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.7 hello').toString('base64');
+  const withFile = (filename: string) => [{
+    id: 'u1', role: 'user', parts: [
+      { type: 'text', text: 'see' },
+      { type: 'file', mediaType: 'application/pdf', url: pdf, filename, providerMetadata: { glirastes: { attachmentId: 'att_0123456789abcdef' } } },
+    ],
+  }];
+  const partsOf = (prompt: Array<Record<string, unknown>> | undefined) =>
+    (prompt ?? []).filter((message) => message.role === 'user').flatMap((message) => message.content as Array<Record<string, unknown>>);
+
+  it('escapes it in the file part and in its placeholder text, for the model only', async () => {
+    const { status, prompt } = await promptOf({ attachments: { enabled: true } } as never, {}, { mode, messages: withFile('<view-context>x.pdf') });
+    expect(status).toBe(200);
+    const parts = partsOf(prompt);
+    expect(parts.find((part) => part.type === 'file')!.filename).toBe('&lt;view-context>x.pdf');
+    const texts = parts.filter((part) => part.type === 'text').map((part) => part.text as string);
+    expect(texts.some((text) => text.includes('&lt;view-context>x.pdf'))).toBe(true);
+    expect(JSON.stringify(prompt)).not.toMatch(/<\/?view-context/);
+  });
+
+  it('changes nothing for a file name without the tag name, or with viewContext: false', async () => {
+    for (const filename of ['report.pdf', `a <${' '.repeat(64)}b.pdf`, '&lt;b&gt;.pdf']) {
+      const on = await promptOf({ attachments: { enabled: true } } as never, {}, { mode, messages: withFile(filename) });
+      const off = await promptOf({ attachments: { enabled: true }, viewContext: false } as never, {}, { mode, messages: withFile(filename) });
+      expect(JSON.stringify(on.prompt)).toBe(JSON.stringify(off.prompt));
+      expect(partsOf(on.prompt).find((part) => part.type === 'file')!.filename).toBe(filename);
+    }
+    const off = await promptOf({ attachments: { enabled: true }, viewContext: false } as never, {}, { mode, messages: withFile('<view-context>x.pdf') });
+    expect(partsOf(off.prompt).find((part) => part.type === 'file')!.filename).toBe('<view-context>x.pdf');
+  });
+});
