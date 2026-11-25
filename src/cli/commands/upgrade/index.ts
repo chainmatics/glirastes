@@ -11,3 +11,4 @@ export {
   type UpgradeReport,
   type UpgradeReportOptions,
 } from './report.js';
+export { createOffersList, formatOffersList, type OfferItem, type OffersList, type OffersOptions } from './offers.js';

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `glirastes upgrade offers [--since <version>] [--json] [--root <dir>]`: every optional feature up to the installed SDK that the app does not use yet, newest first, also those an earlier `upgrade ack` took out of the report. Stateless and read-only: nothing is stored at `ack`, detection (`adoptedWhen`) decides, so `.glirastes/sdk-baseline.json` is unchanged and needs no merge; a note without `adoptedWhen` stays listed, marked `use not detectable`, a deferred one `deferred`. `upgrade ack` now says how many optional items leave the report and points to `offers`. Skill `upgrading-glirastes` step 10.
+
+### Fixed
+
+- Upgrade note `voice-composer-variant` (0.29.0) now detects its adoption (`variant: 'composer'` in the app), so the report and `offers` stop listing it once an app uses it.
+
 ## [0.29.0] - 2026-11-25
 
 ### Added

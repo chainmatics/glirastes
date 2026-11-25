@@ -166,7 +166,7 @@ export const CLI_USAGE =
   + '       glirastes build [--root] [--app-id] [--output]\n'
   + '       glirastes tools <refresh|check|status|resolve|describe|eval|policy|verify|enrich> [options]\n'
   + '         derive chat tools from the code, check them, show them and print agent work lists\n'
-  + '       glirastes upgrade <report|ack> [options]\n'
+  + '       glirastes upgrade <report|ack|offers> [options]\n'
   + '         see what changed in the SDK since this app was last reviewed, acknowledge the review\n'
   + '       glirastes stt pull [--dir <path>] [--mirror <url>] [--json]\n'
   + '         download the sha256-pinned local speech models for glirastes/server/stt-local\n'
