@@ -24,8 +24,6 @@ const MESSAGE_CHAT_KEYS = [
   'toolRendererRegistry',
   'toolLabels',
   'activityLog',
-  'approve',
-  'reject',
   'approvalDescription',
   'approvalSubjects',
   'approvalDisplay',
@@ -33,11 +31,15 @@ const MESSAGE_CHAT_KEYS = [
   'mentionPrefix',
   'composer',
   'messageFooter',
+  // Below: not compared as they are. Called only (stable functions that call the current one; whether
+  // `continueAfterBudgetStop` is there is compared), or changing while a turn runs: `MessageList` tracks what
+  // a message reads of them.
+  'suggestions',
+  'approve',
+  'reject',
   'stop',
   'continueAfterBudgetStop',
   'turnWorkedMs',
-  // Below: change while a turn runs. Not compared as they are; `MessageList` tracks what a message reads of them.
-  'suggestions',
   'messages',
   'isLoading',
   'isTurnRunning',
@@ -126,7 +128,11 @@ export function createMessageChats() {
   return function messageChats(chat: FullChat, messages: ReadonlyArray<ChatMessage>): (message: ChatMessage, index: number) => MessageChat {
     live.current = chat;
     const nextStatic: unknown[] = STATIC_KEYS.map((key) => chat[key]);
-    nextStatic.push(chat.suggestions?.placement, chat.suggestions?.count, chat.suggestions?.enabled);
+    nextStatic.push(
+      chat.suggestions?.placement, chat.suggestions?.count, chat.suggestions?.enabled,
+      // The "Continue" button shows only while the chat can continue.
+      chat.continueAfterBudgetStop !== undefined,
+    );
     // Compared by value where they are plain data: an app that renders on every chunk with an inline
     // `locale={{ … }}` or `entityDeclarations={{ … }}` does not render every message again.
     // Compared with a copy of what was taken over: an entry the app changes in place and passes in a new
