@@ -1,5 +1,6 @@
 import {
   AppSetupArtifactSchema,
+  type EffectiveEnvironmentControl,
   type Principal,
   type SecurityRevocation,
 } from '../contracts/index.js';
@@ -156,6 +157,12 @@ export interface Glirastes {
   accepted(): MaterializedDeploymentRevisions | undefined;
   /** The signed revocations the sync accepted, checked before every tool call. */
   revocations(): SecurityRevocation[];
+  /**
+   * The environment control in force: the last accepted signed control, or a
+   * local halt (`control_unverifiable`) after one failed verification.
+   * Undefined in Standalone and until a Platform delivered one.
+   */
+  control(): EffectiveEnvironmentControl | undefined;
   /** Waits for `ready()`, then returns what `createAiChatHandler` needs for one turn. */
   chatTurn(principal: GlirastesPrincipalFactory): Promise<GlirastesChatTurn>;
   /** Stops the sync, flushes the metrics and forgets this instance. */
@@ -187,6 +194,11 @@ class AcceptedStateStore implements RuntimeStateStore {
 
   revocations(): SecurityRevocation[] {
     return this.state?.revocations ?? [];
+  }
+
+  control(): EffectiveEnvironmentControl | undefined {
+    const control = this.state?.control;
+    return control?.localHalt ?? control?.accepted ?? undefined;
   }
 }
 
@@ -547,6 +559,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     },
     accepted: () => store.accepted(),
     revocations: () => store.revocations(),
+    control: () => store.control(),
     async chatTurn(principal) {
       await instance.ready();
       const source = instance.currentSource();

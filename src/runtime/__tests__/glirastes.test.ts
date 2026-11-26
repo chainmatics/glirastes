@@ -15,6 +15,7 @@ import type {
 import { endpointToolToTool } from '../../server/core/index.js';
 import { canonicalRuntimeJson } from '../../sync/signature-verifier.js';
 import { RuntimeControlPlaneRequestError } from '../../sync/control-plane-client.js';
+import { RuntimeEnvironmentControlError } from '../../sync/sync-manager.js';
 import type {
   GeneratedEndpointToolBinding,
   GeneratedToolBinding,
@@ -143,6 +144,7 @@ function platform(options: {
   lookup?: Array<() => Response>;
   deployments?: RuntimeDeploymentBundle[];
   publicKey?: KeyObject;
+  control?: unknown;
 } = {}) {
   const lookups = [...options.lookup ?? []];
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -166,6 +168,7 @@ function platform(options: {
         activeSnapshotComplete: true,
         deployments: options.deployments ?? [],
         revocations: [],
+        ...('control' in options ? { control: options.control } : {}),
       });
     }
     if (url.includes('/metrics/events')) return new Response(null, { status: 202 });
@@ -356,6 +359,59 @@ describe('createGlirastes connected', () => {
 
     const register = http.calls.find(({ url }) => url.endsWith('/register'));
     expect(JSON.parse(String(register?.init.body)).version).toBe(expected);
+  });
+
+  it('exposes no environment control in Standalone or from a Platform without it', async () => {
+    const standalone = track(createGlirastes({ generated: generated(), localLimits: limits, env: {} }));
+    await standalone.ready();
+    expect(standalone.control()).toBeUndefined();
+    await standalone.stop();
+
+    const http = platform();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+    await glirastes.ready();
+    expect(glirastes.control()).toBeUndefined();
+    const sync = http.calls.find(({ url }) => url.includes('/sync?'));
+    expect(new URL(sync!.url).searchParams.get('controlVersion')).toBe('1');
+    const register = http.calls.find(({ url }) => url.endsWith('/register'));
+    expect(JSON.parse(String(register?.init.body)).capabilities).toMatchObject({ environmentControl: 1 });
+  });
+
+  it('exposes the accepted environment control, or a local halt when it cannot be verified', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const unsigned = {
+      schemaVersion: 1 as const, tenantId: TENANT_ID, targetAppId: APP_ID, environmentId: ENVIRONMENT_ID,
+      sequence: 1, assistant: 'halted' as const, reasonCode: 'operator-halt',
+      issuedAt: '2026-11-26T09:00:00.000Z',
+    };
+    const control = {
+      ...unsigned,
+      signature: {
+        algorithm: 'Ed25519' as const, keyId: 'runtime-key',
+        value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url'),
+      },
+    };
+    const accepted = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, push: false, pollIntervalMs: 60_000,
+      fetchImpl: platform({ publicKey, control }).fetchImpl, onError: vi.fn(),
+    }));
+    await accepted.ready();
+    expect(accepted.control()).toEqual(control);
+    await accepted.stop();
+
+    const onError = vi.fn();
+    const forged = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, push: false, pollIntervalMs: 60_000,
+      fetchImpl: platform({ publicKey, control: { ...control, assistant: 'enabled' } }).fetchImpl, onError,
+    }));
+    await forged.ready();
+    expect(forged.control()).toMatchObject({
+      kind: 'local', assistant: 'halted', reasonCode: 'control_unverifiable', sequence: 0,
+    });
+    expect(onError).toHaveBeenCalledWith(expect.any(RuntimeEnvironmentControlError));
   });
 
   it('carries the platform environment before a deployment is accepted', async () => {
