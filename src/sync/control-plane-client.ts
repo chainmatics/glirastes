@@ -7,7 +7,8 @@ import {
   DISCOVERY_DIGEST_PATTERN,
   POLICY_RELAXATIONS_VERSION,
 } from './capability-report.js';
-import type { RuntimeSyncManager } from './sync-manager.js';
+import type { RuntimeControlState } from './state-store.js';
+import type { RuntimeSyncApplyResult, RuntimeSyncManager } from './sync-manager.js';
 
 const SETUP_RUN_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -20,6 +21,21 @@ export interface RuntimePushConnector {
     /** Called once the stream is open, before any event. */
     onOpen?: () => void | Promise<void>;
   }): Promise<void>;
+}
+
+const CONTROL_HEARTBEAT_INTERVAL_MS = 60_000;
+
+/** Content-free status of the environment control a runner applies. */
+interface ControlHeartbeatStatus {
+  controlSequence: number;
+  assistantState: 'enabled' | 'halted';
+}
+
+function controlStatusOf(control: RuntimeControlState | undefined): ControlHeartbeatStatus {
+  return {
+    controlSequence: control?.accepted?.sequence ?? 0,
+    assistantState: control?.localHalt || control?.accepted?.assistant === 'halted' ? 'halted' : 'enabled',
+  };
 }
 
 const PUSH_RECONNECT_BASE_MS = 1_000;
@@ -56,6 +72,8 @@ export class RuntimeControlPlaneRequestError extends Error {
 
 export class RuntimeControlPlaneClient {
   private abortController: AbortController | null = null;
+  private controlStatus: (ControlHeartbeatStatus & { localHalt: boolean }) | undefined;
+  private controlReportedAt: number | undefined;
   private cursor: string | null = null;
 
   constructor(private readonly options: {
@@ -91,6 +109,8 @@ export class RuntimeControlPlaneClient {
     pollIntervalMs?: number;
     /** Abort a hung request after this many milliseconds (default 10 s); syncs run one at a time behind it. */
     requestTimeoutMs?: number;
+    /** How often a sync repeats the environment control heartbeat when nothing changed (default 60 s). */
+    controlHeartbeatIntervalMs?: number;
     onError?: (error: unknown) => void;
   }) {
     if (
@@ -173,14 +193,39 @@ export class RuntimeControlPlaneClient {
   }) {
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
     this.assertWritable('heartbeat');
+    const control = this.controlStatus
+      ? { controlSequence: this.controlStatus.controlSequence, assistantState: this.controlStatus.assistantState }
+      : {};
     return this.request('heartbeat', {
       method: 'PATCH',
       body: JSON.stringify({
         runnerKey: this.options.runnerKey,
         ...input,
-        technicalMetadata: input.technicalMetadata ?? {},
+        technicalMetadata: { ...input.technicalMetadata, ...control },
       }),
     });
+  }
+
+  /** Reports the applied control when it changed, and again at the interval, so the Platform sees it is in force. */
+  private async reportControl(result: RuntimeSyncApplyResult | undefined): Promise<void> {
+    if (this.options.readOnly || !result?.control || result.control === 'absent') return;
+    const control = result.state?.control;
+    const status = { ...controlStatusOf(control), localHalt: Boolean(control?.localHalt) };
+    const now = Date.now();
+    const changed = this.controlStatus === undefined
+      || this.controlStatus.controlSequence !== status.controlSequence
+      || this.controlStatus.assistantState !== status.assistantState
+      || this.controlStatus.localHalt !== status.localHalt;
+    const due = this.controlReportedAt === undefined
+      || now - this.controlReportedAt >= (this.options.controlHeartbeatIntervalMs ?? CONTROL_HEARTBEAT_INTERVAL_MS);
+    this.controlStatus = status;
+    if (!changed && !due) return;
+    try {
+      await this.heartbeat({ health: status.localHalt ? 'degraded' : 'healthy' });
+      this.controlReportedAt = now;
+    } catch (error) {
+      this.options.onError?.(error);
+    }
   }
 
   async syncOnce() {
@@ -199,6 +244,7 @@ export class RuntimeControlPlaneClient {
     ) {
       this.cursor = bundle.cursor;
     }
+    await this.reportControl(result);
     return result;
   }
 
