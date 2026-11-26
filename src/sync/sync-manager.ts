@@ -285,7 +285,11 @@ export class RuntimeSyncManager {
     const accepted = (left.accepted?.sequence ?? 0) >= (right.accepted?.sequence ?? 0)
       ? left.accepted
       : right.accepted;
-    const halt = left.localHalt ?? right.localHalt;
+    const acceptedSequence = accepted?.sequence ?? 0;
+    // A newer accepted control supersedes a halt that sits below it.
+    const halt = [left.localHalt, right.localHalt].find((candidate) => candidate && (
+      candidate.sequence >= acceptedSequence || (candidate.failedSequence ?? 0) > acceptedSequence
+    )) ?? null;
     return {
       accepted,
       localHalt: halt && {

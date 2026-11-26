@@ -17,7 +17,16 @@ export class HttpRuntimePublicKeyProvider implements RuntimePublicKeyProvider {
   }) {}
 
   async getKey(keyId: string): Promise<RuntimePublicJwk | null> {
-    if (Date.now() >= this.expiresAt) await this.refresh();
+    if (Date.now() >= this.expiresAt) {
+      try {
+        await this.refresh();
+      } catch (error) {
+        // A known key still verifies during a JWKS outage.
+        const cached = this.keys.get(keyId);
+        if (cached) return cached;
+        throw error;
+      }
+    }
     const cached = this.keys.get(keyId);
     if (cached) return cached;
 

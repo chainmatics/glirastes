@@ -2,6 +2,7 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { EnvironmentControl } from '../../contracts/environment-control.js';
 import { canonicalRuntimeJson, RuntimeRevisionVerifier } from '../signature-verifier.js';
+import { HttpRuntimePublicKeyProvider } from '../jwks-provider.js';
 import { MemoryRuntimeStateStore } from '../state-store.js';
 import { RuntimeEnvironmentControlError, RuntimeSyncManager } from '../sync-manager.js';
 
@@ -190,6 +191,23 @@ describe('RuntimeSyncManager environment control', () => {
     expect((await store.load())?.control?.accepted).toEqual(control(2, 'halted'));
   });
 
+  it('drops a concurrent local halt once a newer accepted control is above it', async () => {
+    const store = new MemoryRuntimeStateStore();
+    let releaseSlow!: () => void;
+    const slow = new Promise<void>((resolve) => { releaseSlow = resolve; });
+    const first = setup({
+      store,
+      keys: { getKey: async () => { await slow; return null; } },
+    });
+    const second = setup({ store });
+    await second.manager.apply(bundle({ control: control(3, 'enabled') }));
+    const failing = first.manager.apply(bundle({ control: control(4, 'halted') }));
+    await second.manager.apply(bundle({ control: control(5, 'enabled') }));
+    releaseSlow();
+    await failing;
+    expect((await store.load())?.control).toEqual({ accepted: control(5, 'enabled'), localHalt: null });
+  });
+
   it('halts locally with control_unverifiable on an invalid signature', async () => {
     const { store, manager, onControlRejected } = setup();
     await manager.apply(bundle({ control: control(3, 'enabled') }));
@@ -230,6 +248,22 @@ describe('RuntimeSyncManager environment control', () => {
 
     expect((await manager.apply(bundle({ control: control(4, 'enabled') }))).control).toBe('accepted');
     expect((await store.load())?.control).toEqual({ accepted: control(4, 'enabled'), localHalt: null });
+  });
+
+  it('applies a delivered halt with the cached key while the JWKS refresh fails', async () => {
+    const jwk = publicKey.export({ format: 'jwk' });
+    let healthy = true;
+    const fetchImpl = vi.fn(async () => (healthy
+      ? new Response(JSON.stringify({ keys: [{ ...jwk, kid: keyId, alg: 'EdDSA', use: 'sig' }] }), { status: 200 })
+      : new Response('', { status: 503 })));
+    const provider = new HttpRuntimePublicKeyProvider({
+      baseUrl: 'https://control.example.test', apiKey: 'gl_runtime', fetchImpl, cacheTtlMs: 0,
+    });
+    const { store, manager } = setup({ keys: provider });
+    await manager.apply(bundle({ control: control(1, 'enabled') }));
+    healthy = false;
+    expect((await manager.apply(bundle({ control: control(2, 'halted') }))).control).toBe('accepted');
+    expect((await store.load())?.control).toEqual({ accepted: control(2, 'halted'), localHalt: null });
   });
 
   it('fails the sync without halting when the key lookup itself fails', async () => {

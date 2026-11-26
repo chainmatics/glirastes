@@ -311,9 +311,12 @@ against the same JWKS.
   failed (for example its key was briefly missing from the JWKS), a verified
   copy of that same control lifts the halt.
 - This is fail closed on purpose: a Platform signing fault stops every
-  assistant with this SDK. A JWKS request that fails is no verdict; the sync
-  fails and is retried.
-- Overlapping syncs (poll and push) are applied one after the other.
+  assistant with this SDK. While a JWKS refresh fails, a key the runner has
+  already loaded keeps verifying. Only a key it has not seen yet is no
+  verdict; the sync fails and is retried.
+- Overlapping syncs (poll and push) are applied one after the other. A local
+  halt from one of them is dropped when the other accepted a newer control
+  above it.
 - When the Platform withdraws the environment's place, the runner keeps the
   control of that environment. A halt stays in force until a newer verified
   control arrives for it, or until another environment completes its first
