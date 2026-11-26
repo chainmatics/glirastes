@@ -80,6 +80,20 @@ Version 0.26.0 is published on npm and as the public Linux amd64 image
 gates and the separate embedded Get It Done production smoke test. Publication
 and a successful embedded pilot do not certify a customer's container deployment.
 
+## Chat views
+
+Optional generative UI in the chat ([chat views](chat-views.md)), off unless
+`chatViews` is set on the chat handler. Tested in CI; no real-browser or pilot
+acceptance is recorded.
+
+| Binding | Status | Evidence | Limits |
+| --- | --- | --- | --- |
+| React (`glirastes/react`: `ChatView`, `starterChatBindings`, `bindChatComponent`) | shipped | `src/react/chat-views/__tests__/chat-view.test.tsx`, `src/server/adapters/nextjs/__tests__/render-view.test.ts` | one view per answer, snapshot only, buttons only `prompt` and `uiAction` |
+| Text renderer (`chatViewToText`, `chatElementToText` in `glirastes`) | shipped | `src/chat-views/__tests__/text.test.ts` | also the fallback for every element without a binding |
+| Codegen manifest (`glirastes tools refresh` → `.glirastes/chat-components.json`) | shipped | `src/codegen/tools/sources/chat-components.test.ts` | exported `defineChatComponent` definitions importable in Node |
+| `<glirastes-chat>` (Web Components), native clients | not claimed | none | no own binding; app components need React |
+| Configured runtime container | not available | none | no `chat.chatViews` option yet; chat views are off |
+
 ## Experimental
 
 Shipped, tested in CI, without a stability promise: options, defaults and the

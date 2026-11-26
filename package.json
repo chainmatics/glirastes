@@ -302,6 +302,7 @@
     "docs/chat-interactions.md",
     "docs/chat-queue.md",
     "docs/chat-route-security.md",
+    "docs/chat-views.md",
     "docs/concepts.md",
     "docs/entity-identity.md",
     "docs/history-measurement.md",

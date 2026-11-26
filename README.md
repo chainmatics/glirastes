@@ -362,6 +362,9 @@ two jobs:
   [docs/chat-attachments.md](docs/chat-attachments.md)).
 - Opt-in message queue: send while a turn runs or an approval waits, the
   message goes once the chat is idle ([docs/chat-queue.md](docs/chat-queue.md)).
+- Opt-in chat views: the model composes a small view (table, key figures,
+  status overview) from the app's own components, with every value a
+  reference to a real tool result ([docs/chat-views.md](docs/chat-views.md)).
 - `unstyled` to bring your own CSS; `deChatLocale` for German texts.
 - Push-to-talk speech input through one STT controller (`voice` config,
   `glirastes/stt` adapters, `createRecordingTranscriptionHandler` for a
@@ -542,6 +545,7 @@ installed SDK version. The versioned source guides remain available below.
 - [Chat interactions (`@` and `/`)](docs/chat-interactions.md)
 - [Chat attachments](docs/chat-attachments.md)
 - [Chat message queue](docs/chat-queue.md)
+- [Chat views](docs/chat-views.md)
 - [Managed runtime sync](docs/managed-runtime-sync.md)
 - [Runtime persistence](docs/runtime-persistence.md)
 - [0.5.0 acceptance](https://github.com/chainmatics/glirastes/blob/v0.26.0/docs/acceptance/0.5.0-acceptance.md)

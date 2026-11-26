@@ -10,6 +10,7 @@ unreleased changes; check their source version against your installed SDK.
 - [Chat](https://glirastes.io/docs/chat), [sessions](https://glirastes.io/docs/sessions) and [attachments](https://glirastes.io/docs/attachments)
 - [Interactions, navigation and commands](https://glirastes.io/docs/interactions)
 - [Deployment](https://glirastes.io/docs/deployment) and [support matrix](https://glirastes.io/docs/support)
+- [Chat views](chat-views.md) (optional): the model composes views in the chat from the app's components
 - [Local speech recognition](local-stt.md) (experimental): `glirastes/server/stt-local` transcribes recordings in the Node process
 
 The [repository's Markdown guides](https://github.com/chainmatics/glirastes/tree/main/docs)
