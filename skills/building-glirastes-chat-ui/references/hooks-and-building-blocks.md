@@ -14,6 +14,7 @@ them.
 - UI action outcomes
 - Sessions
 - Theme and keyboard
+- Speech adapter and route
 - Speech worklet
 
 ## Own provider and transport
@@ -208,7 +209,8 @@ Defaults keep today's markup; everything below is opt-in.
   `continueAfterBudgetStop()` of the chat context (present only when the transport has
   `ChatTransport.continueAfterBudgetStop`, as `useVercelAiChatTransport` does), which resends the
   history with `glirastesContinuation: 'budget'`. A custom transport implements it the same way
-  or the button is not shown.
+  or the button is not shown. A transport with continuation support hides the exact `continueHint`
+  after continuation or a later message. The stored message keeps it.
 - `parts` (in `MessagePartsProps` and from `useMessageParts`): every part of
   the message in message order as a `MessagePartEntry` `{ key, index, kind,
   part, toolName?, toolCallId?, node, approval? }` (`MessagePartKind`
@@ -478,6 +480,33 @@ global shortcut (`mod` is ⌘ on macOS, Ctrl elsewhere), `useChatShortcuts`
 the chat window keys, `usePushToTalkHotkey` a hold-to-talk combination, and
 `useFloatingPanel` moves and resizes a floating panel by pointer or keyboard.
 
+## Speech adapter and route
+
+The smallest working voice input for a Whisper-style service:
+
+1. Adapter. `voice: { enabled: true }` alone uses `DeepgramSttAdapter`
+   (WebSocket to `/api/ai/speech-stream` or `voice.baseUrl`, `voice.getToken`
+   as `?token=`, Deepgram live results; no server for it ships). For a service
+   with `POST /v1/audio/transcriptions` pass a `RecordedSttAdapter`, created
+   once at module scope:
+
+   ```tsx
+   import { RecordedSttAdapter } from 'glirastes/stt';
+   const speech = new RecordedSttAdapter(); // posts audio/wav to /api/ai/speech-recognize
+   <VercelAiChat endpoint="/api/chat" voice={{ enabled: true, adapter: speech }} />
+   ```
+
+2. Route. `createRecordingTranscriptionHandler` from `glirastes/server/nextjs`
+   (snippet in the SKILL.md speech gate). `url` is the base **without** `/v1`,
+   the handler appends `/v1/audio/transcriptions`: OpenAI
+   `https://api.openai.com` + `whisper-1`, OpenRouter `https://openrouter.ai/api`
+   + `openai/whisper-1`, a local server `http://stt:8765`. `authorize` is the
+   app's own session check (401), an unset `url` answers 503, `languages` and
+   `defaultLanguage` (`de`) gate `?language=`. In-process instead:
+   `transcribe` with `createLocalTranscriber` ([local speech](local-speech.md)).
+
+3. Worklet. Both adapters need the audio worklet (next section).
+
 ## Speech worklet
 
 Required for every voice input: `VoiceInputAddon` (the chat's `voice` config),
@@ -528,7 +557,16 @@ or the URL is absolute. `workletUrl` literals in test files (`*.test.*`,
 
 The mic, stop and retry buttons draw their own icon (`svg[data-icon="mic" |
 "stop" | "busy" | "retry"]`) and carry a localized `aria-label`; style them via
-`[data-component="voice-input-addon"][data-state]`. An app that hid the old
+`[data-component="voice-input-addon"][data-state]` (also
+`[data-component="voice-input-button"]`). `data-state` names what the button
+shows: `idle`, `connecting`, `recording`, `transcribing` (after stop, until the
+text arrives; busy icon, `aria-busy`) or `failed`. Up to 0.31 `transcribing`
+showed as `recording`; a selector for the red recording look covers both.
+
+While recording, the mic button (`voiceStopAriaLabel`, "Stop recording" /
+"Aufnahme beenden") and the recording bar's stop (`voiceStopAndInsertAriaLabel`,
+"Stop and insert text" / "Beenden und Text übernehmen", next to cancel,
+`voiceCancelAriaLabel`) have distinct names; both stay operable and focusable. An app that hid the old
 words with CSS and drew an own icon (`::before`, `content:`) shows two icons:
 remove its own icon or hide the shipped `svg[data-icon]`.
 

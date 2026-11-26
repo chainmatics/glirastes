@@ -27,10 +27,17 @@ export const BUDGET_CONTINUATION = 'budget' as const;
  */
 export const MAX_BUDGET_CONTINUATIONS = 3;
 
+export const DEFAULT_CONTINUE_HINTS = {
+  en: 'Use the button below to go on with the open steps.',
+  de: 'Nutze den Button unten, um mit den offenen Schritten fortzufahren.',
+} as const;
+
 export interface BudgetStopPartData {
   v: 1;
   /** Whether the chat may offer "Continue" for this stop. */
   continuable: boolean;
+  /** Exact suffix of the stop notice, if supplied by the emitting handler. */
+  continueHint?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -41,7 +48,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function readBudgetStopPart(part: unknown): BudgetStopPartData | undefined {
   if (!isRecord(part) || part.type !== BUDGET_STOP_PART_TYPE || !isRecord(part.data)) return undefined;
   if (part.data.v !== 1 || typeof part.data.continuable !== 'boolean') return undefined;
-  return { v: 1, continuable: part.data.continuable };
+  return {
+    v: 1,
+    continuable: part.data.continuable,
+    ...(typeof part.data.continueHint === 'string' && { continueHint: part.data.continueHint }),
+  };
 }
 
 /** Parts that are content of an answer: after a stop they mean the turn went on. */

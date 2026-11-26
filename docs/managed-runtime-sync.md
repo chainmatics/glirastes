@@ -734,6 +734,10 @@ After the closing sentence the notice says what was done and what is open:
   the repeat guard described next. Only after the last continuation the line
   suggests typing "continue". A client without the button (an own UI without
   `continueAfterBudgetStop`) sets `continueHint` to its own text.
+  A React chat with continuation support hides the exact hint once the stop
+  has been continued or a later message follows. For older messages that
+  lack hint metadata, it recognizes the default English and German hints.
+  The stored message and model history retain the full notice.
 
 The summary is built in the handler from the stream of this request and the
 history; it names labels and plan titles only, never tool arguments or

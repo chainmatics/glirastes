@@ -81,7 +81,7 @@ export function VoiceInputButton({
         disabled={disabled || isConnecting}
         className={joinClassNames('glirastes-voice-input-button', className)}
         data-component="voice-input-button"
-        data-state={state === 'transcribing' ? 'recording' : state}
+        data-state={state}
         aria-busy={state === 'connecting' || state === 'transcribing'}
         title={label}
         aria-label={label}

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Voice input: `data-state` of the mic button (`[data-component="voice-input-addon"]`, also `voice-input-button`) is `transcribing` after stop until the text arrives, matching its label and busy icon; it used to stay `recording`. The stock styles keep the red recording look for both states; an own selector on `[data-state="recording"]` should add `[data-state="transcribing"]`.
+- Voice input: the recording bar's stop button has its own accessible name, "Stop and insert text" / "Beenden und Text übernehmen" (new locale key `voiceStopAndInsertAriaLabel`), so it no longer shares "Stop recording" / "Aufnahme beenden" with the mic button while recording. Both stay operable.
+
+### Fixed
+
+- Budget stop notice: after "Continue" (or a later message), the chat no longer shows the notice's last paragraph "Use the button below …" / "Nutze den Button unten …", since the button is gone. Only the view changes; the stored message keeps the text.
+
+### Documentation
+
+- README and skill `building-glirastes-chat-ui` (speech gate, `references/hooks-and-building-blocks.md` "Speech adapter and route"): the complete minimal voice path. `voice: { enabled: true }` alone uses `DeepgramSttAdapter`; a Whisper-style service needs `adapter: new RecordedSttAdapter()` and a `createRecordingTranscriptionHandler` route whose `url` is the base without `/v1` (`https://api.openai.com`, `https://openrouter.ai/api`). The reference lists the voice button's `data-state` values.
+
 ## [0.31.0] - 2026-11-26
 
 ### Added

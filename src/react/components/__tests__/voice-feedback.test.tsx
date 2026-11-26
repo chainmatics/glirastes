@@ -94,8 +94,37 @@ describe('voice button states', () => {
 
     fireEvent.click(button());
     await waitFor(() => expect(button().getAttribute('aria-label')).toBe('Transcribing…'));
+    // data-state names the state the button shows, not the one before it.
+    expect(button().getAttribute('data-state')).toBe('transcribing');
+    expect(button().querySelector('svg[data-icon="busy"]')).toBeTruthy();
     finalize();
     await waitFor(() => expect(button().getAttribute('aria-label')).toBe('Start voice input'));
+    expect(button().getAttribute('data-state')).toBe('idle');
+  });
+
+  it('gives the mic button and the recording bar stop distinct names', async () => {
+    const adapter: SttProviderAdapter = {
+      connect: async () => ({ finalize: async () => {}, cancel: async () => {}, close: async () => {} }),
+    };
+    render(<Composer voice={{ enabled: true, adapter }} />);
+    fireEvent.click(button());
+    await waitFor(() => expect(button().getAttribute('data-state')).toBe('recording'));
+    expect(screen.getAllByRole('button', { name: 'Stop recording' })).toEqual([button()]);
+    const barStop = screen.getByRole('button', { name: 'Stop and insert text' });
+    expect(barStop.closest('[data-component="recording-bar"]')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cancel recording' })).toBeTruthy();
+  });
+
+  it('gives them distinct German names with deChatLocale', async () => {
+    document.documentElement.lang = 'de';
+    const adapter: SttProviderAdapter = {
+      connect: async () => ({ finalize: async () => {}, cancel: async () => {}, close: async () => {} }),
+    };
+    render(<Composer voice={{ enabled: true, adapter }} />);
+    fireEvent.click(button());
+    await waitFor(() => expect(button().getAttribute('data-state')).toBe('recording'));
+    expect(screen.getAllByRole('button', { name: 'Aufnahme beenden' })).toEqual([button()]);
+    expect(screen.getByRole('button', { name: 'Beenden und Text übernehmen' })).toBeTruthy();
   });
 
   it('labels the retry button with an icon only', async () => {

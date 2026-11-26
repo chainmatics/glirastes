@@ -98,7 +98,7 @@ function RecordingBarInner({
 }: RecordingBarProps) {
   const locale = useContext(ChatContext)?.locale;
   const cancelLabel = voiceText(locale, 'voiceCancelAriaLabel');
-  const stopLabel = voiceText(locale, 'voiceStopAriaLabel');
+  const stopLabel = voiceText(locale, 'voiceStopAndInsertAriaLabel');
   const handleCancel = useCallback(() => onCancel(), [onCancel]);
   const handleStop = useCallback(() => onStop(), [onStop]);
 

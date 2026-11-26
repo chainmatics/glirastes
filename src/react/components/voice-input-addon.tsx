@@ -390,7 +390,7 @@ export function VoiceInputAddon({
         aria-label={label}
         title={label}
         data-component="voice-input-addon"
-        data-state={state}
+        data-state={iconState}
       >
         <VoiceStateIcon state={iconState} />
       </button>

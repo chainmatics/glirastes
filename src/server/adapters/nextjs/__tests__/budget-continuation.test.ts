@@ -148,7 +148,7 @@ describe('the stop notice of a turn stopped at a limit', () => {
     const noticeAt = turn.chunks.findIndex((chunk) => chunk.type === 'text-start' && chunk.id === NOTICE_ID);
     expect(stopAt).toBeGreaterThan(-1);
     expect(noticeAt).toBe(stopAt + 1);
-    expect(turn.chunks[stopAt]).toMatchObject({ data: { v: 1, continuable: true } });
+    expect(turn.chunks[stopAt]).toMatchObject({ data: { v: 1, continuable: true, continueHint: expect.any(String) } });
   });
 
   it('writes no stop part for a turn that answers', async () => {

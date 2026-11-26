@@ -6,6 +6,7 @@
  * model sees. Fixed texts per reason with the limit value only: no usage of
  * other dimensions, no tool data, no principal data.
  */
+import { DEFAULT_CONTINUE_HINTS } from '../../../contracts/budget-continuation.js';
 import type { BudgetReason } from '../../../runtime/budget.js';
 import type { BudgetStopSummaryTexts, TurnToolCall } from './budget-continuation.js';
 import { toolResultFailure } from '../../../runtime/tool-failure.js';
@@ -31,7 +32,7 @@ const EN: BudgetStopTexts = Object.freeze({
   done: 'Done so far: {items}.',
   open: 'Still open: {items}.',
   openUnanswered: 'Still open: your question is not answered yet.',
-  continueHint: 'Use the button below to go on with the open steps.',
+  continueHint: DEFAULT_CONTINUE_HINTS.en,
   continueTypedHint: 'Write “continue” to go on with the open steps.',
   maxSteps: 'the step limit for this request was reached ({limit} steps)',
   maxModelSteps: 'the step limit for this request was reached ({limit} steps)',
@@ -50,7 +51,7 @@ const DE: BudgetStopTexts = Object.freeze({
   done: 'Erledigt: {items}.',
   open: 'Offen: {items}.',
   openUnanswered: 'Offen: Deine Frage ist noch nicht beantwortet.',
-  continueHint: 'Nutze den Button unten, um mit den offenen Schritten fortzufahren.',
+  continueHint: DEFAULT_CONTINUE_HINTS.de,
   continueTypedHint: 'Schreib „weiter“, um mit den offenen Schritten fortzufahren.',
   maxSteps: 'das Schrittlimit für diese Anfrage ist erreicht ({limit} Schritte)',
   maxModelSteps: 'das Schrittlimit für diese Anfrage ist erreicht ({limit} Schritte)',

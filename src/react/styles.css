@@ -1378,7 +1378,8 @@
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="voice-input-addon"][data-state="recording"] {
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="voice-input-addon"][data-state="recording"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="voice-input-addon"][data-state="transcribing"] {
   border-color: var(--cm-danger);
   color: var(--cm-danger);
 }
