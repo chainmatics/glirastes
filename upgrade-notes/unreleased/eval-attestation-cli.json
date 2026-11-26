@@ -1,0 +1,20 @@
+{
+  "id": "eval-attestation-cli",
+  "kind": "optional",
+  "summary": "New command glirastes evals attest reports the result of your own CI eval suite to the Platform as digests and counts only, for the Platform's eval gate.",
+  "howTo": "Nothing to do unless the environment's eval gate is on. Run your suite in CI, then glirastes evals attest --suite <file|dir> --total <n> --failed <n> [--run-ref <label>] with GLIRASTES_EVAL_ATTEST_KEY set to the app's eval attestation key (scope evals:attest; an owner or admin issues it in the dashboard; runtime, connect and CI keys cannot attest). It reads setupArtifactDigest (discoveryDigest) and promptDigest (prompts.bundleDigest) from the committed .glirastes/setup-artifact.json and exits 0 for pass, 1 for fail or a Platform error, 2 for a usage or configuration problem without sending anything. The body is EvalAttestationRequestSchema from glirastes/contracts.",
+  "skill": "setting-up-glirastes",
+  "affectedWhen": {
+    "patterns": [
+      "glirastes evals"
+    ]
+  },
+  "surface": [
+    "glirastes/contracts#EVAL_ATTESTATION_MAX_TOTAL",
+    "glirastes/contracts#EVAL_ATTESTATION_SCHEMA_VERSION",
+    "glirastes/contracts#EvalAttestationRequest",
+    "glirastes/contracts#EvalAttestationRequestSchema",
+    "glirastes/contracts#EvalAttestationResponse",
+    "glirastes/contracts#EvalAttestationResponseSchema"
+  ]
+}

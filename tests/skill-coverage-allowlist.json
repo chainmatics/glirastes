@@ -167,6 +167,8 @@
   "ENVIRONMENT_CONTROL_CAPABILITY": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "ENVIRONMENT_CONTROL_SCHEMA_VERSION": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
   "ENVIRONMENT_CONTROL_SYNC_VERSION": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",
+  "EVAL_ATTESTATION_MAX_TOTAL": "Wire constant of the eval attestation body; glirastes evals attest builds and validates it, integrators never set it.",
+  "EVAL_ATTESTATION_SCHEMA_VERSION": "Wire constant of the eval attestation body; glirastes evals attest builds and validates it, integrators never set it.",
   "EXECUTION_DEFAULTS": "Pre-Foundation root-barrel API (hand-written tool definitions, pipeline, PII); Foundation apps derive tools with glirastes tools refresh.",
   "EdgeCaseTestOptions": "Legacy pipeline test helper without LLM calls; not part of the Foundation workflow.",
   "EffectiveToolPolicy": "Platform wire contract (schema or type) read by the SDK's own sync and runtime; integrators never build it.",

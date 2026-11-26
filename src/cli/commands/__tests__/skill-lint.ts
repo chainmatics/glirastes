@@ -6,9 +6,10 @@ import { POLICY_SUBCOMMANDS, TOOLS_SUBCOMMANDS } from '../tools/index.js';
 import type { ToolArgsSpec } from '../tools/args.js';
 import { UPGRADE_SUBCOMMANDS } from '../upgrade/report.js';
 import { STT_SUBCOMMANDS } from '../stt/index.js';
+import { EVALS_SUBCOMMANDS } from '../evals/index.js';
 
 /** Top-level commands a skill may tell an agent to run (src/cli/index.ts). */
-const COMMANDS = new Set(['init', 'setup', 'connect', 'sync', 'doctor', 'install', 'tools', 'stt', 'upgrade']);
+const COMMANDS = new Set(['init', 'setup', 'connect', 'sync', 'doctor', 'install', 'tools', 'stt', 'evals', 'upgrade']);
 const SECTIONS = ['## Boundaries', '## Workflow', '## Commands', '## Verification'] as const;
 const KNOWN_PATHS = new Set<string>([
   ...Object.values(TOOLS_PATHS),
@@ -77,6 +78,11 @@ function commandProblem(argv: ReadonlyArray<string>): string | undefined {
     const sub = argv[2];
     const spec = sub && Object.hasOwn(STT_SUBCOMMANDS, sub) ? STT_SUBCOMMANDS[sub] : undefined;
     return spec ? argsProblem(argv.slice(3), spec) : `unknown stt subcommand ${sub ?? ''}`;
+  }
+  if (command === 'evals') {
+    const sub = argv[2];
+    const spec = sub && Object.hasOwn(EVALS_SUBCOMMANDS, sub) ? EVALS_SUBCOMMANDS[sub] : undefined;
+    return spec ? argsProblem(argv.slice(3), spec) : `unknown evals subcommand ${sub ?? ''}`;
   }
   if (command !== 'tools') return undefined;
   const sub = argv[2];

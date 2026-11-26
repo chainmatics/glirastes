@@ -1,0 +1,401 @@
+{
+  "contract": "EvalAttestationRequest",
+  "schemaVersion": 1,
+  "endpoint": {
+    "method": "POST",
+    "path": "/v1/apps/:appId/eval-attestations",
+    "auth": "x-api-key: the app's eval attestation key, scope evals:attest (GLIRASTES_EVAL_ATTEST_KEY)"
+  },
+  "sources": {
+    "setupArtifactDigest": ".glirastes/setup-artifact.json#discoveryDigest (the Platform stores it on every config revision as setupArtifactDigest)",
+    "promptDigest": ".glirastes/setup-artifact.json#prompts.bundleDigest (the deployment's promptDigest)",
+    "result": "pass when failed is 0, otherwise fail"
+  },
+  "suiteDigest": {
+    "algorithm": "sha256 base64url over canonicalRuntimeJson({ schemaVersion: 1, files }); each entry { path, sha256 } where path is the relative path with \"/\" separators in Unicode NFC and sha256 is sha256 base64url of the raw file bytes; entries sorted by the UTF-8 bytes of path; a single file is listed under its base name",
+    "policy": {
+      "included": "every regular file below --suite, hidden files and directories included",
+      "ignored": [
+        ".DS_Store",
+        "Thumbs.db",
+        "desktop.ini"
+      ],
+      "refused": [
+        "symbolic links (to files, directories or nothing)",
+        "anything that is neither a file nor a directory",
+        "two paths that are equal after NFC normalisation",
+        "a suite without files"
+      ],
+      "bytes": "file bytes are hashed as they are; line endings count, nothing is normalised"
+    },
+    "cases": [
+      {
+        "name": "basic",
+        "files": [
+          {
+            "path": "cases/routing.jsonl",
+            "utf8": "{\"input\":\"x\"}\n"
+          },
+          {
+            "path": "README.md",
+            "utf8": "suite\n"
+          },
+          {
+            "path": "cases/approvals.jsonl",
+            "utf8": "{\"input\":\"y\"}\n"
+          }
+        ],
+        "canonical": "{\"files\":[{\"path\":\"README.md\",\"sha256\":\"sha256:SJ5g8qewCvMErNUhoXnXLx531wS3MxfKQ0o8NLCJt_o\"},{\"path\":\"cases/approvals.jsonl\",\"sha256\":\"sha256:MyBI6_6SBMGomJMtUMc-ZOFtCMIgao-fdE93oVOxyL4\"},{\"path\":\"cases/routing.jsonl\",\"sha256\":\"sha256:OvLWWsOf7SgafD3rp755rVsFSZ3YF1ZBDaPdedGjBqk\"}],\"schemaVersion\":1}",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874"
+      },
+      {
+        "name": "unicode-nfd-astral-hidden",
+        "note": "café is NFD and is listed as NFC café; U+FF61 sorts before U+1F600 in UTF-8 byte order (UTF-16 code unit order would reverse them)",
+        "files": [
+          {
+            "path": "😀.jsonl",
+            "utf8": "a\n"
+          },
+          {
+            "path": "café.jsonl",
+            "utf8": "b\n"
+          },
+          {
+            "path": "｡.jsonl",
+            "utf8": "c\n"
+          },
+          {
+            "path": ".hidden/x.jsonl",
+            "utf8": "d\n"
+          }
+        ],
+        "canonical": "{\"files\":[{\"path\":\".hidden/x.jsonl\",\"sha256\":\"sha256:jXS-7BvpljIq12gTuvuS1Ag5iV1t1-6AixfKIB6smL4\"},{\"path\":\"café.jsonl\",\"sha256\":\"sha256:AmOCmYm2_ZVPcrqvL8ZLwuLwHWktTecphuqAj26ZgT8\"},{\"path\":\"｡.jsonl\",\"sha256\":\"sha256:o6XnFfDMV0pzw_m-u2vCTzL_1bZ7OHJEwskJ2neaFHg\"},{\"path\":\"😀.jsonl\",\"sha256\":\"sha256:h0KPxSKAPTEGXnvOPPA_5HUJZjHl4Hu9eg_eYMTPJcc\"}],\"schemaVersion\":1}",
+        "suiteDigest": "sha256:mg2RcqOf1XjRuQS-q0v1g7DonGD5mciLviE2gIL_sAA"
+      },
+      {
+        "name": "crlf",
+        "note": "line endings count: the same case with LF has another digest",
+        "files": [
+          {
+            "path": "case.jsonl",
+            "utf8": "x\r\n"
+          }
+        ],
+        "canonical": "{\"files\":[{\"path\":\"case.jsonl\",\"sha256\":\"sha256:s14J-iztnrytnRYzb7lhFG_jS_vrxWJnnahfijFMnco\"}],\"schemaVersion\":1}",
+        "suiteDigest": "sha256:4rpmwv7oIja8VvAyc-uWL26O4plI5If5KZlPRmV3YRI"
+      },
+      {
+        "name": "lf",
+        "files": [
+          {
+            "path": "case.jsonl",
+            "utf8": "x\n"
+          }
+        ],
+        "canonical": "{\"files\":[{\"path\":\"case.jsonl\",\"sha256\":\"sha256:c8s4WKaHqElMozIwUwFigvPa051Cz2LKTnndoqrH2aw\"}],\"schemaVersion\":1}",
+        "suiteDigest": "sha256:dN4KQ8phIBBYbcwXwhx6Zk6Yjrktn36W6QHb-LS6kdA"
+      }
+    ]
+  },
+  "valid": [
+    {
+      "name": "valid/pass",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "valid/fail-with-run-ref",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "fail",
+        "total": 120,
+        "failed": 3,
+        "ranAt": "2026-11-26T10:00:00+01:00",
+        "ciRunRef": "github/chainmatics/app/actions/runs/123456789"
+      }
+    },
+    {
+      "name": "valid/all-failed",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "fail",
+        "total": 1,
+        "failed": 1,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "valid/run-ref-like-a-prefix-but-no-secret",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "buildkite/acme/task-abcdefghijklmnopqrstuvwxyz0123/wsk-eeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "invalid/pass-with-failures",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 1,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/fail-without-failures",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "fail",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/failed-above-total",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "fail",
+        "total": 2,
+        "failed": 3,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/total-zero",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 0,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/total-above-limit",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 100001,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/runtime-digest-instead-of-setup-artifact-digest",
+      "body": {
+        "schemaVersion": 1,
+        "runtimeDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/extra-field",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "model": "gpt-4o"
+      }
+    },
+    {
+      "name": "invalid/schema-version-2",
+      "body": {
+        "schemaVersion": 2,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/digest-not-sha256",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "md5:abc",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/ran-at-without-offset",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00"
+      }
+    },
+    {
+      "name": "invalid/run-ref-free-text",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "nightly run with prompt changes"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-glirastes-key",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "github/acme/runs/gl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-github-token",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-github-oauth-token",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "gho_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-github-fine-grained-token",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "github_pat_1111111111111111111111_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-aws-access-key-id",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "aws:AKIAIOSFODNN7EXAMPLE"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-model-api-key",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "run/sk-proj-cccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-slack-token",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "xoxb-not-a-real-slack-token"
+      }
+    }
+  ]
+}
