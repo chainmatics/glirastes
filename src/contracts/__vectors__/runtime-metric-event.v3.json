@@ -1,0 +1,208 @@
+{
+  "contract": "TechnicalRuntimeEvent",
+  "schemaVersion": 3,
+  "negotiation": {
+    "sentWhen": "the runner selects cohorts (canarySelection) and the stable deployment carries a verified rolloutBinding; otherwise v2",
+    "batchSchemaVersion": 3,
+    "eventTypes": [
+      "turn.finished",
+      "turn.continued"
+    ]
+  },
+  "absentMarker": "__absent__",
+  "base": {
+    "schemaVersion": 3,
+    "eventId": "019fbd00-0000-7000-8000-000000000001",
+    "eventType": "turn.finished",
+    "occurredAt": "2026-10-05T10:15:30.000Z",
+    "appId": "019fb900-0000-7000-8000-0000000000a1",
+    "environmentId": "019fb900-0000-7000-8000-0000000000e1",
+    "buildId": "git:4f2c9e1",
+    "instanceId": "web-1",
+    "revisionId": "019fb900-0000-7000-8000-0000000000b1",
+    "model": "anthropic/claude-sonnet-5.5",
+    "status": "completed",
+    "errorCode": null,
+    "inputTokens": 1200,
+    "outputTokens": 240,
+    "cost": {
+      "usd": 0.0048,
+      "source": "provider-reported",
+      "pricingVersion": null
+    },
+    "latency": {
+      "firstTokenMs": 420,
+      "totalMs": 1830
+    },
+    "toolCallCount": 3,
+    "toolErrorCount": 1,
+    "tools": [
+      {
+        "toolId": "019fb900-0000-7000-8000-0000000000c1",
+        "calls": 2,
+        "errors": 1
+      },
+      {
+        "toolId": "019fb900-0000-7000-8000-0000000000c2",
+        "calls": 1,
+        "errors": 0
+      }
+    ],
+    "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+    "cohort": "canary",
+    "approvalsDeclined": 0
+  },
+  "valid": [
+    {
+      "name": "valid/canary-turn",
+      "patch": {}
+    },
+    {
+      "name": "valid/stable-turn",
+      "patch": {
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d1",
+        "cohort": "stable"
+      }
+    },
+    {
+      "name": "valid/local-code-without-deployment",
+      "patch": {
+        "deploymentId": null,
+        "cohort": null,
+        "revisionId": null
+      }
+    },
+    {
+      "name": "valid/continued-with-declined-approvals",
+      "patch": {
+        "eventType": "turn.continued",
+        "continuation": "approval",
+        "turnId": "0123456789abcdef0123456789abcdef",
+        "approvalsDeclined": 2,
+        "toolCallCount": 0,
+        "toolErrorCount": 0,
+        "tools": []
+      }
+    },
+    {
+      "name": "valid/continued-ui-outcome",
+      "patch": {
+        "eventType": "turn.continued",
+        "continuation": "ui-outcome",
+        "turnId": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "valid/error-turn-in-canary",
+      "patch": {
+        "status": "error",
+        "errorCode": "model_error"
+      }
+    },
+    {
+      "name": "valid/declined-at-call-limit",
+      "patch": {
+        "approvalsDeclined": 10000
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "invalid/schema-version-2",
+      "patch": {
+        "schemaVersion": 2
+      }
+    },
+    {
+      "name": "invalid/missing-deployment",
+      "patch": {
+        "deploymentId": "__absent__"
+      }
+    },
+    {
+      "name": "invalid/missing-cohort",
+      "patch": {
+        "cohort": "__absent__"
+      }
+    },
+    {
+      "name": "invalid/missing-approvals-declined",
+      "patch": {
+        "approvalsDeclined": "__absent__"
+      }
+    },
+    {
+      "name": "invalid/cohort-without-deployment",
+      "patch": {
+        "deploymentId": null
+      }
+    },
+    {
+      "name": "invalid/deployment-without-cohort",
+      "patch": {
+        "cohort": null
+      }
+    },
+    {
+      "name": "invalid/unknown-cohort",
+      "patch": {
+        "cohort": "shadow"
+      }
+    },
+    {
+      "name": "invalid/deployment-not-uuid",
+      "patch": {
+        "deploymentId": "deployment-1"
+      }
+    },
+    {
+      "name": "invalid/negative-approvals-declined",
+      "patch": {
+        "approvalsDeclined": -1
+      }
+    },
+    {
+      "name": "invalid/fractional-approvals-declined",
+      "patch": {
+        "approvalsDeclined": 0.5
+      }
+    },
+    {
+      "name": "invalid/approvals-declined-beyond-limit",
+      "patch": {
+        "approvalsDeclined": 10001
+      }
+    },
+    {
+      "name": "invalid/subject-id",
+      "patch": {
+        "subjectId": "alice"
+      }
+    },
+    {
+      "name": "invalid/cohort-salt",
+      "patch": {
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg"
+      }
+    },
+    {
+      "name": "invalid/continued-without-turn-id",
+      "patch": {
+        "eventType": "turn.continued",
+        "continuation": "approval"
+      }
+    },
+    {
+      "name": "invalid/turn-id-on-finished",
+      "patch": {
+        "turnId": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "invalid/extra-prompt-key",
+      "patch": {
+        "prompt": "Summarize the open tasks"
+      }
+    }
+  ]
+}

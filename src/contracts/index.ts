@@ -49,6 +49,8 @@ export type {
 
 export {
   RUNTIME_METRIC_EVENT_SCHEMA_VERSION,
+  RUNTIME_METRIC_EVENT_SCHEMA_VERSION_V3,
+  RuntimeRolloutCohortSchema,
   RUNTIME_METRIC_LABEL_PATTERN,
   RUNTIME_METRIC_MAX_BATCH,
   RUNTIME_METRIC_MAX_COUNT,
@@ -63,16 +65,20 @@ export {
   TechnicalRuntimeEventBatchSchema,
   TechnicalRuntimeEventSchema,
   TechnicalRuntimeEventV2Schema,
+  TechnicalRuntimeEventV3Schema,
   TOOL_CONTRACT_REJECTED_STATUSES,
   ToolContractRejectedEventSchema,
   TurnContinuationSchema,
   TurnContinuedEventSchema,
+  TurnContinuedEventV3Schema,
 } from './events.js';
 export type {
   RuntimeCostSource,
   RuntimeMetricEvent,
   TurnContinuation,
   TurnContinuedEvent,
+  TurnContinuedEventV3,
+  RuntimeRolloutCohort,
   ToolContractRejectedEvent,
   RuntimeTurnCost,
   RuntimeTurnErrorCode,
@@ -81,6 +87,7 @@ export type {
   TechnicalRuntimeEvent,
   TechnicalRuntimeEventBatch,
   TechnicalRuntimeEventV2,
+  TechnicalRuntimeEventV3,
 } from './events.js';
 
 export {
