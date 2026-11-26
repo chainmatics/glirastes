@@ -27,14 +27,6 @@ export function createTurnRateLimiter(options: {
   const maxPrincipals = Math.max(1, options.maxPrincipals ?? DEFAULT_MAX_PRINCIPALS);
   const turns = new Map<string, number[]>();
 
-  const prune = (at: number) => {
-    for (const [key, times] of turns) {
-      const recent = times.filter((time) => at - time < WINDOW_MS);
-      if (recent.length === 0) turns.delete(key);
-      else turns.set(key, recent);
-    }
-  };
-
   return {
     admit(principal, limit) {
       if (!limit) return { admitted: true };
@@ -50,7 +42,7 @@ export function createTurnRateLimiter(options: {
       // Re-insert so the map stays ordered by the latest turn.
       turns.delete(key);
       turns.set(key, recent);
-      if (turns.size > maxPrincipals) prune(at);
+      // The first entry is the least recent principal, expired or not.
       while (turns.size > maxPrincipals) turns.delete(turns.keys().next().value!);
       return { admitted: true };
     },

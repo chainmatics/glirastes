@@ -66,6 +66,18 @@ describe('applyBudgetCeiling', () => {
     });
   });
 
+  it('keeps the tool timeout within a lowered total timeout', () => {
+    expect(applyBudgetCeiling(local, { totalTimeoutMs: 5_000 })).toMatchObject({ totalTimeoutMs: 5_000, toolTimeoutMs: 5_000 });
+    expect(applyBudgetCeiling(local, { totalTimeoutMs: 60_000 })).toMatchObject({ totalTimeoutMs: 60_000, toolTimeoutMs: 20_000 });
+  });
+
+  it('fails closed on a value that is not a finite non-negative number', () => {
+    expect(applyBudgetCeiling(local, { maxToolCalls: Number.NaN, maxEstimatedCostUsd: -1 })).toEqual({
+      ...local, maxToolCalls: 0, maxEstimatedCostUsd: 0,
+    });
+    expect(applyBudgetCeiling(local, { maxModelSteps: Number.POSITIVE_INFINITY })).toEqual(local);
+  });
+
   it('never raises a limit above the local one', () => {
     expect(applyBudgetCeiling(local, {
       maxModelSteps: 99, maxToolCalls: 999, totalTimeoutMs: 999_999, maxInputTokens: 1_000_000,
@@ -107,6 +119,20 @@ describe('createTurnRateLimiter', () => {
     const limiter = createTurnRateLimiter();
     for (let turn = 0; turn < 1_000; turn += 1) expect(limiter.admit(alice, undefined).admitted).toBe(true);
     expect(limiter.size()).toBe(0);
+  });
+
+  it('drops expired principals before a live one at the cap, without losing live counts', () => {
+    let now = 0;
+    const limiter = createTurnRateLimiter({ now: () => now, maxPrincipals: 2 });
+    const limit = { maxTurnsPerMinutePerPrincipal: 1 };
+    limiter.admit({ tenantId: 't1', subjectId: 'old' }, limit);
+    now = 61_000;
+    limiter.admit({ tenantId: 't1', subjectId: 'live' }, limit);
+    now = 61_001;
+    limiter.admit({ tenantId: 't1', subjectId: 'new' }, limit);
+    expect(limiter.size()).toBe(2);
+    expect(limiter.admit({ tenantId: 't1', subjectId: 'live' }, limit).admitted).toBe(false);
+    expect(limiter.admit({ tenantId: 't1', subjectId: 'new' }, limit).admitted).toBe(false);
   });
 
   it('remembers a bounded number of principals', () => {

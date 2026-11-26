@@ -191,7 +191,10 @@ export function applyBudgetCeiling(
   const next = { ...budget };
   for (const field of Object.keys(ceiling) as Array<keyof EnvironmentControlBudgetCeiling>) {
     const value = ceiling[field];
-    if (value !== undefined) next[field] = Math.min(budget[field], value);
+    if (value === undefined) continue;
+    // A broken value can only tighten: NaN or a negative limit allows nothing.
+    next[field] = Number.isNaN(value) || value < 0 ? 0 : Math.min(budget[field], value);
   }
+  next.toolTimeoutMs = Math.min(next.toolTimeoutMs, next.totalTimeoutMs);
   return next;
 }
