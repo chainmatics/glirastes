@@ -4,6 +4,7 @@ import { AUDIO_WORKLET_UNAVAILABLE } from '../stt/worklet-error.js';
 type VoiceTextKey =
   | 'voiceStartAriaLabel'
   | 'voiceStopAriaLabel'
+  | 'voiceStopAndInsertAriaLabel'
   | 'voiceConnectingAriaLabel'
   | 'voiceTranscribingAriaLabel'
   | 'voiceCancelAriaLabel'
@@ -15,6 +16,7 @@ type VoiceTextKey =
 export const VOICE_TEXTS_EN: Readonly<Record<VoiceTextKey, string>> = {
   voiceStartAriaLabel: 'Start voice input',
   voiceStopAriaLabel: 'Stop recording',
+  voiceStopAndInsertAriaLabel: 'Stop and insert text',
   voiceConnectingAriaLabel: 'Starting voice input…',
   voiceTranscribingAriaLabel: 'Transcribing…',
   voiceCancelAriaLabel: 'Cancel recording',

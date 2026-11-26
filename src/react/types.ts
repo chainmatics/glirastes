@@ -1548,6 +1548,12 @@ export interface ChatLocale {
   voiceStartAriaLabel?: string;
   /** Voice button while it records (a press stops). */
   voiceStopAriaLabel?: string;
+  /**
+   * Stop button of the recording bar, next to its cancel button: ends the
+   * recording and keeps the text. Distinct from `voiceStopAriaLabel`, so the
+   * two stop controls shown while recording do not share one name.
+   */
+  voiceStopAndInsertAriaLabel?: string;
   /** Voice button while the microphone and the provider start. */
   voiceConnectingAriaLabel?: string;
   /** Voice button while the recording is turned into text. */

@@ -133,6 +133,7 @@ export const deChatLocale: ChatLocale = {
   retryRecordingAriaLabel: 'Aufnahme wiederholen',
   voiceStartAriaLabel: 'Spracheingabe starten',
   voiceStopAriaLabel: 'Aufnahme beenden',
+  voiceStopAndInsertAriaLabel: 'Beenden und Text übernehmen',
   voiceConnectingAriaLabel: 'Spracheingabe wird gestartet …',
   voiceTranscribingAriaLabel: 'Wird in Text umgewandelt …',
   voiceCancelAriaLabel: 'Aufnahme abbrechen',
