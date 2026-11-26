@@ -89,6 +89,7 @@ export async function startRuntimeService(config: RuntimeServiceConfig) {
       generated,
       env,
       runtime: "container-v1",
+      controlFreshness: "required",
       localLimits: {
         ...config.limits,
         toolTimeoutMs: config.application.timeoutMs,

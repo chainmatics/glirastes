@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   handler: undefined as AiChatHandlerFullConfig | undefined,
   leaseHealthy: true,
   accepted: true,
+  glirastesOptions: undefined as Record<string, unknown> | undefined,
   lose: undefined as (() => void) | undefined,
   abortAll: vi.fn(),
   stop: vi.fn(),
@@ -98,24 +99,27 @@ vi.mock("./approval-store.js", () => ({
   },
 }));
 vi.mock("../runtime/glirastes.js", () => ({
-  createGlirastes: () => ({
-    accepted: () => (state.accepted ? {} : undefined),
-    ready: async () => {},
-    stop: async () => {
-      state.stop();
-    },
-    chatTurn: async (
-      resolve: (
-        tenant: string,
-        request: Request,
-      ) => Promise<Principal | undefined>,
-    ) => ({
-      managedRuntime: {
-        resolvePrincipal: (request: Request) =>
-          resolve("platform-tenant", request),
+  createGlirastes: (options: Record<string, unknown>) => {
+    state.glirastesOptions = options;
+    return {
+      accepted: () => (state.accepted ? {} : undefined),
+      ready: async () => {},
+      stop: async () => {
+        state.stop();
       },
-    }),
-  }),
+      chatTurn: async (
+        resolve: (
+          tenant: string,
+          request: Request,
+        ) => Promise<Principal | undefined>,
+      ) => ({
+        managedRuntime: {
+          resolvePrincipal: (request: Request) =>
+            resolve("platform-tenant", request),
+        },
+      }),
+    };
+  },
 }));
 vi.mock("../server/adapters/nextjs/create-ai-chat-handler.js", () => ({
   createAiChatHandler: (config: AiChatHandlerFullConfig) => {
@@ -290,6 +294,13 @@ describe("runtime service security wiring", () => {
     expect(
       await state.handler!.managedRuntime!.resolvePrincipal(request()),
     ).toBeUndefined();
+  });
+});
+
+describe("runtime service environment control", () => {
+  it("serves no turn before the first successful sync after start", async () => {
+    await started();
+    expect(state.glirastesOptions).toMatchObject({ controlFreshness: "required" });
   });
 });
 
