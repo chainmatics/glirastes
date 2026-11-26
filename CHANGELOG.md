@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-26
+
 ### Changed
 
 - Voice input: `data-state` of the mic button (`[data-component="voice-input-addon"]`, also `voice-input-button`) is `transcribing` after stop until the text arrives, matching its label and busy icon; it used to stay `recording`. The stock styles keep the red recording look for both states; an own selector on `[data-state="recording"]` should add `[data-state="transcribing"]`.
@@ -1420,6 +1422,7 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.31.1]: https://github.com/chainmatics/glirastes/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/chainmatics/glirastes/compare/v0.30.1...v0.31.0
 [0.30.1]: https://github.com/chainmatics/glirastes/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/chainmatics/glirastes/compare/v0.29.1...v0.30.0
