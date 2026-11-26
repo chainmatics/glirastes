@@ -230,6 +230,9 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 const INSTANCES = Symbol.for('glirastes.runtime.instances');
 type InstanceHolder = { [INSTANCES]?: Map<string, Glirastes> };
 
+// Raises a cached instance to `controlFreshness: 'required'`; never lowers it.
+const requireFreshControl = new WeakMap<Glirastes, () => void>();
+
 function instances(): Map<string, Glirastes> {
   const holder = globalThis as InstanceHolder;
   holder[INSTANCES] ??= new Map();
@@ -240,7 +243,8 @@ function instances(): Map<string, Glirastes> {
  * The Glirastes runtime of one app: the tools derived from the code, and,
  * connected, the Platform connection behind them. One instance per app and
  * process: a second call with the same generated app returns the first
- * instance (its options are ignored), so route bundles can each call it.
+ * instance (its options are ignored, except that `controlFreshness:
+ * 'required'` raises it), so route bundles can each call it.
  *
  * Without `GLIRASTES_API_KEY` the app runs Standalone and never touches the
  * network. With it, the first `ready()` (or `chatTurn()`) asks the Platform
@@ -260,7 +264,10 @@ export function createGlirastes(options: CreateGlirastesOptions): Glirastes {
   }
   const appId = AppSetupArtifactSchema.parse(options.generated.setupArtifact).appId;
   const existing = instances().get(appId);
-  if (existing) return existing;
+  if (existing) {
+    if (options.controlFreshness === 'required') requireFreshControl.get(existing)?.();
+    return existing;
+  }
   const instance = createInstance(options, appId);
   instances().set(appId, instance);
   return instance;
@@ -304,8 +311,11 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   const base = localSource();
   const store = new AcceptedStateStore();
   const rateLimiter = createTurnRateLimiter();
-  // Set by the first successful sync of this process; `required` refuses turns until then.
-  let controlKnown = options.controlFreshness !== 'required';
+  let controlRequired = options.controlFreshness === 'required';
+  // The environment whose sync succeeded on the current connection; `required` refuses turns for any other.
+  let syncedEnvironment: string | undefined;
+  const controlKnown = () => !controlRequired
+    || (syncedEnvironment !== undefined && syncedEnvironment === resolved?.environmentId);
   const abort = new AbortController();
   const retryMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS);
   let resolved: ResolvedRuntimeConnection | undefined;
@@ -367,6 +377,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     connectedBase = undefined;
     managed = undefined;
     metrics = undefined;
+    syncedEnvironment = undefined;
     store.clear();
     reportedNotBound.clear();
     await closing?.close().catch(onError);
@@ -402,6 +413,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       return true;
     }
     notedNoReference = false;
+    syncedEnvironment = undefined;
 
     let placeLost = false;
     let sync: ReturnType<typeof createManagedRuntimeSync>;
@@ -461,7 +473,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         }
         await sync.client.syncOnce();
         store.synced(environmentId);
-        controlKnown = true;
+        syncedEnvironment = environmentId;
         break;
       } catch (error) {
         if (isPlaceRequired(error) || isReferenceChanged(error)) {
@@ -563,7 +575,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           loadRevocations: () => store.revocations(),
           ...(config
             ? {
-                loadControl: () => turnControlOf(store.control(), { known: controlKnown }),
+                loadControl: () => turnControlOf(store.control(), { known: controlKnown() }),
                 admitTurn: ({ principal: current }: { principal: Principal }) => {
                   const control = turnControlOf(store.control());
                   return rateLimiter.admit(current, control.assistant === 'enabled' ? control.rateLimit : undefined);
@@ -590,5 +602,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       await metrics?.close();
     },
   };
+  requireFreshControl.set(instance, () => {
+    controlRequired = true;
+  });
   return instance;
 }

@@ -863,6 +863,31 @@ describe('createGlirastes connected', () => {
     await vi.waitFor(() => expect(glirastes.control()).toBeUndefined(), { timeout: 1_000 });
   });
 
+  it('refuses turns with control_unknown under required once a rebound environment has not synced yet', async () => {
+    const { publicKey } = generateKeyPairSync('ed25519');
+    const NEXT_ENVIRONMENT_ID = id('3991');
+    const http = controlPlatform({
+      publicKey,
+      environments: [ENVIRONMENT_ID, NEXT_ENVIRONMENT_ID],
+      sync: (environmentId, call) => {
+        if (environmentId === ENVIRONMENT_ID) {
+          return call === 1 ? syncBody() : json({ code: 'environment_place_required' }, 409);
+        }
+        return json({ code: 'unavailable' }, 503);
+      },
+    });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 20, onError: vi.fn(), controlFreshness: 'required',
+    }));
+    const request = new Request('https://app.example/api/chat', { method: 'POST' });
+    const turn = await glirastes.chatTurn(principal);
+    expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'enabled' });
+
+    await vi.waitFor(() => expect(http.syncCalls.get(NEXT_ENVIRONMENT_ID)).toBeGreaterThanOrEqual(1), { timeout: 1_000 });
+    expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'halted', code: 'control_unknown' });
+  });
+
   it('looks up again when a development connection is read-only rejected and binds to the new reference', async () => {
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const NEW_ENVIRONMENT_ID = id('3902');
@@ -999,6 +1024,21 @@ describe('createGlirastes environment control enforcement', () => {
     await vi.waitFor(async () => {
       expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'enabled' });
     }, { timeout: 1_000 });
+  });
+
+  it('raises a cached instance to required on a later stricter call, never lowers it', async () => {
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => (
+      String(input).includes('/sync?') ? json({ code: 'unavailable' }, 503) : platform().fetchImpl(input, init)
+    )) as typeof fetch;
+    const create = (controlFreshness?: 'best-effort' | 'required') => createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
+      ...(controlFreshness ? { controlFreshness } : {}),
+    });
+    const glirastes = track(create());
+    expect(create('required')).toBe(glirastes);
+    expect(create('best-effort')).toBe(glirastes);
+    const turn = await glirastes.chatTurn(principal);
+    expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'halted', code: 'control_unknown' });
   });
 
   it('rejects an unknown control freshness', () => {
