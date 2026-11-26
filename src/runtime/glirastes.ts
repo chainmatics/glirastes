@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   AppSetupArtifactSchema,
   type EffectiveEnvironmentControl,
@@ -52,6 +53,8 @@ import { createTurnRateLimiter, type TurnAdmission } from './turn-rate-limit.js'
 const DEFAULT_FIRST_SYNC_TIMEOUT_MS = 5_000;
 const DEFAULT_RETRY_INTERVAL_MS = 30_000;
 const TURN_ROLLOUT_LIMIT = 256;
+// Turn ids come from the client; keyed by digest so their length costs nothing.
+const turnKey = (turnId: string) => createHash('sha256').update(turnId, 'utf8').digest('base64url');
 
 /** The module `glirastes tools refresh` emits (`tools.generated.ts`). */
 export interface GlirastesGeneratedModule extends GeneratedToolModule {
@@ -552,15 +555,15 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     source: LocalRuntimeSource,
     context: { turnId: string; principal: Principal; conversationId?: string },
   ): { source: LocalRuntimeSource; rollout?: TurnRollout } => {
-    const known = turns.get(context.turnId);
+    const key = turnKey(context.turnId);
+    const known = turns.get(key);
     if (known) return known;
     let turn: { source: LocalRuntimeSource; rollout?: TurnRollout } = { source };
     if (managed && source === managed.source) {
       const deployments = store.deployments();
       const selection = cohorts.select(deployments, {
         subjectId: context.principal.subjectId,
-        // Per subject: a client-chosen conversation id never carries another user's cohort.
-        conversationId: `${context.principal.subjectId}\n${context.conversationId ?? context.turnId}`,
+        conversationId: context.conversationId ?? context.turnId,
       });
       if (selection) {
         const canary = selection.cohort === 'canary'
@@ -569,13 +572,13 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         const deployment = canary ? selection.deployment : deployments.stable!;
         turn = {
           source: canary ?? source,
-          ...(deployments.stable?.rolloutBinding
+          ...(canary || deployments.stable?.rolloutBinding
             ? { rollout: { deploymentId: deployment.deploymentId, cohort: canary ? 'canary' : 'stable' } }
             : {}),
         };
       }
     }
-    turns.set(context.turnId, turn);
+    turns.set(key, turn);
     if (turns.size > TURN_ROLLOUT_LIMIT) turns.delete(turns.keys().next().value!);
     return turn;
   };
@@ -643,7 +646,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
                   const control = turnControlOf(store.control());
                   return rateLimiter.admit(current, control.assistant === 'enabled' ? control.rateLimit : undefined);
                 },
-                turnRollout: ({ turnId }: { turnId: string }) => turns.get(turnId)?.rollout,
+                turnRollout: ({ turnId }: { turnId: string }) => turns.get(turnKey(turnId))?.rollout,
               }
             : {}),
         },

@@ -149,6 +149,28 @@ describe('RolloutCohortSelector', () => {
     expect(canaryState({ stable, canary: unbound })).toBe('unbound');
   });
 
+  it('never selects a bound canary while the stable deployment is unbound', () => {
+    const unboundStable = deployment('3901', 'stable', 100, { rolloutBinding: undefined });
+    const wide = deployment('3902', 'canary', 99);
+    const selector = new RolloutCohortSelector();
+    for (const subjectId of subjects.slice(0, 300)) {
+      expect(selector.select({ stable: unboundStable, canary: wide }, { subjectId, conversationId: subjectId })?.cohort)
+        .toBe('stable');
+    }
+    expect(canaryState({ stable: unboundStable, canary: wide })).toBe('unbound');
+    expect(selectRuntimeDeployment({ stable: unboundStable, canary: wide }, { subjectId: subjectIn(0, 99) }))
+      .toBe(unboundStable);
+  });
+
+  it('keeps at most the per-subject cap of conversations of one subject', () => {
+    const selector = new RolloutCohortSelector({ maxConversationsPerSubject: 3 });
+    selector.select({ stable, canary }, { subjectId: 'bob', conversationId: 'bob-1' });
+    for (let index = 0; index < 50; index += 1) {
+      selector.select({ stable, canary }, { subjectId: 'alice', conversationId: `${'c'.repeat(100_000)}-${index}` });
+    }
+    expect(selector.size).toBe(4);
+  });
+
   it('never selects a canary whose prompt this runner does not hold', () => {
     const otherPrompt = deployment('3902', 'canary', 99, { promptDigest: 'sha256:prompt-b' });
     const selector = new RolloutCohortSelector();

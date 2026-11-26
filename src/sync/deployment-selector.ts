@@ -3,6 +3,7 @@ import type { RuntimeDeploymentBundle, SecurityRevocation } from '../contracts/r
 
 const DEFAULT_MAX_CONVERSATIONS = 10_000;
 const DEFAULT_CONVERSATION_TTL_MS = 24 * 60 * 60 * 1_000;
+const DEFAULT_MAX_CONVERSATIONS_PER_SUBJECT = 100;
 
 /** The unsalted bucket of earlier releases; canary selection uses `rolloutCohortBucket`. */
 export function stableCohortBucket(subjectId: string): number {
@@ -42,16 +43,26 @@ export interface RolloutSelection {
   cohort: RolloutCohort;
 }
 
-/** A canary binding that names exactly this deployment, its mode and its share. */
-function boundCanary(deployment: RuntimeDeploymentBundle): boolean {
+function bound(deployment: RuntimeDeploymentBundle, mode: RolloutCohort): boolean {
   const binding = deployment.rolloutBinding;
-  return deployment.rolloutMode === 'canary'
+  return deployment.rolloutMode === mode
     && binding !== undefined
-    && binding.rolloutMode === 'canary'
+    && binding.rolloutMode === mode
     && binding.deploymentId === deployment.deploymentId
     && binding.environmentId === deployment.environmentId
     && binding.targetPercentage === deployment.targetPercentage;
 }
+
+/**
+ * Both deployments carry a binding that names exactly them, their mode and
+ * share: an unbound stable would report its turns without a cohort, so the
+ * canary's errors would land in the stable baseline.
+ */
+function boundCanary(stable: RuntimeDeploymentBundle | null, canary: RuntimeDeploymentBundle): boolean {
+  return stable !== null && bound(stable, 'stable') && bound(canary, 'canary');
+}
+
+const digestOf = (value: string) => createHash('sha256').update(value, 'utf8').digest('base64url');
 
 function revoked(
   deployment: RuntimeDeploymentBundle,
@@ -70,7 +81,7 @@ export function canaryState(
 ): CanaryState | undefined {
   const { stable, canary } = deployments;
   if (!canary) return undefined;
-  if (!boundCanary(canary)) return 'unbound';
+  if (!boundCanary(stable, canary)) return 'unbound';
   if (revoked(canary, deployments.revocations ?? [], (options.now ?? Date.now)())) return 'revoked';
   const promptAvailable = options.promptAvailable
     ?? ((digest: string | undefined) => digest === stable?.promptDigest);
@@ -84,13 +95,22 @@ export function canaryState(
  * process memory, bounded and expiring: not shared between instances.
  */
 export class RolloutCohortSelector {
-  private readonly conversations = new Map<string, { deploymentId: string; seenAt: number }>();
+  // Keyed by digests, so client-chosen ids of any length cost the same.
+  private readonly conversations = new Map<string, { deploymentId: string; seenAt: number; subject: string }>();
+  private readonly perSubject = new Map<string, number>();
   private readonly maxConversations: number;
+  private readonly maxPerSubject: number;
   private readonly ttlMs: number;
   private readonly now: () => number;
 
-  constructor(options: { maxConversations?: number; ttlMs?: number; now?: () => number } = {}) {
+  constructor(options: {
+    maxConversations?: number;
+    maxConversationsPerSubject?: number;
+    ttlMs?: number;
+    now?: () => number;
+  } = {}) {
     this.maxConversations = Math.max(1, options.maxConversations ?? DEFAULT_MAX_CONVERSATIONS);
+    this.maxPerSubject = Math.max(1, options.maxConversationsPerSubject ?? DEFAULT_MAX_CONVERSATIONS_PER_SUBJECT);
     this.ttlMs = Math.max(1, options.ttlMs ?? DEFAULT_CONVERSATION_TTL_MS);
     this.now = options.now ?? Date.now;
   }
@@ -112,7 +132,9 @@ export class RolloutCohortSelector {
     }) === 'selectable'
       ? canary
       : undefined;
-    const sticky = this.conversations.get(input.conversationId);
+    const subject = digestOf(input.subjectId ?? '');
+    const key = digestOf(`${subject}\n${input.conversationId}`);
+    const sticky = this.conversations.get(key);
     let selection: RolloutSelection;
     if (sticky && now - sticky.seenAt < this.ttlMs) {
       selection = selectable && sticky.deploymentId === selectable.deploymentId
@@ -125,17 +147,35 @@ export class RolloutCohortSelector {
         ? { deployment: selectable, cohort: 'canary' }
         : { deployment: stable, cohort: 'stable' };
     }
-    this.remember(input.conversationId, selection.deployment.deploymentId, now);
+    this.remember(key, subject, selection.deployment.deploymentId, now);
     return selection;
   }
 
-  private remember(conversationId: string, deploymentId: string, now: number): void {
-    this.conversations.delete(conversationId);
-    this.conversations.set(conversationId, { deploymentId, seenAt: now });
-    for (const [key, entry] of this.conversations) {
-      if (this.conversations.size <= this.maxConversations && now - entry.seenAt < this.ttlMs) break;
-      this.conversations.delete(key);
+  private remember(key: string, subject: string, deploymentId: string, now: number): void {
+    this.forget(key);
+    this.conversations.set(key, { deploymentId, seenAt: now, subject });
+    this.perSubject.set(subject, (this.perSubject.get(subject) ?? 0) + 1);
+    if (this.perSubject.get(subject)! > this.maxPerSubject) {
+      for (const [other, entry] of this.conversations) {
+        if (entry.subject === subject) {
+          this.forget(other);
+          break;
+        }
+      }
     }
+    for (const [other, entry] of this.conversations) {
+      if (this.conversations.size <= this.maxConversations && now - entry.seenAt < this.ttlMs) break;
+      this.forget(other);
+    }
+  }
+
+  private forget(key: string): void {
+    const entry = this.conversations.get(key);
+    if (!entry) return;
+    this.conversations.delete(key);
+    const count = (this.perSubject.get(entry.subject) ?? 1) - 1;
+    if (count > 0) this.perSubject.set(entry.subject, count);
+    else this.perSubject.delete(entry.subject);
   }
 }
 
@@ -170,7 +210,7 @@ export function selectRuntimeDeployment(
   const canary = deployments.canary;
   if (
     canary
-    && boundCanary(canary)
+    && boundCanary(deployments.stable, canary)
     && rolloutCohortBucket(canary.rolloutBinding!.cohortSalt, input.subjectId)
       < canary.rolloutBinding!.targetPercentage
   ) {

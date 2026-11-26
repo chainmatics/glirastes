@@ -4,6 +4,7 @@ import {
   sign,
   type KeyObject,
 } from 'node:crypto';
+import { MockLanguageModelV3 } from 'ai/test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type {
@@ -24,6 +25,7 @@ import type {
 } from '../contract-bindings.js';
 import type { AiChatHandlerConfig } from '../../server/adapters/nextjs/types.js';
 import { createGlirastes, type Glirastes, type GlirastesChatTurn } from '../glirastes.js';
+import { createAiChatHandler } from '../../server/adapters/nextjs/create-ai-chat-handler.js';
 import { SDK_VERSION } from '../sdk-version.js';
 import { createLocalSchemaDigest } from '../local-tool-bindings.js';
 
@@ -1070,7 +1072,7 @@ describe('createGlirastes canary cohorts', () => {
     };
   }
 
-  function deployments(privateKey: KeyObject, options: { bound?: boolean; canary?: boolean } = {}) {
+  function deployments(privateKey: KeyObject, options: { bound?: boolean; canary?: boolean; stableBound?: boolean } = {}) {
     const stable = activeDeployment(privateKey);
     const base = activeDeployment(privateKey);
     const canary: RuntimeDeploymentBundle = {
@@ -1084,7 +1086,8 @@ describe('createGlirastes canary cohorts', () => {
     const bind = (deployment: RuntimeDeploymentBundle) => (options.bound === false
       ? deployment
       : { ...deployment, rolloutBinding: signedBinding(privateKey, deployment) });
-    return options.canary === false ? [bind(stable)] : [bind(stable), bind(canary)];
+    const first = options.stableBound === false ? stable : bind(stable);
+    return options.canary === false ? [first] : [first, bind(canary)];
   }
 
   const subjects = Array.from({ length: 200 }, (_, index) => `user-${index}`);
@@ -1092,12 +1095,15 @@ describe('createGlirastes canary cohorts', () => {
   const inStable = subjects.find((subject) => rolloutCohortBucket(SALT, subject) >= 50)!;
   const as = (subjectId: string) => ({ ...principal(TENANT_ID), subjectId });
 
-  async function connected(sync: () => RuntimeDeploymentBundle[], publicKey: KeyObject) {
+  async function connected(sync: () => RuntimeDeploymentBundle[], publicKey: KeyObject, control?: () => unknown) {
     const http = platform({ publicKey });
     const fetchImpl = (async (input: string | URL | Request, init: RequestInit = {}) => {
       if (!String(input).includes('/sync?')) return http.fetchImpl(input, init);
       http.calls.push({ url: String(input), init });
-      return json({ cursor: '2026-07-29T00:02:00.000Z', activeSnapshotComplete: true, deployments: sync(), revocations: [] });
+      return json({
+        cursor: '2026-07-29T00:02:00.000Z', activeSnapshotComplete: true, deployments: sync(), revocations: [],
+        ...(control ? { control: control() } : {}),
+      });
     }) as typeof fetch;
     const glirastes = track(createGlirastes({
       generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
@@ -1166,6 +1172,63 @@ describe('createGlirastes canary cohorts', () => {
     expect(result.rollout).toBeUndefined();
     const heartbeat = calls.find(({ url }) => url.endsWith('/heartbeat'));
     expect(JSON.parse(String(heartbeat?.init.body)).technicalMetadata).toMatchObject({ canaryState: 'unbound' });
+  });
+
+  it('never runs a bound canary while the stable deployment is unbound, and reports turns as v2', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const { glirastes } = await connected(() => deployments(privateKey, { stableBound: false }), publicKey);
+    for (const [index, subjectId] of subjects.slice(0, 40).entries()) {
+      const result = await turn(glirastes, subjectId, `ai-t${index}`);
+      expect(result.snapshot.policyRevision.revisionId).toBe(id('3908'));
+      expect(result.rollout).toBeUndefined();
+    }
+  });
+
+  it('applies a budget ceiling and a halt to canary turns', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const signedControl = (patch: Record<string, unknown>) => {
+      const unsigned = {
+        kind: 'environment-control' as const, schemaVersion: 1 as const, tenantId: TENANT_ID, targetAppId: APP_ID,
+        environmentId: ENVIRONMENT_ID, sequence: 1, assistant: 'enabled', reasonCode: 'operator-tighten',
+        issuedAt: '2026-11-26T09:00:00.000Z', ...patch,
+      };
+      return {
+        ...unsigned,
+        signature: {
+          algorithm: 'Ed25519' as const, keyId: 'runtime-key',
+          value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url'),
+        },
+      };
+    };
+    let control = signedControl({ budgetCeiling: { maxToolCalls: 2 } });
+    const { glirastes } = await connected(() => deployments(privateKey), publicKey, () => control);
+    const snapshots: unknown[] = [];
+    const run = async (turnId: string) => {
+      const chat = await glirastes.chatTurn((tenantId) => ({ ...as(inCanary), tenantId }));
+      const handler = createAiChatHandler({
+        ...chat, model: new MockLanguageModelV3(), systemPrompt: 'Assistant',
+        streamHandler: async (context) => {
+          snapshots.push(context.managedTurn?.snapshot);
+          return new Response('ok');
+        },
+      });
+      return handler(new Request('https://app.example/api/chat', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [{ id: turnId, role: 'user', parts: [{ type: 'text', text: 'Show tasks' }] }] }),
+      }));
+    };
+
+    expect((await run('u1')).status).toBe(200);
+    expect(snapshots[0]).toMatchObject({
+      policyRevision: { revisionId: CANARY_POLICY_ID }, budget: { ...limits, maxToolCalls: 2 },
+    });
+
+    control = signedControl({ sequence: 2, assistant: 'halted', reasonCode: 'operator-halt' });
+    await vi.waitFor(() => expect(glirastes.control()).toMatchObject({ assistant: 'halted' }), { timeout: 1_000 });
+    const halted = await run('u2');
+    expect(halted.status).toBe(503);
+    expect(await halted.json()).toEqual({ error: 'assistant_halted' });
+    expect(snapshots).toHaveLength(1);
   });
 
   it('adds no rollout in Standalone', async () => {
