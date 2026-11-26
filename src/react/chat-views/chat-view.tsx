@@ -28,8 +28,6 @@ export interface ChatViewProps {
   locale?: string;
   texts?: Partial<ChatViewTexts>;
   dispatch?: Partial<ChatViewDispatch>;
-  /** Renders the Markdown text of a whole view that cannot render as components. */
-  renderText?: (markdown: string) => ReactNode;
 }
 
 type Element = ResolvedChatView['elements'][string];
@@ -44,17 +42,18 @@ function elementOf(view: ResolvedChatView, id: string): Element | undefined {
 
 const NO_DISPATCH: ChatViewDispatch = { prompt: () => {}, uiAction: () => {} };
 
-function plainText(text: string): ReactNode {
-  return <div data-element="text-fallback">{text}</div>;
-}
-
 /**
- * A resolved chat view through the bound components. An element whose
+ * A resolved chat view through the bound components. Every text fallback is
+ * plain text (`format: 'plain'`) in React text nodes, never Markdown or HTML:
+ * view values are tool data and model literals, so none of them can become a
+ * link, image or markup.
+ *
+ * An element whose
  * component is not bound (or not in its version) or whose props do not fit
  * renders as its text; a root that cannot render, or a binding that throws at
  * the root, renders the whole view as text.
  */
-export function ChatView({ view, registry, locale = 'en', texts, dispatch, renderText = plainText }: ChatViewProps) {
+export function ChatView({ view, registry, locale = 'en', texts, dispatch }: ChatViewProps) {
   const manifest = registry?.manifest ?? starterChatComponentManifest;
   const phrases = chatViewPhrasesOf(locale);
   const said = texts?.said ?? phrases.said;
@@ -63,14 +62,14 @@ export function ChatView({ view, registry, locale = 'en', texts, dispatch, rende
   const actions: ChatViewDispatch = { ...NO_DISPATCH, ...dispatch };
   const wholeText = (
     <div data-component="chat-view" data-fallback="text">
-      {renderText(chatViewToText(view, manifest, { locale }))}
+      <div data-element="text-fallback">{chatViewToText(view, manifest, { locale, format: 'plain' })}</div>
     </div>
   );
   const root = elementOf(view, view.root);
   if (!registry || !root || !registry.resolve(root.type, root.schemaVersion, root.props)) return wholeText;
 
   const elementText = (target: ResolvedChatView, id: string) => (
-    <span data-element="text-fallback">{chatElementToText(target, id, manifest, { locale })}</span>
+    <span data-element="text-fallback">{chatElementToText(target, id, manifest, { locale, format: 'plain' })}</span>
   );
 
   function renderCell(tableId: string, rowIndex: number, cellId: string): ReactNode {

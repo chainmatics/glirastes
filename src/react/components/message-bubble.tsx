@@ -572,7 +572,6 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
             prompt: (text) => { send(text); },
             uiAction: (id, args) => runChatViewAction?.(id, args, toolCallId),
           }}
-          renderText={(text) => <MarkdownComponent content={text} />}
         />
       );
     }

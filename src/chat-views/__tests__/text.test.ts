@@ -117,6 +117,55 @@ describe('chatViewToText', () => {
     expect(chatViewToText(view, manifest)).toBe('still readable');
   });
 
+  describe('values are data, never Markdown', () => {
+    const hostile: ResolvedChatView = {
+      v: 1,
+      root: 'card',
+      caption: '# [x](https://evil.example)',
+      elements: {
+        card: v('Card', { title: '![](https://evil.example/p.png)' }, { children: ['facts', 'note', 'table'] }),
+        facts: v('KeyValue', { items: [{ label: '<img src=x>', value: 'a *b* `c` ~d~ &amp; e\\f' }] }),
+        note: v('Text', { text: '1. - first\n> quoted' }),
+        table: v(
+          'Table',
+          { columns: [{ header: 'A|B', cell: 'who' }, { header: 'Note', cell: 'what' }] },
+          { rows: [{ who: { label: 'x | y\nz', tone: 'neutral' }, what: { text: '[x](https://evil.example)' } }] },
+        ),
+        who: v('StatusBadge', {}),
+        what: v('Text', {}),
+      },
+    };
+
+    it('escapes links, images, HTML, entities, emphasis and block markers', () => {
+      expect(chatViewToText(hostile, manifest)).toBe(
+        [
+          '\\# \\[x\\](https://evil.example)',
+          '**\\!\\[\\](https://evil.example/p.png)**',
+          '\\<img src=x\\>: a \\*b\\* \\`c\\` \\~d\\~ \\&amp; e\\\\f',
+          '1\\. - first \\> quoted',
+          [
+            '| A\\|B | Note |',
+            '| --- | --- |',
+            '| x \\| y z | \\[x\\](https://evil.example) |',
+          ].join('\n'),
+        ].join('\n\n'),
+      );
+    });
+
+    it('keeps the table shape for a value with a pipe or a line break', () => {
+      const table = chatElementToText(hostile, 'table', manifest);
+      const lines = table.split('\n');
+      expect(lines).toHaveLength(3);
+      // Unescaped pipes only: the two cell borders plus the one between the cells.
+      for (const line of lines) expect(line.match(/(?<!\\)\|/g)).toHaveLength(3);
+    });
+
+    it('renders values unescaped and without emphasis in plain form', () => {
+      expect(chatElementToText(hostile, 'facts', manifest, { format: 'plain' })).toBe('<img src=x>: a *b* `c` ~d~ &amp; e\\f');
+      expect(chatViewToText(hostile, manifest, { format: 'plain' })).toMatch(/^# \[x\]\(https:\/\/evil\.example\)\n\n!\[\]/);
+    });
+  });
+
   it('renders one element for the per-element fallback', () => {
     expect(chatElementToText(starterView, 'facts', manifest)).toBe('Customer: ACME\nOpen: 2');
     expect(chatElementToText(starterView, 'missing', manifest)).toBe('');

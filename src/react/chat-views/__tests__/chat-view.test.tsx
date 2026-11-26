@@ -7,6 +7,7 @@ import type { ResolvedChatView } from '../../../contracts/chat-view.js';
 import { defineChatComponent } from '../../../chat-views/define.js';
 import { starterChatComponents } from '../../../chat-views/starter-catalog.js';
 import { UiActionBus } from '../../../browser/ui-action-bus.js';
+import { readChatViewCapabilities } from '../../../server/adapters/nextjs/render-view.js';
 import { AiChatProvider } from '../../provider/ai-chat-provider.js';
 import { useChatContext } from '../../provider/chat-context.js';
 import { MessageList } from '../../components/message-list.js';
@@ -144,7 +145,7 @@ describe('chat views in the message list', () => {
     expect(document.querySelector('[data-element="status-badge"]')?.textContent).toBe('done');
   });
 
-  it('renders the whole view as text when the root cannot render', async () => {
+  it('renders the whole view as text when the root cannot render', () => {
     const view: ResolvedChatView = {
       v: 1,
       root: 'card',
@@ -156,7 +157,7 @@ describe('chat views in the message list', () => {
     renderChat(view, { chatViews: {} });
     const root = document.querySelector('[data-component="chat-view"]')!;
     expect(root.getAttribute('data-fallback')).toBe('text');
-    await waitFor(() => expect(root.textContent).toContain('Inside'), { timeout: 3000 });
+    expect(root.textContent).toContain('Inside');
   });
 
   it('renders an element whose component throws as its text', () => {
@@ -223,13 +224,86 @@ describe('chat views in the message list', () => {
     });
   });
 
-  it('renders a view as text without the chatViews option', async () => {
+  it('renders a view as text without the chatViews option', () => {
     renderChat(invoices, { language: 'de' });
     const root = document.querySelector('[data-component="chat-view"]')!;
     expect(root.getAttribute('data-fallback')).toBe('text');
-    // The Markdown text form (the Markdown renderer loads lazily).
-    await waitFor(() => expect(root.textContent).toContain('Acme'), { timeout: 3000 });
+    // Plain text, synchronously: no Markdown renderer is involved.
+    expect(root.textContent).toContain('Acme');
     expect(root.textContent).toContain('vom Assistenten berechnet');
+  });
+
+  describe('values never become markup in a text fallback', () => {
+    const LINK = '[x](https://evil.example)';
+    const IMAGE = '![](https://evil.example/p.png)';
+    const HTML = '<img src=x>';
+    const BARE = 'https://evil.example and mail@evil.example';
+    const hostile = (rootProps: Record<string, unknown> = {}): ResolvedChatView => ({
+      v: 1,
+      root: 'card',
+      caption: LINK,
+      elements: {
+        card: { type: 'Card', schemaVersion: 1, props: { title: IMAGE, ...rootProps }, children: ['facts', 'note', 'table', 'chart'] },
+        facts: { type: 'KeyValue', schemaVersion: 1, props: { items: [{ label: HTML, value: LINK }] } },
+        note: { type: 'Text', schemaVersion: 1, props: { text: BARE } },
+        table: {
+          type: 'Table',
+          schemaVersion: 1,
+          props: { columns: [{ header: IMAGE, cell: 'who' }] },
+          rows: [{ who: { label: LINK, tone: 'neutral' } }, { who: { label: HTML, tone: 'purple' } }],
+        },
+        who: { type: 'StatusBadge', schemaVersion: 1, props: {} },
+        // Unknown type: its per-element fallback is the text of its children.
+        chart: { type: 'Chart', schemaVersion: 1, props: {}, children: ['inner'] },
+        inner: { type: 'Text', schemaVersion: 1, props: { text: IMAGE } },
+      },
+    });
+    const expectInert = () => {
+      const root = document.querySelector('[data-component="chat-view"]')!;
+      expect(root.querySelector('a, img, script')).toBeNull();
+      return root;
+    };
+
+    it('in the whole-view fallback without the option', () => {
+      renderChat(hostile());
+      const root = expectInert();
+      expect(root.getAttribute('data-fallback')).toBe('text');
+      for (const value of [LINK, IMAGE, HTML, BARE]) expect(root.textContent).toContain(value);
+    });
+
+    it('in the whole-view fallback when the root fails', () => {
+      renderChat(hostile({ title: 42 }), { chatViews: {} });
+      const root = expectInert();
+      expect(root.getAttribute('data-fallback')).toBe('text');
+      expect(root.textContent).toContain(LINK);
+    });
+
+    it('in the per-element and per-cell fallbacks', () => {
+      renderChat(hostile(), { chatViews: {} });
+      const root = expectInert();
+      expect(root.getAttribute('data-fallback')).toBeNull();
+      const fallbacks = [...root.querySelectorAll('[data-element="text-fallback"]')].map((node) => node.textContent);
+      // The invalid badge cell (tone `purple`) and the unknown Chart.
+      expect(fallbacks).toEqual([HTML, IMAGE]);
+    });
+
+    it('through the escaped Markdown text form, also when a consumer renders it as Markdown', async () => {
+      const { chatViewToText } = await import('../../../chat-views/text.js');
+      const { starterChatComponentManifest } = await import('../../../chat-views/starter-catalog.js');
+      const { default: Markdown } = await import('react-markdown');
+      const { default: remarkGfm } = await import('remark-gfm');
+      const markdown = chatViewToText(hostile(), starterChatComponentManifest);
+      const { container } = render(<Markdown remarkPlugins={[remarkGfm]}>{markdown}</Markdown>);
+      expect(container.querySelector('img, script')).toBeNull();
+      // GFM autolinks a bare address after unescaping; that link shows exactly
+      // its target. No value yields a link with hidden or different text.
+      const links = [...container.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')]);
+      expect(links.length).toBeGreaterThan(0);
+      for (const [text, href] of links) expect([text, `mailto:${text}`]).toContain(href);
+      expect(links.map(([text]) => text)).not.toContain('x');
+      expect(container.querySelector('table')).not.toBeNull();
+      for (const value of [LINK, IMAGE, HTML, BARE]) expect(container.textContent).toContain(value);
+    });
   });
 
   it('renders nothing for a failed or running render_view call', () => {
@@ -318,5 +392,11 @@ describe('chat view capabilities in the request body', () => {
     const chatViews = body.chatViews as { components: Array<{ id: string; schemaVersion: number }>; surface: string };
     expect(chatViews.surface).toBe('narrow');
     expect(chatViews.components.map((component) => component.id)).toEqual(starterChatComponents.map((definition) => definition.id));
+    // Round trip: the server's parser (Task 6) reads exactly this field and shape.
+    expect(readChatViewCapabilities(body)).toEqual(chatViews);
+  });
+
+  it('sends nothing the server would read as capabilities without the option', async () => {
+    expect(readChatViewCapabilities(await bodyOf({}))).toBeUndefined();
   });
 });
