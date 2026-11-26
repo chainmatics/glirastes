@@ -156,8 +156,18 @@ its deployment while it stays selectable, and reports turns as metric v3 with
 stable and canary must be bound; an older binding is never applied again.
 Stickiness is per process. Prompts stay in the code: a canary with another
 prompt digest than stable is never selected (heartbeat
-`canaryState: 'prompt-unavailable'`) unless the runner holds that prompt. See `docs/managed-runtime-sync.md`,
-Canary cohorts.
+`canaryState: 'prompt-unavailable'`) unless the runner holds that prompt.
+Heartbeats report the `CanaryState` (`selectable`, `unbound`, `revoked`,
+`prompt-unavailable`). The Platform signs a `RolloutBinding` per deployment; a
+binding older than the accepted one reaches `onError` as
+`RuntimeRolloutBindingError` (`RuntimeRolloutBindingErrorCode`
+`rollout_binding_stale` or `rollout_binding_conflict`). Turn metrics are then
+`TechnicalRuntimeEventV3` and `TurnContinuedEventV3` with a
+`RuntimeRolloutCohort`; a custom `managedRuntime` reports its `TurnRollout`
+through `turnRollout`. A host that selects deployments itself uses
+`RolloutCohortSelector` (per turn, with conversation stickiness) or
+`selectRuntimeDeployment`; both bucket with `rolloutCohortBucket`. See
+`docs/managed-runtime-sync.md`, Canary cohorts.
 
 ## Frontend and acceptance
 
