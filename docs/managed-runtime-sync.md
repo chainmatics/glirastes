@@ -318,6 +318,11 @@ against the same JWKS.
   control of that environment. A halt stays in force until a newer verified
   control arrives for it, or until another environment completes its first
   sync.
+  If the new connection has no reference environment yet, a kept halt stays
+  in effect while turns run on the local code (fail closed).
+- Control-plane and JWKS requests time out after 10 seconds
+  (`requestTimeoutMs`, `timeoutMs`), so a hung request cannot hold back a
+  pushed halt.
 
 `glirastes.control()` returns the control in force, or the local halt.
 Rejections reach `onError` as a content-free `RuntimeEnvironmentControlError`
