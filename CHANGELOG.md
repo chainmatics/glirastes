@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Composer: a long draft scrolls with a thin thumb in the text color and no track (`rich-mention-input` editor and the composer textareas), instead of the platform's boxed scrollbar.
 
+- `BulkApprovalCard` (2+ approvals of one tool): each item shows its first detail line that differs between the approvals, and the lines all approvals state alike (a scope, a team) are shown once under the header (`[data-element="shared-details"]` > `[data-element="shared-detail"]`). Before, each item showed its first line, so six `memory_remember` calls whose model put `scope` before `note` listed the scope six times. When no line differs, items keep showing their first line and no shared line appears.
+
 ## [0.30.0] - 2026-11-26
 
 ### Added
