@@ -1,0 +1,26 @@
+{
+  "version": "0.31.1",
+  "notes": [
+    {
+      "id": "voice-transcribing-state",
+      "kind": "recommended",
+      "summary": "Voice button data-state is now `transcribing` after stop (it stayed `recording`), and the recording bar's stop button has its own name (`voiceStopAndInsertAriaLabel`, \"Stop and insert text\").",
+      "howTo": "An own selector or test on `[data-component=\"voice-input-addon\"][data-state=\"recording\"]` (or `voice-input-button`) no longer matches between stop and the arriving text: add `[data-state=\"transcribing\"]` where the recording look or wait should cover it (the stock styles do). States: idle, connecting, recording, transcribing, failed. A test or locator that finds the recording bar's stop by the name \"Stop recording\" / \"Aufnahme beenden\" now finds only the mic button; use \"Stop and insert text\" / \"Beenden und Text übernehmen\" or `[data-component=\"recording-bar\"]`. An own locale table can set `voiceStopAndInsertAriaLabel`. Details: skills/building-glirastes-chat-ui/references/hooks-and-building-blocks.md (Speech worklet).",
+      "skill": "building-glirastes-chat-ui",
+      "affectedWhen": {
+        "patterns": [
+          "data-state=.{0,3}recording",
+          "voiceStopAriaLabel"
+        ],
+        "files": [
+          "code",
+          "style"
+        ]
+      },
+      "surface": [
+        "*#ChatLocale.voiceStopAndInsertAriaLabel",
+        "locale#voiceStopAndInsertAriaLabel"
+      ]
+    }
+  ]
+}

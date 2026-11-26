@@ -2594,6 +2594,7 @@
   "glirastes/react#ChatLocale.voiceConnectingAriaLabel",
   "glirastes/react#ChatLocale.voiceFailedText",
   "glirastes/react#ChatLocale.voiceStartAriaLabel",
+  "glirastes/react#ChatLocale.voiceStopAndInsertAriaLabel",
   "glirastes/react#ChatLocale.voiceStopAriaLabel",
   "glirastes/react#ChatLocale.voiceTranscribingAriaLabel",
   "glirastes/react#ChatLocale.voiceUnavailableText",
@@ -6164,6 +6165,7 @@
   "locale#voiceConnectingAriaLabel",
   "locale#voiceFailedText",
   "locale#voiceStartAriaLabel",
+  "locale#voiceStopAndInsertAriaLabel",
   "locale#voiceStopAriaLabel",
   "locale#voiceTranscribingAriaLabel",
   "locale#voiceUnavailableText"
