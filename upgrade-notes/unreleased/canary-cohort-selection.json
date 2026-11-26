@@ -1,0 +1,47 @@
+{
+  "id": "canary-cohort-selection",
+  "kind": "optional",
+  "summary": "Connected runners run a canary deployment for its cohort per turn, kept per conversation, once the Platform signs a rollout binding; turn metrics then carry deploymentId, cohort and approvalsDeclined (v3). selectRuntimeDeployment selects only a bound canary.",
+  "howTo": "Nothing to do for createGlirastes().chatTurn(): it sends canaryVersion=1 on sync, reports capabilities.canarySelection: 1 and technicalMetadata.canaryState in heartbeats, and hands turnRollout to createAiChatHandler. An older Platform answers as before and turns stay on the stable deployment with metric v2. The cohort follows sha256(cohortSalt:subjectId) of the principal; a conversation (the chat id of the request body, else its first user message) stays on its deployment while that stays selectable and moves to stable on its next turn when the canary is withdrawn, revoked or unbound; continuations of a turn keep its snapshot. Stickiness lives in process memory (10,000 conversations, 24 h), not across instances. A canary is selectable only when its prompt digest equals the stable one, because the runner runs the prompt of its code. If you call selectRuntimeDeployment yourself: a canary without a rollout binding is no longer selected, and the bucket now uses the binding's salt. A custom managedRuntime may implement turnRollout to report metric v3; RuntimeControlPlaneClient and createManagedRuntimeSync take opt-in canarySelection and canaryState. A RuntimeMetricsSink you implement now also receives v3 turn events: narrow on schemaVersion where you typed them as TechnicalRuntimeEventV2.",
+  "skill": "setting-up-glirastes",
+  "affectedWhen": {
+    "symbols": [
+      "selectRuntimeDeployment",
+      "createManagedRuntimeSync",
+      "RuntimeControlPlaneClient",
+      "createTurnMetricsRecorder",
+      "ManagedLocalRuntimeConfig",
+      "TechnicalRuntimeEventBatchSchema",
+      "RuntimeMetricEventSchema",
+      "RuntimeMetricsSink"
+    ]
+  },
+  "surface": [
+    "*#ManagedLocalRuntimeConfig.turnRollout",
+    "*#ResolveTurnSnapshotContext.conversationId",
+    "glirastes/contracts#CANARY_SELECTION_CAPABILITY",
+    "glirastes/contracts#CANARY_SELECTION_SYNC_VERSION",
+    "glirastes/contracts#ROLLOUT_BINDING_SCHEMA_VERSION",
+    "glirastes/contracts#RUNTIME_METRIC_EVENT_SCHEMA_VERSION_V3",
+    "glirastes/contracts#RolloutBinding",
+    "glirastes/contracts#RolloutBindingSchema",
+    "glirastes/contracts#RuntimeRolloutCohort",
+    "glirastes/contracts#RuntimeRolloutCohortSchema",
+    "glirastes/contracts#TechnicalRuntimeEventV3",
+    "glirastes/contracts#TechnicalRuntimeEventV3Schema",
+    "glirastes/contracts#TurnContinuedEventV3",
+    "glirastes/contracts#TurnContinuedEventV3Schema",
+    "glirastes/runtime#TurnMetricsEvent",
+    "glirastes/runtime#TurnMetricsRecorderOptions.approvalsDeclined",
+    "glirastes/runtime#TurnMetricsRecorderOptions.rollout",
+    "glirastes/runtime#TurnRollout.*",
+    "glirastes/sync#CanaryState",
+    "glirastes/sync#CanaryStateOptions.*",
+    "glirastes/sync#RolloutCohort",
+    "glirastes/sync#RolloutCohortSelector",
+    "glirastes/sync#RolloutDeployments.*",
+    "glirastes/sync#RolloutSelection.*",
+    "glirastes/sync#canaryState",
+    "glirastes/sync#rolloutCohortBucket"
+  ]
+}

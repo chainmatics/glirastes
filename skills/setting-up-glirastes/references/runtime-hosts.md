@@ -149,6 +149,13 @@ signed `EnvironmentControl` (assistant `enabled` or `halted`, an optional
 locally with `control_unverifiable` and reaches `onError` as
 `RuntimeEnvironmentControlError` (`RuntimeEnvironmentControlErrorCode`:
 `control_unverifiable`, `control_scope_mismatch`, `control_sequence_conflict`).
+Once the Platform signs rollout bindings, `createGlirastes` runs a canary
+deployment for its cohort (salted bucket of the user), keeps a conversation on
+its deployment while it stays selectable, and reports turns as metric v3 with
+`deploymentId`, `cohort` and `approvalsDeclined`. Stickiness is per process;
+a canary with another prompt digest than stable is never selected (heartbeat
+`canaryState: 'prompt-unavailable'`). See `docs/managed-runtime-sync.md`,
+Canary cohorts.
 
 ## Frontend and acceptance
 

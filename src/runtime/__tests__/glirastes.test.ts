@@ -1054,7 +1054,6 @@ describe('createGlirastes canary cohorts', () => {
   const SALT = 'q3Zr8Kc1VtW0xYbHnL5pJg';
   const CANARY_ID = id('3914');
   const CANARY_POLICY_ID = id('3918');
-  const request = new Request('https://app.example/api/chat', { method: 'POST' });
 
   function signedBinding(privateKey: KeyObject, deployment: RuntimeDeploymentBundle) {
     const unsigned = {
@@ -1109,7 +1108,7 @@ describe('createGlirastes canary cohorts', () => {
 
   async function turn(glirastes: Glirastes, subjectId: string, turnId: string, conversationId = turnId) {
     const chat = await glirastes.chatTurn(principal);
-    const snapshot = await chat.managedRuntime.resolveTurnSnapshot({ request, turnId, conversationId, principal: as(subjectId) });
+    const snapshot = await chat.managedRuntime.resolveTurnSnapshot({ turnId, conversationId, principal: as(subjectId) });
     return { snapshot, rollout: chat.managedRuntime.turnRollout?.({ turnId }) };
   }
 

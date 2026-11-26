@@ -70,7 +70,7 @@ function collectingSink() {
       buildId: null,
       instanceId: 'web-1',
     },
-    record: (event) => { if (event.eventType === 'turn.finished') events.push(event); },
+    record: (event) => { if (event.eventType === 'turn.finished' && event.schemaVersion === 2) events.push(event); },
     flush: async () => undefined,
     close: async () => undefined,
   };

@@ -404,6 +404,43 @@ Use `MemoryRuntimeStateStore` for the zero-setup embedded development path.
 Long-lived and unattended runners should use `FileRuntimeStateStore` or provide
 their own durable `RuntimeStateStore`.
 
+### Canary cohorts
+
+A connected runner sends `canaryVersion=1` on sync and reports
+`capabilities.canarySelection: 1`; a Platform that knows it signs a
+`RolloutBinding` (`glirastes/contracts`, golden vectors in
+`src/contracts/__vectors__/rollout-binding.v1.json`) into each deployment:
+`kind: 'rollout-binding'`, `deploymentId`, `environmentId`, `rolloutMode`,
+`targetPercentage` and a `cohortSalt`, signed with the revision keys. The sync
+keeps a binding only when its signature verifies and it names exactly that
+deployment, environment, mode and share; otherwise it drops the binding and
+keeps the deployment. An older Platform sends none and every turn stays on
+stable.
+
+`createGlirastes` chooses per turn. The cohort is the first four bytes of
+sha256(`cohortSalt:subjectId`) as unsigned big-endian integer modulo 100; a
+bucket below `targetPercentage` runs the canary. A conversation (the chat id of
+the request body, else its first user message, keyed per user) stays on the
+deployment of its first turn while that deployment is the current stable or a
+selectable canary; a new conversation follows the current share. Continuations
+of a turn keep its snapshot. Safety wins over stickiness: a withdrawn, revoked
+or unbound canary moves the conversation to stable on its next turn, and after
+a promotion a conversation of the replaced stable runs the new one. The
+stickiness lives in process memory (10,000 conversations, 24 hours); several
+instances agree on the cohort of a user, not on a conversation's history.
+
+A canary is selectable only when its `promptDigest` equals the stable one: the
+runner runs the prompt of its code and holds no other. Heartbeats carry
+`technicalMetadata.canaryState` while a canary is delivered: `selectable`,
+`unbound`, `revoked` or `prompt-unavailable`.
+
+Once the stable deployment carries a verified binding, turn metrics are
+`TechnicalRuntimeEvent` v3 (`turn.finished` and `turn.continued`): v2 plus
+`deploymentId`, `cohort` (`stable` or `canary`; both null together) and
+`approvalsDeclined` (approvals the request declined). Batches carry
+`schemaVersion: 3` and hold only v3 events; vectors in
+`src/contracts/__vectors__/runtime-metric-event.v3.json`.
+
 ## Code report and Platform decisions
 
 With `setupArtifact` (the committed, content-free code report the generated

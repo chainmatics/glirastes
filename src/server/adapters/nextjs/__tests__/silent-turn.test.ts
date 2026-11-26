@@ -37,7 +37,7 @@ function metricsSink() {
       instanceId: 'web-1',
     },
     record: (event) => {
-      if (event.eventType === 'turn.finished') events.push(event);
+      if (event.eventType === 'turn.finished' && event.schemaVersion === 2) events.push(event);
     },
     flush: async () => undefined,
     close: async () => undefined,

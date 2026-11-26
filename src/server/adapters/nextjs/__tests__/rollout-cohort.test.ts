@@ -66,7 +66,7 @@ function handler(managedRuntime: ManagedLocalRuntimeConfig, metrics: RuntimeMetr
         inputSchema: z.object({ query: z.string() }), execute: async () => ({ tasks: [] }),
       }),
     },
-    model: new MockLanguageModelV3({ doStream: async () => ({ stream: textStep() }) }),
+    model: new MockLanguageModelV3({ doStream: async () => ({ stream: textStep() }) as never }),
     systemPrompt: 'Assistant',
     managedRuntime,
     metrics,
