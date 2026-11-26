@@ -1406,6 +1406,8 @@ export interface ChatLocale {
   activityFailureToolDisabled?: string;
   /** `refused`: refused for another reason. */
   activityFailureRefused?: string;
+  /** `assistant-halted`: the environment control halted the assistant. */
+  activityFailureAssistantHalted?: string;
   /** `limit-reached`: the turn's budget, without a named limit. */
   activityFailureLimitReached?: string;
   /** `limit-tool-calls`; supports `{limit}`, as are the other `activityFailureLimit…` keys. */

@@ -12,6 +12,7 @@ import { MEMORY_FORGET_TOOL_NAME, MEMORY_REMEMBER_TOOL_NAME } from '../../contra
  * - `invalid-input`: the model's arguments did not match the tool's schema.
  * - `tool-unavailable`, `not-permitted`, `identity-missing`, `account-refused`,
  *   `tool-disabled`, `refused`: the managed turn guard refused the call.
+ * - `assistant-halted`: the environment control halted the assistant.
  * - `limit-reached` and `limit-*`: the turn's budget refused it (`{limit}`).
  * - `record-not-found`, `record-invalid-id`, `record-unchecked`: the server
  *   refused the call before its approval card (approval subjects).
@@ -29,6 +30,7 @@ export const STEP_FAILURE_CODES = [
   'account-refused',
   'tool-disabled',
   'refused',
+  'assistant-halted',
   'limit-reached',
   'limit-tool-calls',
   'limit-model-steps',
@@ -74,6 +76,7 @@ const KEYS: Readonly<Record<StepFailureCode, StepFailureLocaleKey>> = {
   'account-refused': 'activityFailureAccountRefused',
   'tool-disabled': 'activityFailureToolDisabled',
   refused: 'activityFailureRefused',
+  'assistant-halted': 'activityFailureAssistantHalted',
   'limit-reached': 'activityFailureLimitReached',
   'limit-tool-calls': 'activityFailureLimitToolCalls',
   'limit-model-steps': 'activityFailureLimitModelSteps',
@@ -112,6 +115,7 @@ export const STEP_FAILURE_TEXTS_EN: Readonly<Record<StepFailureLocaleKey, string
   activityFailureAccountRefused: 'Tool call refused for this account.',
   activityFailureToolDisabled: 'This tool has been disabled.',
   activityFailureRefused: 'Tool call refused.',
+  activityFailureAssistantHalted: 'The assistant is halted.',
   activityFailureLimitReached: 'Limit for this turn reached.',
   activityFailureLimitToolCalls: 'Tool call limit for this turn reached ({limit}).',
   activityFailureLimitModelSteps: 'Step limit for this turn reached ({limit}).',
@@ -171,6 +175,7 @@ const CHANNELS: Readonly<Record<StepFailureCode, { source: StepFailureSource; to
   'account-refused': { source: 'error-text' },
   'tool-disabled': { source: 'error-text' },
   refused: { source: 'error-text' },
+  'assistant-halted': { source: 'error-text' },
   'limit-reached': { source: 'error-text' },
   'limit-tool-calls': { source: 'error-text', values: { limit: NUMBER } },
   'limit-model-steps': { source: 'error-text', values: { limit: NUMBER } },

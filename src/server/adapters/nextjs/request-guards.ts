@@ -184,3 +184,14 @@ export function validateAttachments(
   }
   return undefined;
 }
+
+/** The content-free answer to a request the environment control refuses. */
+export function controlRefusal(
+  status: 429 | 503,
+  code: 'assistant_halted' | 'control_unknown' | 'turn_rate_limited',
+  retryAfterMs?: number,
+): Response {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+  if (retryAfterMs !== undefined) headers['Retry-After'] = String(Math.max(1, Math.ceil(retryAfterMs / 1000)));
+  return new Response(JSON.stringify({ error: code }), { status, headers });
+}

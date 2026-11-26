@@ -39,6 +39,7 @@ const DENIAL_GERMAN = {
   tenant_mismatch: 'Tool-Aufruf für dieses Konto abgelehnt.',
   revoked: 'Dieses Tool wurde deaktiviert.',
   budget_exhausted: 'Limit für diesen Durchlauf erreicht.',
+  assistant_halted: 'Der Assistent ist angehalten.',
 } satisfies Record<ToolDenialReason, string>;
 
 /** Every budget dimension; a new dimension fails compilation here. `[limit, German text]`. */

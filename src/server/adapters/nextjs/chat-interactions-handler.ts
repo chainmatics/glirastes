@@ -10,6 +10,7 @@ import { PrincipalSchema } from '../../../contracts/index.js';
 import { authorizeTurnTool } from '../../../runtime/authorization.js';
 import { modelFacingToolName } from '../../../runtime/local-tool-bindings.js';
 import type { TurnSnapshot } from '../../../runtime/turn-snapshot.js';
+import { controlRefusal } from './request-guards.js';
 import type { ManagedLocalRuntimeConfig } from './types.js';
 
 export interface ChatInteractionsHandlerConfig {
@@ -20,7 +21,8 @@ export interface ChatInteractionsHandlerConfig {
   /**
    * The chat handler's managed runtime. With it, the response is per user:
    * commands, actions and searches whose tool this user may not run (Platform
-   * disabled, roles, revocation, not deployed) are left out.
+   * disabled, roles, revocation, not deployed) are left out. While the
+   * environment control halts the assistant it answers 503.
    */
   managedRuntime?: ManagedLocalRuntimeConfig;
 }
@@ -51,6 +53,8 @@ export function createChatInteractionsHandler(config: ChatInteractionsHandlerCon
   return async function chatInteractionsHandler(request: Request): Promise<Response> {
     const runtime = config.managedRuntime;
     if (!runtime) return json(merged);
+    const control = await runtime.loadControl?.({ request });
+    if (control?.assistant === 'halted') return controlRefusal(503, control.code);
     const principal = PrincipalSchema.safeParse(await runtime.resolvePrincipal(request));
     if (!principal.success) return json({ error: 'Unauthorized' }, 401);
     let snapshot: TurnSnapshot;
