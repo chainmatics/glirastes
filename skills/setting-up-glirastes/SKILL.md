@@ -248,8 +248,10 @@ When the developer runs an eval suite of their own in CI and the Platform's
 eval gate is on, a step after it reports the result with
 `glirastes evals attest --suite <file|dir> --total <n> --failed <n>`. It sends
 digests and counts only, reads both digests from the committed
-`.glirastes/setup-artifact.json` and authenticates with `GLIRASTES_API_KEY`
-(the app's CI key, set by the developer). It never runs the suite. Tooling that
+`.glirastes/setup-artifact.json` and authenticates with `GLIRASTES_EVAL_ATTEST_KEY`:
+the app's eval attestation key (scope `evals:attest`), which an owner or admin
+issues in the dashboard and the developer stores as a CI secret. Runtime,
+connect and tool job CI keys cannot attest. It never runs the suite. Tooling that
 posts the attest itself validates the body with `EvalAttestationRequestSchema`
 (type `EvalAttestationRequest`) and the answer with `EvalAttestationResponseSchema`
 (type `EvalAttestationResponse`) from `glirastes/contracts`. See

@@ -4,7 +4,7 @@
   "endpoint": {
     "method": "POST",
     "path": "/v1/apps/:appId/eval-attestations",
-    "auth": "x-api-key: the app's CI API key (GLIRASTES_API_KEY)"
+    "auth": "x-api-key: the app's eval attestation key, scope evals:attest (GLIRASTES_EVAL_ATTEST_KEY)"
   },
   "sources": {
     "setupArtifactDigest": ".glirastes/setup-artifact.json#discoveryDigest (the Platform stores it on every config revision as setupArtifactDigest)",
@@ -136,6 +136,20 @@
         "total": 1,
         "failed": 1,
         "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "valid/run-ref-like-a-prefix-but-no-secret",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "buildkite/acme/task-abcdefghijklmnopqrstuvwxyz0123/wsk-eeeeeeeeeeeeeeeeeeeeeeee"
       }
     }
   ],
@@ -283,6 +297,104 @@
         "failed": 0,
         "ranAt": "2026-11-26T09:00:00.000Z",
         "ciRunRef": "nightly run with prompt changes"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-glirastes-key",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "github/acme/runs/gl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-github-token",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-github-oauth-token",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "gho_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-github-fine-grained-token",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "github_pat_1111111111111111111111_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-aws-access-key-id",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "aws:AKIAIOSFODNN7EXAMPLE"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-model-api-key",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "run/sk-proj-cccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "name": "invalid/run-ref-secret-slack-token",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "xoxb-not-a-real-slack-token"
       }
     }
   ]

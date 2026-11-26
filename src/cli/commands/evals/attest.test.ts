@@ -52,7 +52,7 @@ function run(argv: string[], overrides: Partial<EvalsCommandDependencies> = {}) 
   const fetchMock = overrides.fetch ?? okFetch();
   const deps: EvalsCommandDependencies = {
     cwd: root,
-    env: { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: 'https://platform.test/' },
+    env: { GLIRASTES_EVAL_ATTEST_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: 'https://platform.test/' },
     now: () => new Date('2026-11-26T09:00:00.000Z'),
     log: (line) => { log.push(line); },
     error: (line) => { error.push(line); },
@@ -213,14 +213,39 @@ describe('glirastes evals attest', () => {
     });
   });
 
-  it('stops with exit 2 and no request without an API key', async () => {
+  it('stops with exit 2 and no request without the eval attestation key, even with a runtime key set', async () => {
     const { exit, fetchMock, error } = run(
       ['--suite', 'evals', '--total', '1', '--failed', '0'],
-      { env: { GLIRASTES_CONTROL_PLANE_URL: 'https://platform.test' } },
+      { env: { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: 'https://platform.test' } },
     );
     expect(await exit).toBe(2);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(error.join('\n')).toContain('GLIRASTES_API_KEY');
+    const output = error.join('\n');
+    expect(output).toContain('GLIRASTES_EVAL_ATTEST_KEY');
+    expect(output).toContain('evals:attest');
+  });
+
+  it('refuses a --run-ref that looks like a secret before sending, without echoing it', async () => {
+    const secret = `ghp_${'A'.repeat(36)}`;
+    const { exit, fetchMock, error } = run(['--suite', 'evals', '--total', '1', '--failed', '0', '--run-ref', secret]);
+    expect(await exit).toBe(2);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(error.join('\n')).toContain('--run-ref');
+    expect(error.join('\n')).not.toContain(secret);
+  });
+
+  it('explains a 403 for a key that is not the eval attestation key', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ code: 'eval_attestation_key_required' }),
+      { status: 403, headers: { 'content-type': 'application/json' } },
+    ));
+    const { exit, error } = run(['--suite', 'evals', '--total', '1', '--failed', '0'], { fetch: fetchMock });
+    expect(await exit).toBe(1);
+    const output = error.join('\n');
+    expect(output).toContain('HTTP 403, eval_attestation_key_required');
+    expect(output).toContain('evals:attest');
+    expect(output).toContain('runtime');
+    expect(output).not.toContain(API_KEY);
   });
 
   it.each([
@@ -268,7 +293,7 @@ describe('glirastes evals attest', () => {
     ['http://[::1]:8101', 0],
   ])('allows plain http only for loopback: %s', async (url, expected) => {
     const { exit, fetchMock } = run(['--suite', 'evals', '--total', '1', '--failed', '0'], {
-      env: { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: url },
+      env: { GLIRASTES_EVAL_ATTEST_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: url },
     });
     expect(await exit).toBe(expected);
     expect(fetchMock).toHaveBeenCalledTimes(expected === 0 ? 1 : 0);
@@ -334,7 +359,7 @@ describe('glirastes evals through the CLI', () => {
     await runCli(['evals', 'attest', '--suite', 'evals', '--total', '4', '--failed', '1', '--root', root], {
       evals: {
         cwd: root,
-        env: { GLIRASTES_API_KEY: API_KEY },
+        env: { GLIRASTES_EVAL_ATTEST_KEY: API_KEY },
         fetch: fetchMock,
         log: () => undefined,
         error: () => undefined,

@@ -4,6 +4,10 @@ import { lstat, readdir, readFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { basename, join, resolve } from 'node:path';
 import {
+  EVAL_ATTESTATION_KEY_SCOPE,
+  EVAL_ATTESTATION_SECRET_PATTERNS,
+} from '../../../contracts/eval-attestation.js';
+import {
   EVAL_ATTESTATION_MAX_TOTAL,
   EVAL_ATTESTATION_SCHEMA_VERSION,
   EvalAttestationRequestSchema,
@@ -25,7 +29,7 @@ export const EVALS_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
 export const EVALS_USAGE = [
   'Usage: glirastes evals attest --suite <file|dir> --total <n> --failed <n> [--run-ref <label>] [--root <dir>] [--json]',
   '         report the result of your own eval suite to the Platform: digests and counts only, never cases or outputs;',
-  '         pass when --failed is 0 (exit 0), otherwise fail (exit 1); needs GLIRASTES_API_KEY and .glirastes/setup-artifact.json',
+  '         pass when --failed is 0 (exit 0), otherwise fail (exit 1); needs GLIRASTES_EVAL_ATTEST_KEY (the app\'s eval attestation key, scope evals:attest) and .glirastes/setup-artifact.json',
 ].join('\n');
 
 const SETUP_ARTIFACT_PATH = '.glirastes/setup-artifact.json';
@@ -130,9 +134,14 @@ async function readSetupDigests(root: string): Promise<{ appId: string; setupArt
 }
 
 function connection(env: Record<string, string | undefined>): { baseUrl: string; apiKey: string } {
-  const apiKey = env.GLIRASTES_API_KEY?.trim();
-  if (!apiKey) throw new EvalsStop('GLIRASTES_API_KEY is not set. Use the app\'s CI API key; nothing was sent.', 2);
-  if (!RUNTIME_API_KEY_PATTERN.test(apiKey)) throw new EvalsStop('GLIRASTES_API_KEY is malformed; nothing was sent.', 2);
+  const apiKey = env.GLIRASTES_EVAL_ATTEST_KEY?.trim();
+  if (!apiKey) {
+    throw new EvalsStop(
+      `GLIRASTES_EVAL_ATTEST_KEY is not set. Use the app's eval attestation key (scope ${EVAL_ATTESTATION_KEY_SCOPE}), issued by an owner or admin in the dashboard; runtime and connect keys cannot attest. Nothing was sent.`,
+      2,
+    );
+  }
+  if (!RUNTIME_API_KEY_PATTERN.test(apiKey)) throw new EvalsStop('GLIRASTES_EVAL_ATTEST_KEY is malformed; nothing was sent.', 2);
   const configured = env.GLIRASTES_CONTROL_PLANE_URL?.trim();
   let baseUrl = DEFAULT_CONTROL_PLANE_URL;
   if (configured) {
@@ -159,6 +168,9 @@ async function attest(argv: readonly string[], deps: Required<EvalsCommandDepend
   const runRef = args.values.get('--run-ref');
   if (runRef !== undefined && !RUNTIME_METRIC_LABEL_PATTERN.test(runRef)) {
     throw new EvalsStop('--run-ref takes a technical label (no whitespace or quotes, at most 200 characters).', 2);
+  }
+  if (runRef !== undefined && EVAL_ATTESTATION_SECRET_PATTERNS.some((pattern) => pattern.test(runRef))) {
+    throw new EvalsStop('--run-ref looks like a token or key; nothing was sent.', 2);
   }
 
   const root = resolve(deps.cwd, args.values.get('--root') ?? '.');
@@ -202,7 +214,10 @@ async function attest(argv: readonly string[], deps: Required<EvalsCommandDepend
   }
   if (!response.ok) {
     const code = await errorCode(response);
-    throw new EvalsStop(`The Platform refused the attest (HTTP ${response.status}${code ? `, ${code}` : ''}).`, 1);
+    const hint = response.status === 403
+      ? ` Only the app's eval attestation key (scope ${EVAL_ATTESTATION_KEY_SCOPE}) can attest; runtime, connect and CI keys cannot. An owner or admin issues it in the dashboard; set it as GLIRASTES_EVAL_ATTEST_KEY.`
+      : '';
+    throw new EvalsStop(`The Platform refused the attest (HTTP ${response.status}${code ? `, ${code}` : ''}).${hint}`, 1);
   }
   let recorded;
   try {

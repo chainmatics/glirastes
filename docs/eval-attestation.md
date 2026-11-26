@@ -19,7 +19,10 @@ The command never runs your suite and never calls a model. It sends:
 | `result` | `pass` when `--failed` is 0, otherwise `fail` |
 | `total`, `failed`, `ranAt`, `ciRunRef` | the flags and the current time |
 
-No case, input, output, prompt, file name or model name leaves the CI. The body
+No case, input, output, prompt, file name or model name leaves the CI.
+`--run-ref` is a technical label. A value that looks like a token or key
+(`gl_`, `ghp_`, `gho_`, `github_pat_`, `glpat-`, `AKIA…`, `sk-`, `xoxb-`,
+private keys) is refused before anything is sent, and the Platform refuses it too. The body
 is `EvalAttestationRequestSchema` from `glirastes/contracts`; the golden vector
 is `src/contracts/__vectors__/eval-attestation.v1.json`, including the suite
 digest cases.
@@ -44,7 +47,13 @@ digest cases.
 ## Request
 
 `POST {GLIRASTES_CONTROL_PLANE_URL}/v1/apps/:appId/eval-attestations` with
-`x-api-key: GLIRASTES_API_KEY` (the app's CI key). The app id comes from the
+`x-api-key: GLIRASTES_EVAL_ATTEST_KEY`, the app's eval attestation key. It is
+a key of its own with the single scope `evals:attest`, bound to one app and
+reaching no other route. An owner or admin issues it in the dashboard, and
+issuing again revokes the previous key. Store it as a CI secret. The runtime
+key (`GLIRASTES_API_KEY`), the connect key and the tool job CI key cannot
+attest: the Platform answers 403 `eval_attestation_key_required`, and the
+command says which key it needs. The app id comes from the
 setup artifact; the URL defaults to the hosted Platform and must be `https`
 (plain `http` only for `localhost`, `127.x.x.x` and `[::1]`). A redirect is
 never followed, so the key cannot travel to another origin.
