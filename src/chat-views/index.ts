@@ -12,6 +12,8 @@ export type {
   ChatComponentDefinitionInput,
   ChatComponentItemScope,
   ChatComponentTextRule,
+  ChatPropSchema,
+  ChatPropsOf,
 } from './define.js';
 export { starterChatComponentManifest, starterChatComponents } from './starter-catalog.js';
 export { CHAT_VIEW_PROMPT_RULE, describeChatCatalog } from './describe.js';

@@ -1,0 +1,9 @@
+{
+  "name": "glirastes-zod3-fixture",
+  "private": true,
+  "type": "module",
+  "description": "An app on zod 3.25 (classic 'zod' plus the bundled 'zod/v4' build), for tests/zod3-chat-views.test.ts",
+  "dependencies": {
+    "zod": "3.25.76"
+  }
+}

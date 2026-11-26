@@ -66,7 +66,9 @@ createAiChatHandler({ ...config, chatViews: { catalog: appManifest } }); // + th
 <VercelAiChat endpoint="/api/chat" chatViews={{ components: appBindings, surface: 'narrow' }} />
 ```
 
-An app component is defined once with `defineChatComponent` (Zod props,
+An app component is defined once with `defineChatComponent` (zod 4 props;
+an app on zod 3.25+ imports `z` from `zod/v4`, zod 3 classic schemas are
+refused with that hint,
 `bindable()` / `refOnly()` for data props, a `text` rule for the fallback),
 bound in the browser with `bindChatComponent(definition, Component)`, and
 collected by `glirastes tools refresh` into `.glirastes/chat-components.json`,

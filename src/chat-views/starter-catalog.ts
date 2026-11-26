@@ -16,7 +16,7 @@ import { chatElementId } from './element-id.js';
 const scalar = () => z.union([z.string(), z.number(), z.boolean()]);
 const isoDateOrDateTime = () => z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
 
-export const starterChatComponents: ChatComponentDefinition[] = [
+export const starterChatComponents: ChatComponentDefinition<z.ZodObject>[] = [
   defineChatComponent({
     id: 'Group',
     schemaVersion: 1,

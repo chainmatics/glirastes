@@ -108,9 +108,12 @@ export interface ProbedContractEntry {
 /**
  * `content-rejected`: the schema, description or contract metadata carries a
  * secret-looking string (content boundary), so nothing of it may be committed.
+ * `unsupported-schema`: a chat component module threw the SDK's error for a
+ * schema that is not zod 4 (zod 3 classic) while loading.
  */
 export type ProbeFailureReason =
-  | 'missing' | 'import-failed' | 'not-a-schema' | 'invalid-entry' | 'content-rejected' | 'timeout' | 'probe-failed';
+  | 'missing' | 'import-failed' | 'not-a-schema' | 'invalid-entry' | 'unsupported-schema' | 'content-rejected' | 'timeout'
+  | 'probe-failed';
 
 export interface ProbeFailure {
   ok: false;
@@ -183,7 +186,7 @@ const WireChatComponent = z.object({
 });
 const WireFailure = z.object({
   ok: z.literal(false),
-  reason: z.enum(['missing', 'import-failed', 'not-a-schema', 'invalid-entry']),
+  reason: z.enum(['missing', 'import-failed', 'not-a-schema', 'invalid-entry', 'unsupported-schema']),
   detail: z.string().optional(),
 });
 const WireOutput = z.object({ results: z.array(z.union([WireEntry, WireSchema, WireChatComponent, WireFailure])) });
