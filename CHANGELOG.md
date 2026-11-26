@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Composer: a long draft scrolls with a thin thumb in the text color and no track (`rich-mention-input` editor and the composer textareas), instead of the platform's boxed scrollbar.
+
 ## [0.30.0] - 2026-11-26
 
 ### Added
