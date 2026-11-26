@@ -74,6 +74,15 @@ export interface TurnRollout {
   readonly cohort: RuntimeRolloutCohort | null;
 }
 
+// The rollout of a snapshot `createGlirastes` resolved, so a recorder given only the snapshot reports it too.
+const snapshotRollouts = new WeakMap<TurnSnapshot, TurnRollout>();
+
+/** Internal: remembers the rollout a cohort-selecting runner chose for that snapshot. */
+export function attachTurnRollout(snapshot: TurnSnapshot, rollout: TurnRollout | undefined): TurnSnapshot {
+  if (rollout) snapshotRollouts.set(snapshot, rollout);
+  return snapshot;
+}
+
 export interface TurnMetricsOutcome {
   status: RuntimeTurnStatus;
   errorCode: RuntimeTurnErrorCode | null;
@@ -121,7 +130,8 @@ export interface TurnMetricsRecorderOptions {
   /**
    * Set only by a runner that selects a cohort per turn (canary
    * negotiation): the turn is then reported as schema version 3 with these
-   * fields, `approvalsRequested` and `approvalsDeclined`. Without it the event stays v2.
+   * fields, `approvalsRequested` and `approvalsDeclined`. Without it the event stays v2,
+   * unless `snapshot` was resolved by `createGlirastes().chatTurn()` with a rollout.
    */
   rollout?: TurnRollout;
   /** Approvals this request declined; reported with `rollout` only. */
@@ -161,6 +171,7 @@ export function createTurnMetricsRecorder(
 ): TurnMetricsRecorder {
   const now = options.now ?? Date.now;
   const createEventId = options.createEventId ?? randomUUID;
+  const rollout = options.rollout ?? (options.snapshot && snapshotRollouts.get(options.snapshot));
   const manifestTools = options.snapshot?.manifestRevision.tools ?? [];
   const toolIdByName = new Map(manifestTools.map((tool) => [
     modelFacingToolName(tool.name),
@@ -231,12 +242,12 @@ export function createTurnMetricsRecorder(
       toolErrorCount: Math.min(calls, toolErrorCount),
       tools: listedTools(),
     };
-    if (options.rollout) {
+    if (rollout) {
       const v3 = {
         ...fields,
         schemaVersion: 3,
-        deploymentId: options.rollout.deploymentId,
-        cohort: options.rollout.cohort,
+        deploymentId: rollout.deploymentId,
+        cohort: rollout.cohort,
         approvalsRequested: bounded(approvalRequests, MAX_CALLS),
         approvalsDeclined: bounded(options.approvalsDeclined ?? 0, MAX_CALLS),
       };

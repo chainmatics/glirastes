@@ -27,6 +27,7 @@ import type { AiChatHandlerConfig } from '../../server/adapters/nextjs/types.js'
 import { createGlirastes, type Glirastes, type GlirastesChatTurn } from '../glirastes.js';
 import { createAiChatHandler } from '../../server/adapters/nextjs/create-ai-chat-handler.js';
 import { SDK_VERSION } from '../sdk-version.js';
+import { createTurnMetricsRecorder } from '../metrics/turn-recorder.js';
 import { createLocalSchemaDigest } from '../local-tool-bindings.js';
 
 const id = (suffix: string) => `019fa9a9-d5f7-7ec3-a3c7-8899de1d${suffix.padStart(4, '0')}`;
@@ -1274,6 +1275,18 @@ describe('createGlirastes canary cohorts', () => {
     await vi.waitFor(async () => {
       expect((await turn(glirastes, inCanary, `ai-t${Date.now()}`)).rollout?.cohort).toBe('canary');
     }, { timeout: 1_000 });
+  });
+
+  it('reports a canary turn as v3 to a custom recorder that passes only the snapshot', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const { glirastes } = await connected(() => deployments(privateKey), publicKey);
+    const sink = { identity: glirastes.metrics!.identity, record: vi.fn(), flush: vi.fn(), close: vi.fn() };
+    for (const [subjectId, cohort, deploymentId] of [[inCanary, 'canary', CANARY_ID], [inStable, 'stable', id('3904')]] as const) {
+      const { snapshot } = await turn(glirastes, subjectId, `ai-${cohort}`);
+      const event = createTurnMetricsRecorder({ sink, snapshot, startedAtMs: Date.now() })
+        .finish({ status: 'completed', errorCode: null });
+      expect(event).toMatchObject({ schemaVersion: 3, cohort, deploymentId });
+    }
   });
 
   it('adds no rollout in Standalone', async () => {

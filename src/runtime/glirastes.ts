@@ -37,7 +37,7 @@ import {
   createRuntimeMetricsSinkFromEnv,
   type RuntimeMetricsSinkOptions,
 } from './metrics/sink.js';
-import type { RuntimeMetricsSink, TurnRollout } from './metrics/turn-recorder.js';
+import { attachTurnRollout, type RuntimeMetricsSink, type TurnRollout } from './metrics/turn-recorder.js';
 import { policyOverlayFromRevision } from './policy-overlay.js';
 import { resolveRuntimeConnectionConfig } from './runtime-mode.js';
 import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
@@ -666,7 +666,10 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       return {
         managedRuntime: {
           resolvePrincipal: (request) => principal(tenantId, request),
-          resolveTurnSnapshot: (context) => turnOf(source, context).source.resolveTurnSnapshot(context),
+          resolveTurnSnapshot: (context) => {
+            const turn = turnOf(source, context);
+            return attachTurnRollout(turn.source.resolveTurnSnapshot(context), turn.rollout);
+          },
           loadRevocations: () => store.revocations(),
           ...(config
             ? {
