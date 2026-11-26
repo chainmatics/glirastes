@@ -188,7 +188,10 @@ describe('an entityLinks object changed in place applies from the next render, a
 });
 
 describe('new matchers start every chip over, as in 0.29.0', () => {
-  it('a finished chip of the old matchers shows in the render that passes them, then starts over (0.29.0: [A-MAR-5], [], [], [])', async () => {
+  // 0.29.0 and 0.29.1 showed the old chip in the render that passed the new matchers and started over on the
+  // next render ([A-MAR-5], [], [], []). A finished message no longer renders while a later one streams, so the
+  // chips start over right after that render instead, without waiting for one.
+  it('a finished chip of the old matchers starts over right after the render that passes them ([], [], [], [])', async () => {
     const conversation = (later: string): ChatMessage[] => [
       ...answer('See MAR-5'),
       { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'And now?' }] },
@@ -210,7 +213,7 @@ describe('new matchers start every chip over, as in 0.29.0', () => {
     }
     await act(async () => { await new Promise((done) => setTimeout(done, 100)); });
     seen.push(chips());
-    expect(seen).toEqual([['task:A-MAR-5=MAR-5'], [], [], []]);
+    expect(seen).toEqual([[], [], [], []]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useChatContext } from '../provider/chat-context.js';
+import { useMessageChat } from '../provider/message-chat-context.js';
 import { sanitizeSubjectText } from '../../contracts/approval-subject.js';
 import type { ApprovalEntryProps, ApprovalOutcome, ApprovalSubject, ChatLocale } from '../types.js';
 import { approvalSubjectLines, previewValueText } from './approval-card.js';
@@ -45,7 +45,7 @@ export function approvalOutcomeText(outcome: ApprovalOutcome, locale: ChatLocale
  * `data-component="approval-entry"`, `data-decision` and `data-outcome`.
  */
 export function ApprovalEntry({ approval }: ApprovalEntryProps) {
-  const { locale, language } = useChatContext();
+  const { locale, language } = useMessageChat();
   const lines = approvalSubjectLines(
     { id: approval.approvalId, toolName: approval.toolName, args: {}, messageId: '', ...(approval.details ? { details: approval.details } : {}), ...(approval.subjects ? { subjects: approval.subjects } : {}) },
     locale,

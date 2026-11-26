@@ -1,5 +1,5 @@
 import { useId, useState, type FormEvent } from 'react';
-import { useChatContext } from '../provider/chat-context.js';
+import { useMessageChat } from '../provider/message-chat-context.js';
 import { isClarificationAnswered } from '../utils/clarification.js';
 import type { ClarificationCardProps } from '../types.js';
 
@@ -19,7 +19,7 @@ export function ClarificationCard({
   showOptions = true,
   className,
 }: ClarificationCardProps) {
-  const { classNames, locale, messages } = useChatContext();
+  const { classNames, locale, messages } = useMessageChat();
   const questionId = useId();
   const [draft, setDraft] = useState('');
   const [answeredHere, setAnsweredHere] = useState(false);

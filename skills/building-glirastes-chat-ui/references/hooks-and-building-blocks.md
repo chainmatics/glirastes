@@ -169,6 +169,38 @@ Defaults keep today's markup; everything below is opt-in.
   in the default order) and `turnOutcome`. `useMessageParts(message)` returns the same nodes
   plus `visible` and `turnOutcome` for a custom `MessageBubble`. A layout that drops `children`
   places `continuation` itself, or the user loses the "Continue" button after a stop.
+- Renders: inside `MessageList` (`AiChatPanel`, the floating window,
+  `<glirastes-chat>`) only the streaming message renders on each chunk. A
+  finished message renders when something it shows changes: the message
+  object, the links, the provider's config (compared by identity), its turn
+  outcome, its open approval. The chat functions a message calls (`send`,
+  `approve`, `stop`, …) always reach the current ones and render nothing.
+  Components inside a message (custom bubble, `MessageParts`, `Markdown`,
+  `MentionChip`, tool renderers, …) must not rely on rendering per chunk:
+  keep `Date.now()`, relative times and external state in state, a
+  subscription or a timer, not computed in render. `useMessageParts` and
+  props are enough; a component that calls `useChatContext()` renders with
+  every change of the chat (every chunk).
+- Keep config stable, or every message renders per chunk as before: a
+  module constant (`const LOCALE = { … }` outside the component), `useMemo`
+  for config that depends on state. This matters when the component holding
+  the provider renders per chunk (it calls `useVercelAiChatTransport`
+  itself) and builds config inline. Per prop (probed):
+  - as before, inline is fine: `language`, `approvalSubjects`,
+    `activityLog`, `messageFooter`, `approvalDisplay`, `suggestions`;
+  - inline renders every message per chunk, and an in-place change passed
+    as the same object shows in a finished message only once it renders
+    again: `classNames`, `components`, `toolLabels` entries, `toolResults`
+    (`allowlist`), `entityDeclarations` entries, `composer`, `markdown`
+    (`remarkPlugins`: every Markdown parses), `toolRenderers` entries,
+    `chatInteractions` entities;
+  - inline renders every message per chunk, in place as before: `locale`,
+    `locales`, `triggers`, `entityLinks` (and `matchers`),
+    `approvalDescription`;
+  - not read by messages: every other prop (callbacks, `transport`,
+    `session`, `queue`, `theme`, `voice`, `attachments`, …).
+  After a change pass a new object. Replace changed messages, do not mutate
+  them.
 - `continuation`: the "Continue" button (`locale.continueButton`, German "Weitermachen") under
   the latest answer when the server's stop notice ends it with a continuable `data-budget-stop`
   part; a `<button type="button" data-action="continue-after-stop">` in

@@ -1,5 +1,5 @@
 import { useState, type SyntheticEvent } from 'react';
-import { useChatContext } from '../provider/chat-context.js';
+import { useMessageChat } from '../provider/message-chat-context.js';
 import type { ChatLocale, TurnNoticeProps, TurnNoticeStatus, TurnOutcome } from '../types.js';
 import type { ActivityStep, ActivityStepStatus } from '../utils/activity.js';
 import { stepFailureText } from '../utils/step-failure.js';
@@ -95,7 +95,7 @@ function foldRepeatedSteps(steps: ActivityStep[]): Array<{ step: ActivityStep; c
  * Keeps styling neutral via `data-*` attributes.
  */
 export function ActivityLog({ steps: allSteps, active, notice, noticeStatus, noticeOutcome, className }: ActivityLogProps) {
-  const { locale, toolLabels, components, activityLog, language } = useChatContext();
+  const { locale, toolLabels, components, activityLog, language } = useMessageChat();
   // Once the turn no longer runs: a UI action still waiting was never confirmed, a call still running was stopped
   // (a step waiting for approval stays waiting).
   const steps = active ? allSteps : allSteps.map((step) => (step.uiOutcome === 'pending'

@@ -1,4 +1,4 @@
-import { useChatContext } from '../provider/chat-context.js';
+import { useMessageChat } from '../provider/message-chat-context.js';
 import type { PlanItem } from '../../contracts/plan.js';
 import { StatusIcon } from './status-icon.js';
 
@@ -16,7 +16,7 @@ export interface PlanChecklistProps {
  * Keeps styling neutral via `data-*` attributes.
  */
 export function PlanChecklist({ items, active, className }: PlanChecklistProps) {
-  const { locale } = useChatContext();
+  const { locale } = useMessageChat();
   if (items.length < 2) return null;
 
   return (

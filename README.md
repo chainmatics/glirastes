@@ -188,6 +188,11 @@ export async function POST(request: Request) {
 }
 ```
 
+OpenRouter is only the example. `model` takes any Vercel AI SDK provider,
+including a local OpenAI-compatible server such as Ollama or LM Studio
+(`createOpenAI({ baseURL: 'http://localhost:11434/v1' })`); Glirastes adds no
+model charges of its own.
+
 Budgets default to safe values; pass `localLimits: { maxToolCalls: 4 }` to override single fields.
 A failed backend call reaches the model with its HTTP `status` and response
 `body`; pass `classifyToolFailure: ({ status, body }) => 'expected' | 'error'`
@@ -235,7 +240,9 @@ commands, is the bundled skill
   endpoint still checks its own session and permissions.
 - **Guard rails per turn.** Each turn runs on one pinned tool and policy
   snapshot, with local budgets (steps, tool calls, tokens, cost, timeouts),
-  loop detection and fail-closed authorization. Write and delete tools ask
+  loop detection over a normalized fingerprint of tool, arguments and result
+  (the same call with new data is progress, an identical repeat is a loop) and
+  fail-closed authorization. Write and delete tools ask
   the user before they run.
 - **Small start set per turn.** With `toolDiscovery`, the handler groups the
   generated tools into modules (module, kind, usage hints, synonyms), matches
@@ -269,6 +276,7 @@ glirastes tools status            # what the chat can do
 glirastes tools check             # verify committed outputs, no model, no network
 glirastes tools eval              # every example sentence finds its tool
 glirastes upgrade report          # what changed since you last reviewed the SDK (then: upgrade ack)
+glirastes upgrade offers          # optional features the app does not use yet
 ```
 
 **Policy.** Reads run directly, writes ask first, deletes and anything
