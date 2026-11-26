@@ -4,6 +4,11 @@ import {
   ENVIRONMENT_CONTROL_SYNC_VERSION,
 } from '../contracts/environment-control.js';
 import {
+  CANARY_SELECTION_CAPABILITY,
+  CANARY_SELECTION_SYNC_VERSION,
+} from '../contracts/rollout-binding.js';
+import type { CanaryState } from './deployment-selector.js';
+import {
   DISCOVERY_DIGEST_PATTERN,
   POLICY_RELAXATIONS_VERSION,
 } from './capability-report.js';
@@ -117,6 +122,14 @@ export class RuntimeControlPlaneClient {
     pollIntervalMs?: number;
     /** Abort a hung request after this many milliseconds (default 10 s); syncs run one at a time behind it. */
     requestTimeoutMs?: number;
+    /**
+     * True when this runner selects a cohort per turn: the sync then asks
+     * for rollout bindings (`canaryVersion=1`) and registration reports
+     * `canarySelection`.
+     */
+    canarySelection?: boolean;
+    /** Whether the canary is selectable here; added to heartbeats while one is known. */
+    canaryState?: () => CanaryState | undefined;
     /** How often a sync repeats the environment control heartbeat when nothing changed (default 60 s). */
     controlHeartbeatIntervalMs?: number;
     onError?: (error: unknown) => void;
@@ -179,6 +192,11 @@ export class RuntimeControlPlaneClient {
       throw new Error('capabilities.environmentControl is reported by the runtime');
     }
     capabilities.environmentControl = ENVIRONMENT_CONTROL_CAPABILITY;
+    const canarySelection = this.options.canarySelection ? CANARY_SELECTION_CAPABILITY : undefined;
+    if (capabilities.canarySelection !== undefined && capabilities.canarySelection !== canarySelection) {
+      throw new Error('capabilities.canarySelection is reported by the runtime');
+    }
+    if (canarySelection !== undefined) capabilities.canarySelection = canarySelection;
     this.assertTechnicalMetadata(capabilities);
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
     this.assertWritable('register');
@@ -205,12 +223,13 @@ export class RuntimeControlPlaneClient {
     const control = this.controlStatus
       ? { controlSequence: this.controlStatus.controlSequence, assistantState: this.controlStatus.assistantState }
       : {};
+    const canaryState = this.options.canarySelection ? this.options.canaryState?.() : undefined;
     return this.request('heartbeat', {
       method: 'PATCH',
       body: JSON.stringify({
         runnerKey: this.options.runnerKey,
         ...input,
-        technicalMetadata: { ...input.technicalMetadata, ...control },
+        technicalMetadata: { ...input.technicalMetadata, ...control, ...(canaryState ? { canaryState } : {}) },
       }),
     });
   }
@@ -241,6 +260,7 @@ export class RuntimeControlPlaneClient {
     const query = new URLSearchParams({ runnerKey: this.options.runnerKey });
     if (this.cursor) query.set('cursor', this.cursor);
     query.set('controlVersion', String(ENVIRONMENT_CONTROL_SYNC_VERSION));
+    if (this.options.canarySelection) query.set('canaryVersion', String(CANARY_SELECTION_SYNC_VERSION));
     const bundle = await this.request(`sync?${query.toString()}`, {
       method: 'GET',
     });

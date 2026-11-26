@@ -220,7 +220,7 @@ export class RuntimeSyncManager {
         }
         const materialized = materializeDeploymentRevisions(parsed.data);
         await this.options.validateDeployment?.(parsed.data, materialized);
-        acceptedDeployments.push(parsed.data);
+        acceptedDeployments.push(await this.withVerifiedRolloutBinding(parsed.data));
       } catch {
         rejectedDeploymentIds.push(parsed.data.deploymentId);
         if (parsed.data.status === 'active') rejectedActive = true;
@@ -391,6 +391,29 @@ export class RuntimeSyncManager {
       && (this.options.targetAppId === undefined
         || control.targetAppId === this.options.targetAppId)
       && (knownTenantId === undefined || control.tenantId === knownTenantId);
+  }
+
+  /** An unverifiable binding only costs the deployment its canary selection, never the deployment. */
+  private async withVerifiedRolloutBinding(
+    deployment: RuntimeDeploymentBundle,
+  ): Promise<RuntimeDeploymentBundle> {
+    const binding = deployment.rolloutBinding;
+    if (!binding) return deployment;
+    const { rolloutBinding: _dropped, ...unbound } = deployment;
+    if (
+      binding.deploymentId !== deployment.deploymentId
+      || binding.environmentId !== this.options.environmentId
+      || binding.rolloutMode !== deployment.rolloutMode
+      || binding.targetPercentage !== deployment.targetPercentage
+    ) {
+      return unbound;
+    }
+    try {
+      await this.options.verifier.verifyRolloutBinding(binding);
+      return deployment;
+    } catch {
+      return unbound;
+    }
   }
 
   private deploymentScopeMatches(deployment: RuntimeDeploymentBundle): boolean {
