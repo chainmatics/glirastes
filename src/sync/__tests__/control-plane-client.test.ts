@@ -330,4 +330,87 @@ describe('RuntimeControlPlaneClient', () => {
       });
     });
   });
+  describe('canary selection', () => {
+    const syncBody = () => new Response(JSON.stringify({
+      cursor: '2026-07-28T20:00:00.000Z', activeSnapshotComplete: true, deployments: [], revocations: [],
+    }), { status: 200 });
+
+    it('negotiates canary selection on sync and at registration only when the runner selects cohorts', async () => {
+      const fetchImpl = vi.fn().mockImplementation(async (url: string) => (
+        url.includes('/sync?') ? syncBody() : new Response(JSON.stringify({ ok: true }), { status: 200 })
+      ));
+      const selecting = new RuntimeControlPlaneClient({
+        ...baseOptions, fetchImpl, canarySelection: true, manager: { apply: vi.fn().mockResolvedValue({}) } as never,
+      });
+      await selecting.register({ capabilities: { aiSdk: true } });
+      await selecting.syncOnce();
+      expect(JSON.parse(fetchImpl.mock.calls[0][1].body).capabilities).toEqual({
+        aiSdk: true, environmentControl: 1, canarySelection: 1,
+      });
+      expect(new URL(fetchImpl.mock.calls[1][0]).searchParams.get('canaryVersion')).toBe('1');
+
+      fetchImpl.mockClear();
+      const plain = new RuntimeControlPlaneClient({
+        ...baseOptions, fetchImpl, manager: { apply: vi.fn().mockResolvedValue({}) } as never,
+      });
+      await plain.register({ capabilities: { aiSdk: true } });
+      await plain.syncOnce();
+      expect(JSON.parse(fetchImpl.mock.calls[0][1].body).capabilities).toEqual({ aiSdk: true, environmentControl: 1 });
+      expect(new URL(fetchImpl.mock.calls[1][0]).searchParams.has('canaryVersion')).toBe(false);
+    });
+
+    it('records when the last sync succeeded and keeps it through failed ones', async () => {
+      let fail = false;
+      const fetchImpl = vi.fn().mockImplementation(async () => (
+        fail ? new Response('{}', { status: 503 }) : syncBody()
+      ));
+      const client = new RuntimeControlPlaneClient({
+        ...baseOptions, fetchImpl, manager: { apply: vi.fn().mockResolvedValue({}) } as never,
+      });
+      expect(client.lastSyncedAt).toBeUndefined();
+      const before = Date.now();
+      await client.syncOnce();
+      const synced = client.lastSyncedAt;
+      expect(synced).toBeGreaterThanOrEqual(before);
+      fail = true;
+      await expect(client.syncOnce()).rejects.toThrow();
+      expect(client.lastSyncedAt).toBe(synced);
+    });
+
+    it('does not count a sync as fresh when the manager rejected the active set', async () => {
+      const apply = vi.fn().mockResolvedValue({ rejectedActive: false });
+      const client = new RuntimeControlPlaneClient({
+        ...baseOptions, fetchImpl: vi.fn().mockImplementation(async () => syncBody()), manager: { apply } as never,
+      });
+      await client.syncOnce();
+      const synced = client.lastSyncedAt;
+      expect(synced).toBeDefined();
+      apply.mockResolvedValue({ rejectedActive: true });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await client.syncOnce();
+      expect(client.lastSyncedAt).toBe(synced);
+    });
+
+    it('refuses a caller-supplied canarySelection capability', async () => {
+      const client = new RuntimeControlPlaneClient({
+        ...baseOptions, fetchImpl: vi.fn(), manager: { apply: vi.fn() } as never,
+      });
+      await expect(client.register({ capabilities: { canarySelection: 1 } })).rejects.toThrow(/canarySelection/);
+    });
+
+    it('adds the canary state to heartbeats, content-free, when a canary is known', async () => {
+      const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      let state: string | undefined = 'prompt-unavailable';
+      const client = new RuntimeControlPlaneClient({
+        ...baseOptions, fetchImpl, canarySelection: true, canaryState: () => state as never,
+        manager: { apply: vi.fn() } as never,
+      });
+      await client.heartbeat({ health: 'healthy', lastAppliedDeploymentId: 'deployment-1' });
+      state = undefined;
+      await client.heartbeat({ health: 'healthy', lastAppliedDeploymentId: 'deployment-1' });
+      const bodies = fetchImpl.mock.calls.map(([, init]) => JSON.parse(init.body));
+      expect(bodies[0].technicalMetadata).toEqual({ canaryState: 'prompt-unavailable' });
+      expect(bodies[1].technicalMetadata).toEqual({});
+    });
+  });
 });

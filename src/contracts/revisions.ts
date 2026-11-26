@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ExecutionBudgetSchema } from './runtime.js';
 import { EnvironmentControlSchema } from './environment-control.js';
+import { RolloutBindingSchema } from './rollout-binding.js';
 import { findForbiddenContentPath } from './content-boundary.js';
 import { ToolOverrideDeltaSchema, ToolRiskClassSchema } from './tool-policy-entry.js';
 
@@ -294,6 +295,8 @@ export const RuntimeDeploymentBundleSchema = z.object({
   runtimeDigest: digest.optional(),
   promptDigest: digest.optional(),
   promptBinding: SignedPromptBindingSchema.optional(),
+  /** Only present when the runner negotiated `canaryVersion=1`. */
+  rolloutBinding: RolloutBindingSchema.optional(),
   updatedAt: publishedAt,
 }).strict().superRefine((deployment, context) => {
   // The server emits all four binding fields or none. A partial set means

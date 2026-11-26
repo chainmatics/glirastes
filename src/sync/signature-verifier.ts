@@ -10,6 +10,7 @@ import type {
   SecurityRevocation,
 } from '../contracts/revisions.js';
 import type { EnvironmentControl } from '../contracts/environment-control.js';
+import type { RolloutBinding } from '../contracts/rollout-binding.js';
 import type {
   PromptBundle,
   SignedPromptBinding,
@@ -120,6 +121,11 @@ export class RuntimeRevisionVerifier {
 
   async verifyEnvironmentControl(control: EnvironmentControl): Promise<void> {
     const { signature, ...unsigned } = control;
+    await this.verifyEnvelope(unsigned, signature);
+  }
+
+  async verifyRolloutBinding(binding: RolloutBinding): Promise<void> {
+    const { signature, ...unsigned } = binding;
     await this.verifyEnvelope(unsigned, signature);
   }
 

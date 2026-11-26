@@ -13,6 +13,7 @@ import {
 } from './state-store.js';
 import {
   RuntimeEnvironmentControlError,
+  RuntimeRolloutBindingError,
   RuntimeSyncManager,
 } from './sync-manager.js';
 import {
@@ -25,6 +26,7 @@ import type {
 import type {
   MaterializedDeploymentRevisions,
 } from './materialize-deployment.js';
+import type { CanaryState } from './deployment-selector.js';
 
 export function createManagedRuntimeSync(options: {
   baseUrl: string;
@@ -55,6 +57,9 @@ export function createManagedRuntimeSync(options: {
    * with `relaxableToolIds(setupArtifact)`).
    */
   setupArtifact?: unknown;
+  /** The runner selects a cohort per turn: negotiates rollout bindings (see `RuntimeControlPlaneClient`). */
+  canarySelection?: boolean;
+  canaryState?: () => CanaryState | undefined;
 }) {
   const report = options.setupArtifact === undefined
     ? undefined
@@ -81,6 +86,9 @@ export function createManagedRuntimeSync(options: {
     validateDeployment: options.validateDeployment,
     onControlRejected: (code) => {
       options.onError?.(new RuntimeEnvironmentControlError(code));
+    },
+    onRolloutBindingRejected: (code) => {
+      options.onError?.(new RuntimeRolloutBindingError(code));
     },
     onPending: async (deployments) => {
       if (options.readOnly) return;
@@ -127,6 +135,8 @@ export function createManagedRuntimeSync(options: {
       ? undefined
       : options.push ?? new FetchSsePushConnector(options.fetchImpl),
     pollIntervalMs: options.pollIntervalMs,
+    ...(options.canarySelection ? { canarySelection: true } : {}),
+    ...(options.canaryState ? { canaryState: options.canaryState } : {}),
     onError: options.onError,
   });
   let reported: Promise<CapabilityReportResult> | undefined;

@@ -73,7 +73,7 @@ export function collectingSink() {
       buildId: null, instanceId: 'web-1',
     },
     // Keeps finished turns only, so the fixture also compiles once the sink takes more event types (P05).
-    record: (event) => { if (event.eventType === 'turn.finished') events.push(event); },
+    record: (event) => { if (event.eventType === 'turn.finished' && event.schemaVersion === 2) events.push(event); },
     flush: async () => undefined,
     close: async () => undefined,
   };

@@ -1,0 +1,506 @@
+{
+  "contract": "RolloutBinding",
+  "schemaVersion": 1,
+  "negotiation": {
+    "syncQuery": {
+      "canaryVersion": "1"
+    },
+    "registrationCapability": {
+      "canarySelection": 1
+    }
+  },
+  "signing": {
+    "algorithm": "Ed25519",
+    "input": "canonicalRuntimeJson of the binding without signature",
+    "testKey": {
+      "keyId": "rollout-binding-vector-key",
+      "publicJwk": {
+        "crv": "Ed25519",
+        "x": "f67pMDT_BDgBGtNFXjsE_xvt-EAuaFxnWlKKnNmF8j4",
+        "kty": "OKP",
+        "kid": "rollout-binding-vector-key",
+        "alg": "EdDSA",
+        "use": "sig"
+      },
+      "privateJwkTestOnly": {
+        "crv": "Ed25519",
+        "d": "sH48lncVQmlnwv7r8KWJpGfrdk53tOYpNV8ylxLNmuY",
+        "x": "f67pMDT_BDgBGtNFXjsE_xvt-EAuaFxnWlKKnNmF8j4",
+        "kty": "OKP"
+      }
+    }
+  },
+  "selection": {
+    "bucket": "first 4 bytes of sha256(utf8(cohortSalt + \":\" + subjectId)) as UInt32BE, modulo 100",
+    "canary": "bucket < targetPercentage of a valid canary binding",
+    "subject": "principal subjectId, else the conversation id"
+  },
+  "bucket": [
+    {
+      "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+      "subjectId": "alice",
+      "bucket": 32
+    },
+    {
+      "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+      "subjectId": "bob",
+      "bucket": 10
+    },
+    {
+      "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+      "subjectId": "user-42",
+      "bucket": 29
+    },
+    {
+      "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+      "subjectId": "conversation:ai-msg-1",
+      "bucket": 47
+    },
+    {
+      "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+      "subjectId": "Zoë",
+      "bucket": 93
+    },
+    {
+      "cohortSalt": "Xk9mR2tP7vQa4sLd1uWz0A",
+      "subjectId": "alice",
+      "bucket": 7
+    },
+    {
+      "cohortSalt": "Xk9mR2tP7vQa4sLd1uWz0A",
+      "subjectId": "bob",
+      "bucket": 0
+    },
+    {
+      "cohortSalt": "Xk9mR2tP7vQa4sLd1uWz0A",
+      "subjectId": "user-42",
+      "bucket": 57
+    },
+    {
+      "cohortSalt": "Xk9mR2tP7vQa4sLd1uWz0A",
+      "subjectId": "conversation:ai-msg-1",
+      "bucket": 38
+    },
+    {
+      "cohortSalt": "Xk9mR2tP7vQa4sLd1uWz0A",
+      "subjectId": "Zoë",
+      "bucket": 38
+    }
+  ],
+  "valid": [
+    {
+      "name": "valid/canary-ten-percent",
+      "canonical": "{\"cohortSalt\":\"q3Zr8Kc1VtW0xYbHnL5pJg\",\"deploymentId\":\"019fbd00-0000-7000-8000-0000000000d2\",\"environmentId\":\"019fbd00-0000-7000-8000-0000000000e1\",\"issuedAt\":\"2026-11-26T09:00:00.000Z\",\"kind\":\"rollout-binding\",\"rolloutMode\":\"canary\",\"schemaVersion\":1,\"targetPercentage\":10}",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "valid/stable-full",
+      "canonical": "{\"cohortSalt\":\"Xk9mR2tP7vQa4sLd1uWz0A\",\"deploymentId\":\"019fbd00-0000-7000-8000-0000000000d1\",\"environmentId\":\"019fbd00-0000-7000-8000-0000000000e1\",\"issuedAt\":\"2026-11-26T10:00:00+01:00\",\"kind\":\"rollout-binding\",\"rolloutMode\":\"stable\",\"schemaVersion\":1,\"targetPercentage\":100}",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d1",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "stable",
+        "targetPercentage": 100,
+        "cohortSalt": "Xk9mR2tP7vQa4sLd1uWz0A",
+        "issuedAt": "2026-11-26T10:00:00+01:00",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "Osucb1BwH2r6Kudt-hpmHido-6NDKg_W0gXzJx3-QVXnQ2a8eHx_n-2XgpCEioYCoSaiiVuVnY8xZv0VwUVzBQ"
+        }
+      }
+    },
+    {
+      "name": "valid/canary-half-with-64-character-salt",
+      "canonical": "{\"cohortSalt\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"deploymentId\":\"019fbd00-0000-7000-8000-0000000000d2\",\"environmentId\":\"019fbd00-0000-7000-8000-0000000000e1\",\"issuedAt\":\"2026-11-26T09:00:00.000Z\",\"kind\":\"rollout-binding\",\"rolloutMode\":\"canary\",\"schemaVersion\":1,\"targetPercentage\":50}",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 50,
+        "cohortSalt": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "aWSRgdTy2ym22up1B7wXGMbEfNW1vkVjNCCoUgIjFcYncDUlo8jfG-4HUZeKc8ZzUOiloB3k3KpCWYpRHQ-1BQ"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "invalid/missing-kind",
+      "failure": "schema",
+      "binding": {
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/other-kind",
+      "failure": "schema",
+      "binding": {
+        "kind": "environment-control",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/schema-version-2",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 2,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/missing-salt",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/salt-too-short",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJ",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/salt-too-long",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/salt-not-base64url",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5p+/",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/percentage-zero",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 0,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/percentage-fraction",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10.5,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/canary-at-hundred",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 100,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/stable-below-hundred",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "stable",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/unknown-mode",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "shadow",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/deployment-not-uuid",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "deployment-1",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/issued-without-offset",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/extra-field",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        },
+        "subjectId": "alice"
+      }
+    },
+    {
+      "name": "invalid/missing-signature",
+      "failure": "schema",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/tampered-percentage",
+      "failure": "signature",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 90,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/tampered-salt",
+      "failure": "signature",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "Xk9mR2tP7vQa4sLd1uWz0A",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "rollout-binding-vector-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    },
+    {
+      "name": "invalid/unknown-key",
+      "failure": "signature",
+      "binding": {
+        "kind": "rollout-binding",
+        "schemaVersion": 1,
+        "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
+        "environmentId": "019fbd00-0000-7000-8000-0000000000e1",
+        "rolloutMode": "canary",
+        "targetPercentage": 10,
+        "cohortSalt": "q3Zr8Kc1VtW0xYbHnL5pJg",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "other-key",
+          "value": "RpV-XABUa_RMdXFWjwI4nIaMuKaRtn2hQrLO_bKygQc6_hOb7pmGPB_y5cKor86gr7Go4SOKI8WewLoG_qEQBQ"
+        }
+      }
+    }
+  ]
+}

@@ -44,6 +44,8 @@ export type TechnicalRuntimeEvent = z.infer<typeof TechnicalRuntimeEventSchema>;
 // ---------------------------------------------------------------------------
 
 export const RUNTIME_METRIC_EVENT_SCHEMA_VERSION = 2;
+/** Turn events of a runner that selects a cohort per turn (canary): v2 plus rollout fields. */
+export const RUNTIME_METRIC_EVENT_SCHEMA_VERSION_V3 = 3;
 /** Most events one ingest request carries (keeps a batch far below 256 KB). */
 export const RUNTIME_METRIC_MAX_BATCH = 50;
 /** Most distinct tools one turn event lists; further tools only count. */
@@ -145,7 +147,7 @@ const turnEventFields = {
   tools: z.array(RuntimeTurnToolUsageSchema).max(RUNTIME_METRIC_MAX_TOOLS),
 };
 
-type TurnEventFields = z.infer<z.ZodObject<typeof turnEventFields>>;
+type TurnEventFields = Omit<z.infer<z.ZodObject<typeof turnEventFields>>, 'schemaVersion'>;
 
 function refineTurnEvent(event: TurnEventFields, context: z.RefinementCtx): void {
   const allowed = ERROR_CODES_BY_STATUS[event.status];
@@ -231,7 +233,48 @@ export const TurnContinuedEventSchema = z.object({
   turnId: z.string().regex(RUNTIME_METRIC_TURN_ID_PATTERN),
 }).strict().superRefine(refineTurnEvent);
 
+export const RuntimeRolloutCohortSchema = z.enum(['stable', 'canary']);
+
+/** v3: the deployment and cohort the turn ran in, and the approvals its request raised and declined. */
+const turnEventV3Fields = {
+  ...turnEventFields,
+  schemaVersion: z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION_V3),
+  deploymentId: z.uuid().nullable(),
+  cohort: RuntimeRolloutCohortSchema.nullable(),
+  approvalsRequested: callCount,
+  approvalsDeclined: callCount,
+};
+
+function refineTurnEventV3(
+  event: TurnEventFields & { deploymentId: string | null; cohort: string | null },
+  context: z.RefinementCtx,
+): void {
+  refineTurnEvent(event, context);
+  if ((event.deploymentId === null) !== (event.cohort === null)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A deployment and its cohort are known together or not at all',
+      path: ['cohort'],
+    });
+  }
+}
+
+export const TechnicalRuntimeEventV3Schema = z.object({
+  ...turnEventV3Fields,
+  eventType: z.literal('turn.finished'),
+}).strict().superRefine(refineTurnEventV3);
+
+export const TurnContinuedEventV3Schema = z.object({
+  ...turnEventV3Fields,
+  eventType: z.literal('turn.continued'),
+  continuation: TurnContinuationSchema,
+  turnId: z.string().regex(RUNTIME_METRIC_TURN_ID_PATTERN),
+}).strict().superRefine(refineTurnEventV3);
+
 export type TechnicalRuntimeEventV2 = z.infer<typeof TechnicalRuntimeEventV2Schema>;
+export type TechnicalRuntimeEventV3 = z.infer<typeof TechnicalRuntimeEventV3Schema>;
+export type TurnContinuedEventV3 = z.infer<typeof TurnContinuedEventV3Schema>;
+export type RuntimeRolloutCohort = z.infer<typeof RuntimeRolloutCohortSchema>;
 export type TurnContinuation = z.infer<typeof TurnContinuationSchema>;
 export type TurnContinuedEvent = z.infer<typeof TurnContinuedEventSchema>;
 export type RuntimeTurnStatus = z.infer<typeof RuntimeTurnStatusSchema>;
@@ -277,9 +320,11 @@ export const ToolContractRejectedEventSchema = z.object({
 export type ToolContractRejectedEvent = z.infer<typeof ToolContractRejectedEventSchema>;
 
 /** Every content-free metric event of the runtime: finished and continued turns, contract rejections. */
-export const RuntimeMetricEventSchema = z.discriminatedUnion('eventType', [
+export const RuntimeMetricEventSchema = z.union([
   TechnicalRuntimeEventV2Schema,
   TurnContinuedEventSchema,
+  TechnicalRuntimeEventV3Schema,
+  TurnContinuedEventV3Schema,
   ToolContractRejectedEventSchema,
 ]);
 
@@ -287,14 +332,21 @@ export type RuntimeMetricEvent = z.infer<typeof RuntimeMetricEventSchema>;
 
 /**
  * Body of `POST /v1/runtime/apps/:appId/environments/:environmentId/metrics/events`.
- * One batch carries one event type, so a Platform that does not know a newer
- * type refuses only that batch and keeps receiving turns.
+ * One batch carries one event type of the batch's schema version, so a
+ * Platform that does not know a newer type or version refuses only that
+ * batch and keeps receiving turns.
  */
 export const TechnicalRuntimeEventBatchSchema = z.object({
-  schemaVersion: z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION),
+  schemaVersion: z.union([
+    z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION),
+    z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION_V3),
+  ]),
   events: z.array(RuntimeMetricEventSchema).min(1).max(RUNTIME_METRIC_MAX_BATCH),
 }).strict().refine((batch) => new Set(batch.events.map((event) => event.eventType)).size === 1, {
   message: 'A batch carries one event type',
+  path: ['events'],
+}).refine((batch) => batch.events.every((event) => event.schemaVersion === batch.schemaVersion), {
+  message: 'A batch carries events of its own schema version',
   path: ['events'],
 });
 

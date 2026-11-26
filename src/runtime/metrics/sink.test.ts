@@ -154,6 +154,22 @@ describe('createRuntimeMetricsSink', () => {
     expect(drops).toEqual([{ reason: 'send-failed', count: 2 }]);
   });
 
+  it('batches v3 turns under schema version 3, apart from v2 events', async () => {
+    const http = recordingFetch();
+    const { sink, drops } = sinkWith(http.fetch);
+    const v3 = (cohort: 'stable' | 'canary') => ({
+      ...event(), schemaVersion: 3, deploymentId: '019fbd00-0000-7000-8000-0000000000d2', cohort, approvalsRequested: 0, approvalsDeclined: 0,
+    }) as never;
+
+    sink.record(v3('canary'));
+    sink.record(event());
+    sink.record(v3('stable'));
+    await sink.flush();
+
+    expect(drops).toEqual([]);
+    expect(http.calls.map((call) => [call.body.schemaVersion, call.body.events.length])).toEqual([[2, 1], [3, 2]]);
+  });
+
   it('splits large queues into batches of at most 50 events', async () => {
     const http = recordingFetch();
     const { sink } = sinkWith(http.fetch);

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
   RuntimeDeploymentBundleSchema,
@@ -16,6 +17,7 @@ import {
 } from './signature-verifier.js';
 import {
   type RuntimeControlState,
+  type RuntimeRolloutBindingRecord,
   type RuntimeStateStore,
   type RuntimeSyncState,
 } from './state-store.js';
@@ -53,6 +55,21 @@ const CONTROL_ERROR_MESSAGES: Record<RuntimeEnvironmentControlErrorCode, string>
   control_sequence_conflict: 'Glirastes environment control changed without a new sequence; the assistant is halted',
 };
 
+const MAX_ROLLOUT_BINDING_RECORDS = 64;
+
+/** Why a verified rollout binding was dropped: older than, or different at the same time as, the accepted one. */
+export type RuntimeRolloutBindingErrorCode = 'rollout_binding_stale' | 'rollout_binding_conflict';
+
+/** Content-free report of a rollout binding the runner dropped; its deployment runs as unbound. */
+export class RuntimeRolloutBindingError extends Error {
+  constructor(readonly code: RuntimeRolloutBindingErrorCode) {
+    super(code === 'rollout_binding_stale'
+      ? 'Glirastes rollout binding is older than the accepted one; the canary is not selected'
+      : 'Glirastes rollout binding changed without a new issuedAt; the canary is not selected');
+    this.name = 'RuntimeRolloutBindingError';
+  }
+}
+
 /** Content-free report of a delivered control the runner did not accept. */
 export class RuntimeEnvironmentControlError extends Error {
   constructor(readonly code: RuntimeEnvironmentControlErrorCode) {
@@ -81,6 +98,8 @@ export interface RuntimeSyncApplyResult {
   state: RuntimeSyncState;
   rejectedDeploymentIds: string[];
   rejectedRevocationIds: string[];
+  /** True when an active deployment failed verification: the active set was kept, not replaced. */
+  rejectedActive: boolean;
   control: RuntimeControlOutcome;
 }
 
@@ -101,6 +120,7 @@ export class RuntimeSyncManager {
     onPending?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
     onActivated?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
     onControlRejected?: (code: RuntimeEnvironmentControlErrorCode) => void;
+    onRolloutBindingRejected?: (code: RuntimeRolloutBindingErrorCode) => void;
   }) {}
 
   /** Poll and push may overlap; each apply runs load, work and save exclusively. */
@@ -182,6 +202,7 @@ export class RuntimeSyncManager {
       await this.options.onRevocations?.(acceptedRevocations);
     }
 
+    const bindings = new Map((state.rolloutBindings ?? []).map((record) => [record.deploymentId, record]));
     const acceptedDeployments: RuntimeDeploymentBundle[] = [];
     const rejectedDeploymentIds: string[] = [];
     let rejectedActive = false;
@@ -220,7 +241,7 @@ export class RuntimeSyncManager {
         }
         const materialized = materializeDeploymentRevisions(parsed.data);
         await this.options.validateDeployment?.(parsed.data, materialized);
-        acceptedDeployments.push(parsed.data);
+        acceptedDeployments.push(await this.withVerifiedRolloutBinding(parsed.data, bindings));
       } catch {
         rejectedDeploymentIds.push(parsed.data.deploymentId);
         if (parsed.data.status === 'active') rejectedActive = true;
@@ -228,6 +249,9 @@ export class RuntimeSyncManager {
       }
     }
 
+    if (bindings.size > 0) {
+      state = { ...state, rolloutBindings: [...bindings.values()].slice(-MAX_ROLLOUT_BINDING_RECORDS) };
+    }
     const active = acceptedDeployments.filter(
       (deployment) => deployment.status === 'active',
     );
@@ -265,6 +289,7 @@ export class RuntimeSyncManager {
       state,
       rejectedDeploymentIds,
       rejectedRevocationIds,
+      rejectedActive,
       control: controlResult.outcome,
     };
   }
@@ -391,6 +416,48 @@ export class RuntimeSyncManager {
       && (this.options.targetAppId === undefined
         || control.targetAppId === this.options.targetAppId)
       && (knownTenantId === undefined || control.tenantId === knownTenantId);
+  }
+
+  /** An unverifiable binding only costs the deployment its canary selection, never the deployment. */
+  private async withVerifiedRolloutBinding(
+    deployment: RuntimeDeploymentBundle,
+    accepted: Map<string, RuntimeRolloutBindingRecord>,
+  ): Promise<RuntimeDeploymentBundle> {
+    const binding = deployment.rolloutBinding;
+    if (!binding) return deployment;
+    const { rolloutBinding: _dropped, ...unbound } = deployment;
+    if (
+      binding.deploymentId !== deployment.deploymentId
+      || binding.environmentId !== this.options.environmentId
+      || binding.rolloutMode !== deployment.rolloutMode
+      || binding.targetPercentage !== deployment.targetPercentage
+    ) {
+      return unbound;
+    }
+    try {
+      await this.options.verifier.verifyRolloutBinding(binding);
+    } catch {
+      return unbound;
+    }
+    const record = {
+      deploymentId: deployment.deploymentId,
+      issuedAt: binding.issuedAt,
+      digest: createHash('sha256').update(canonicalRuntimeJson(binding)).digest('base64url'),
+    };
+    const known = accepted.get(record.deploymentId);
+    if (known) {
+      const order = Date.parse(record.issuedAt) - Date.parse(known.issuedAt);
+      const code = order < 0 ? 'rollout_binding_stale' : order === 0 && known.digest !== record.digest
+        ? 'rollout_binding_conflict'
+        : undefined;
+      if (code) {
+        this.options.onRolloutBindingRejected?.(code);
+        return unbound;
+      }
+    }
+    accepted.delete(record.deploymentId);
+    accepted.set(record.deploymentId, record);
+    return deployment;
   }
 
   private deploymentScopeMatches(deployment: RuntimeDeploymentBundle): boolean {

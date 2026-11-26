@@ -1,9 +1,210 @@
 import { createHash } from 'node:crypto';
-import type { RuntimeDeploymentBundle } from '../contracts/revisions.js';
+import type { RuntimeDeploymentBundle, SecurityRevocation } from '../contracts/revisions.js';
 
+const DEFAULT_MAX_CONVERSATIONS = 10_000;
+const DEFAULT_CONVERSATION_TTL_MS = 24 * 60 * 60 * 1_000;
+const DEFAULT_MAX_CONVERSATIONS_PER_SUBJECT = 100;
+
+/** The unsalted bucket of earlier releases; canary selection uses `rolloutCohortBucket`. */
 export function stableCohortBucket(subjectId: string): number {
   const digest = createHash('sha256').update(subjectId).digest();
   return digest.readUInt32BE(0) % 100;
+}
+
+/** The rollout bucket (0-99) of a subject: first 4 bytes of sha256(`salt:subject`) as UInt32BE, modulo 100. */
+export function rolloutCohortBucket(cohortSalt: string, subjectId: string): number {
+  const digest = createHash('sha256').update(`${cohortSalt}:${subjectId}`, 'utf8').digest();
+  return digest.readUInt32BE(0) % 100;
+}
+
+export type RolloutCohort = 'stable' | 'canary';
+
+/**
+ * Why the canary in the state is (not) selectable on this runner: `unbound`
+ * (no valid rollout binding, or the last successful sync is older than the
+ * staleness limit), `revoked` (its agent or policy revision is),
+ * `prompt-unavailable` (its prompt digest is not one this runner holds).
+ */
+export type CanaryState = 'selectable' | 'unbound' | 'revoked' | 'prompt-unavailable';
+
+export interface RolloutDeployments {
+  stable: RuntimeDeploymentBundle | null;
+  canary: RuntimeDeploymentBundle | null;
+  revocations?: ReadonlyArray<SecurityRevocation>;
+}
+
+export interface CanaryStateOptions {
+  /** Whether this runner holds the prompt of that digest; defaults to "the stable deployment's digest". */
+  promptAvailable?: (promptDigest: string | undefined) => boolean;
+  /** Epoch ms of the last successful sync; read together with `maxStalenessMs`. */
+  syncedAt?: number;
+  /**
+   * With it, a canary is never selected once `syncedAt` is missing or older:
+   * a rollback the Platform decided while unreachable must not be missed.
+   */
+  maxStalenessMs?: number;
+  now?: () => number;
+}
+
+export interface RolloutSelection {
+  deployment: RuntimeDeploymentBundle;
+  cohort: RolloutCohort;
+}
+
+function bound(deployment: RuntimeDeploymentBundle, mode: RolloutCohort): boolean {
+  const binding = deployment.rolloutBinding;
+  return deployment.rolloutMode === mode
+    && binding !== undefined
+    && binding.rolloutMode === mode
+    && binding.deploymentId === deployment.deploymentId
+    && binding.environmentId === deployment.environmentId
+    && binding.targetPercentage === deployment.targetPercentage;
+}
+
+/**
+ * Both deployments carry a binding that names exactly them, their mode and
+ * share: an unbound stable would report its turns without a cohort, so the
+ * canary's errors would land in the stable baseline.
+ */
+function boundCanary(stable: RuntimeDeploymentBundle | null, canary: RuntimeDeploymentBundle): boolean {
+  return stable !== null && bound(stable, 'stable') && bound(canary, 'canary');
+}
+
+const digestOf = (value: string) => createHash('sha256').update(value, 'utf8').digest('base64url');
+
+function revoked(
+  deployment: RuntimeDeploymentBundle,
+  revocations: ReadonlyArray<SecurityRevocation>,
+  now: number,
+): boolean {
+  return revocations.some((revocation) => revocation.environmentId === deployment.environmentId
+    && Date.parse(revocation.effectiveAt) <= now
+    && (revocation.agentRevisionIds.includes(deployment.agentRevision.revisionId)
+      || revocation.policyRevisionIds.includes(deployment.policyRevision.revisionId)));
+}
+
+export function canaryState(
+  deployments: RolloutDeployments,
+  options: CanaryStateOptions = {},
+): CanaryState | undefined {
+  const { stable, canary } = deployments;
+  if (!canary) return undefined;
+  if (!boundCanary(stable, canary)) return 'unbound';
+  const now = (options.now ?? Date.now)();
+  if (
+    options.maxStalenessMs !== undefined
+    && (options.syncedAt === undefined || now - options.syncedAt > options.maxStalenessMs)
+  ) return 'unbound';
+  if (revoked(canary, deployments.revocations ?? [], now)) return 'revoked';
+  const promptAvailable = options.promptAvailable
+    ?? ((digest: string | undefined) => digest === stable?.promptDigest);
+  return promptAvailable(canary.promptDigest) ? 'selectable' : 'prompt-unavailable';
+}
+
+/**
+ * Per-turn choice between the stable and the canary deployment. The cohort
+ * follows the salted bucket of the subject; the first choice of a
+ * conversation sticks while that deployment stays selectable. Kept in
+ * process memory, bounded and expiring: not shared between instances.
+ */
+export class RolloutCohortSelector {
+  // Keyed by digests, so client-chosen ids of any length cost the same.
+  private readonly conversations = new Map<string, { deploymentId: string; seenAt: number; subject: string }>();
+  private readonly perSubject = new Map<string, number>();
+  private readonly maxConversations: number;
+  private readonly maxPerSubject: number;
+  private readonly ttlMs: number;
+  private readonly now: () => number;
+
+  constructor(options: {
+    maxConversations?: number;
+    maxConversationsPerSubject?: number;
+    ttlMs?: number;
+    now?: () => number;
+  } = {}) {
+    this.maxConversations = Math.max(1, options.maxConversations ?? DEFAULT_MAX_CONVERSATIONS);
+    this.maxPerSubject = Math.max(1, options.maxConversationsPerSubject ?? DEFAULT_MAX_CONVERSATIONS_PER_SUBJECT);
+    this.ttlMs = Math.max(1, options.ttlMs ?? DEFAULT_CONVERSATION_TTL_MS);
+    this.now = options.now ?? Date.now;
+  }
+
+  get size(): number {
+    return this.conversations.size;
+  }
+
+  select(
+    deployments: RolloutDeployments,
+    input: { subjectId?: string; conversationId: string }
+      & Pick<CanaryStateOptions, 'promptAvailable' | 'syncedAt' | 'maxStalenessMs'>,
+  ): RolloutSelection | undefined {
+    const { stable, canary } = deployments;
+    if (!stable) return undefined;
+    const now = this.now();
+    const eligible = canary && canaryState(deployments, {
+      now: () => now,
+      ...(input.promptAvailable ? { promptAvailable: input.promptAvailable } : {}),
+    }) === 'selectable'
+      ? canary
+      : undefined;
+    const selectable = eligible && canaryState(deployments, {
+      now: () => now,
+      ...(input.promptAvailable ? { promptAvailable: input.promptAvailable } : {}),
+      ...(input.maxStalenessMs !== undefined
+        ? { maxStalenessMs: input.maxStalenessMs, ...(input.syncedAt !== undefined ? { syncedAt: input.syncedAt } : {}) }
+        : {}),
+    }) === 'selectable'
+      ? canary
+      : undefined;
+    const subject = digestOf(input.subjectId ?? '');
+    const key = digestOf(`${subject}\n${input.conversationId}`);
+    const sticky = this.conversations.get(key);
+    let selection: RolloutSelection;
+    if (sticky && now - sticky.seenAt < this.ttlMs) {
+      if (!selectable && eligible && sticky.deploymentId === eligible.deploymentId) {
+        // Only a stale sync blocks the canary: run stable now, keep the conversation on the canary.
+        this.remember(key, subject, sticky.deploymentId, now);
+        return { deployment: stable, cohort: 'stable' };
+      }
+      selection = selectable && sticky.deploymentId === selectable.deploymentId
+        ? { deployment: selectable, cohort: 'canary' }
+        : { deployment: stable, cohort: 'stable' };
+    } else {
+      const subjectId = input.subjectId || input.conversationId;
+      selection = selectable
+        && rolloutCohortBucket(selectable.rolloutBinding!.cohortSalt, subjectId) < selectable.rolloutBinding!.targetPercentage
+        ? { deployment: selectable, cohort: 'canary' }
+        : { deployment: stable, cohort: 'stable' };
+    }
+    this.remember(key, subject, selection.deployment.deploymentId, now);
+    return selection;
+  }
+
+  private remember(key: string, subject: string, deploymentId: string, now: number): void {
+    this.forget(key);
+    this.conversations.set(key, { deploymentId, seenAt: now, subject });
+    this.perSubject.set(subject, (this.perSubject.get(subject) ?? 0) + 1);
+    if (this.perSubject.get(subject)! > this.maxPerSubject) {
+      for (const [other, entry] of this.conversations) {
+        if (entry.subject === subject) {
+          this.forget(other);
+          break;
+        }
+      }
+    }
+    for (const [other, entry] of this.conversations) {
+      if (this.conversations.size <= this.maxConversations && now - entry.seenAt < this.ttlMs) break;
+      this.forget(other);
+    }
+  }
+
+  private forget(key: string): void {
+    const entry = this.conversations.get(key);
+    if (!entry) return;
+    this.conversations.delete(key);
+    const count = (this.perSubject.get(entry.subject) ?? 1) - 1;
+    if (count > 0) this.perSubject.set(entry.subject, count);
+    else this.perSubject.delete(entry.subject);
+  }
 }
 
 export function selectRuntimeDeployment(
@@ -34,12 +235,14 @@ export function selectRuntimeDeployment(
   if (!deployments.stable) {
     throw new Error('No verified stable deployment is available');
   }
+  const canary = deployments.canary;
   if (
-    deployments.canary
-    && stableCohortBucket(input.subjectId)
-      < deployments.canary.targetPercentage
+    canary
+    && boundCanary(deployments.stable, canary)
+    && rolloutCohortBucket(canary.rolloutBinding!.cohortSalt, input.subjectId)
+      < canary.rolloutBinding!.targetPercentage
   ) {
-    return deployments.canary;
+    return canary;
   }
   return deployments.stable;
 }

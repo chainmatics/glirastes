@@ -13,16 +13,19 @@ export {
 } from './state-store.js';
 export type {
   RuntimeControlState,
+  RuntimeRolloutBindingRecord,
   RuntimeStateStore,
   RuntimeSyncState,
 } from './state-store.js';
 export {
   RuntimeEnvironmentControlError,
+  RuntimeRolloutBindingError,
   RuntimeSyncManager,
 } from './sync-manager.js';
 export type {
   RuntimeControlOutcome,
   RuntimeEnvironmentControlErrorCode,
+  RuntimeRolloutBindingErrorCode,
   RuntimeSyncApplyResult,
 } from './sync-manager.js';
 export {
@@ -56,8 +59,18 @@ export type {
 export { FetchSsePushConnector } from './fetch-sse-push.js';
 export { HttpRuntimePublicKeyProvider } from './jwks-provider.js';
 export {
+  canaryState,
+  RolloutCohortSelector,
+  rolloutCohortBucket,
   selectRuntimeDeployment,
   stableCohortBucket,
+} from './deployment-selector.js';
+export type {
+  CanaryState,
+  CanaryStateOptions,
+  RolloutCohort,
+  RolloutDeployments,
+  RolloutSelection,
 } from './deployment-selector.js';
 export { materializeDeploymentRevisions } from './materialize-deployment.js';
 export type { MaterializedDeploymentRevisions } from './materialize-deployment.js';

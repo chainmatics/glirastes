@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   AppSetupArtifactSchema,
   type EffectiveEnvironmentControl,
@@ -14,6 +15,7 @@ import {
   type RuntimePushConnector,
 } from '../sync/control-plane-client.js';
 import { validateLocalDeploymentBindings } from '../sync/local-deployment-validator.js';
+import { canaryState, RolloutCohortSelector } from '../sync/deployment-selector.js';
 import { createManagedRuntimeSync } from '../sync/managed-sync.js';
 import type { MaterializedDeploymentRevisions } from '../sync/materialize-deployment.js';
 import { AcceptedStateStore } from './accepted-state-store.js';
@@ -35,7 +37,7 @@ import {
   createRuntimeMetricsSinkFromEnv,
   type RuntimeMetricsSinkOptions,
 } from './metrics/sink.js';
-import type { RuntimeMetricsSink } from './metrics/turn-recorder.js';
+import { attachTurnRollout, type RuntimeMetricsSink, type TurnRollout } from './metrics/turn-recorder.js';
 import { policyOverlayFromRevision } from './policy-overlay.js';
 import { resolveRuntimeConnectionConfig } from './runtime-mode.js';
 import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
@@ -50,6 +52,10 @@ import { createTurnRateLimiter, type TurnAdmission } from './turn-rate-limit.js'
 
 const DEFAULT_FIRST_SYNC_TIMEOUT_MS = 5_000;
 const DEFAULT_RETRY_INTERVAL_MS = 30_000;
+const DEFAULT_CANARY_MAX_STALENESS_MS = 5 * 60_000;
+const TURN_ROLLOUT_LIMIT = 256;
+// Turn ids come from the client; keyed by digest so their length costs nothing.
+const turnKey = (turnId: string) => createHash('sha256').update(turnId, 'utf8').digest('base64url');
 
 /** The module `glirastes tools refresh` emits (`tools.generated.ts`). */
 export interface GlirastesGeneratedModule extends GeneratedToolModule {
@@ -90,6 +96,13 @@ export interface CreateGlirastesOptions {
   /** How long `ready()` waits for the first sync (default 5 s). */
   firstSyncTimeoutMs?: number;
   /**
+   * Connected only. Once the last successful sync is older than this, turns
+   * stop selecting the canary and run on stable until a sync succeeds again,
+   * so a rollback the Platform decided is never missed (default: 5 minutes,
+   * at least 3 poll intervals).
+   */
+  canaryMaxStalenessMs?: number;
+  /**
    * Connected only. `best-effort` (default): until the first successful sync
    * after process start, turns run on the local code, so a halt applies again
    * only after that sync. `required`: turns are refused with
@@ -128,12 +141,14 @@ export type GlirastesPrincipalFactory = (
 export interface GlirastesChatTurn {
   managedRuntime: {
     resolvePrincipal: (request: Request) => Principal | undefined | Promise<Principal | undefined>;
-    resolveTurnSnapshot: (context: { turnId: string; principal: Principal }) => TurnSnapshot;
+    resolveTurnSnapshot: (context: { turnId: string; principal: Principal; conversationId?: string }) => TurnSnapshot;
     loadRevocations: (context: { request: Request; snapshot: TurnSnapshot }) => SecurityRevocation[];
     /** Connected only: the environment control in force (see `controlFreshness`). */
     loadControl?: (context: { request: Request }) => ManagedTurnControl;
     /** Connected only: the per-process turn rate limit of the control. */
     admitTurn?: (context: { request: Request; principal: Principal }) => TurnAdmission;
+    /** Connected only: the deployment and cohort of a resolved turn, once the Platform signs rollout bindings. */
+    turnRollout?: (context: { turnId: string }) => TurnRollout | undefined;
   };
   loadTools: (context: { turnSnapshot?: TurnSnapshot }) => ToolRegistry;
   toolSemantics?: ToolSearchSemanticsMap;
@@ -311,6 +326,10 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   const base = localSource();
   const store = new AcceptedStateStore();
   const rateLimiter = createTurnRateLimiter();
+  const cohorts = new RolloutCohortSelector();
+  let canarySource: { deploymentId: string; source: LocalRuntimeSource } | undefined;
+  // A continuation reuses the source and cohort of its turn.
+  const turns = new Map<string, { source: LocalRuntimeSource; rollout?: TurnRollout }>();
   let controlRequired = options.controlFreshness === 'required';
   // The environment whose sync succeeded on the current connection; `required` refuses turns for any other.
   let syncedEnvironment: string | undefined;
@@ -318,6 +337,12 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     || (syncedEnvironment !== undefined && syncedEnvironment === resolved?.environmentId);
   const abort = new AbortController();
   const retryMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS);
+  const canaryMaxStalenessMs = Math.max(
+    1,
+    options.canaryMaxStalenessMs ?? Math.max(DEFAULT_CANARY_MAX_STALENESS_MS, 3 * retryMs),
+  );
+  // Set only while a metrics sink exists: the Platform can judge (and roll back) a canary by its metrics alone.
+  let canaryFreshness: { syncedAt: () => number | undefined } | undefined;
   let resolved: ResolvedRuntimeConnection | undefined;
   let connectedBase: LocalRuntimeSource | undefined;
   let managed: { tenantId: string; source: LocalRuntimeSource } | undefined;
@@ -376,6 +401,9 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     resolved = undefined;
     connectedBase = undefined;
     managed = undefined;
+    canarySource = undefined;
+    canaryFreshness = undefined;
+    turns.clear();
     metrics = undefined;
     syncedEnvironment = undefined;
     store.clear();
@@ -418,6 +446,14 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     let placeLost = false;
     let sync: ReturnType<typeof createManagedRuntimeSync>;
     const stateStore = store.bind(environmentId);
+    const sink = options.metrics !== false && !readOnly
+      ? createRuntimeMetricsSinkFromEnv(env, {
+          ...options.metrics,
+          connection: { appId: connection.appId, environmentId },
+          ...(options.fetchImpl ? { fetch: options.fetchImpl } : {}),
+        })
+      : undefined;
+    const freshness = { syncedAt: (): number | undefined => sync?.client.lastSyncedAt };
     try {
       sync = createManagedRuntimeSync({
         baseUrl: config.baseUrl,
@@ -443,9 +479,16 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         ...(options.push !== undefined ? { push: options.push } : {}),
         pollIntervalMs: retryMs,
+        ...(sink
+          ? {
+              canarySelection: true,
+              canaryState: () => canaryState(store.deployments(), canaryStalenessOf(freshness)),
+            }
+          : {}),
       });
     } catch (error) {
       onError(error);
+      await sink?.close().catch(onError);
       return false;
     }
     resolved = connection;
@@ -453,13 +496,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       targetAppId: connection.appId,
       environmentId,
     });
-    if (options.metrics !== false && !readOnly) {
-      metrics = createRuntimeMetricsSinkFromEnv(env, {
-        ...options.metrics,
-        connection: { appId: connection.appId, environmentId },
-        ...(options.fetchImpl ? { fetch: options.fetchImpl } : {}),
-      });
-    }
+    metrics = sink;
+    canaryFreshness = sink ? freshness : undefined;
     stopSync = () => sync.client.stop();
 
     while (!abort.signal.aborted && !placeLost) {
@@ -517,6 +555,63 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     }
   };
 
+  const canaryStalenessOf = (freshness: { syncedAt: () => number | undefined }) => {
+    const syncedAt = freshness.syncedAt();
+    return { maxStalenessMs: canaryMaxStalenessMs, ...(syncedAt !== undefined ? { syncedAt } : {}) };
+  };
+
+  const canarySourceOf = (deploymentId: string, tenantId: string): LocalRuntimeSource | undefined => {
+    const revisions = store.acceptedCanary(deploymentId);
+    if (!resolved || !revisions || revisions.policyRevision.tenantId !== tenantId) return undefined;
+    if (canarySource?.deploymentId !== deploymentId) {
+      canarySource = {
+        deploymentId,
+        source: localSource(
+          {
+            tenantId,
+            targetAppId: resolved.appId,
+            ...(resolved.environmentId ? { environmentId: resolved.environmentId } : {}),
+          },
+          { accepted: () => revisions },
+        ),
+      };
+    }
+    return canarySource.source;
+  };
+
+  const turnOf = (
+    source: LocalRuntimeSource,
+    context: { turnId: string; principal: Principal; conversationId?: string },
+  ): { source: LocalRuntimeSource; rollout?: TurnRollout } => {
+    const key = turnKey(context.turnId);
+    const known = turns.get(key);
+    if (known) return known;
+    let turn: { source: LocalRuntimeSource; rollout?: TurnRollout } = { source };
+    if (managed && source === managed.source && canaryFreshness) {
+      const deployments = store.deployments();
+      const selection = cohorts.select(deployments, {
+        subjectId: context.principal.subjectId,
+        conversationId: context.conversationId ?? context.turnId,
+        ...canaryStalenessOf(canaryFreshness),
+      });
+      if (selection) {
+        const canary = selection.cohort === 'canary'
+          ? canarySourceOf(selection.deployment.deploymentId, managed.tenantId)
+          : undefined;
+        const deployment = canary ? selection.deployment : deployments.stable!;
+        turn = {
+          source: canary ?? source,
+          ...(canary || deployments.stable?.rolloutBinding
+            ? { rollout: { deploymentId: deployment.deploymentId, cohort: canary ? 'canary' : 'stable' } }
+            : {}),
+        };
+      }
+    }
+    turns.set(key, turn);
+    if (turns.size > TURN_ROLLOUT_LIMIT) turns.delete(turns.keys().next().value!);
+    return turn;
+  };
+
   const instance: Glirastes = {
     mode: config ? 'connected' : 'standalone',
     bindings: bound.bindings,
@@ -571,7 +666,10 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       return {
         managedRuntime: {
           resolvePrincipal: (request) => principal(tenantId, request),
-          resolveTurnSnapshot: (context) => source.resolveTurnSnapshot(context),
+          resolveTurnSnapshot: (context) => {
+            const turn = turnOf(source, context);
+            return attachTurnRollout(turn.source.resolveTurnSnapshot(context), turn.rollout);
+          },
           loadRevocations: () => store.revocations(),
           ...(config
             ? {
@@ -580,6 +678,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
                   const control = turnControlOf(store.control());
                   return rateLimiter.admit(current, control.assistant === 'enabled' ? control.rateLimit : undefined);
                 },
+                turnRollout: ({ turnId }: { turnId: string }) => turns.get(turnKey(turnId))?.rollout,
               }
             : {}),
         },
