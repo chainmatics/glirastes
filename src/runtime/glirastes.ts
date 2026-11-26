@@ -15,15 +15,8 @@ import {
 } from '../sync/control-plane-client.js';
 import { validateLocalDeploymentBindings } from '../sync/local-deployment-validator.js';
 import { createManagedRuntimeSync } from '../sync/managed-sync.js';
-import {
-  materializeDeploymentRevisions,
-  type MaterializedDeploymentRevisions,
-} from '../sync/materialize-deployment.js';
-import type {
-  RuntimeControlState,
-  RuntimeStateStore,
-  RuntimeSyncState,
-} from '../sync/state-store.js';
+import type { MaterializedDeploymentRevisions } from '../sync/materialize-deployment.js';
+import { AcceptedStateStore } from './accepted-state-store.js';
 import {
   createContractBindings,
   type ContractBindingsResult,
@@ -171,68 +164,6 @@ export interface Glirastes {
   chatTurn(principal: GlirastesPrincipalFactory): Promise<GlirastesChatTurn>;
   /** Stops the sync, flushes the metrics and forgets this instance. */
   stop(): Promise<void>;
-}
-
-/** Keeps the sync state in memory and the accepted deployment materialized for the turns. */
-class AcceptedStateStore implements RuntimeStateStore {
-  private state: RuntimeSyncState | null = null;
-  private stable: MaterializedDeploymentRevisions | undefined;
-  private environmentId: string | undefined;
-  // An unsigned connection error must never lift a signed halt.
-  private retained: { environmentId: string; control: RuntimeControlState } | undefined;
-
-  /** Called before the sync of an environment starts. */
-  bind(environmentId: string): void {
-    this.environmentId = environmentId;
-    if (this.retained?.environmentId === environmentId && !this.state) {
-      this.state = {
-        cursor: null,
-        stable: null,
-        canary: null,
-        pending: [],
-        revocations: [],
-        updatedAt: new Date(0).toISOString(),
-        control: this.retained.control,
-      };
-      this.retained = undefined;
-    }
-  }
-
-  /** After the first successful sync of another environment, a retained control no longer applies. */
-  synced(environmentId: string): void {
-    if (this.retained && this.retained.environmentId !== environmentId) this.retained = undefined;
-  }
-
-  async load(): Promise<RuntimeSyncState | null> {
-    return this.state ? structuredClone(this.state) : null;
-  }
-
-  async saveAtomic(state: RuntimeSyncState): Promise<void> {
-    this.state = structuredClone(state);
-    this.stable = state.stable ? materializeDeploymentRevisions(state.stable) : undefined;
-  }
-
-  accepted(): MaterializedDeploymentRevisions | undefined {
-    return this.stable;
-  }
-
-  clear(): void {
-    const control = this.state?.control;
-    if (control && this.environmentId) {
-      this.retained = { environmentId: this.environmentId, control };
-    }
-    this.state = null;
-    this.stable = undefined;
-  }
-
-  revocations(): SecurityRevocation[] {
-    return this.state?.revocations ?? [];
-  }
-
-  control(): EffectiveEnvironmentControl | undefined {
-    const control = this.state?.control ?? this.retained?.control;
-    return control?.localHalt ?? control?.accepted ?? undefined;
-  }
 }
 
 function logError(error: unknown): void {
@@ -450,7 +381,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
 
     let placeLost = false;
     let sync: ReturnType<typeof createManagedRuntimeSync>;
-    store.bind(environmentId);
+    const stateStore = store.bind(environmentId);
     try {
       sync = createManagedRuntimeSync({
         baseUrl: config.baseUrl,
@@ -460,7 +391,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         runnerKey: connection.runnerKey,
         ...(readOnly ? { readOnly } : {}),
         version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
-        stateStore: store,
+        stateStore,
         setupArtifact: options.generated.setupArtifact,
         // A deployment that names a tool this code lacks, or has changed, keeps running on the local tool.
         validateDeployment: (_deployment, revisions) => {
