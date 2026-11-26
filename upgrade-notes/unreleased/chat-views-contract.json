@@ -1,8 +1,8 @@
 {
   "id": "chat-views-contract",
   "kind": "optional",
-  "summary": "Optional Chat Views (generative UI in chat): the render_view spec, manifest and resolved view schemas in glirastes/contracts; catalog authoring and resolution in glirastes; the render_view tool behind the chatViews handler option.",
-  "howTo": "Nothing to do. The schemas, CHAT_VIEW_LIMITS, chatComponentManifestDigest and the catalog helpers (defineChatComponent, bindable, refOnly, toChatComponentManifest, mergeChatManifests, starterChatComponents) the spec validation (validateChatViewSpec, effectiveChatManifest) and the reference resolution (resolveChatView) and the deterministic text rendering (chatViewToText, chatElementToText) are the base for the optional Chat Views feature. To let the model show views, set `chatViews: {}` (starter catalog) or `chatViews: { catalog }` on createAiChatHandler; without it nothing changes. A later release adds the React renderer.",
+  "summary": "Optional Chat Views (generative UI in chat): the render_view spec, manifest and resolved view schemas in glirastes/contracts; catalog authoring and resolution in glirastes; the render_view tool behind the chatViews handler option; the React renderer behind the chatViews provider option.",
+  "howTo": "Nothing to do. The schemas, CHAT_VIEW_LIMITS, chatComponentManifestDigest and the catalog helpers (defineChatComponent, bindable, refOnly, toChatComponentManifest, mergeChatManifests, starterChatComponents) the spec validation (validateChatViewSpec, effectiveChatManifest) and the reference resolution (resolveChatView) and the deterministic text rendering (chatViewToText, chatElementToText) are the base for the optional Chat Views feature. To let the model show views, set `chatViews: {}` (starter catalog) or `chatViews: { catalog }` on createAiChatHandler; without it nothing changes. In the browser, set `chatViews={{}}` on AiChatProvider (starter bindings) or `chatViews={{ components: [bindChatComponent(definition, Component)] }}` for the app's own components (memoize the array); the provider then sends what the page can render as `chatViews` in each request and renders each view through the bindings (an element that does not fit renders as its text). Without the option nothing is sent and a stored view renders as text.",
   "skill": "building-glirastes-chat-ui",
   "surface": [
     "glirastes/contracts#CHAT_VIEW_LIMITS",
@@ -52,6 +52,31 @@
     "glirastes#ChatViewTextOptions.*",
     "*#AiChatHandlerConfig.chatViews",
     "*#AiChatHandlerFullConfig.chatViews",
-    "*#ChatViewsConfig.*"
+    "*#ChatViewsConfig.*",
+    "*#AiChatProviderConfig.chatViews",
+    "*#AiChatProviderProps.chatViews",
+    "*#GlirastesChatElementConfig.chatViews",
+    "*#VercelAiChatProps.chatViews",
+    "glirastes/react#ChatContextValue.chatViewRegistry",
+    "glirastes/react#ChatContextValue.runChatViewAction",
+    "glirastes/react#ChatLocale.chatViewMoreRows",
+    "glirastes/react#ChatLocale.chatViewPartialNote",
+    "glirastes/react#ChatLocale.chatViewSaidMarker",
+    "locale#chatViewMoreRows",
+    "locale#chatViewPartialNote",
+    "locale#chatViewSaidMarker",
+    "glirastes/react#ChatTransport.setChatViewCapabilities",
+    "glirastes/react#ChatComponentBinding.*",
+    "glirastes/react#ChatComponentProps.*",
+    "glirastes/react#ChatView",
+    "glirastes/react#ChatViewDispatch.*",
+    "glirastes/react#ChatViewProps.*",
+    "glirastes/react#ChatViewRegistry.*",
+    "glirastes/react#ChatViewTexts.*",
+    "glirastes/react#ChatViewsOptions.*",
+    "glirastes/react#ResolvedChatComponent.*",
+    "glirastes/react#bindChatComponent",
+    "glirastes/react#createChatViewRegistry",
+    "glirastes/react#starterChatBindings"
   ]
 }

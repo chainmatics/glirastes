@@ -144,6 +144,8 @@ interface PropsContext {
   inItemScope: boolean;
   errors: string[];
   idProps: ElementIdProp[];
+  /** Props of a resolved view: plain values, so no reference rules and no literal limit. */
+  resolved?: boolean;
 }
 
 const ANNOTATIONS = new Set([
@@ -236,16 +238,16 @@ function checkValue(
   ctx: PropsContext,
 ): void {
   const { entry, errors } = ctx;
-  const kind = chatRefKind(value);
+  const kind = ctx.resolved ? undefined : chatRefKind(value);
   if (kind) {
     checkRef(kind, value as Json, display, pattern, ctx);
     return;
   }
-  if (pattern && entry.refOnly.includes(pattern)) {
+  if (!ctx.resolved && pattern && entry.refOnly.includes(pattern)) {
     errors.push(at(display, `only accepts a reference ${REF_HINT}`));
     return;
   }
-  if (typeof value === 'string' && value.length > CHAT_VIEW_LIMITS.maxLiteralChars) {
+  if (!ctx.resolved && typeof value === 'string' && value.length > CHAT_VIEW_LIMITS.maxLiteralChars) {
     errors.push(
       at(display, `string has ${value.length} characters; the maximum is ${CHAT_VIEW_LIMITS.maxLiteralChars}`),
     );
@@ -467,6 +469,41 @@ export function resolveChatComponentEntry(
     if (entry.id === type && (!found || entry.schemaVersion > found.schemaVersion)) found = entry;
   }
   return found;
+}
+
+/** Props the server adds to a resolved item-scope element (Table): rows left out, rows from a cut source. */
+export const RESOLVED_TABLE_NOTE_PROPS = ['truncatedRows', 'partial'] as const;
+
+/**
+ * Checks the props of one element of a resolved view (browser side) against
+ * its manifest entry: the same JSON Schema subset, on resolved values. An
+ * item-scope element's rows prop is not in its props (the rows are in
+ * `element.rows`), and its `truncatedRows`/`partial` notes are not checked.
+ * Returns the errors; empty when the props fit.
+ */
+export function validateResolvedChatElementProps(
+  props: Record<string, unknown>,
+  entry: ChatComponentManifestEntry,
+): string[] {
+  let schema: unknown = entry.props;
+  let own = props;
+  const scope = entry.itemScope;
+  if (scope && isRecord(schema)) {
+    own = Object.fromEntries(
+      Object.entries(props).filter(
+        ([key]) => key !== scope.rowsProp && !(RESOLVED_TABLE_NOTE_PROPS as readonly string[]).includes(key),
+      ),
+    );
+    const properties = isRecord(schema.properties) ? { ...schema.properties } : {};
+    delete properties[scope.rowsProp];
+    const required = Array.isArray(schema.required)
+      ? (schema.required as unknown[]).filter((name) => name !== scope.rowsProp)
+      : undefined;
+    schema = { ...schema, properties, ...(required ? { required } : {}) };
+  }
+  const ctx: PropsContext = { entry, inItemScope: false, errors: [], idProps: [], resolved: true };
+  checkValue(own, schema, '', '', ctx);
+  return ctx.errors;
 }
 
 function zodIssues(error: { issues: Array<{ path: PropertyKey[]; message: string }> }): string[] {

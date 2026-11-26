@@ -1,4 +1,5 @@
 import type { ChatLocale } from './types.js';
+import { CHAT_VIEW_PHRASES } from '../chat-views/text.js';
 
 /** German texts for every part of the chat UI. Pass as `locale`, or spread and override single texts. */
 export const deChatLocale: ChatLocale = {
@@ -141,6 +142,9 @@ export const deChatLocale: ChatLocale = {
   completionResultsLabel: '{count} Vorschläge',
   removeMentionLabel: '{label} entfernen',
   openEntityLabel: '{label} öffnen',
+  chatViewSaidMarker: CHAT_VIEW_PHRASES.de.said,
+  chatViewPartialNote: CHAT_VIEW_PHRASES.de.partial,
+  chatViewMoreRows: CHAT_VIEW_PHRASES.de.more,
   chatAboutLabel: 'Mit KI besprechen',
   completionEmptyLabel: 'Keine Treffer. @ für Dinge, / für Befehle',
   completionCommandsGroupLabel: 'Befehle',

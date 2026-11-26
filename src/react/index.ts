@@ -118,6 +118,7 @@ export type {
   StepSummaryFormatter,
   // Provider
   AiChatProviderConfig,
+  ChatViewsOptions,
   // Hook returns
   UseAiChatReturn,
   PendingApproval,
@@ -339,6 +340,19 @@ export {
   type ToolResultRendererProps,
   type ToolResultRendererRegistry,
 } from './tool-renderers/registry.js';
+
+// Chat views
+export {
+  bindChatComponent,
+  createChatViewRegistry,
+  type ChatComponentBinding,
+  type ChatComponentProps,
+  type ChatViewDispatch,
+  type ChatViewRegistry,
+  type ResolvedChatComponent,
+} from './chat-views/registry.js';
+export { starterChatBindings } from './chat-views/starter-bindings.js';
+export { ChatView, type ChatViewProps, type ChatViewTexts } from './chat-views/chat-view.js';
 
 // Completion providers
 export {

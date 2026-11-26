@@ -16,18 +16,36 @@ export interface ChatViewTextOptions {
   locale?: string;
 }
 
-const PHRASES = {
+/**
+ * The fixed phrases of a view, per language; `{count}` is filled in. Shared
+ * with the React binding (its locale defaults), so both say the same.
+ */
+export const CHAT_VIEW_PHRASES = {
   en: {
-    said: ' (computed by the assistant)',
-    partial: '(excerpt — not all entries shown)',
-    more: (count: number) => `(+${count} more)`,
+    said: 'computed by the assistant',
+    partial: 'excerpt — not all entries shown',
+    more: '+{count} more',
   },
   de: {
-    said: ' (vom Assistenten berechnet)',
-    partial: '(Auszug – nicht alle Einträge)',
-    more: (count: number) => `(+${count} weitere)`,
+    said: 'vom Assistenten berechnet',
+    partial: 'Auszug – nicht alle Einträge',
+    more: '+{count} weitere',
   },
 } as const;
+
+/** The phrase table of a BCP 47 locale (German or English). */
+export function chatViewPhrasesOf(locale: string | undefined): (typeof CHAT_VIEW_PHRASES)[keyof typeof CHAT_VIEW_PHRASES] {
+  return locale?.toLowerCase().startsWith('de') ? CHAT_VIEW_PHRASES.de : CHAT_VIEW_PHRASES.en;
+}
+
+function phrasesOf(locale: string) {
+  const table = chatViewPhrasesOf(locale);
+  return {
+    said: ` (${table.said})`,
+    partial: `(${table.partial})`,
+    more: (count: number) => `(${table.more.replace('{count}', String(count))})`,
+  };
+}
 
 type Element = ResolvedChatView['elements'][string];
 type Json = Record<string, unknown>;
@@ -36,7 +54,7 @@ interface Context {
   view: ResolvedChatView;
   entries: Map<string, ChatComponentManifestEntry>;
   locale: string;
-  phrases: (typeof PHRASES)[keyof typeof PHRASES];
+  phrases: ReturnType<typeof phrasesOf>;
 }
 
 function isRecord(value: unknown): value is Json {
@@ -155,7 +173,7 @@ function contextOf(view: ResolvedChatView, manifest: ChatComponentManifest, opti
     view,
     entries: new Map(manifest.components.map((entry) => [entry.id, entry])),
     locale,
-    phrases: locale.toLowerCase().startsWith('de') ? PHRASES.de : PHRASES.en,
+    phrases: phrasesOf(locale),
   };
 }
 
