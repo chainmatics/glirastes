@@ -4,14 +4,16 @@ Optional. With chat views the model can answer with a small composed view (a
 table of invoices, a few key figures, a status overview) built from
 components the app declares, instead of text only. The layout is generated;
 the data is not: every value in a view is a reference to a real tool result,
-resolved on the server. An app that does not set `chatViews` gets no new tool,
-no new prompt text and no new request field.
+resolved on the server. An app that does not set `chatViews` sees no change.
+With `chatViews` the SDK adds the `render_view` tool and a short prompt rule
+(configurable via `promptRule`).
 
 ## Contents
 
 - Decide first
 - Enable on the server
 - Enable in React
+- Tell the model when to use a view
 - Add an app component
 - How the model writes a view
 - Action buttons
@@ -40,12 +42,13 @@ export const POST = createAiChatHandler({
 });
 ```
 
-`chatViews` (`ChatViewsConfig`) has two keys:
+`chatViews` (`ChatViewsConfig`) has three keys:
 
 | Key | What it does |
 | --- | --- |
 | `catalog` | the app's components, as a `ChatComponentManifest` or as `defineChatComponent` definitions; merged over the starter catalog (same `id` and `schemaVersion` replaces the starter's). Without it, the starter catalog alone |
 | `maxViewsPerTurn` | only `1` in this release |
+| `promptRule` | `string \| false`: the system prompt rule that says when to call `render_view`. Default the SDK rule (`CHAT_VIEW_PROMPT_RULE`), a string replaces it, `false` adds none (see "Tell the model when to use a view") |
 
 Any other key, another `maxViewsPerTurn` or an invalid manifest throws
 `createAiChatHandler: chatViews…` when the handler is created. With the
@@ -70,6 +73,35 @@ sends what the page can render as `chatViews: { components: [{ id,
 schemaVersion }], surface? }` next to `messages`; the server offers the model
 only the intersection of its catalog and that list. Without the option nothing
 is sent and a stored view renders as plain text.
+
+## Tell the model when to use a view
+
+A tool description alone does not make a real model choose a view over a
+Markdown table; the system prompt does. By default the handler appends this
+rule to the system prompt (also without an app `systemPrompt`) while
+`render_view` is offered in a request, and not when an app tool named
+`render_view` exists or the tool is scoped out:
+
+> Answer format: when an answer would list 4 or more like records, compare items or give a status overview, call render_view instead of writing a text or Markdown list or table. After the view add at most one short sentence and do not repeat the view's data in text. Never use a view for a single value, a confirmation or a question.
+
+Replace it with `promptRule` when the app should name its own components or
+use other thresholds; set `promptRule: false` only when the app writes the rule
+in its own system prompt. Template to adapt:
+
+```
+From 4 like records, a comparison or a status overview: call render_view
+instead of a text or Markdown list or table (TaskTable with TaskStatus,
+TeamProgress). Afterwards at most one short sentence; do not repeat the data.
+Not for single values, confirmations or follow-up questions.
+```
+
+```ts
+chatViews: { catalog, promptRule: '<your rule>' }   // or promptRule: false
+```
+
+Check by hand in the running chat: a list question (5 records) yields a view;
+a single-value question and a confirmation do not. If the list still arrives
+as text, name your components in the rule.
 
 ## Add an app component
 
@@ -299,7 +331,8 @@ it('shows invoices as a table', async () => {
 ```
 
 `tools` is the app's registry with `invoices_list`. For the browser, render
-`<ChatView view={view} registry={createChatViewRegistry([...starterChatBindings, binding])} locale="de" />`
+`<ChatView view={view} registry={createChatViewRegistry(mergeChatComponentBindings(starterChatBindings, [binding]))} locale="de" />`
+(`mergeChatComponentBindings` lets the app's binding replace a starter one of the same `id@schemaVersion`; `createChatViewRegistry` itself throws on a duplicate in one list)
 with Testing Library (jsdom) and assert the component and a text fallback for
 props that do not fit. `validateChatViewSpec(spec, manifest)` and
 `resolveChatView(spec, manifest, lookup)` test a spec without a handler.
@@ -308,7 +341,7 @@ props that do not fit. `validateChatViewSpec(spec, manifest)` and
 
 | Symptom | Check |
 | --- | --- |
-| The model never shows a view | `chatViews` set on `createAiChatHandler`? The rules allow a view only for ≥ 4 like records, a comparison or a status overview, never for single values, confirmations or questions; ask for one explicitly to test. No app tool named `render_view`? The browser's `chatViews.components` does not exclude the component? |
+| The model never shows a view | `chatViews` set on `createAiChatHandler`? `promptRule` not `false` (or your own rule in the system prompt)? The rules allow a view only for ≥ 4 like records, a comparison or a status overview, never for single values, confirmations or questions; name your components in `promptRule`. No app tool named `render_view`? The browser's `chatViews.components` does not exclude the component? |
 | `render_view` fails with a reference error | the path is not in the result (typo, or only in the cut form: see limits); `Text` takes no reference, use `StatusBadge`, `KeyValue` or an own bindable prop |
 | An element shows text instead of the component | not bound in the browser, bound in another `schemaVersion` than the element's, or its props do not fit the bound schema (a server catalog newer than the browser bundle) |
 | The whole view shows text | the React `chatViews` option is missing, or the root element failed |
@@ -341,8 +374,14 @@ props that do not fit. `validateChatViewSpec(spec, manifest)` and
   `RENDER_VIEW_TOOL_NAME`, `chatComponentManifestDigest` (SHA-256 of the
   canonical JSON, to compare catalogs).
 - `glirastes/server/nextjs` (also `/server/http`, `/adapter/nextjs`):
-  `ChatViewsConfig`.
-- `glirastes/react`: `bindChatComponent`, `createChatViewRegistry`
+  `ChatViewsConfig` (`catalog`, `maxViewsPerTurn`, `promptRule`).
+- Types `ChatViewSpec`, `ResolvedChatView`, `ChatComponentManifest`,
+  `ChatComponentManifestEntry`, `ChatViewCapabilities`, `ChatValueRef`,
+  `ChatItemRef`, `ChatOperator`, `ChatSaid` are also exported from `glirastes`;
+  `CHAT_VIEW_PROMPT_RULE` (the default rule text) from `glirastes`.
+- `glirastes/react`: `bindChatComponent`, `mergeChatComponentBindings(...lists)`
+  (a later binding with the same `id@schemaVersion` replaces the earlier one,
+  first-appearance order kept), `createChatViewRegistry`
   (`ChatViewRegistry`: `manifest`, `resolve`, `capabilities`;
   `ResolvedChatComponent`), `starterChatBindings`, `ChatView`
   (`ChatViewProps`, `ChatViewTexts`), `ChatComponentBinding`,

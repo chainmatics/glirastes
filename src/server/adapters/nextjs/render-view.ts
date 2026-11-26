@@ -19,6 +19,7 @@ import {
 } from '../../../contracts/chat-view.js';
 import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import {
+  CHAT_VIEW_PROMPT_RULE,
   describeChatCatalog,
   effectiveChatManifest,
   mergeChatManifests,
@@ -48,12 +49,20 @@ export interface ChatViewsConfig {
   catalog?: ChatComponentManifest | ChatComponentDefinition[];
   /** Views per answer; only `1` in this release. */
   maxViewsPerTurn?: 1;
+  /**
+   * The system prompt rule that tells the model when to call `render_view`,
+   * added while the tool is offered. Default: the SDK rule
+   * (`CHAT_VIEW_PROMPT_RULE`); a string replaces it (the app's own wording,
+   * e.g. naming its components); `false` adds none (the app writes its own
+   * rule in its system prompt).
+   */
+  promptRule?: string | false;
 }
 
 /** The answer when the model tries a second view in one answer. */
 export const ONE_VIEW_PER_ANSWER = 'one view per answer';
 
-const CONFIG_KEYS: ReadonlySet<string> = new Set(['catalog', 'maxViewsPerTurn']);
+const CONFIG_KEYS: ReadonlySet<string> = new Set(['catalog', 'maxViewsPerTurn', 'promptRule']);
 
 type Json = Record<string, unknown>;
 
@@ -69,13 +78,14 @@ const hasOwn = (value: Json, key: string) => Object.prototype.hasOwnProperty.cal
  */
 export function resolveChatViews(value: unknown, label: string): ChatComponentManifest | null {
   if (value === undefined || value === null) return null;
-  if (!isRecord(value)) throw new Error(`${label}: chatViews must be an object ({ catalog?, maxViewsPerTurn? })`);
+  if (!isRecord(value)) throw new Error(`${label}: chatViews must be an object ({ catalog?, maxViewsPerTurn?, promptRule? })`);
   for (const key of Object.keys(value)) {
     if (!CONFIG_KEYS.has(key)) throw new Error(`${label}: chatViews.${key} is not an option`);
   }
   if (value.maxViewsPerTurn !== undefined && value.maxViewsPerTurn !== 1) {
     throw new Error(`${label}: chatViews.maxViewsPerTurn must be 1`);
   }
+  checkPromptRule(value.promptRule, label);
   const catalog = value.catalog;
   if (catalog === undefined) return starterChatComponentManifest;
   let app: ChatComponentManifest;
@@ -93,6 +103,19 @@ export function resolveChatViews(value: unknown, label: string): ChatComponentMa
     app = parsed.data;
   }
   return mergeChatManifests(starterChatComponentManifest, app);
+}
+
+function checkPromptRule(rule: unknown, label: string): void {
+  if (rule === undefined || rule === false) return;
+  if (typeof rule !== 'string' || rule.trim().length === 0) {
+    throw new Error(`${label}: chatViews.promptRule must be a non-empty string or false`);
+  }
+}
+
+/** The prompt rule of a valid `chatViews` option: the default, the app's text, or undefined (none). */
+export function chatViewPromptRule(value: unknown): string | undefined {
+  const rule = isRecord(value) ? value.promptRule : undefined;
+  return rule === false ? undefined : typeof rule === 'string' ? rule : CHAT_VIEW_PROMPT_RULE;
 }
 
 /** The request's `chatViews` field; undefined when absent or invalid (then nothing is narrowed). */

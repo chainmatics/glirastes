@@ -676,8 +676,11 @@ export interface AiChatHandlerConfig {
    * over the SDK starter catalog; without it the starter catalog alone. A
    * request may narrow the catalog with its `chatViews` field
    * (`ChatViewCapabilities`), never widen it. One view per answer. Without
-   * this option there is no `render_view` tool, no catalog text and no
-   * request field. An invalid value throws when the handler is created.
+   * this option nothing changes: no `render_view` tool, no catalog text, no
+   * prompt rule and no request field. With it the SDK adds the `render_view`
+   * tool and a short system prompt rule (while the tool is offered); set
+   * `promptRule` to replace it or `false` to switch it off. An invalid value
+   * throws when the handler is created.
    */
   chatViews?: ChatViewsConfig;
   /**

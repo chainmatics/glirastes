@@ -22,8 +22,17 @@ type JsonSchema = {
   oneOf?: JsonSchema[];
 };
 
+/**
+ * The fixed system prompt rule the chat handler adds while `render_view` is
+ * offered (`chatViews.promptRule` replaces or switches it off). A tool
+ * description alone did not change the model's answer format; the system
+ * prompt is where it takes answer-format rules.
+ */
+export const CHAT_VIEW_PROMPT_RULE =
+  'Answer format: when an answer would list 4 or more like records, compare items or give a status overview, call render_view instead of writing a text or Markdown list or table. After the view add at most one short sentence and do not repeat the view\'s data in text. Never use a view for a single value, a confirmation or a question.';
+
 const RULES = [
-  'Renders one view in the chat. Default is text. A view only for ≥ 4 like records, a comparison or a status overview; never for single values, confirmations or questions; never just to wrap a single result that already has its own tool-result renderer. One view per turn.',
+  'Renders one view in the chat. Use it instead of a text or Markdown list or table for ≥ 4 like records, a comparison or a status overview, and keep the text after it to one short sentence. Never for single values, confirmations or questions; never just to wrap a single result that already has its own tool-result renderer. One view per turn.',
   'Spec: {root, elements:{<id>:{type, props, children?:[<id>]}}, caption?}. Each component lists its props; "?" optional, ":ref" only a reference, "|ref" a literal or a reference.',
 ];
 

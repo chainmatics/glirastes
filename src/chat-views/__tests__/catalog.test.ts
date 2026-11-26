@@ -171,12 +171,25 @@ describe('describeChatCatalog', () => {
 
   it('states the usage rules, the reference grammar and typed signatures', () => {
     const text = describeChatCatalog(starterChatComponentManifest);
-    expect(text).toMatch(/Default is text/);
+    expect(text).toMatch(/instead of a text or Markdown list/);
     expect(text).toMatch(/One view per turn/);
     expect(text).toMatch(/\$ref/);
     expect(text).toMatch(/\$item/);
     expect(text).toMatch(/\$said/);
     expect(text).toContain('Table(rows:ref[], columns:[{header, cell:#id}]≤8)');
     expect(text).toContain("tone:'neutral'|'success'|'warning'|'danger'");
+  });
+});
+
+describe('root type exports', () => {
+  it('the chat view types are importable from the package root next to the functions that use them', async () => {
+    const root = await import('../../index.js');
+    const spec: import('../../index.js').ChatViewSpec = { root: 'a', elements: { a: { type: 'Group', props: {} } } };
+    const manifest: import('../../index.js').ChatComponentManifest = root.starterChatComponentManifest;
+    const entry: import('../../index.js').ChatComponentManifestEntry = manifest.components[0]!;
+    const capabilities: import('../../index.js').ChatViewCapabilities = { components: [{ id: entry.id, schemaVersion: entry.schemaVersion }] };
+    const ref: import('../../index.js').ChatValueRef = { $ref: 'call', path: 'data[]' };
+    expect(root.validateChatViewSpec(spec, root.effectiveChatManifest(manifest, capabilities))).toBeDefined();
+    expect(ref.$ref).toBe('call');
   });
 });
