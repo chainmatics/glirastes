@@ -13,6 +13,7 @@ import { renderCurrentSetupManifests } from './current-setup-manifests.js';
 import { inspectSkillsStaleness, skillsAutoUpdateDisabled } from './skills-auto-update.js';
 import { inspectVoiceWorklet } from './voice-worklet-check.js';
 import { inspectReactMarkdown } from './react-markdown-check.js';
+import { inspectChatViewsZod } from './chat-views-zod-check.js';
 import { scanApp, type AppScan } from './upgrade/detect.js';
 export { formatDoctorReport } from './doctor-presentation.js';
 import {
@@ -202,6 +203,24 @@ async function reactMarkdownCheck(rootDir: string, scan: AppScan | undefined): P
     : check('react-markdown', 'warn', 'E-SETUP-109', 'install-react-markdown');
 }
 
+/**
+ * Only for apps with chat views on zod 3: chat component props must be zod 4
+ * schemas (`zod/v4` of zod 3.25+). A hint, never a failure.
+ */
+async function chatViewsZodCheck(rootDir: string, scan: AppScan | undefined): Promise<DoctorCheck | null> {
+  let inspection: Awaited<ReturnType<typeof inspectChatViewsZod>>;
+  try {
+    inspection = await inspectChatViewsZod(rootDir, scan);
+  } catch {
+    // An unreadable tree is reported by the project check.
+    return null;
+  }
+  if (!inspection.chatViews || inspection.status === 'unknown') return null;
+  if (inspection.status === 'pass') return check('chat-views-zod', 'pass', 'E-SETUP-110');
+  return check('chat-views-zod', 'warn', 'E-SETUP-110',
+    inspection.status === 'zod-too-old' ? 'upgrade-zod-for-chat-views' : 'import-zod-v4-for-chat-views');
+}
+
 export async function createDoctorReport(
   options: CreateDoctorReportOptions,
 ): Promise<DoctorReport> {
@@ -222,6 +241,7 @@ export async function createDoctorReport(
   const scan = await scanApp(rootDir).catch(() => undefined);
   const voiceCheck = await voiceWorkletCheck(rootDir, scan);
   const markdownCheck = await reactMarkdownCheck(rootDir, scan);
+  const zodCheck = await chatViewsZodCheck(rootDir, scan);
   let profile: Awaited<ReturnType<typeof detectSetupProfile>>;
   try {
     profile = await detectSetupProfile({ rootDir, managed: options.managed });
@@ -237,6 +257,7 @@ export async function createDoctorReport(
     ));
     if (voiceCheck) checks.push(voiceCheck);
     if (markdownCheck) checks.push(markdownCheck);
+    if (zodCheck) checks.push(zodCheck);
     if (skillsCheck) checks.push(skillsCheck);
     return finish(mode, 0, checks);
   }
@@ -450,6 +471,7 @@ export async function createDoctorReport(
 
   if (voiceCheck) checks.push(voiceCheck);
   if (markdownCheck) checks.push(markdownCheck);
+  if (zodCheck) checks.push(zodCheck);
   if (skillsCheck) checks.push(skillsCheck);
   return finish(mode, profile.toolCount, checks);
 }

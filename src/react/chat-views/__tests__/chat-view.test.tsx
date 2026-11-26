@@ -19,6 +19,7 @@ import {
   bindChatComponent,
   ChatView,
   createChatViewRegistry,
+  mergeChatComponentBindings,
   starterChatBindings,
   type ChatComponentBinding,
 } from '../../index.js';
@@ -313,6 +314,20 @@ describe('chat views in the message list', () => {
     expect(document.querySelector('[data-component="chat-view"]')).toBeNull();
     expect(document.querySelector('[data-component="tool-result"]')).toBeNull();
   });
+
+  it('marks only a bubble that renders a chat view with data-has-chat-view', () => {
+    const plain = { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Hello' }] } as unknown as ChatMessage;
+    renderChat(invoices, { chatViews: {} }, transport([plain, viewMessage(invoices)]));
+    const bubbles = [...document.querySelectorAll('[data-component="message-bubble"]')];
+    expect(bubbles).toHaveLength(2);
+    expect(bubbles[0]?.hasAttribute('data-has-chat-view')).toBe(false);
+    expect(bubbles[1]?.hasAttribute('data-has-chat-view')).toBe(true);
+  });
+
+  it('does not mark a bubble whose render_view call failed', () => {
+    renderChat(invoices, { chatViews: {} }, transport([viewMessage(invoices, { success: false, error: 'x', retryable: false })]));
+    expect(document.querySelector('[data-has-chat-view]')).toBeNull();
+  });
 });
 
 describe('createChatViewRegistry', () => {
@@ -332,6 +347,28 @@ describe('createChatViewRegistry', () => {
     expect(registry.resolve('Note', 2, { text: 'x' })?.entry.schemaVersion).toBe(2);
     expect(registry.resolve('Note', 3, { body: 'x' })?.entry.schemaVersion).toBe(1);
     expect(registry.resolve('Note', 1, { text: 'x' })).toBeUndefined();
+  });
+});
+
+describe('mergeChatComponentBindings', () => {
+  const note = (schemaVersion: number) => defineChatComponent({
+    id: 'Note', schemaVersion, description: 'n', props: z.object({ body: z.string() }), text: {},
+  });
+  const bound = (schemaVersion: number) => bindChatComponent(note(schemaVersion), () => null);
+
+  it('lets a later binding of the same id and schemaVersion replace an earlier one, keeping first-appearance order', () => {
+    const early = bound(1);
+    const other = bound(2);
+    const late = bound(1);
+    const merged = mergeChatComponentBindings([early, other], [late]);
+    expect(merged).toEqual([late, other]);
+    expect(merged[0]).toBe(late);
+    expect(() => createChatViewRegistry(merged)).not.toThrow();
+  });
+
+  it('keeps createChatViewRegistry strict for duplicates inside one list', () => {
+    expect(() => createChatViewRegistry([bound(1), bound(1)])).toThrow();
+    expect(() => createChatViewRegistry([...starterChatBindings, ...starterChatBindings])).toThrow();
   });
 });
 
@@ -439,6 +476,15 @@ describe('chat view capabilities in the request body', () => {
     expect(chatViews.components.map((component) => component.id)).toEqual(starterChatComponents.map((definition) => definition.id));
     // Round trip: the server's parser (Task 6) reads exactly this field and shape.
     expect(readChatViewCapabilities(body)).toEqual(chatViews);
+  });
+
+  it('lets an app binding override a starter component without throwing', async () => {
+    const group = starterChatComponents.find((definition) => definition.id === 'Group')!;
+    const mine = bindChatComponent(group, () => null);
+    const body = await bodyOf({ chatViews: { components: [mine] } });
+    const chatViews = body.chatViews as { components: Array<{ id: string; schemaVersion: number }> };
+    expect(chatViews.components.filter((component) => component.id === 'Group')).toHaveLength(1);
+    expect(chatViews.components).toHaveLength(starterChatBindings.length);
   });
 
   it('sends nothing the server would read as capabilities without the option', async () => {

@@ -95,6 +95,12 @@ export async function scanChatComponents(
   keys.forEach((key, index) => {
     const { item, where } = items.get(key)!;
     const result: SchemaProbeResult = results[index] ?? { ok: false, reason: 'probe-failed' };
+    if (!result.ok && result.reason === 'unsupported-schema') {
+      // The SDK's own message names the fix (import z from 'zod/v4').
+      findings.push(toolFinding('chat-component-invalid', 'error', where,
+        `The chat component ${item.module}#${item.export} uses a schema that is not zod 4: ${result.detail ?? ''}`.trim()));
+      return;
+    }
     if (!result.ok || result.kind !== 'chat-component') {
       const reason = result.ok ? 'unexpected-result' : result.reason;
       const detail = !result.ok && result.detail ? `: ${result.detail}` : '';

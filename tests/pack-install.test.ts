@@ -109,8 +109,10 @@ describe('package pack install', () => {
     expect(await loadAll('require', requireSubpaths().map(specifier))).toEqual([]);
   }, 60_000);
 
-  it('ships the stylesheet subpath', () => {
-    expect(existsSync(join(consumer, 'node_modules/glirastes', String(manifest.exports['./react/styles.css'])))).toBe(true);
+  it('ships the stylesheet subpaths, layered and unlayered', () => {
+    for (const subpath of ['styles.css', 'styles.unlayered.css', 'pills.css', 'pills.unlayered.css']) {
+      expect(existsSync(join(consumer, 'node_modules/glirastes', String(manifest.exports[`./react/${subpath}`])))).toBe(true);
+    }
   });
 
   it('ships the audio worklet asset, resolvable through its export', async () => {

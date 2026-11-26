@@ -1,0 +1,8 @@
+{
+  "id": "styles-cascade-layer",
+  "kind": "breaking",
+  "summary": "glirastes/react/styles.css and pills.css are now inside @layer glirastes, so Tailwind utilities and other app CSS override them without !important; unlayered global resets now win over the SDK styles too.",
+  "howTo": "Tailwind v4: declare the order before the imports in your global CSS: @layer theme, base, glirastes, components, utilities; then @import \"tailwindcss\"; and the glirastes styles. Remove ! overrides you only needed against the SDK styles. Tailwind v3 or global unlayered resets (button {}, preflight): import glirastes/react/styles.unlayered.css (and pills.unlayered.css) instead, which behave as before, or put the resets in a layer. A message bubble that shows a chat view now has data-has-chat-view and a definite width (100% under the existing max-width), so container queries inside views work; drop a workaround like [data-component=\"message-bubble\"]:has([data-component=\"chat-view\"]) { width: 85% }.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": { "patterns": ["glirastes/react/(styles|pills)\\.css"], "files": ["code", "style"] }
+}

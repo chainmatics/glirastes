@@ -1,0 +1,22 @@
+{
+  "id": "chat-views-prompt-rule",
+  "kind": "recommended",
+  "summary": "With chatViews the SDK now adds a short answer-format rule to the system prompt whenever render_view is offered; without a prompt rule models kept answering lists as text or Markdown tables.",
+  "howTo": "Nothing to do if the default fits: from 4 like records, a comparison or a status overview the model calls render_view instead of a text or Markdown list, adds at most one sentence after it and never uses a view for a single value, a confirmation or a question (CHAT_VIEW_PROMPT_RULE). Apps with own components should name them: chatViews: { promptRule: 'From 4 like tasks or a team status: render_view (TaskTable with TaskStatus, TeamProgress) instead of a list; afterwards at most 1 sentence. Not for single values, confirmations or questions.' }. If your system prompt already has such a rule, set promptRule: false. Check by hand: a list question yields a view, a single value or a confirmation does not. Also new: chat-view types (ChatViewSpec, ResolvedChatView, ChatComponentManifest, …) are exported from 'glirastes' too, and mergeChatComponentBindings from 'glirastes/react' combines starter and app bindings (a later binding with the same id and schema version wins), e.g. for createChatViewRegistry in tests.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": { "patterns": ["chatViews\\s*:"] },
+  "surface": [
+    "glirastes#CHAT_VIEW_PROMPT_RULE",
+    "*#ChatViewsConfig.promptRule",
+    "glirastes#ChatComponentManifest",
+    "glirastes#ChatComponentManifestEntry",
+    "glirastes#ChatItemRef",
+    "glirastes#ChatOperator",
+    "glirastes#ChatSaid",
+    "glirastes#ChatValueRef",
+    "glirastes#ChatViewCapabilities",
+    "glirastes#ChatViewSpec",
+    "glirastes#ResolvedChatView",
+    "glirastes/react#mergeChatComponentBindings"
+  ]
+}

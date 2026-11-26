@@ -345,6 +345,7 @@ export {
 export {
   bindChatComponent,
   createChatViewRegistry,
+  mergeChatComponentBindings,
   type ChatComponentBinding,
   type ChatComponentProps,
   type ChatViewDispatch,

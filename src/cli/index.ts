@@ -282,6 +282,24 @@ async function runInstall(
     );
   }
   const ask = dependencies.ask ?? terminalAsk;
+  // Without a terminal nobody can answer: name the flags instead of failing generically.
+  if (!dependencies.ask && !(process.stdin.isTTY && process.stdout.isTTY)) {
+    const missing: string[] = [];
+    const consentGiven = hasFlag(rest, '--with-setup-skills') || hasFlag(rest, '--without-setup-skills');
+    if (!consentGiven) missing.push('--with-setup-skills or --without-setup-skills');
+    if (hasFlag(rest, '--with-setup-skills') && !getFlagValue(rest, '--host')) {
+      missing.push('--host <codex|claude|gemini> (comma-separated for several)');
+    }
+    if (missing.length > 0) {
+      throw new FoundationDiagnosticError({
+        code: 'E-SETUP-035',
+        operation: 'install',
+        message: `No TTY to ask: pass ${missing.join(' and ')}. `
+          + 'Add --force to overwrite skills that already exist; without it they are skipped.',
+        remediation: 'pass-install-flags',
+      });
+    }
+  }
   let includeSetupSkills = hasFlag(rest, '--with-setup-skills');
   if (
     !includeSetupSkills

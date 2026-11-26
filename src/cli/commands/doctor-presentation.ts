@@ -18,6 +18,7 @@ const LABELS = new Map([
   ['agent-skills', 'Installed agent skills'],
   ['voice-worklet', 'Voice input audio worklet'],
   ['react-markdown', 'React chat Markdown rendering'],
+  ['chat-views-zod', 'Chat component schemas (zod)'],
 ]);
 
 const NEXT_ACTIONS = new Map([
@@ -69,6 +70,10 @@ const NEXT_ACTIONS = new Map([
     'Voice input loads its audio worklet from an absolute URL, or a script copies it outside public/, which this offline check cannot verify. Make sure the URL answers with the file of glirastes/react/audio-worklet-processor.js, or serve it from public/ with glirastes stt worklet.'],
   ['install-react-markdown',
     'The app renders the glirastes React chat (it imports glirastes/react or glirastes/embed), but the package react-markdown is not installed where Node resolves it, so every answer shows its raw Markdown source. Add react-markdown (an optional peer dependency of glirastes) to the app with its package manager.'],
+  ['import-zod-v4-for-chat-views',
+    "The app defines chat components and resolves zod 3, but a definition file imports z from 'zod' (the zod 3 classic API), which chat views refuse. Import it from the zod 4 build that zod 3.25 ships: import { z } from 'zod/v4' (in the files that call defineChatComponent, bindable or refOnly), or move the app to zod 4."],
+  ['upgrade-zod-for-chat-views',
+    "The app defines chat components, but the zod it resolves is older than 3.25 and has no zod 4 build. Update zod to 3.25 or later and import { z } from 'zod/v4' in the files that call defineChatComponent, or move the app to zod 4."],
   ['align-explicit-runtime-mode',
     'Ask your coding agent to align the local runtime settings with the intended connection. Do not silently switch a connected app to standalone.'],
 ]);

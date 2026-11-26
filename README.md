@@ -466,7 +466,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes/react` | Chat UI, provider, hooks, client actions, navigation bridge, STT |
 | `glirastes/react/audio-worklet-processor.js` | Audio worklet file voice input loads (serve it at `/audio-worklet-processor.js`) |
 | `glirastes/react/vercel` | AI SDK transport and `VercelAiChat` |
-| `glirastes/react/styles.css` | Shipped chat styles |
+| `glirastes/react/styles.css` | Shipped chat styles, in `@layer glirastes` (also `styles.unlayered.css`; `pills.css` / `pills.unlayered.css`) |
 | `glirastes/stt` | Provider-neutral STT controller and adapters |
 | `glirastes/ai-sdk` | Vercel AI SDK reference engine (alias `glirastes/runtime/ai-sdk`) |
 | `glirastes/contracts` | Principals, budgets, manifests, revisions, deployments |
@@ -495,7 +495,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes connect [--base-url <url>] [--dotenv <path>] [--json]` | Connect the app once and issue one app key (`--base-url` only for self-hosted, `--dotenv` for the Git-ignored key file) |
 | `glirastes sync [--dotenv <path>]` | Upload the current local setup |
 | `glirastes doctor [--managed] [--dotenv <path>] [--verbose] [--json]` | Diagnose the local setup |
-| `glirastes install [--host a,b]` | Install the agent skills only |
+| `glirastes install [--host a,b]` | Install the agent skills only. Without a TTY pass `--with-setup-skills` or `--without-setup-skills` (plus `--host`, and `--force` to overwrite), else it fails with `E-SETUP-035` |
 | `glirastes-runtime build --project <dir> --out <new-dir> [--frozen]` | Generate an immutable JSON runtime artifact; frozen mode checks committed generation |
 | `glirastes-runtime validate --artifact <dir>` | Check exact SDK version, hashes and bindings |
 | `glirastes-runtime serve --config <absolute-json-path>` | Serve the configured customer runtime |

@@ -17,6 +17,7 @@ import {
   beginChatViewTurn,
   chatViewSourceMemo,
   readChatViewCapabilities,
+  chatViewPromptRule,
   resolveChatViews,
   withoutChatViewProjections,
   type ChatViewTurn,
@@ -627,6 +628,8 @@ interface RequestTurnState {
   escapeViewContextTags?: boolean;
   /** With `chatViews`: the source memo of tool results a view may reference (`chatViewSourceMemo`). */
   chatViewSourceMemo?: string;
+  /** With `chatViews` (the handler's own `render_view`): the system prompt rule; added only while the tool is offered. */
+  chatViewPromptRule?: string;
 }
 
 /**
@@ -736,7 +739,11 @@ async function defaultStreamHandler(
   const stoppedTurnNote = stoppedTurn && request.continuation !== 'budget'
     ? [budgetContinuationInstruction(callsBeforeStop, builtinSet)]
     : [];
-  const notes = [...uiOutcomeNote, ...stoppedTurnNote];
+  // The rule for `render_view` only while the tool is in this request's offer (scoping may drop it).
+  const chatViewNote = request.chatViewPromptRule && RENDER_VIEW_TOOL_NAME in ctx.tools
+    ? [request.chatViewPromptRule]
+    : [];
+  const notes = [...chatViewNote, ...uiOutcomeNote, ...stoppedTurnNote];
   const systemPrompt = ctx.systemPrompt
     ? [
         ctx.systemPrompt,
@@ -1424,6 +1431,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
   // Chat Views: the merged catalog, or null when off (then nothing of the feature exists).
   const chatViewsManifest = resolveChatViews(chatViewsOption, 'createAiChatHandler');
+  const chatViewsPromptRule = chatViewsManifest ? chatViewPromptRule(chatViewsOption) : undefined;
   const alwaysOnBuiltins: ReadonlyArray<string> = chatViewsManifest
     ? [...ALWAYS_ON_BUILTINS, RENDER_VIEW_TOOL_NAME]
     : ALWAYS_ON_BUILTINS;
@@ -2149,7 +2157,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       /** The request state with the source memo of chat views (model input only). */
       const withChatViewMemo = (state: RequestTurnState, views: ChatViewTurn | undefined, history: ReadonlyArray<unknown>): RequestTurnState => {
         const memo = views ? chatViewSourceMemo(history) : undefined;
-        return memo ? { ...state, chatViewSourceMemo: memo } : state;
+        return {
+          ...state,
+          ...(memo ? { chatViewSourceMemo: memo } : {}),
+          ...(views && chatViewsPromptRule ? { chatViewPromptRule: chatViewsPromptRule } : {}),
+        };
       };
 
       // Emit session.started for audit + telemetry

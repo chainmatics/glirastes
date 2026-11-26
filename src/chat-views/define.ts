@@ -12,7 +12,69 @@ import { cellIdFields } from './element-id.js';
 
 type ChatPropMark = 'bindable' | 'refOnly';
 
-const propMarks = new WeakMap<z.ZodType, ChatPropMark>();
+/**
+ * The structural minimum of a zod 4 schema: zod 4 itself or the `zod/v4`
+ * build shipped in zod 3.25 and later. Typed structurally so an app's zod
+ * types are never compared with the SDK's own (two zod type trees exhaust
+ * `tsc`'s memory); the props type is read from `_zod.output`, as `z.infer` does.
+ */
+export interface ChatPropSchema {
+  readonly _zod: { readonly def: unknown; readonly output: unknown };
+}
+
+/** The props type a component receives for its props schema (`z.infer` of it). */
+export type ChatPropsOf<S extends ChatPropSchema> = S['_zod']['output'];
+
+/** `code` of the error for a schema that is not zod 4; the tools probe reports it (probe-child.mjs). */
+const CHAT_SCHEMA_UNSUPPORTED = 'GLIRASTES_CHAT_SCHEMA_UNSUPPORTED';
+
+const ZOD_V4_HINT = "Import z from 'zod/v4' (shipped with zod 3.25 and later: import { z } from 'zod/v4') or use zod 4.";
+
+type LooseDef = {
+  type: string;
+  innerType?: unknown;
+  shape?: Record<string, unknown>;
+  element?: unknown;
+  valueType?: unknown;
+  options?: unknown[];
+};
+
+function unsupportedSchema(where: string, value: unknown): Error {
+  const zod3 = value !== null && typeof value === 'object' && '_def' in value && !('_zod' in value);
+  const error = new Error(zod3
+    ? `${where}: this is a zod 3 schema (the classic 'zod' API of zod 3.x); chat views need zod 4 schemas. ${ZOD_V4_HINT}`
+    : `${where}: expected a zod 4 schema. ${ZOD_V4_HINT}`);
+  (error as Error & { code: string }).code = CHAT_SCHEMA_UNSUPPORTED;
+  return error;
+}
+
+/** The zod 4 definition of `schema`; a clear error for zod 3 and anything else. */
+function defOf(schema: unknown, where: string): LooseDef {
+  const internals = schema !== null && typeof schema === 'object'
+    ? (schema as { _zod?: { def?: unknown } })._zod
+    : undefined;
+  const def = internals?.def;
+  if (def === null || typeof def !== 'object' || typeof (def as LooseDef).type !== 'string') {
+    throw unsupportedSchema(where, schema);
+  }
+  return def as LooseDef;
+}
+
+const propMarks = new WeakMap<object, ChatPropMark>();
+
+/**
+ * A copy of `schema` carrying `mark`, so a schema the caller reuses elsewhere
+ * stays unmarked. Copied by the schema's own zod (`clone`), which may be
+ * another zod 4 build than the SDK's.
+ */
+function marked<T extends ChatPropSchema>(schema: T, mark: ChatPropMark, where: string): T {
+  defOf(schema, where);
+  const clone = (schema as { clone?: unknown }).clone;
+  if (typeof clone !== 'function') throw unsupportedSchema(where, schema);
+  const copy = clone.call(schema) as T;
+  propMarks.set(copy, mark);
+  return copy;
+}
 
 /**
  * Marks a prop that accepts a literal value or a reference (`$ref`, `$item`;
@@ -20,19 +82,15 @@ const propMarks = new WeakMap<z.ZodType, ChatPropMark>();
  * manifest describes the plain value type; the validator accepts references
  * on marked props by name.
  */
-export function bindable<T extends z.ZodType>(schema: T): T {
-  const marked = schema.clone() as T;
-  propMarks.set(marked, 'bindable');
-  return marked;
+export function bindable<T extends ChatPropSchema>(schema: T): T {
+  return marked(schema, 'bindable', 'bindable()');
 }
 
 /** Marks a prop (ids, lists) that accepts only a reference (`$ref`, `$item`). */
 export function refOnly(): z.ZodUnknown;
-export function refOnly<T extends z.ZodType>(schema: T): T;
-export function refOnly(schema?: z.ZodType): z.ZodType {
-  const marked = (schema ?? z.unknown()).clone();
-  propMarks.set(marked, 'refOnly');
-  return marked;
+export function refOnly<T extends ChatPropSchema>(schema: T): T;
+export function refOnly(schema?: ChatPropSchema): ChatPropSchema {
+  return marked(schema ?? z.unknown(), 'refOnly', 'refOnly()');
 }
 
 export type ChatComponentChildren = 'none' | 'any' | string[];
@@ -51,19 +109,20 @@ export interface ChatComponentTextRule {
   columns?: string;
 }
 
-export interface ChatComponentDefinitionInput<P extends z.ZodRawShape> {
+export interface ChatComponentDefinitionInput<S extends ChatPropSchema = ChatPropSchema> {
   id: string;
   schemaVersion: number;
   description: string;
   whenToUse?: string;
-  props: z.ZodObject<P>;
+  /** A zod 4 `z.object(...)`: zod 4, or `zod/v4` of zod 3.25 and later. */
+  props: S;
   children?: ChatComponentChildren;
   itemScope?: ChatComponentItemScope;
   text: ChatComponentTextRule;
 }
 
-export interface ChatComponentDefinition<P extends z.ZodRawShape = z.ZodRawShape>
-  extends ChatComponentDefinitionInput<P> {
+export interface ChatComponentDefinition<S extends ChatPropSchema = ChatPropSchema>
+  extends ChatComponentDefinitionInput<S> {
   children: ChatComponentChildren;
   /** Prop paths accepting values or references (`items[].value`, `args.*`). */
   bindable: string[];
@@ -73,30 +132,18 @@ export interface ChatComponentDefinition<P extends z.ZodRawShape = z.ZodRawShape
 
 const COMPONENT_ID = /^[A-Z][A-Za-z0-9]{0,39}$/;
 
-type LooseDef = {
-  type: string;
-  innerType?: z.ZodType;
-  shape?: Record<string, z.ZodType>;
-  element?: z.ZodType;
-  valueType?: z.ZodType;
-  options?: z.ZodType[];
-};
-
-function defOf(schema: z.ZodType): LooseDef {
-  return (schema as unknown as { _zod: { def: LooseDef } })._zod.def;
-}
-
 function collectMarks(
-  schema: z.ZodType,
+  schema: unknown,
   path: string,
   out: Record<ChatPropMark, string[]>,
+  where: string,
 ): void {
-  const mark = propMarks.get(schema);
+  const mark = propMarks.get(schema as object);
   if (mark && path) {
     if (!out[mark].includes(path)) out[mark].push(path);
     return;
   }
-  const def = defOf(schema);
+  const def = defOf(schema, where);
   switch (def.type) {
     case 'optional':
     case 'nullable':
@@ -104,21 +151,21 @@ function collectMarks(
     case 'prefault':
     case 'readonly':
     case 'nonoptional':
-      if (def.innerType) collectMarks(def.innerType, path, out);
+      if (def.innerType) collectMarks(def.innerType, path, out, where);
       return;
     case 'object':
       for (const [key, child] of Object.entries(def.shape ?? {})) {
-        collectMarks(child, path ? `${path}.${key}` : key, out);
+        collectMarks(child, path ? `${path}.${key}` : key, out, where);
       }
       return;
     case 'array':
-      if (def.element) collectMarks(def.element, `${path}[]`, out);
+      if (def.element) collectMarks(def.element, `${path}[]`, out, where);
       return;
     case 'record':
-      if (def.valueType) collectMarks(def.valueType, `${path}.*`, out);
+      if (def.valueType) collectMarks(def.valueType, `${path}.*`, out, where);
       return;
     case 'union':
-      for (const option of def.options ?? []) collectMarks(option, path, out);
+      for (const option of def.options ?? []) collectMarks(option, path, out, where);
       return;
     default:
       return;
@@ -145,16 +192,19 @@ function assertCellIdField(def: ChatComponentDefinition): void {
   }
 }
 
-export function defineChatComponent<P extends z.ZodRawShape>(
-  def: ChatComponentDefinitionInput<P>,
-): ChatComponentDefinition<P> {
+export function defineChatComponent<S extends ChatPropSchema>(
+  def: ChatComponentDefinitionInput<S>,
+): ChatComponentDefinition<S> {
   if (!COMPONENT_ID.test(def.id)) {
     throw new Error(`chat component id "${def.id}" must match ${COMPONENT_ID}`);
   }
   if (!Number.isInteger(def.schemaVersion) || def.schemaVersion < 1) {
     throw new Error(`chat component ${def.id}: schemaVersion must be an integer >= 1`);
   }
-  const propNames = Object.keys(def.props.shape);
+  const where = `chat component ${def.id}`;
+  const propsDef = defOf(def.props, where);
+  if (propsDef.type !== 'object') throw new Error(`${where}: props must be a z.object(...)`);
+  const propNames = Object.keys(propsDef.shape ?? {});
   const named = [
     ...Object.values(def.text),
     ...(def.itemScope ? [def.itemScope.rowsProp, def.itemScope.cellsProp] : []),
@@ -165,17 +215,35 @@ export function defineChatComponent<P extends z.ZodRawShape>(
     }
   }
   const marks: Record<ChatPropMark, string[]> = { bindable: [], refOnly: [] };
-  collectMarks(def.props, '', marks);
-  const defined: ChatComponentDefinition<P> = { ...def, children: def.children ?? 'none', ...marks };
+  collectMarks(def.props, '', marks, where);
+  const defined: ChatComponentDefinition<S> = { ...def, children: def.children ?? 'none', ...marks };
   if (def.itemScope) assertCellIdField(defined);
   return defined;
 }
 
+/**
+ * Metadata (`.describe()`, `.meta()`) from the SDK's zod registry and, for a
+ * schema of another zod 4 build (`zod/v4` of zod 3.25), from that build's own
+ * registry through the schema's `meta()`.
+ */
+const anyZodMetadata = {
+  get(schema: unknown): Record<string, unknown> | undefined {
+    const own = z.globalRegistry.get(schema as z.ZodType);
+    if (own) return own as Record<string, unknown>;
+    const meta = (schema as { meta?: unknown }).meta;
+    if (typeof meta !== 'function') return undefined;
+    const found: unknown = meta.call(schema);
+    return found !== null && typeof found === 'object' ? found as Record<string, unknown> : undefined;
+  },
+} as unknown as typeof z.globalRegistry;
+
 function propsJsonSchema(def: ChatComponentDefinition): Record<string, unknown> {
+  defOf(def.props, `chat component ${def.id}@${def.schemaVersion}`);
   let schema: Record<string, unknown>;
   try {
-    schema = z.toJSONSchema(def.props, {
+    schema = z.toJSONSchema(def.props as unknown as z.ZodType, {
       io: 'input',
+      metadata: anyZodMetadata,
       unrepresentable: 'throw',
       override: (ctx) => {
         const zodDef = (ctx.zodSchema as unknown as {

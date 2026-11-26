@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const MAX_TEXT = 1_000;
+/** `code` of the SDK's error for a chat component schema that is not zod 4 (src/chat-views/define.ts). */
+const CHAT_SCHEMA_UNSUPPORTED = 'GLIRASTES_CHAT_SCHEMA_UNSUPPORTED';
 const RESULT_FD = 3;
 
 // Writes the whole payload even when the pipe accepts it in pieces. A pipe
@@ -219,8 +221,11 @@ async function main() {
           ? await describeEntry(value)
           : await describeSchema(value, item.io));
       }
-    } catch {
-      results.push({ ok: false, reason: 'import-failed' });
+    } catch (error) {
+      // A zod 3 schema in a chat component throws while the module loads; only the SDK's own message goes on.
+      results.push(item.kind === 'chat-component' && error?.code === CHAT_SCHEMA_UNSUPPORTED
+        ? { ok: false, reason: 'unsupported-schema', detail: text(error.message) ?? undefined }
+        : { ok: false, reason: 'import-failed' });
     }
   }
   return results;

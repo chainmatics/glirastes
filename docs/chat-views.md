@@ -7,8 +7,10 @@ business value in a view is a reference to a real tool result, which the
 server resolves.
 
 The feature is optional and off by default. Without `chatViews` on the chat
-handler there is no `render_view` tool, no extra prompt text and no request
-field; the stream is byte-identical to a handler without the feature. Without
+handler nothing changes: no `render_view` tool, no prompt text and no request
+field; the stream is byte-identical to a handler without the feature. With
+`chatViews` the SDK adds the `render_view` tool and a short prompt rule (see
+"The prompt rule", configurable via `promptRule`). Without
 `chatViews` on the React provider nothing is sent and a stored view renders as
 plain text.
 
@@ -43,6 +45,8 @@ reference `skills/building-glirastes-chat-ui/references/chat-views.md`.
    `{ shown, elements }`: in the current turn through the AI SDK's
    `toModelOutput`, in later turns because the handler strips `view` from the
    history before model input.
+   While the tool is offered, the handler also appends a short fixed rule to
+   the system prompt (below).
 3. **Bindings**: the browser renders the `view` of the persisted tool part
    through a registry of React components; a deterministic text renderer
    (`chatViewToText`) is the second binding and the fallback for every element
@@ -62,13 +66,35 @@ createAiChatHandler({ ...config, chatViews: { catalog: appManifest } }); // + th
 <VercelAiChat endpoint="/api/chat" chatViews={{ components: appBindings, surface: 'narrow' }} />
 ```
 
-An app component is defined once with `defineChatComponent` (Zod props,
+An app component is defined once with `defineChatComponent` (zod 4 props;
+an app on zod 3.25+ imports `z` from `zod/v4`, zod 3 classic schemas are
+refused with that hint,
 `bindable()` / `refOnly()` for data props, a `text` rule for the fallback),
 bound in the browser with `bindChatComponent(definition, Component)`, and
 collected by `glirastes tools refresh` into `.glirastes/chat-components.json`,
 which the server receives as `chatViews.catalog`
 (`chatComponentManifestSchema.parse(json)`; a Node server may pass the
 definitions directly).
+
+## The prompt rule
+
+A tool description alone did not change which answer format a real model
+picks: it kept writing Markdown tables. The system prompt is where models take
+answer-format rules, so while `render_view` is offered in a request (the
+handler's own tool, not an app tool of that name, and not scoped out) the
+handler appends this rule, also when the app has no `systemPrompt`:
+
+> Answer format: when an answer would list 4 or more like records, compare items or give a status overview, call render_view instead of writing a text or Markdown list or table. After the view add at most one short sentence and do not repeat the view's data in text. Never use a view for a single value, a confirmation or a question.
+
+`chatViews.promptRule` controls it: omitted = this default
+(`CHAT_VIEW_PROMPT_RULE` from `glirastes`); a string replaces it (your own
+wording, e.g. naming your components and thresholds); `false` adds nothing, so
+the app writes its own rule in its system prompt. A non-string, non-`false`
+or empty value throws when the handler is created.
+
+```ts
+createAiChatHandler({ ...config, chatViews: { promptRule: 'From 4 like tasks or a team status call render_view (TaskTable, TeamProgress); afterwards at most one sentence. Not for single values, confirmations or questions.' } });
+```
 
 ## The catalog
 
@@ -124,6 +150,15 @@ the entry's `itemScope` and `text` rule, so an app table prints as a table.
   Markdown form; its `plain` form must not be fed to a Markdown renderer.
 - Styling hooks: `[data-component="chat-view"]`, `[data-element="…"]`,
   `text-fallback`, `said-marker`, `table-note`; `unstyled` is honoured.
+- A message bubble that renders a view carries `data-has-chat-view` and, by
+  default, a definite `width: 100%` (capped by the bubble's `max-width`) so
+  container queries inside the view work in a narrow sidebar; wide tables
+  scroll inside the view.
+- The shipped CSS is in `@layer glirastes`. With Tailwind v4, declare
+  `@layer theme, base, glirastes, components, utilities;` before
+  `@import "tailwindcss";` so utilities override SDK styles without `!`. For
+  Tailwind v3 or global unlayered resets import
+  `glirastes/react/styles.unlayered.css` instead.
 
 ## Security and privacy
 

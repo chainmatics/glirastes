@@ -41,6 +41,11 @@ For skill installation only, use the installed Foundation CLI:
 npx --no-install glirastes install --host codex --with-setup-skills
 ```
 
+Without a terminal (an agent session, CI) `glirastes install` cannot ask: it
+fails with `E-SETUP-035` unless you pass `--with-setup-skills` or
+`--without-setup-skills` (and `--host <codex|claude|gemini>` with the first);
+add `--force` to overwrite skills that already exist.
+
 Hosts install into `.agents/skills` (Codex), `.claude/skills` (Claude), or
 `.gemini/skills` (Gemini). Unknown frameworks and projects without package.json
 receive the generic web/runtime guidance by default; this is not a claim of
