@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-26
+
+### Added
+
+- **Chat views (optional generative UI in chat).** Off unless `chatViews` is set. With it, the model may compose one view per answer from a component catalog through the built-in `render_view` tool. Every business value in a view is a reference into a real tool result (`{$ref, path}`, `{$item}` per table row, `$count`, `$sum`). The only value the model writes itself is `Stat.value` with a `basis`, and it is shown as "computed by the assistant". The server checks the view against the catalog and resolves the references with the same owner guard as `read_result`. Values reach the browser in their PII-shielded form, and the model never sees the resolved view, in this turn or later ones. The browser renders the view with the starter bindings or the app's own components (`bindChatComponent`); an element without a valid binding falls back to plain text. Requests can only narrow the catalog to what the client renders, never widen it. App components are declared with `defineChatComponent` (`bindable`, `refOnly`, `chatElementId`), and `glirastes tools refresh` collects them into `.glirastes/chat-components.json` (`tools check` reports drift). A neutral text renderer is included (`chatViewToText`). Contract and limits are in `glirastes/contracts`. Setup: `docs/chat-views.md` and the skill reference `building-glirastes-chat-ui/references/chat-views.md`. The runtime container has no `chat.chatViews` option yet.
+
 ## [0.30.1] - 2026-11-26
 
 ### Fixed
@@ -1401,6 +1407,7 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.31.0]: https://github.com/chainmatics/glirastes/compare/v0.30.1...v0.31.0
 [0.30.1]: https://github.com/chainmatics/glirastes/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/chainmatics/glirastes/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/chainmatics/glirastes/compare/v0.29.0...v0.29.1
