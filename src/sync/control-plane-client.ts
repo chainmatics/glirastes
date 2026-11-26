@@ -31,6 +31,15 @@ interface ControlHeartbeatStatus {
   assistantState: 'enabled' | 'halted';
 }
 
+interface HeartbeatInput {
+  health: 'healthy' | 'degraded' | 'unhealthy';
+  validatedDeploymentId?: string;
+  lastAppliedDeploymentId?: string;
+  technicalMetadata?: Record<string, unknown>;
+}
+
+const HEALTH_RANK = { healthy: 0, degraded: 1, unhealthy: 2 } as const;
+
 function controlStatusOf(control: RuntimeControlState | undefined): ControlHeartbeatStatus {
   return {
     controlSequence: control?.accepted?.sequence ?? 0,
@@ -74,6 +83,7 @@ export class RuntimeControlPlaneClient {
   private abortController: AbortController | null = null;
   private controlStatus: (ControlHeartbeatStatus & { localHalt: boolean }) | undefined;
   private controlReportedAt: number | undefined;
+  private deploymentHeartbeat: Pick<HeartbeatInput, 'health' | 'validatedDeploymentId' | 'lastAppliedDeploymentId'> | undefined;
   private cursor: string | null = null;
 
   constructor(private readonly options: {
@@ -185,12 +195,17 @@ export class RuntimeControlPlaneClient {
     });
   }
 
-  async heartbeat(input: {
-    health: 'healthy' | 'degraded' | 'unhealthy';
-    validatedDeploymentId?: string;
-    lastAppliedDeploymentId?: string;
-    technicalMetadata?: Record<string, unknown>;
-  }) {
+  async heartbeat(input: HeartbeatInput) {
+    const { health, validatedDeploymentId, lastAppliedDeploymentId } = input;
+    this.deploymentHeartbeat = {
+      health,
+      ...(validatedDeploymentId !== undefined ? { validatedDeploymentId } : {}),
+      ...(lastAppliedDeploymentId !== undefined ? { lastAppliedDeploymentId } : {}),
+    };
+    return this.sendHeartbeat(input);
+  }
+
+  private async sendHeartbeat(input: HeartbeatInput) {
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
     this.assertWritable('heartbeat');
     const control = this.controlStatus
@@ -221,7 +236,10 @@ export class RuntimeControlPlaneClient {
     this.controlStatus = status;
     if (!changed && !due) return;
     try {
-      await this.heartbeat({ health: status.localHalt ? 'degraded' : 'healthy' });
+      const last = this.deploymentHeartbeat;
+      const base = last?.health ?? 'healthy';
+      const health = status.localHalt && HEALTH_RANK[base] < HEALTH_RANK.degraded ? 'degraded' : base;
+      await this.sendHeartbeat({ ...last, health });
       this.controlReportedAt = now;
     } catch (error) {
       this.options.onError?.(error);

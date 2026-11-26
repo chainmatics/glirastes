@@ -269,6 +269,23 @@ describe('RuntimeControlPlaneClient', () => {
       expect(JSON.stringify(heartbeats())).not.toContain('operator-halt');
     });
 
+    it('keeps the last reported deployment health in the control report', async () => {
+      const enabled = { accepted: { sequence: 1, assistant: 'enabled' }, localHalt: null };
+      const { client, heartbeats } = clientWith([
+        applied('accepted', enabled),
+        applied('unverifiable', { accepted: enabled.accepted, localHalt: { kind: 'local', sequence: 2 } }),
+      ]);
+      await client.heartbeat({ health: 'unhealthy', lastAppliedDeploymentId: 'deployment-1' });
+      await client.syncOnce();
+      await client.heartbeat({ health: 'healthy', lastAppliedDeploymentId: 'deployment-1' });
+      await client.syncOnce();
+      expect(heartbeats().slice(1).map(({ health, lastAppliedDeploymentId }) => ({ health, lastAppliedDeploymentId }))).toEqual([
+        { health: 'unhealthy', lastAppliedDeploymentId: 'deployment-1' },
+        { health: 'healthy', lastAppliedDeploymentId: 'deployment-1' },
+        { health: 'degraded', lastAppliedDeploymentId: 'deployment-1' },
+      ]);
+    });
+
     it('repeats the report after the heartbeat interval', async () => {
       const enabled = { accepted: { sequence: 1, assistant: 'enabled' }, localHalt: null };
       const { client, heartbeats } = clientWith(
