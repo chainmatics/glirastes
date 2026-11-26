@@ -330,15 +330,56 @@ against the same JWKS.
 `glirastes.control()` returns the control in force, or the local halt.
 Rejections reach `onError` as a content-free `RuntimeEnvironmentControlError`
 (`control_unverifiable`, `control_scope_mismatch`, `control_sequence_conflict`).
-Turns enforce the control from the next SDK step on (halt, budget ceiling,
-rate limit); this release only verifies and stores it.
+#### Enforcement in the turn
 
-`createGlirastes` keeps the control in process memory only. After a restart
-a halt applies again only once the first sync succeeds; until then turns run
-on the local code. Production deployments that must stay stopped across
-restarts should use the `required` control freshness mode once it ships.
+`createGlirastes().chatTurn()` hands `loadControl` and `admitTurn` to
+`createAiChatHandler` and `createChatInteractionsHandler` (Connected only;
+Standalone is unchanged).
+
+- **Halt.** A signed `halted` control and a local `control_unverifiable` halt
+  act alike. The chat handler answers every request, including approval and
+  UI-outcome continuations and direct commands, with HTTP 503
+  `{ "error": "assistant_halted" }` before it resolves the principal or calls
+  the model. A turn that is already running is checked again before every
+  model step, tool call, approval check and approval-subject lookup: it ends
+  with the error text `The assistant is halted.` and sends nothing more to the
+  model. A tool call that is already running is not cut off; only the next
+  one is refused. The interactions GET answers 503 as well.
+- **Budget ceiling.** Each named field lowers the turn budget to
+  `min(local, agent, policy, ceiling)`. A ceiling above the local value raises
+  nothing; fields it does not name stay as they are.
+- **Rate limit.** `maxTurnsPerMinutePerPrincipal` is a sliding one-minute
+  window per principal (tenant and subject) and counts every chat request,
+  continuations included. A refusal answers HTTP 429
+  `{ "error": "turn_rate_limited" }` with `Retry-After`. The window lives in
+  the process: several instances each count their own requests. It is not a
+  distributed limit.
+- The React chat shows its generic error for these answers; nothing new is
+  rendered.
+- A custom `streamHandler` gets the guard as `ctx.managedTurn` and calls
+  `beforeModelStep()` before each model call.
+
+#### Control freshness
+
+`createGlirastes` keeps the control in process memory only. With
+`controlFreshness: 'best-effort'` (default), turns run on the local code
+until the first successful sync after process start, so after a restart a
+halt applies again only once that sync succeeded. With
+`controlFreshness: 'required'`, a connected runner refuses every turn with
+HTTP 503 `control_unknown` until then; this includes a connection that has no
+reference environment yet. Use `required` in production. A control that was
+accepted stays in force while the connection is dropped and looked up again.
 A runner built with `createManagedRuntimeSync` and a `FileRuntimeStateStore`
 persists the control with the rest of the state.
+
+#### Applied status
+
+When the Platform delivers the control, the runner sends a heartbeat with
+`technicalMetadata.controlSequence` (the accepted sequence, 0 without one)
+and `technicalMetadata.assistantState` (`enabled` or `halted`) whenever they
+change and again with the first sync after 60 seconds; a local halt reports
+`health: 'degraded'`. Deployment heartbeats carry the same two fields. A
+development (read-only) connection sends no heartbeat.
 
 Use `MemoryRuntimeStateStore` for the zero-setup embedded development path.
 Long-lived and unattended runners should use `FileRuntimeStateStore` or provide
