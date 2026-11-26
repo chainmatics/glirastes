@@ -63,6 +63,7 @@ describe('runtime state stores', () => {
       ...emptyState,
       control: {
         accepted: {
+          kind: 'environment-control',
           schemaVersion: 1,
           tenantId: '019fbc00-0000-7000-8000-0000000000a1',
           targetAppId: '019fbc00-0000-7000-8000-0000000000a2',

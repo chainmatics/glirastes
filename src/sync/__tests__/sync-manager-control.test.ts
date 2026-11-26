@@ -23,6 +23,7 @@ function control(
   overrides: Partial<Omit<EnvironmentControl, 'signature'>> = {},
 ): EnvironmentControl {
   const unsigned = {
+    kind: 'environment-control' as const,
     schemaVersion: 1 as const,
     tenantId,
     targetAppId,
@@ -54,14 +55,17 @@ function bundle(extra: Record<string, unknown> = {}) {
   };
 }
 
-function setup(options: { keys?: typeof keys } = {}) {
-  const store = new MemoryRuntimeStateStore();
+function setup(options: {
+  keys?: { getKey: (keyId: string) => Promise<unknown> };
+  store?: MemoryRuntimeStateStore;
+} = {}) {
+  const store = options.store ?? new MemoryRuntimeStateStore();
   const onControlRejected = vi.fn();
   const manager = new RuntimeSyncManager({
     environmentId,
     targetAppId,
     store,
-    verifier: new RuntimeRevisionVerifier(options.keys ?? keys),
+    verifier: new RuntimeRevisionVerifier((options.keys ?? keys) as typeof keys),
     onControlRejected,
   });
   return { store, manager, onControlRejected };
@@ -84,7 +88,7 @@ describe('RuntimeSyncManager environment control', () => {
     const { store, manager } = setup();
     const halt = control(5, 'halted');
     await manager.apply(bundle({ control: halt }));
-    expect((await manager.apply(bundle({ control: control(5, 'enabled') }))).control).toBe('stale');
+    expect((await manager.apply(bundle({ control: control(5, 'halted') }))).control).toBe('stale');
     expect((await manager.apply(bundle({ control: control(4, 'enabled') }))).control).toBe('stale');
     expect((await store.load())?.control?.accepted).toEqual(halt);
   });
@@ -97,25 +101,93 @@ describe('RuntimeSyncManager environment control', () => {
     expect((await store.load())?.control?.accepted).toEqual(halt);
   });
 
-  it('rejects a control for another environment or app without applying it', async () => {
-    const { store, manager, onControlRejected } = setup();
-    const result = await manager.apply(bundle({
-      control: control(1, 'halted', { environmentId: otherEnvironmentId }),
-    }));
-    expect(result.control).toBe('scope_mismatch');
-    expect((await manager.apply(bundle({
-      control: control(1, 'halted', { targetAppId: otherEnvironmentId }),
-    }))).control).toBe('scope_mismatch');
-    expect((await store.load())?.control).toBeUndefined();
-    expect(onControlRejected).toHaveBeenCalledWith('control_scope_mismatch');
+  it('halts locally on a signed control for another environment or app', async () => {
+    for (const overrides of [{ environmentId: otherEnvironmentId }, { targetAppId: otherEnvironmentId }]) {
+      const { store, manager, onControlRejected } = setup();
+      const result = await manager.apply(bundle({ control: control(1, 'enabled', overrides) }));
+      expect(result.control).toBe('unverifiable');
+      expect((await store.load())?.control).toEqual({
+        accepted: null,
+        localHalt: expect.objectContaining({ reasonCode: 'control_unverifiable', sequence: 0 }),
+      });
+      expect(onControlRejected).toHaveBeenCalledWith('control_scope_mismatch');
+    }
   });
 
-  it('rejects a control of another tenant than the accepted one', async () => {
-    const { manager } = setup();
+  it('halts locally on a signed control of another tenant than the accepted one', async () => {
+    const { store, manager } = setup();
     await manager.apply(bundle({ control: control(1, 'enabled') }));
     expect((await manager.apply(bundle({
-      control: control(2, 'halted', { tenantId: otherEnvironmentId }),
-    }))).control).toBe('scope_mismatch');
+      control: control(2, 'enabled', { tenantId: otherEnvironmentId }),
+    }))).control).toBe('unverifiable');
+    expect((await store.load())?.control?.localHalt?.sequence).toBe(1);
+  });
+
+  it('halts locally when the same sequence arrives with different content', async () => {
+    const { store, manager, onControlRejected } = setup();
+    await manager.apply(bundle({ control: control(3, 'halted') }));
+    const conflicting = control(3, 'enabled');
+    expect((await manager.apply(bundle({ control: conflicting }))).control).toBe('unverifiable');
+    expect(onControlRejected).toHaveBeenCalledWith('control_sequence_conflict');
+    const state = await store.load();
+    expect(state?.control?.accepted?.assistant).toBe('halted');
+    expect(state?.control?.localHalt?.sequence).toBe(3);
+    // The conflict never lifts by itself on a repeat of the accepted control.
+    expect((await manager.apply(bundle({ control: control(3, 'halted') }))).control).toBe('stale');
+    expect((await store.load())?.control?.localHalt).not.toBeNull();
+  });
+
+  it('lifts a halt from a failed verification when the accepted control verifies again', async () => {
+    let keyAvailable = true;
+    const { store, manager } = setup({
+      keys: { getKey: async (requested) => (keyAvailable ? keys.getKey(requested) : null) },
+    });
+    const accepted = control(3, 'enabled');
+    await manager.apply(bundle({ control: accepted }));
+    keyAvailable = false;
+    expect((await manager.apply(bundle({ control: accepted }))).control).toBe('unverifiable');
+    expect((await store.load())?.control?.localHalt).toMatchObject({ sequence: 3, failedSequence: 3 });
+
+    keyAvailable = true;
+    expect((await manager.apply(bundle({ control: accepted }))).control).toBe('accepted');
+    expect((await store.load())?.control).toEqual({ accepted, localHalt: null });
+  });
+
+  it('serialises overlapping syncs so an older enabled cannot overwrite a newer halt', async () => {
+    let releaseSlow!: () => void;
+    const slow = new Promise<void>((resolve) => { releaseSlow = resolve; });
+    let calls = 0;
+    const { store, manager } = setup({
+      keys: {
+        getKey: async (requested) => {
+          calls += 1;
+          if (calls === 1) await slow;
+          return keys.getKey(requested);
+        },
+      },
+    });
+    const older = manager.apply(bundle({ control: control(1, 'enabled') }));
+    const newer = manager.apply(bundle({ control: control(2, 'halted') }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseSlow();
+    await Promise.all([older, newer]);
+    expect((await store.load())?.control?.accepted).toEqual(control(2, 'halted'));
+  });
+
+  it('re-checks the stored control before saving when another writer got there first', async () => {
+    const store = new MemoryRuntimeStateStore();
+    let releaseSlow!: () => void;
+    const slow = new Promise<void>((resolve) => { releaseSlow = resolve; });
+    const first = setup({
+      store,
+      keys: { getKey: async (requested) => { await slow; return keys.getKey(requested); } },
+    });
+    const second = setup({ store });
+    const older = first.manager.apply(bundle({ control: control(1, 'enabled') }));
+    await second.manager.apply(bundle({ control: control(2, 'halted') }));
+    releaseSlow();
+    expect((await older).control).toBe('stale');
+    expect((await store.load())?.control?.accepted).toEqual(control(2, 'halted'));
   });
 
   it('halts locally with control_unverifiable on an invalid signature', async () => {
@@ -131,6 +203,7 @@ describe('RuntimeSyncManager environment control', () => {
       assistant: 'halted',
       reasonCode: 'control_unverifiable',
       sequence: 3,
+      failedSequence: 4,
       detectedAt: expect.any(String),
     });
     expect(onControlRejected).toHaveBeenCalledWith('control_unverifiable');

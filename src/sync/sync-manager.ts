@@ -10,6 +10,7 @@ import {
   type EnvironmentControl,
 } from '../contracts/environment-control.js';
 import {
+  canonicalRuntimeJson,
   RuntimeSyncVerificationError,
   type RuntimeRevisionVerifier,
 } from './signature-verifier.js';
@@ -32,28 +33,48 @@ const WireSyncBundleSchema = z.object({
 /**
  * What a sync did with the environment control: `absent` (Platform without
  * control), `kept` (null after an accepted one, or none yet), `accepted`,
- * `stale` (sequence not higher), `scope_mismatch`, `unverifiable` (local halt).
+ * `stale` (nothing newer), `unverifiable` (local halt).
  */
 export type RuntimeControlOutcome =
   | 'absent'
   | 'kept'
   | 'accepted'
   | 'stale'
-  | 'scope_mismatch'
   | 'unverifiable';
 
 export type RuntimeEnvironmentControlErrorCode =
   | 'control_unverifiable'
-  | 'control_scope_mismatch';
+  | 'control_scope_mismatch'
+  | 'control_sequence_conflict';
+
+const CONTROL_ERROR_MESSAGES: Record<RuntimeEnvironmentControlErrorCode, string> = {
+  control_unverifiable: 'Glirastes environment control could not be verified; the assistant is halted',
+  control_scope_mismatch: 'Glirastes environment control names another tenant, app or environment; the assistant is halted',
+  control_sequence_conflict: 'Glirastes environment control changed without a new sequence; the assistant is halted',
+};
 
 /** Content-free report of a delivered control the runner did not accept. */
 export class RuntimeEnvironmentControlError extends Error {
   constructor(readonly code: RuntimeEnvironmentControlErrorCode) {
-    super(code === 'control_unverifiable'
-      ? 'Glirastes environment control could not be verified; the assistant is halted'
-      : 'Glirastes environment control names another tenant, app or environment');
+    super(CONTROL_ERROR_MESSAGES[code]);
     this.name = 'RuntimeEnvironmentControlError';
   }
+}
+
+type ControlDecision = { outcome: RuntimeControlOutcome; next?: RuntimeControlState };
+
+const NO_CONTROL: RuntimeControlState = { accepted: null, localHalt: null };
+
+function sameControlState(
+  left: RuntimeControlState | undefined,
+  right: RuntimeControlState | undefined,
+): boolean {
+  return canonicalRuntimeJson(left ?? null) === canonicalRuntimeJson(right ?? null);
+}
+
+function unsignedControlJson(control: EnvironmentControl): string {
+  const { signature: _signature, ...unsigned } = control;
+  return canonicalRuntimeJson(unsigned);
 }
 
 export interface RuntimeSyncApplyResult {
@@ -64,6 +85,8 @@ export interface RuntimeSyncApplyResult {
 }
 
 export class RuntimeSyncManager {
+  private queue: Promise<unknown> = Promise.resolve();
+
   constructor(private readonly options: {
     environmentId: string;
     /** When set, a control of another app is rejected. */
@@ -80,13 +103,25 @@ export class RuntimeSyncManager {
     onControlRejected?: (code: RuntimeEnvironmentControlErrorCode) => void;
   }) {}
 
-  async apply(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
+  /** Poll and push may overlap; each apply runs load, work and save exclusively. */
+  apply(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
+    const run = this.queue.then(() => this.applyExclusive(rawBundle));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async applyExclusive(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
     const wire = WireSyncBundleSchema.parse(rawBundle);
     let state = await this.options.store.load() ?? this.emptyState();
     // First, so a failed key lookup aborts the sync before anything else applies.
-    const controlResult = await this.applyControl(wire, state);
+    let controlResult = await this.applyControl(wire, state);
     if (controlResult.next) {
-      state = { ...state, control: controlResult.next };
+      // Another writer of the same store may have moved the control meanwhile.
+      const fresh = (await this.options.store.load())?.control;
+      if (!sameControlState(fresh, state.control)) {
+        controlResult = this.mergeConcurrent(fresh ?? NO_CONTROL, controlResult);
+      }
+      state = { ...state, control: controlResult.next ?? fresh };
       await this.options.store.saveAtomic(state);
     }
     const rejectedRevocationIds: string[] = [];
@@ -124,7 +159,7 @@ export class RuntimeSyncManager {
       };
       // Persist revocations before candidate processing. A crash may replay the
       // same cursor, but revocation IDs make that replay idempotent.
-      await this.options.store.saveAtomic(state);
+      state = await this.saveKeepingControl(state);
       await this.options.onRevocations?.(acceptedRevocations);
     }
 
@@ -201,7 +236,7 @@ export class RuntimeSyncManager {
       cursor: wire.cursor,
       updatedAt: wire.cursor,
     };
-    await this.options.store.saveAtomic(state);
+    state = await this.saveKeepingControl(state);
     if (pending.length > 0) await this.options.onPending?.(pending);
     if (active.length > 0 && !rejectedActive) {
       await this.options.onActivated?.(active);
@@ -215,37 +250,93 @@ export class RuntimeSyncManager {
     };
   }
 
+  private async saveKeepingControl(state: RuntimeSyncState): Promise<RuntimeSyncState> {
+    const fresh = await this.options.store.load();
+    const next = fresh && !sameControlState(fresh.control, state.control)
+      ? { ...state, control: this.newerControl(fresh.control ?? NO_CONTROL, state.control ?? NO_CONTROL) }
+      : state;
+    await this.options.store.saveAtomic(next);
+    return next;
+  }
+
+  private newerControl(
+    left: RuntimeControlState,
+    right: RuntimeControlState,
+  ): RuntimeControlState {
+    const accepted = (left.accepted?.sequence ?? 0) >= (right.accepted?.sequence ?? 0)
+      ? left.accepted
+      : right.accepted;
+    const halt = left.localHalt ?? right.localHalt;
+    return {
+      accepted,
+      localHalt: halt && {
+        ...halt,
+        sequence: Math.max(this.controlBaseline(left), this.controlBaseline(right)),
+      },
+    };
+  }
+
+  private mergeConcurrent(fresh: RuntimeControlState, decision: ControlDecision): ControlDecision {
+    const next = decision.next!;
+    if (next.localHalt) {
+      return { outcome: 'unverifiable', next: this.newerControl(fresh, next) };
+    }
+    if ((next.accepted?.sequence ?? 0) > this.controlBaseline(fresh)) return decision;
+    return { outcome: 'stale', next: fresh };
+  }
+
   private async applyControl(
     wire: z.infer<typeof WireSyncBundleSchema>,
     state: RuntimeSyncState,
-  ): Promise<{ outcome: RuntimeControlOutcome; next?: RuntimeControlState }> {
+  ): Promise<ControlDecision> {
     if (!('control' in wire)) return { outcome: 'absent' };
     if (wire.control === null) return { outcome: 'kept' };
-    const current = state.control ?? { accepted: null, localHalt: null };
+    const current = state.control ?? NO_CONTROL;
     const parsed = EnvironmentControlSchema.safeParse(wire.control);
-    if (!parsed.success) return this.unverifiable(current);
+    if (!parsed.success) return this.unverifiable(current, 'control_unverifiable');
+    const control = parsed.data;
     try {
-      await this.options.verifier.verifyEnvironmentControl(parsed.data);
+      await this.options.verifier.verifyEnvironmentControl(control);
     } catch (error) {
       // A JWKS outage is no verdict on the control; retry with the next sync.
       if (!(error instanceof RuntimeSyncVerificationError)) throw error;
-      return this.unverifiable(current);
+      return this.unverifiable(current, 'control_unverifiable', control.sequence);
     }
-    if (!this.controlScopeMatches(parsed.data, current, state)) {
-      this.options.onControlRejected?.('control_scope_mismatch');
-      return { outcome: 'scope_mismatch' };
+    if (!this.controlScopeMatches(control, current, state)) {
+      return this.unverifiable(current, 'control_scope_mismatch');
     }
-    if (parsed.data.sequence <= this.controlBaseline(current)) {
+    const accepted = current.accepted;
+    if (accepted && control.sequence === accepted.sequence) {
+      if (unsignedControlJson(control) !== unsignedControlJson(accepted)) {
+        return this.unverifiable(current, 'control_sequence_conflict');
+      }
+      // The halt came only from failing to verify this same control.
+      if (current.localHalt?.failedSequence === accepted.sequence) {
+        return { outcome: 'accepted', next: { accepted: control, localHalt: null } };
+      }
       return { outcome: 'stale' };
     }
-    return { outcome: 'accepted', next: { accepted: parsed.data, localHalt: null } };
+    if (control.sequence <= this.controlBaseline(current)) {
+      return { outcome: 'stale' };
+    }
+    return { outcome: 'accepted', next: { accepted: control, localHalt: null } };
   }
 
   private unverifiable(
     current: RuntimeControlState,
-  ): { outcome: RuntimeControlOutcome; next?: RuntimeControlState } {
-    this.options.onControlRejected?.('control_unverifiable');
-    if (current.localHalt) return { outcome: 'unverifiable' };
+    code: RuntimeEnvironmentControlErrorCode,
+    failedSequence?: number,
+  ): ControlDecision {
+    this.options.onControlRejected?.(code);
+    const halt = current.localHalt;
+    if (halt) {
+      // Any other failure makes the halt wait for a higher sequence.
+      if (halt.failedSequence === undefined || halt.failedSequence === failedSequence) {
+        return { outcome: 'unverifiable' };
+      }
+      const { failedSequence: _dropped, ...rest } = halt;
+      return { outcome: 'unverifiable', next: { accepted: current.accepted, localHalt: rest } };
+    }
     return {
       outcome: 'unverifiable',
       next: {
@@ -255,6 +346,7 @@ export class RuntimeSyncManager {
           assistant: 'halted',
           reasonCode: 'control_unverifiable',
           sequence: this.controlBaseline(current),
+          ...(failedSequence !== undefined ? { failedSequence } : {}),
           detectedAt: new Date().toISOString(),
         },
       },

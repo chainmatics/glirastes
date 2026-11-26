@@ -162,6 +162,7 @@ describe('createManagedRuntimeSync', () => {
       onError,
     });
     const unsigned = {
+      kind: 'environment-control' as const,
       schemaVersion: 1 as const,
       tenantId: common.tenantId,
       targetAppId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d39ff',
@@ -183,7 +184,7 @@ describe('createManagedRuntimeSync', () => {
       cursor: '2026-11-26T09:00:00.000Z', activeSnapshotComplete: true, deployments: [], revocations: [],
     };
 
-    expect((await manager.apply({ ...bundle, control })).control).toBe('scope_mismatch');
+    expect((await manager.apply({ ...bundle, control })).control).toBe('unverifiable');
     expect((await manager.apply({ ...bundle, control: { ...control, targetAppId: common.targetAppId } })).control)
       .toBe('unverifiable');
 
