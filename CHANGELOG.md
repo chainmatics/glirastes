@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-26
+
 ### Added
 
 - `glirastes upgrade offers [--since <version>] [--json] [--root <dir>]`: every optional feature up to the installed SDK that the app does not use yet, newest first, also those an earlier `upgrade ack` took out of the report. Stateless and read-only: nothing is stored at `ack`, detection (`adoptedWhen`) decides, so `.glirastes/sdk-baseline.json` is unchanged and needs no merge; a note without `adoptedWhen` stays listed, marked `use not detectable`, a deferred one `deferred`. `upgrade ack` now says how many optional items leave the report and points to `offers`. Skill `upgrading-glirastes` step 10.
@@ -1391,6 +1393,7 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.30.0]: https://github.com/chainmatics/glirastes/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/chainmatics/glirastes/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/chainmatics/glirastes/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/chainmatics/glirastes/compare/v0.27.0...v0.28.0
