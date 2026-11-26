@@ -7,6 +7,19 @@ import {
   type RuntimeDeploymentBundle,
   type SecurityRevocation,
 } from '../contracts/revisions.js';
+import {
+  EnvironmentControlSchema,
+  LocalEnvironmentControlHaltSchema,
+  type EnvironmentControl,
+  type LocalEnvironmentControlHalt,
+} from '../contracts/environment-control.js';
+
+export interface RuntimeControlState {
+  /** The last control whose signature and scope verified. */
+  accepted: EnvironmentControl | null;
+  /** Set while a delivered control could not be verified (fail closed). */
+  localHalt: LocalEnvironmentControlHalt | null;
+}
 
 export interface RuntimeSyncState {
   cursor: string | null;
@@ -15,6 +28,8 @@ export interface RuntimeSyncState {
   pending: RuntimeDeploymentBundle[];
   revocations: SecurityRevocation[];
   updatedAt: string;
+  /** Absent until a Platform with environment control answered; old state files lack it. */
+  control?: RuntimeControlState;
 }
 
 const RuntimeSyncStateSchema: z.ZodType<RuntimeSyncState> = z.object({
@@ -24,6 +39,10 @@ const RuntimeSyncStateSchema: z.ZodType<RuntimeSyncState> = z.object({
   pending: z.array(RuntimeDeploymentBundleSchema),
   revocations: z.array(SecurityRevocationSchema),
   updatedAt: z.iso.datetime({ offset: true }),
+  control: z.object({
+    accepted: EnvironmentControlSchema.nullable(),
+    localHalt: LocalEnvironmentControlHaltSchema.nullable(),
+  }).strict().optional(),
 }).strict();
 
 export interface RuntimeStateStore {

@@ -77,6 +77,7 @@ describe('runner registration with the setup run (P10)', () => {
       discoveryDigest: digest('A'),
       setupRunId: RUN_ID,
       policyRelaxations: 1,
+      environmentControl: 1,
     });
   });
 

@@ -1,5 +1,6 @@
 import {
   AppSetupArtifactSchema,
+  type EffectiveEnvironmentControl,
   type Principal,
   type SecurityRevocation,
 } from '../contracts/index.js';
@@ -14,11 +15,8 @@ import {
 } from '../sync/control-plane-client.js';
 import { validateLocalDeploymentBindings } from '../sync/local-deployment-validator.js';
 import { createManagedRuntimeSync } from '../sync/managed-sync.js';
-import {
-  materializeDeploymentRevisions,
-  type MaterializedDeploymentRevisions,
-} from '../sync/materialize-deployment.js';
-import type { RuntimeStateStore, RuntimeSyncState } from '../sync/state-store.js';
+import type { MaterializedDeploymentRevisions } from '../sync/materialize-deployment.js';
+import { AcceptedStateStore } from './accepted-state-store.js';
 import {
   createContractBindings,
   type ContractBindingsResult,
@@ -156,38 +154,16 @@ export interface Glirastes {
   accepted(): MaterializedDeploymentRevisions | undefined;
   /** The signed revocations the sync accepted, checked before every tool call. */
   revocations(): SecurityRevocation[];
+  /**
+   * The environment control in force: the last accepted signed control, or a
+   * local halt (`control_unverifiable`) after one failed verification.
+   * Undefined in Standalone and until a Platform delivered one.
+   */
+  control(): EffectiveEnvironmentControl | undefined;
   /** Waits for `ready()`, then returns what `createAiChatHandler` needs for one turn. */
   chatTurn(principal: GlirastesPrincipalFactory): Promise<GlirastesChatTurn>;
   /** Stops the sync, flushes the metrics and forgets this instance. */
   stop(): Promise<void>;
-}
-
-/** Keeps the sync state in memory and the accepted deployment materialized for the turns. */
-class AcceptedStateStore implements RuntimeStateStore {
-  private state: RuntimeSyncState | null = null;
-  private stable: MaterializedDeploymentRevisions | undefined;
-
-  async load(): Promise<RuntimeSyncState | null> {
-    return this.state ? structuredClone(this.state) : null;
-  }
-
-  async saveAtomic(state: RuntimeSyncState): Promise<void> {
-    this.state = structuredClone(state);
-    this.stable = state.stable ? materializeDeploymentRevisions(state.stable) : undefined;
-  }
-
-  accepted(): MaterializedDeploymentRevisions | undefined {
-    return this.stable;
-  }
-
-  clear(): void {
-    this.state = null;
-    this.stable = undefined;
-  }
-
-  revocations(): SecurityRevocation[] {
-    return this.state?.revocations ?? [];
-  }
 }
 
 function logError(error: unknown): void {
@@ -405,6 +381,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
 
     let placeLost = false;
     let sync: ReturnType<typeof createManagedRuntimeSync>;
+    const stateStore = store.bind(environmentId);
     try {
       sync = createManagedRuntimeSync({
         baseUrl: config.baseUrl,
@@ -414,7 +391,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         runnerKey: connection.runnerKey,
         ...(readOnly ? { readOnly } : {}),
         version: options.version?.trim() || env.GLIRASTES_BUILD_ID?.trim() || `glirastes@${SDK_VERSION}`,
-        stateStore: store,
+        stateStore,
         setupArtifact: options.generated.setupArtifact,
         // A deployment that names a tool this code lacks, or has changed, keeps running on the local tool.
         validateDeployment: (_deployment, revisions) => {
@@ -459,6 +436,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           await sync.reportCapabilities().catch(onError);
         }
         await sync.client.syncOnce();
+        store.synced(environmentId);
         break;
       } catch (error) {
         if (isPlaceRequired(error) || isReferenceChanged(error)) {
@@ -547,6 +525,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     },
     accepted: () => store.accepted(),
     revocations: () => store.revocations(),
+    control: () => store.control(),
     async chatTurn(principal) {
       await instance.ready();
       const source = instance.currentSource();

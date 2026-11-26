@@ -15,6 +15,7 @@ import type {
 import { endpointToolToTool } from '../../server/core/index.js';
 import { canonicalRuntimeJson } from '../../sync/signature-verifier.js';
 import { RuntimeControlPlaneRequestError } from '../../sync/control-plane-client.js';
+import { RuntimeEnvironmentControlError } from '../../sync/sync-manager.js';
 import type {
   GeneratedEndpointToolBinding,
   GeneratedToolBinding,
@@ -143,6 +144,7 @@ function platform(options: {
   lookup?: Array<() => Response>;
   deployments?: RuntimeDeploymentBundle[];
   publicKey?: KeyObject;
+  control?: unknown;
 } = {}) {
   const lookups = [...options.lookup ?? []];
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -166,6 +168,7 @@ function platform(options: {
         activeSnapshotComplete: true,
         deployments: options.deployments ?? [],
         revocations: [],
+        ...('control' in options ? { control: options.control } : {}),
       });
     }
     if (url.includes('/metrics/events')) return new Response(null, { status: 202 });
@@ -356,6 +359,59 @@ describe('createGlirastes connected', () => {
 
     const register = http.calls.find(({ url }) => url.endsWith('/register'));
     expect(JSON.parse(String(register?.init.body)).version).toBe(expected);
+  });
+
+  it('exposes no environment control in Standalone or from a Platform without it', async () => {
+    const standalone = track(createGlirastes({ generated: generated(), localLimits: limits, env: {} }));
+    await standalone.ready();
+    expect(standalone.control()).toBeUndefined();
+    await standalone.stop();
+
+    const http = platform();
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+    await glirastes.ready();
+    expect(glirastes.control()).toBeUndefined();
+    const sync = http.calls.find(({ url }) => url.includes('/sync?'));
+    expect(new URL(sync!.url).searchParams.get('controlVersion')).toBe('1');
+    const register = http.calls.find(({ url }) => url.endsWith('/register'));
+    expect(JSON.parse(String(register?.init.body)).capabilities).toMatchObject({ environmentControl: 1 });
+  });
+
+  it('exposes the accepted environment control, or a local halt when it cannot be verified', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const unsigned = {
+      kind: 'environment-control' as const, schemaVersion: 1 as const, tenantId: TENANT_ID, targetAppId: APP_ID, environmentId: ENVIRONMENT_ID,
+      sequence: 1, assistant: 'halted' as const, reasonCode: 'operator-halt',
+      issuedAt: '2026-11-26T09:00:00.000Z',
+    };
+    const control = {
+      ...unsigned,
+      signature: {
+        algorithm: 'Ed25519' as const, keyId: 'runtime-key',
+        value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url'),
+      },
+    };
+    const accepted = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, push: false, pollIntervalMs: 60_000,
+      fetchImpl: platform({ publicKey, control }).fetchImpl, onError: vi.fn(),
+    }));
+    await accepted.ready();
+    expect(accepted.control()).toEqual(control);
+    await accepted.stop();
+
+    const onError = vi.fn();
+    const forged = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, push: false, pollIntervalMs: 60_000,
+      fetchImpl: platform({ publicKey, control: { ...control, assistant: 'enabled' } }).fetchImpl, onError,
+    }));
+    await forged.ready();
+    expect(forged.control()).toMatchObject({
+      kind: 'local', assistant: 'halted', reasonCode: 'control_unverifiable', sequence: 0,
+    });
+    expect(onError).toHaveBeenCalledWith(expect.any(RuntimeEnvironmentControlError));
   });
 
   it('carries the platform environment before a deployment is accepted', async () => {
@@ -705,6 +761,106 @@ describe('createGlirastes connected', () => {
       { timeout: 1_000 },
     );
     await vi.waitFor(() => expect(glirastes.accepted()).toBeDefined(), { timeout: 1_000 });
+  });
+
+  function signedControl(privateKey: KeyObject, environmentId: string, sequence: number, assistant: 'enabled' | 'halted') {
+    const unsigned = {
+      kind: 'environment-control' as const, schemaVersion: 1 as const, tenantId: TENANT_ID, targetAppId: APP_ID,
+      environmentId, sequence, assistant, reasonCode: 'operator-halt', issuedAt: '2026-11-26T09:00:00.000Z',
+    };
+    return {
+      ...unsigned,
+      signature: {
+        algorithm: 'Ed25519' as const, keyId: 'runtime-key',
+        value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url'),
+      },
+    };
+  }
+
+  function controlPlatform(options: {
+    publicKey: KeyObject;
+    environments: string[];
+    sync: (environmentId: string, call: number) => Response;
+  }) {
+    const lookups: string[] = [];
+    const syncCalls = new Map<string, number>();
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/v1/runtime/connection')) {
+        const environmentId = options.environments[Math.min(lookups.length, options.environments.length - 1)]!;
+        lookups.push(environmentId);
+        return json({ schemaVersion: 1, appId: APP_ID, environmentId, runnerKey: 'runner-1' });
+      }
+      if (url.includes('jwks')) {
+        return json({ keys: [{ ...options.publicKey.export({ format: 'jwk' }), kid: 'runtime-key', alg: 'EdDSA', use: 'sig' }] });
+      }
+      if (url.includes('/sync?')) {
+        const environmentId = /environments\/([^/]+)\//.exec(url)![1]!;
+        const call = (syncCalls.get(environmentId) ?? 0) + 1;
+        syncCalls.set(environmentId, call);
+        return options.sync(environmentId, call);
+      }
+      if (url.includes('/metrics/events')) return new Response(null, { status: 202 });
+      return json({ ok: true });
+    }) as unknown as typeof fetch;
+    return { fetchImpl, lookups, syncCalls };
+  }
+
+  const syncBody = (control?: unknown) => json({
+    cursor: '2026-11-26T09:00:00.000Z', activeSnapshotComplete: true, deployments: [], revocations: [],
+    ...(control !== undefined ? { control } : {}),
+  });
+
+  it('keeps an accepted halt when an unsigned place error drops the connection', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const halt = signedControl(privateKey, ENVIRONMENT_ID, 1, 'halted');
+    const http = controlPlatform({
+      publicKey,
+      environments: [ENVIRONMENT_ID],
+      sync: (_environmentId, call) => {
+        if (call === 1) return syncBody(halt);
+        if (call === 2) return json({ code: 'environment_place_required' }, 409);
+        return syncBody(null);
+      },
+    });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 20, onError: vi.fn(),
+    }));
+
+    await glirastes.ready();
+    expect(glirastes.control()).toEqual(halt);
+    await vi.waitFor(() => expect(http.syncCalls.get(ENVIRONMENT_ID)).toBeGreaterThanOrEqual(4), { timeout: 1_000 });
+    expect(http.lookups.length).toBeGreaterThanOrEqual(2);
+    expect(glirastes.control()).toEqual(halt);
+  });
+
+  it('keeps a dropped halt until the next environment completes its first sync', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const NEXT_ENVIRONMENT_ID = id('3990');
+    const halt = signedControl(privateKey, ENVIRONMENT_ID, 1, 'halted');
+    let nextMaySync = false;
+    const http = controlPlatform({
+      publicKey,
+      environments: [ENVIRONMENT_ID, NEXT_ENVIRONMENT_ID],
+      sync: (environmentId, call) => {
+        if (environmentId === ENVIRONMENT_ID) {
+          return call === 1 ? syncBody(halt) : json({ code: 'environment_place_required' }, 409);
+        }
+        return nextMaySync ? syncBody() : json({ code: 'unavailable' }, 503);
+      },
+    });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl: http.fetchImpl, push: false,
+      pollIntervalMs: 20, onError: vi.fn(),
+    }));
+
+    await glirastes.ready();
+    await vi.waitFor(() => expect(http.syncCalls.get(NEXT_ENVIRONMENT_ID)).toBeGreaterThanOrEqual(2), { timeout: 1_000 });
+    expect(glirastes.control()).toEqual(halt);
+
+    nextMaySync = true;
+    await vi.waitFor(() => expect(glirastes.control()).toBeUndefined(), { timeout: 1_000 });
   });
 
   it('looks up again when a development connection is read-only rejected and binds to the new reference', async () => {
