@@ -232,7 +232,7 @@ Each version's `outputSchema` guards stored messages: when no version accepts th
 
 ## Chat views
 
-Optional, off unless both sides opt in: `chatViews: {}` on `createAiChatHandler` adds the `render_view` tool (starter catalog), `chatViews={{}}` on `VercelAiChat` renders the views.
+Optional, off unless both sides opt in: `chatViews: {}` on `createAiChatHandler` adds the `render_view` tool (starter catalog) and a short prompt rule (`promptRule`), `chatViews={{}}` on `VercelAiChat` renders the views.
 App components: `defineChatComponent` → `bindChatComponent` → `glirastes tools refresh` writes `.glirastes/chat-components.json` → `chatViews: { catalog }`.
 Values are references to tool results (shielded form under `piiShield`), a view is a snapshot, one per answer, buttons only send a prompt or a client action.
 Setup, test recipe and troubleshooting: [references/chat-views.md](references/chat-views.md).
