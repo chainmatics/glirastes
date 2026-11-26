@@ -152,9 +152,11 @@ locally with `control_unverifiable` and reaches `onError` as
 Once the Platform signs rollout bindings, `createGlirastes` runs a canary
 deployment for its cohort (salted bucket of the user), keeps a conversation on
 its deployment while it stays selectable, and reports turns as metric v3 with
-`deploymentId`, `cohort` and `approvalsDeclined`. Stickiness is per process;
-a canary with another prompt digest than stable is never selected (heartbeat
-`canaryState: 'prompt-unavailable'`). See `docs/managed-runtime-sync.md`,
+`deploymentId`, `cohort`, `approvalsRequested` and `approvalsDeclined`. Both
+stable and canary must be bound; an older binding is never applied again.
+Stickiness is per process. Prompts stay in the code: a canary with another
+prompt digest than stable is never selected (heartbeat
+`canaryState: 'prompt-unavailable'`) unless the runner holds that prompt. See `docs/managed-runtime-sync.md`,
 Canary cohorts.
 
 ## Frontend and acceptance

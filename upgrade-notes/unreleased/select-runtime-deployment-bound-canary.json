@@ -1,0 +1,12 @@
+{
+  "id": "select-runtime-deployment-bound-canary",
+  "kind": "breaking",
+  "summary": "selectRuntimeDeployment selects a canary only when both stable and canary carry a matching rollout binding, and buckets subjects with the binding's cohortSalt; an unbound canary now always resolves to stable.",
+  "howTo": "Only if you call selectRuntimeDeployment yourself: a canary deployment without a rollout binding (or with a stable that has none) is no longer selected, and the bucket is sha256(cohortSalt:subjectId) instead of sha256(subjectId), so the users in a canary change. Sync with canaryVersion=1 (createManagedRuntimeSync({ canarySelection: true })) so the Platform signs bindings, or use RolloutCohortSelector for per-turn selection with conversation stickiness.",
+  "skill": "setting-up-glirastes",
+  "affectedWhen": {
+    "symbols": [
+      "selectRuntimeDeployment"
+    ]
+  }
+}
