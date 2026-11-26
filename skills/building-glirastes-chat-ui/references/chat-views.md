@@ -125,7 +125,7 @@ is sent and a stored view renders as plain text.
    import { bindChatComponent, type ChatComponentProps } from 'glirastes/react';
    import { invoiceSummary } from '@/chat-components/invoice-summary';
 
-   function InvoiceSummaryCard({ props, locale }: ChatComponentProps<typeof invoiceSummary.props.shape>) {
+   function InvoiceSummaryCard({ props, locale }: ChatComponentProps<typeof invoiceSummary.props>) {
      const total = new Intl.NumberFormat(locale, { style: 'currency', currency: props.currency }).format(props.total);
      return <section data-element="invoice-summary">{props.customer}: {total} ({props.status})</section>;
    }
@@ -137,7 +137,8 @@ is sent and a stored view renders as plain text.
    `ChatComponentProps` gives `props` (checked against the schema version),
    `children` (rendered child elements), `said`, `rows` and `renderCell(rowIndex,
    cellId)` for an item-scope component, `locale` and `dispatch` (`prompt`,
-   `uiAction`).
+   `uiAction`). Type it with the props schema (`typeof def.props`); the shape
+   (`typeof def.props.shape`) still works on zod 4.
 
 3. **Collect** with `glirastes tools refresh`: it writes
    `.glirastes/chat-components.json` (only the app's entries; only when the
@@ -160,6 +161,28 @@ is sent and a stored view renders as plain text.
    A Node server may pass the definitions instead
    (`chatViews: { catalog: [invoiceSummary] }`); the manifest is what a
    non-TypeScript host or a check in CI can read.
+
+### Apps on zod 3
+
+Component props must be zod 4 schemas. On zod 3.25 or later (check
+`node_modules/zod/package.json`), import `z` from the zod 4 build that zod
+ships in every file that calls `defineChatComponent`, `bindable` or `refOnly`:
+
+```ts
+import { z } from 'zod/v4';
+```
+
+This works at runtime (the same manifest as with zod 4, `.describe()` and
+`.meta()` included) and in `tsc`: the SDK's signatures are structural
+(`ChatPropSchema`), so the app's zod types are never compared with the SDK's.
+The app's other code keeps `zod`. The classic `import { z } from 'zod'` of
+zod 3 is refused: `bindable()`, `refOnly()` and `defineChatComponent` throw
+"this is a zod 3 schema … import { z } from 'zod/v4'", `glirastes tools
+refresh` reports it as `chat-component-invalid` ("uses a schema that is not
+zod 4"), and `glirastes doctor` warns (check `chat-views-zod`, `E-SETUP-110`).
+Below zod 3.25 there is no `zod/v4`: update zod first. An alias such as
+`"zod-v4": "npm:zod@4"` is not needed (glirastes 0.31.0 ran `tsc` out of
+memory on `zod/v4` schemas; update glirastes instead).
 
 ## How the model writes a view
 
@@ -309,6 +332,8 @@ props that do not fit. `validateChatViewSpec(spec, manifest)` and
 | An element shows text instead of the component | not bound in the browser, bound in another `schemaVersion` than the element's, or its props do not fit the bound schema (a server catalog newer than the browser bundle) |
 | The whole view shows text | the React `chatViews` option is missing, or the root element failed |
 | `defineChatComponent` throws "must be a list of objects with a chatElementId() field" | the cells prop of an `itemScope` component needs a `chatElementId()` field naming each column's cell element |
+| "this is a zod 3 schema", or `chat-component-invalid` "uses a schema that is not zod 4" | the app is on zod 3: `import { z } from 'zod/v4'` in the component files (see Apps on zod 3) |
+| `tsc` runs out of memory on component files importing `zod/v4` | glirastes older than this fix: update it (workaround there: alias `"zod-v4": "npm:zod@4.4.3"` and import from `zod-v4`) |
 | Pseudonyms instead of names | by design with `piiShield`: views show the shielded form |
 | A button does nothing | the `uiAction` id is not registered on this page (`onUiActionOutcome` gets the code, the console warns) |
 | `.glirastes/chat-components.json` missing | no exported `defineChatComponent` imported from `glirastes`, or a `chat-component-invalid` finding in `glirastes tools refresh` |
@@ -317,7 +342,8 @@ props that do not fit. `validateChatViewSpec(spec, manifest)` and
 ## API reference
 
 - `glirastes`: `defineChatComponent` (`ChatComponentDefinitionInput` →
-  `ChatComponentDefinition`; `ChatComponentChildren`,
+  `ChatComponentDefinition`, generic over the props schema `ChatPropSchema`;
+  `ChatPropsOf<typeof def.props>` is its props type; `ChatComponentChildren`,
   `ChatComponentItemScope`, `ChatComponentTextRule`), `bindable`, `refOnly`,
   `toChatComponentManifest`, `mergeChatManifests` (second wins per
   `id@schemaVersion`), `starterChatComponents`,
