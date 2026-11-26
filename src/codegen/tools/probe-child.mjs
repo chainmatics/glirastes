@@ -191,6 +191,19 @@ async function main() {
     };
   };
 
+  // The manifest entry comes from the SDK's own toChatComponentManifest, never from a second converter.
+  const describeChatComponent = async (value) => {
+    if (value === null || typeof value !== 'object' || !isSchema(value.props)) {
+      return { ok: false, reason: 'invalid-entry', detail: 'the export is not a defineChatComponent definition' };
+    }
+    try {
+      const { toChatComponentManifest } = await import(request.chatViewsModuleUrl);
+      return { ok: true, kind: 'chat-component', manifest: jsonObject(toChatComponentManifest([value])) };
+    } catch (error) {
+      return { ok: false, reason: 'invalid-entry', detail: text(error instanceof Error ? error.message : String(error)) };
+    }
+  };
+
   const results = [];
   for (const item of request.items) {
     try {
@@ -199,6 +212,8 @@ async function main() {
       for (const key of item.property) value = value === null || value === undefined ? undefined : value[key];
       if (value === undefined || value === null) {
         results.push({ ok: false, reason: 'missing' });
+      } else if (item.kind === 'chat-component') {
+        results.push(await describeChatComponent(value));
       } else {
         results.push(item.kind === 'contract-entry'
           ? await describeEntry(value)

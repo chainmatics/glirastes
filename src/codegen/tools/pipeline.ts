@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import type { z } from 'zod';
+import { renderChatComponentManifest, scanChatComponents } from './sources/chat-components.js';
 import { writeArtifactSetAtomically } from '../../cli/commands/atomic-artifact-write.js';
 import { createSetupPlanFromContents } from '../../cli/commands/setup-plan.js';
 import { renderManifestContents } from '../../cli/commands/validate-build.js';
@@ -50,6 +51,7 @@ import {
   loadToolsConfig,
   normalizeSources,
   TOOLS_PATHS,
+  type ToolSourceConfig,
   type ToolsConfig,
 } from './config.js';
 import { analyzeChatInteractions } from './chat-interactions.js';
@@ -266,7 +268,7 @@ function isError(finding: ToolFinding): boolean {
  * every other tool be generated and written: the one affected route has no
  * enabled tool, nothing else depends on it.
  */
-const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice', 'entity-id-conflict', 'approval-subject-invalid']);
+const NON_BLOCKING_ERROR_CODES: ReadonlySet<string> = new Set(['route-declared-twice', 'entity-id-conflict', 'approval-subject-invalid', 'chat-component-invalid']);
 
 function isBlocking(finding: ToolFinding): boolean {
   return isError(finding) && !NON_BLOCKING_ERROR_CODES.has(finding.code);
@@ -970,6 +972,14 @@ async function generate(
     [TOOLS_PATHS.setupArtifact]: built.raw,
     ...derived,
   };
+  // Optional Chat Views: the app's own components; no file (and no read of one) when it defines none.
+  const reactActions = normalizeSources(config).find((source): source is ToolSourceConfig & { kind: 'react-actions'; srcDir?: string; tsconfig?: string } => source.kind === 'react-actions');
+  const chatComponents = await scanChatComponents(root, context.probe, {
+    ...(reactActions?.srcDir ? { srcDir: reactActions.srcDir } : {}),
+    ...(reactActions?.tsconfig ? { tsconfig: reactActions.tsconfig } : {}),
+  });
+  findings.push(...chatComponents.findings);
+  if (chatComponents.manifest) outputs[TOOLS_PATHS.chatComponents] = renderChatComponentManifest(chatComponents.manifest);
   const unreadable = unreadableOutputs(outputs);
   if (unreadable.length > 0) {
     findings.push(...unreadable);

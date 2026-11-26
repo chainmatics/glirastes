@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import { chatComponentManifestSchema, type ChatComponentManifest } from '../../contracts/chat-view.js';
 import { ToolPresentationSchema, type ToolPresentation } from '../../contracts/index.js';
 import { findSensitiveStringPath } from '../../contracts/content-boundary.js';
 import type { DeclaredEffect } from '../../contracts/tool-policy.js';
@@ -22,7 +23,7 @@ import { LocalizedPresentationSchema, type LocalizedPresentation } from './seman
 import type { JsonSchemaLike } from './types.js';
 
 export interface SchemaProbeItem {
-  kind: 'schema' | 'contract-entry';
+  kind: 'schema' | 'contract-entry' | 'chat-component';
   io: 'input' | 'output';
   module: string;
   export: string;
@@ -114,9 +115,18 @@ export type ProbeFailureReason =
 export interface ProbeFailure {
   ok: false;
   reason: ProbeFailureReason;
+  /** Why a chat component definition was refused (the SDK's own message); never set for schemas. */
+  detail?: string;
 }
 
-export type SchemaProbeResult = ProbedSchema | ProbedContractEntry | ProbeFailure;
+/** A `defineChatComponent` definition turned into its manifest by the SDK (one entry). */
+export interface ProbedChatComponent {
+  ok: true;
+  kind: 'chat-component';
+  manifest: ChatComponentManifest;
+}
+
+export type SchemaProbeResult = ProbedSchema | ProbedContractEntry | ProbedChatComponent | ProbeFailure;
 
 export interface SchemaProbeOptions {
   /**
@@ -166,11 +176,17 @@ const WireEntry = z.object({
   approvalSubject: z.union([z.object({ value: z.unknown() }).strict(), z.literal('invalid')]).nullable().optional(),
   lookupEffect: z.union([z.object({ value: z.unknown() }).strict(), z.literal('invalid')]).nullable().optional(),
 });
+const WireChatComponent = z.object({
+  ok: z.literal(true),
+  kind: z.literal('chat-component'),
+  manifest: chatComponentManifestSchema,
+});
 const WireFailure = z.object({
   ok: z.literal(false),
   reason: z.enum(['missing', 'import-failed', 'not-a-schema', 'invalid-entry']),
+  detail: z.string().optional(),
 });
-const WireOutput = z.object({ results: z.array(z.union([WireEntry, WireSchema, WireFailure])) });
+const WireOutput = z.object({ results: z.array(z.union([WireEntry, WireSchema, WireChatComponent, WireFailure])) });
 
 const CONTENT_REJECTED: ProbeFailure = Object.freeze({ ok: false, reason: 'content-rejected' });
 
@@ -183,13 +199,14 @@ function scrubbedEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
-function sdkLocations(): { digestModuleUrl: string; sdkSourceRoot: string | null; typescriptUrl: string } {
+function sdkLocations(): { digestModuleUrl: string; chatViewsModuleUrl: string; sdkSourceRoot: string | null; typescriptUrl: string } {
   const compiled = new URL('../../runtime/local-tool-bindings.js', import.meta.url);
   const fromSource = !existsSync(fileURLToPath(compiled));
   return {
     digestModuleUrl: fromSource
       ? new URL('../../runtime/local-tool-bindings.ts', import.meta.url).href
       : compiled.href,
+    chatViewsModuleUrl: new URL(fromSource ? '../../chat-views/define.ts' : '../../chat-views/define.js', import.meta.url).href,
     sdkSourceRoot: fromSource ? fileURLToPath(new URL('../../', import.meta.url)) : null,
     typescriptUrl: pathToFileURL(createRequire(import.meta.url).resolve('typescript')).href,
   };
@@ -370,7 +387,8 @@ function runChunk(
         return;
       }
       finish(parsed.data.results.map((result): SchemaProbeResult => {
-        if (!result.ok) return { ok: false, reason: result.reason };
+        if (!result.ok) return { ok: false, reason: result.reason, ...(result.detail ? { detail: result.detail } : {}) };
+        if (result.kind === 'chat-component') return carriesSecret(result.manifest) ? CONTENT_REJECTED : result;
         return result.kind === 'contract-entry' ? toEntry(result) : toSchema(result);
       }));
     });
