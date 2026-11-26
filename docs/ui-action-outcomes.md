@@ -127,16 +127,26 @@ outcome and starts no continuation, also when the handler settles later. The
 turn ends as `aborted` (`stopped`, or `send-now`), and `onUiActionOutcome`
 fires once with `code: 'unconfirmed'` and `reported: false`. The result stays
 without an outcome, so the next turn's request makes the server tell the model
-"not confirmed". A page load a reloading bridge prepares for the result is
-cancelled when Stop comes before its outcome is written (no `initiated`).
-Once an outcome is written (`initiated` while the page-load save runs), Stop
-no longer ends that wait: the page load goes on and it is reported as
-without Stop. Stop in the same task in which the handler resolves wins: the
-confirmed `ok` is discarded and the event says `unconfirmed`.
+"not confirmed". Stop in the same task in which the handler resolves wins:
+the confirmed `ok` is discarded and the event says `unconfirmed`. Once the
+handler settled and its outcome is being written, Stop changes nothing for
+it. `sendNow` with `'abort'` when no request runs and no wait can be ended
+stops nothing and leaves `pipelineState` alone.
+
+Limit with a reloading navigation (`registerDocumentNavigation`,
+`reloads`): once the bridge prepares a page load for a result of the step,
+Stop and `sendNow` leave the whole step as without them. They end no wait of
+it, record no turn outcome and add no save; the page load goes on and the
+next page continues the turn once. Stop still stops a request that streams.
+So there Stop takes effect only after the timeout: the wait ends when the
+page loads, or, if the page stays, with the outcome or after the outcome
+timeout. A Stop before the bridge prepared the page load (a dialog of the
+same result still open) ends the wait, and the navigation does not start.
 
 `clear()`, a session switch and unmount end a pending wait the same way
 (nothing written, nothing continued) and the chat is idle at once; before,
 it stayed busy until the handler settled (at most the outcome timeout).
+During a prepared page load they behave as before.
 
 Known limit: the handler gets no signal yet. An app dialog it opened can stay
 open; if the user confirms there afterwards, the app may still carry the
@@ -164,15 +174,7 @@ with `awaitsOutcome` there to not run them twice.
   `registerNavigationBridge`, `registerDocumentNavigation`), otherwise
   navigation reports `unavailable`.
 - Handlers return `false` (or throw) instead of failing silently, and resolve
-  once the effect is visible. This holds for every handler on the bus
-  (`subscribeById`, `subscribeByType`, `useAiClientActionById`,
-  `useAiClientActionByType`), not only `registerAiClientAction`: `false` is
-  reported as `rejected-handler`. Every matching handler still runs; the
-  dispatch rejects after them. A handler that filters with `&&`
-  (`(a) => a.actionId === 'x' && run()`) returns `false` for every other
-  action and now declines it: return nothing for an action that is not
-  yours. With two SDK copies on a page, an older copy that created the shared
-  bus first keeps `false` = `ok`.
+  once the effect is visible.
 - Code that reads `success` on UI tool results reads `handedOff` too (it
   gets `handedOff` only for requests with the flag, or with
   `uiToolResultShape: 'handoff'`).

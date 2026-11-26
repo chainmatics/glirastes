@@ -616,7 +616,8 @@ const PAGE_LOAD_SAVE_TIMEOUT_MS = 500;
 /**
  * A result whose outcome the chat waits for (`awaitsOutcome`) while its UI
  * actions run. Stop and `sendNow` end the wait (`stopped`) until the run
- * settled; `released` once it no longer keeps the chat busy.
+ * `settled` (its outcome is being written then); `released` once it no
+ * longer keeps the chat busy.
  */
 interface AwaitedUiRun {
   toolCallId: string;
@@ -1218,8 +1219,12 @@ export function AiChatProvider({
   const requestBaseRef = useRef<Array<{ id: string; role: string }>>([]);
   // Bumped by clear(), a session switch and unmount: queued actions of the left chat never start.
   const uiActionGenerationRef = useRef(0);
+  // A reloading bridge prepares a page load for a result of the step that waits for outcomes: Stop and
+  // `sendNow` leave that step alone (cleared once its results ran, or on a reset).
+  const pageLoadStepRef = useRef(false);
   const resetUiActions = useCallback(() => {
     uiActionGenerationRef.current += 1;
+    pageLoadStepRef.current = false;
     uiActionAbortRef.current.abort();
     uiActionAbortRef.current = new AbortController();
     // A request still running now delivers to the left chat.
@@ -1378,8 +1383,8 @@ export function AiChatProvider({
     toolName: string;
     toolCallId: string;
     output: Record<string, unknown>;
-    /** Aborted when the run ends early (a reset, or Stop for a result the chat waits for). */
-    signal?: AbortSignal;
+    /** The wait of a result the chat waits for (`awaitsOutcome`). */
+    wait?: AwaitedUiRun;
   } | null>(null);
   // Results the chat waits for right now (`awaitsOutcome`): Stop and `sendNow` end their wait.
   const awaitedUiRunsRef = useRef(new Set<AwaitedUiRun>());
@@ -1392,8 +1397,6 @@ export function AiChatProvider({
     done: Promise<UiActionPageLoadResult>;
     resolve: (result: UiActionPageLoadResult) => void;
   } | null>(null);
-  // The messages the save on change handled last: a page-load save waits for it, so it lands after it.
-  const saveSeenRef = useRef<unknown>(null);
   // The session whose history was just loaded, until the page-load continuation was checked.
   const loadedHistoryRef = useRef<string | null>(null);
 
@@ -1443,13 +1446,12 @@ export function AiChatProvider({
    * the history with them in place now.
    */
   const settleForPageLoad = useCallback(async (
-    current: { toolName: string; toolCallId: string; output: Record<string, unknown>; signal?: AbortSignal },
+    current: { toolName: string; toolCallId: string; output: Record<string, unknown> },
     waitForStep: boolean,
     code: 'initiated' | 'unconfirmed' = 'initiated',
-  ): Promise<'cancelled' | void> => {
-    // Nothing is written for a result that is not marked or a chat that does not report (see reportUiOutcome).
-    if (typeof current.output.awaitsOutcome !== 'boolean' || !reportsUiOutcomesRef.current
-      || typeof transportRef.current.addToolOutput !== 'function') return;
+  ) => {
+    const initiated = await reportUiOutcome(current.toolName, current.toolCallId, current.output, code);
+    if (!initiated) return;
     // The other results of the step may still arrive: hold the page load until the stream ended.
     if (waitForStep) {
       // Within the bridge's own deadline, so the save below still lands before it loads the page.
@@ -1460,23 +1462,8 @@ export function AiChatProvider({
       while (streamActiveRef.current && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
-    }
-    // The run ended meanwhile (Stop, `sendNow`, a reset): the page load is cancelled, nothing is written.
-    // Once the outcome is written the page load goes on (a reset still cancels it, as before).
-    if (current.signal?.aborted) return 'cancelled';
-    const initiated = await reportUiOutcome(current.toolName, current.toolCallId, current.output, code);
-    if (!initiated) return;
-    if (waitForStep) {
-      // The render with this outcome, and the save on change it starts, come first: the page-load save
-      // below (without open calls) must be the last one. Bounded within the bridge's deadline.
-      const written = () => rawMessagesRef.current.at(-1)?.parts.some((part) => {
-        const toolPart = part as { toolCallId?: unknown; output?: unknown };
-        return toolPart.toolCallId === current.toolCallId && isRecord(toolPart.output) && toolPart.output.outcome !== undefined;
-      }) === true;
-      const until = Date.now() + 200;
-      do {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      } while ((!written() || saveSeenRef.current !== rawMessagesRef.current) && Date.now() < until);
+      // One more render, so the last results are in the messages.
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
     // Cut off only in the saved copy: should the page stay (the bridge refused), they still run here.
     const outcomes = new Map<string, UiOutcome>([[current.toolCallId, initiated]]);
@@ -1527,17 +1514,18 @@ export function AiChatProvider({
       // A page-bound action first opens its route through a navigation of its own.
       || (action.type === 'glirastes.navigate' && actions.some((candidate) => candidate.route === href));
     if (!ours) return;
+    // Stopped before its page load was prepared: the page stays and nothing is written for it.
+    if (current.wait?.stopped) return false;
+    // From here on Stop and `sendNow` leave the step alone: its page load goes on as without them.
+    pageLoadStepRef.current = true;
     let resolve!: (result: UiActionPageLoadResult) => void;
     const done = new Promise<UiActionPageLoadResult>((settle) => { resolve = settle; });
     pageLoadRef.current = { toolCallId: current.toolCallId, action, done, resolve };
     const generation = uiActionGenerationRef.current;
     const { signal } = uiActionAbortRef.current;
-    const settled = await settleForPageLoad(current, true);
-    // Stopped before its outcome was written, or reset (cleared, another session, unmounted) while preparing:
-    // the page must not be left for it.
-    if (settled === 'cancelled' || signal.aborted || uiActionGenerationRef.current !== generation || !mountedRef.current) {
-      return false;
-    }
+    await settleForPageLoad(current, true);
+    // Reset (cleared, another session, unmounted) while preparing: the page must not be left for it.
+    if (signal.aborted || uiActionGenerationRef.current !== generation || !mountedRef.current) return false;
     return undefined;
   }), [settleForPageLoad]);
 
@@ -1554,6 +1542,7 @@ export function AiChatProvider({
       const current = currentUiRunRef.current;
       if (!current) return;
       pageLeavingRef.current = true;
+      pageLoadStepRef.current = true;
       // Only a running navigation started this page load; any other action's fate is unknown.
       const navigates = toolResultUiActions(current.output).some((action) => (
         action.type === 'glirastes.navigate' || typeof action.route === 'string'
@@ -1751,7 +1740,6 @@ export function AiChatProvider({
 
   // Save messages to session on change (scoped to the active session).
   useEffect(() => {
-    saveSeenRef.current = rawMessages;
     if (!isInitialized) return;
     if (loadedSessionId !== activeSessionId) return;
     if (rawMessages.length === 0) return;
@@ -1789,7 +1777,7 @@ export function AiChatProvider({
     uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
       try {
         if (!mountedRef.current || pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
-        currentUiRunRef.current = { toolName, toolCallId, output: record, signal };
+        currentUiRunRef.current = { toolName, toolCallId, output: record, ...(wait ? { wait } : {}) };
         const run = await runToolResultUiActions(
           output,
           uiActionBusRef.current ?? getDefaultUiActionBus(),
@@ -1810,8 +1798,7 @@ export function AiChatProvider({
               pageLoad.done,
               new Promise<'unconfirmed'>((resolve) => {
                 timer = setTimeout(() => resolve('unconfirmed'), BEFORE_PAGE_LOAD_TIMEOUT_MS);
-                if (signal.aborted) resolve('unconfirmed');
-                else signal.addEventListener('abort', () => resolve('unconfirmed'), { once: true });
+                signal.addEventListener('abort', () => resolve('unconfirmed'), { once: true });
               }),
             ]).finally(() => clearTimeout(timer));
             const code = navigation === 'started' ? 'initiated' as const
@@ -1862,6 +1849,8 @@ export function AiChatProvider({
           awaitedUiRunsRef.current.delete(wait);
           resetSignal.removeEventListener('abort', onReset);
         }
+        // The step ended: the next one starts without a page load.
+        if (awaitedUiRunsRef.current.size === 0) pageLoadStepRef.current = false;
         // One tick later: the transport has started the continuation by then. A stopped wait was released at once.
         if (awaited && !wait?.released) {
           if (wait) wait.released = true;
@@ -1873,17 +1862,21 @@ export function AiChatProvider({
   }, [reportUiOutcome, trackUiWork]);
 
   /**
-   * Ends the wait for every result whose outcome has not settled yet: its run
-   * stops at once (also a handler still pending), nothing is written for it
-   * and the chat is no longer busy for it. True when one was waiting.
+   * The waits Stop and `sendNow` end: every result whose run has not settled
+   * yet, none while a page load is prepared in the step (a reloading bridge;
+   * that step goes on as without Stop).
+   */
+  const stoppableUiRuns = useCallback((): AwaitedUiRun[] => (
+    pageLoadStepRef.current ? [] : [...awaitedUiRunsRef.current].filter((wait) => !wait.settled && !wait.stopped)
+  ), []);
+  /**
+   * Ends those waits: each run stops at once (also a handler still pending),
+   * nothing is written for it and the chat is no longer busy for it. True
+   * when one was waiting.
    */
   const stopAwaitedUiRuns = useCallback((): boolean => {
     let stopped = false;
-    for (const wait of awaitedUiRunsRef.current) {
-      if (wait.settled || wait.stopped) continue;
-      // An outcome is written already (`initiated` while its page load is prepared): past the point of no
-      // return, the run goes on as without Stop.
-      if (reportedOutcomesRef.current.has(wait.toolCallId)) continue;
+    for (const wait of stoppableUiRuns()) {
       wait.stopped = true;
       stopped = true;
       wait.controller.abort();
@@ -1893,7 +1886,7 @@ export function AiChatProvider({
       }
     }
     return stopped;
-  }, []);
+  }, [stoppableUiRuns]);
 
   // Process tool results and approvals from streaming messages
   useEffect(() => {
@@ -2925,14 +2918,14 @@ export function AiChatProvider({
     queueStore.priorityRef.current = id;
     queueStore.commit([item, ...queued.filter((entry) => entry !== item)], queueStore.pausedRef.current, 'reordered');
     // Also while the chat only waits for a UI action outcome (the request already ended).
-    if (queueConfig.sendNowBehavior === 'abort' && (isLoading || awaitedOutcomes > 0)) {
+    if (queueConfig.sendNowBehavior === 'abort' && (isLoading || stoppableUiRuns().length > 0)) {
       selfAbortRef.current = true;
       stop();
       // Only a request that runs clears the mark when it ends; a wait that was given up has none.
       if (!streamActiveRef.current) selfAbortRef.current = false;
     }
     return true;
-  }, [queueEnabled, queueStore, approvalWaiting, queueConfig, pendingApprovalsMap, reject, isLoading, awaitedOutcomes, stop]);
+  }, [queueEnabled, queueStore, approvalWaiting, queueConfig, pendingApprovalsMap, reject, isLoading, stoppableUiRuns, stop]);
 
   const removeQueued = useCallback((id: string): boolean => {
     const queued = queueStore.itemsRef.current;

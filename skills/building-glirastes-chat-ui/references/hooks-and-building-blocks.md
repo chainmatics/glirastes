@@ -402,8 +402,10 @@ have one (`shouldContinueChat`), so the model answers after it. The composer
 stays locked meanwhile (`isLoading`). `stop()` (and `sendNow` with `'abort'`)
 during that wait ends it at once: no outcome is written, no continuation
 starts (also when the handler settles later), the turn ends `aborted`, and
-the next turn's request tells the model "not confirmed". Once an outcome is
-written (`initiated` during the page-load save) Stop changes nothing for it.
+the next turn's request tells the model "not confirmed". Once a reloading
+bridge (`registerDocumentNavigation`, `reloads`) prepared a page load in the
+step, Stop and `sendNow` leave the step as before: there Stop takes effect
+only after the timeout (the page loads, or the outcome or outcome timeout).
 `clear()`, a session switch and unmount also end a pending wait at once. The handler is not
 told: a dialog it opened stays open, and confirming it afterwards may still
 carry the action out. A custom `ChatTransport` opts in with
@@ -428,7 +430,7 @@ turn; an answered approval `'approval'`): count turns on the calls without
 | --- | --- |
 | `ok` | every handler resolved (resolve once the effect is visible) |
 | `rejected-contract` | the payload failed the contract, or an unsafe route or target |
-| `rejected-handler` | a handler (also one subscribed on the bus directly; all still run first) or the bridge's `push` returned `false`; a handler that only filters returns nothing, not `false` |
+| `rejected-handler` | a handler or the bridge's `push` returned `false` |
 | `failed` | a handler threw |
 | `unavailable` | no handler: no navigation bridge, unknown action, a page-bound action that never registered on its route |
 | `initiated` | a reloading navigation (`registerDocumentNavigation()`, `reloads: true`) started; nothing after it runs on the page |

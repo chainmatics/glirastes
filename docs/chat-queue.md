@@ -251,5 +251,7 @@ const queueStorage: ChatQueueStorage = {
   an answered approval on; the AI SDK transport continues at once.
 - `sendNow` with `'abort'` stops a request that is running, and the wait for
   a UI action outcome after it (nothing is written, no continuation starts;
-  see `docs/ui-action-outcomes.md`). While the chat waits for an approval it
-  behaves like `'next'`.
+  see `docs/ui-action-outcomes.md`), except in a step for which a reloading
+  bridge already prepared a page load: that step goes on as before. While
+  the chat waits for an approval, or nothing can be stopped, it behaves like
+  `'next'`.

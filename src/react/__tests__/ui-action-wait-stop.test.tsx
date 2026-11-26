@@ -10,7 +10,7 @@
  * `sendAutomaticallyWhen`. Fake timers: the handler takes 5 s, the outcome
  * timeout is the default 10 s.
  */
-import React, { StrictMode } from 'react';
+import React, { StrictMode, useMemo } from 'react';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiChatProvider } from '../provider/ai-chat-provider.js';
@@ -35,6 +35,7 @@ beforeEach(() => {
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 afterEach(() => {
+  writeDelayMs = 0;
   for (const request of requests) request.close();
   for (const stop of cleanups.splice(0)) stop();
   cleanup();
@@ -87,9 +88,23 @@ function answer(request: ControlledRequest, text: string) {
   request.end();
 }
 
+/** Holds every outcome write for `writeDelayMs` (a slow transport) when set. */
+let writeDelayMs = 0;
+
 function Chat({ config }: { config: AiChatProviderConfig & { session?: SessionConfig } }) {
-  const transport = useVercelAiChatTransport({ endpoint: '/api/chat' });
-  transportStatus = transport.status;
+  const vercel = useVercelAiChatTransport({ endpoint: '/api/chat' });
+  transportStatus = vercel.status;
+  const transport = useMemo(() => {
+    const write = vercel.addToolOutput;
+    if (!write || writeDelayMs === 0) return vercel;
+    return {
+      ...vercel,
+      addToolOutput: async (...args: Parameters<typeof write>) => {
+        await new Promise((resolve) => setTimeout(resolve, writeDelayMs));
+        return write(...args);
+      },
+    };
+  }, [vercel]);
   return <AiChatProvider transport={transport} {...config}><Probe /></AiChatProvider>;
 }
 
@@ -232,6 +247,63 @@ describe('Stop while the chat waits for a UI action outcome', () => {
   });
 });
 
+describe('Stop around the outcome write', () => {
+  it('Stop while the outcome is being written changes nothing: the turn continues and is not stopped', async () => {
+    writeDelayMs = 200;
+    const { bus, outcomes, turnEnds } = mount();
+    const { calls, at } = dialog(bus, 500);
+    await waitingTurn(calls);
+    // The handler resolved, the outcome write still runs (200 ms).
+    await at(600);
+    expect(requests).toHaveLength(1);
+    expect(outcomes).toEqual([]);
+    await act(async () => { ctx.stop(); });
+    await advance(0);
+    expect(ctx.isLoading).toBe(true);
+    expect(firstTurn()?.status).not.toBe('aborted');
+    expect(turnEnds).toEqual([]);
+    await until(() => expect(requests).toHaveLength(2));
+    expect(toolOutput(sentMessages(requests[1]!))).toMatchObject({ outcome: { v: 1, code: 'ok' } });
+    expect(outcomes).toEqual([expect.objectContaining({ code: 'ok', reported: true })]);
+  });
+
+  it('a tool call id used again after clear(): Stop frees the chat at once', async () => {
+    const { bus, outcomes } = mount();
+    // The first dialog answers after 500 ms, the second stays open for 5 s.
+    const durations = [500, 5_000];
+    const calls = vi.fn();
+    cleanups.push(bus.subscribeById('orders.confirm', () => {
+      calls();
+      const ms = durations.shift() ?? 5_000;
+      return new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+    }));
+    await waitingTurn(calls);
+    await advance(500);
+    await until(() => expect(requests).toHaveLength(2));
+    answer(requests[1]!, 'Confirmed.');
+    await until(() => expect(ctx.isLoading).toBe(false));
+    expect(outcomes).toEqual([expect.objectContaining({ toolCallId: 'c1', code: 'ok', reported: true })]);
+
+    await act(async () => { ctx.clear(); });
+    await advance(0);
+    await act(async () => { ctx.send('Again'); });
+    await until(() => expect(requests).toHaveLength(3));
+    // The server numbers its calls per request: the new result has the id c1 again.
+    uiStep(requests[2]!, CONFIRM);
+    await until(() => expect(calls).toHaveBeenCalledTimes(2));
+    await until(() => expect(transportStatus).toBe('ready'));
+    expect(ctx.isLoading).toBe(true);
+    await advance(1_000);
+
+    await act(async () => { ctx.stop(); });
+    await advance(0);
+    expect(ctx.isLoading).toBe(false);
+    expect(outcomes.at(-1)).toMatchObject({ toolCallId: 'c1', code: 'unconfirmed', reported: false });
+    await advance(UI_ACTION_OUTCOME_TIMEOUT_MS + 1_000);
+    expect(requests).toHaveLength(3);
+  });
+});
+
 describe('queue.sendNow while the chat waits for a UI action outcome', () => {
   async function queueOther() {
     await act(async () => { expect(ctx.submit('Other')).toBe('queued'); });
@@ -294,46 +366,6 @@ describe('queue.sendNow while the chat waits for a UI action outcome', () => {
   });
 });
 
-describe('Stop while a page load for a UI action is prepared', () => {
-  it('cancels the page load and writes no initiated', async () => {
-    const { bus, outcomes } = mount();
-    const push = vi.fn();
-    cleanups.push(registerNavigationBridge({ bus, push, reloads: true }));
-    await until(() => expect(ctx.canCompose).toBe(true));
-    await act(async () => { ctx.send('Open the reports'); });
-    await until(() => expect(requests).toHaveLength(1));
-    // The step still streams (another call may follow): the page load waits for its end.
-    uiStep(requests[0]!, NAVIGATE, { open: true });
-    await until(() => expect(toolOutput(ctx.messages)).toBeDefined());
-    await advance(100);
-
-    await act(async () => { ctx.stop(); });
-    await advance(0);
-    await advance(UI_ACTION_OUTCOME_TIMEOUT_MS + 1_000);
-
-    expect(push).not.toHaveBeenCalled();
-    expect(toolOutput(ctx.messages)).not.toHaveProperty('outcome');
-    expect(outcomes).toEqual([expect.objectContaining({ code: 'unconfirmed', reported: false })]);
-    expect(requests).toHaveLength(1);
-    expect(ctx.isLoading).toBe(false);
-    expect(firstTurn()).toMatchObject({ status: 'aborted', reason: 'stopped' });
-  });
-});
-
-describe('a bus handler that returns false is written as rejected-handler (#179)', () => {
-  it('end to end: the outcome the model reads is rejected-handler, not ok', async () => {
-    const { bus } = mount();
-    cleanups.push(bus.subscribeById('orders.confirm', () => false));
-    await until(() => expect(ctx.canCompose).toBe(true));
-    await act(async () => { ctx.send('Confirm the order'); });
-    await until(() => expect(requests).toHaveLength(1));
-    uiStep(requests[0]!, CONFIRM);
-    await until(() => expect(requests).toHaveLength(2));
-    expect(toolOutput(sentMessages(requests[1]!))).toMatchObject({ outcome: { v: 1, code: 'rejected-handler' } });
-  });
-});
-
-
 describe('Stop around a page load for a UI action (reloading bridge)', () => {
   it('before the page load is prepared: the navigation never starts', async () => {
     // The result first opens a dialog (5 s), then navigates: Stop comes while the dialog is open.
@@ -352,6 +384,26 @@ describe('Stop around a page load for a UI action (reloading bridge)', () => {
     expect(push).not.toHaveBeenCalled();
     expect(toolOutput(ctx.messages)).not.toHaveProperty('outcome');
     expect(outcomes).toEqual([expect.objectContaining({ code: 'unconfirmed', reported: false })]);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('while the page load is prepared and the step still streams: Stop ends the request, the page load goes on (as before)', async () => {
+    const { bus, outcomes } = mount();
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push, reloads: true }));
+    await until(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('Open the reports'); });
+    await until(() => expect(requests).toHaveLength(1));
+    // The step still streams (another call may follow): the page load waits for its end.
+    uiStep(requests[0]!, NAVIGATE, { open: true });
+    await until(() => expect(toolOutput(ctx.messages)).toMatchObject({ outcome: { v: 1, code: 'initiated' } }));
+    expect(push).not.toHaveBeenCalled();
+
+    await act(async () => { ctx.stop(); });
+    await until(() => expect(push).toHaveBeenCalledTimes(1));
+    await advance(UI_ACTION_OUTCOME_TIMEOUT_MS + 1_000);
+    expect(requests[0]!.aborted).toBe(true);
+    expect(outcomes).toEqual([expect.objectContaining({ code: 'initiated', reported: true })]);
     expect(requests).toHaveLength(1);
   });
 
@@ -376,6 +428,90 @@ describe('Stop around a page load for a UI action (reloading bridge)', () => {
     expect(turnEnds).toEqual([]);
     expect(firstTurn()?.status).not.toBe('aborted');
     expect(requests).toHaveLength(1);
+  });
+});
+
+describe('a reloading navigation and a dialog in one step', () => {
+  /** c1 navigates with a reloading bridge, c2 opens a dialog; every save is kept, none settles. */
+  async function mixedStep(config: AiChatProviderConfig = {}) {
+    const saves: Array<Array<{ parts: unknown[] }>> = [];
+    const mounted = mount({
+      ...config,
+      session: {
+        load: async () => [],
+        save: (_id: string, messages: unknown[]) => {
+          saves.push(messages as Array<{ parts: unknown[] }>);
+          return new Promise<void>(() => {});
+        },
+      },
+    });
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus: mounted.bus, push, reloads: true }));
+    const { calls } = dialog(mounted.bus, 5_000);
+    await until(() => expect(ctx.canCompose).toBe(true));
+    await act(async () => { ctx.send('Open the reports and confirm'); });
+    await until(() => expect(requests).toHaveLength(1));
+    uiStep(requests[0]!, NAVIGATE, { more: [CONFIRM] });
+    // The page-load save: c1 initiated, c2 cut off as "not confirmed"; the push has not run yet.
+    const cutOff = (messages: Array<{ parts: unknown[] }>) => (
+      (toolOutput(messages, 'c1')?.outcome as { code?: string } | undefined)?.code === 'initiated'
+      && toolOutput(messages, 'c2')?.outcome !== undefined
+    );
+    await until(() => expect(saves.some(cutOff)).toBe(true));
+    expect(push).not.toHaveBeenCalled();
+    return { ...mounted, saves, push, calls };
+  }
+
+  /** The next page: the chat loads the last saved history and continues the turn once. */
+  async function nextPage(history: unknown[]) {
+    cleanup();
+    sessionStorage.clear();
+    const before = requests.length;
+    mount({ session: { load: async () => history as never, save: () => {} } });
+    await advance(1_000);
+    await advance(1_000);
+    return requests.slice(before);
+  }
+
+  it('Stop after the page-load save and before the push leaves the step alone; the next page continues once', async () => {
+    const { saves, push, calls, outcomes, turnEnds } = await mixedStep();
+    const savesBefore = saves.length;
+    await act(async () => { ctx.stop(); });
+    await advance(1_000);
+    await until(() => expect(push).toHaveBeenCalledTimes(1));
+    await advance(UI_ACTION_OUTCOME_TIMEOUT_MS + 6_000);
+
+    // Nothing stopped, nothing recorded, no save of its own (Stop itself leaves the pipeline state as before).
+    expect(calls).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([expect.objectContaining({ toolCallId: 'c1', code: 'initiated', reported: true })]);
+    expect(turnEnds).toEqual([]);
+    expect(firstTurn()?.status).not.toBe('aborted');
+    expect(saves).toHaveLength(savesBefore);
+    const last = saves.at(-1)!;
+    expect(toolOutput(last, 'c1')).toMatchObject({ outcome: { v: 1, code: 'initiated' } });
+    expect(toolOutput(last, 'c2')?.outcome).toEqual({ v: 1 });
+
+    const continued = await nextPage(last);
+    expect(continued).toHaveLength(1);
+    expect(lastRole(continued[0]!)).toBe('assistant');
+  });
+
+  it("sendNow ('abort') after the page-load save stops nothing and leaves the pipeline state alone", async () => {
+    const { push, calls, outcomes, turnEnds } = await mixedStep({ queue: { enabled: true } });
+    await act(async () => { expect(ctx.submit('Other')).toBe('queued'); });
+    const id = ctx.queue.items[0]!.id;
+    const pipelineBefore = ctx.pipelineState;
+    await act(async () => { expect(ctx.sendNow(id)).toBe(true); });
+    expect(ctx.pipelineState).toBe(pipelineBefore);
+    expect(ctx.pipelineState?.status).not.toBe('aborted');
+    await advance(1_000);
+    await until(() => expect(push).toHaveBeenCalledTimes(1));
+    await advance(UI_ACTION_OUTCOME_TIMEOUT_MS + 6_000);
+    expect(ctx.pipelineState?.status).not.toBe('aborted');
+    expect(calls).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([expect.objectContaining({ toolCallId: 'c1', code: 'initiated', reported: true })]);
+    expect(turnEnds).toEqual([]);
+    expect(firstTurn()?.status).not.toBe('aborted');
   });
 });
 
