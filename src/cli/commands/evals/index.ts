@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { lstat, readdir, readFile } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { basename, join, resolve } from 'node:path';
 import {
   EVAL_ATTESTATION_MAX_TOTAL,
@@ -9,6 +11,7 @@ import {
   RUNTIME_METRIC_LABEL_PATTERN,
   type EvalAttestationRequest,
 } from '../../../contracts/index.js';
+import { isUuidLike } from '../../../contracts/entity-identity.js';
 import { DEFAULT_CONTROL_PLANE_URL, RUNTIME_API_KEY_PATTERN } from '../../../runtime/runtime-mode.js';
 import { errorCode } from '../../../sync/control-plane-client.js';
 import { canonicalRuntimeJson } from '../../../sync/signature-verifier.js';
@@ -28,7 +31,9 @@ export const EVALS_USAGE = [
 const SETUP_ARTIFACT_PATH = '.glirastes/setup-artifact.json';
 const REQUEST_TIMEOUT_MS = 30_000;
 const DIGEST_PATTERN = /^sha256:(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9+/]{43}=)$/;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** OS metadata files left out of the suite digest; everything else counts, hidden files included. */
+export const EVAL_SUITE_IGNORED_FILES: ReadonlyArray<string> = ['.DS_Store', 'Thumbs.db', 'desktop.ini'];
+const LOOPBACK_HOSTS = new Set(['localhost', '[::1]']);
 
 export interface EvalsCommandDependencies {
   cwd?: string;
@@ -46,36 +51,52 @@ class EvalsStop extends Error {
   }
 }
 
-function sha256(value: string | Buffer): string {
+function sha256(value: string): string {
   return `sha256:${createHash('sha256').update(value).digest('base64url')}`;
 }
 
-async function suiteFiles(dir: string, prefix: string): Promise<Array<{ path: string; full: string }>> {
-  const files: Array<{ path: string; full: string }> = [];
+async function hashFile(full: string): Promise<string> {
+  const hash = createHash('sha256');
+  await pipeline(createReadStream(full), hash);
+  return `sha256:${hash.digest('base64url')}`;
+}
+
+// Sequential on purpose: one open file at a time, only (path, hash) kept.
+async function hashSuiteDir(dir: string, prefix: string, out: Array<{ path: string; sha256: string }>): Promise<void> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...await suiteFiles(full, path));
-    else if (entry.isFile()) files.push({ path, full });
-    else throw new EvalsStop(`The suite contains ${path}, which is neither a file nor a directory; links are not followed.`, 2);
+    if (entry.isDirectory()) await hashSuiteDir(full, path, out);
+    else if (entry.isFile()) {
+      if (!EVAL_SUITE_IGNORED_FILES.includes(entry.name)) out.push({ path, sha256: await hashFile(full) });
+    } else throw new EvalsStop('An entry in the suite is a link or neither a file nor a directory; links are not followed.', 2);
   }
-  return files;
 }
 
 /**
- * `sha256:` over the sorted list of relative POSIX path and file digest; a
- * single file is listed under its base name. Contents never leave this function.
+ * The suite digest over (relative path, file digest) pairs: paths in NFC with
+ * `/` separators, sorted by their UTF-8 bytes. Paths equal after NFC are refused.
  */
+export function suiteDigestOf(entries: ReadonlyArray<{ path: string; sha256: string }>): string {
+  const files = entries.map((entry) => ({ path: entry.path.normalize('NFC'), sha256: entry.sha256 }));
+  if (files.length === 0) throw new EvalsStop('The suite contains no files.', 2);
+  files.sort((left, right) => Buffer.compare(Buffer.from(left.path, 'utf8'), Buffer.from(right.path, 'utf8')));
+  for (let index = 1; index < files.length; index += 1) {
+    if (files[index]!.path === files[index - 1]!.path) {
+      throw new EvalsStop('An entry in the suite has the same name as another one after Unicode normalisation.', 2);
+    }
+  }
+  return sha256(canonicalRuntimeJson({ schemaVersion: EVAL_ATTESTATION_SCHEMA_VERSION, files }));
+}
+
+/** `--suite` as a file (listed under its base name) or a directory; contents never leave this function. */
 export async function computeSuiteDigest(suitePath: string): Promise<string> {
   const stat = await lstat(suitePath);
-  let listed: Array<{ path: string; full: string }>;
-  if (stat.isFile()) listed = [{ path: basename(suitePath), full: suitePath }];
-  else if (stat.isDirectory()) listed = await suiteFiles(suitePath, '');
+  const entries: Array<{ path: string; sha256: string }> = [];
+  if (stat.isFile()) entries.push({ path: basename(suitePath), sha256: await hashFile(suitePath) });
+  else if (stat.isDirectory()) await hashSuiteDir(suitePath, '', entries);
   else throw new EvalsStop('--suite must name a file or a directory; links are not followed.', 2);
-  if (listed.length === 0) throw new EvalsStop('The suite contains no files.', 2);
-  const files = await Promise.all(listed.map(async ({ path, full }) => ({ path, sha256: sha256(await readFile(full)) })));
-  files.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
-  return sha256(canonicalRuntimeJson({ schemaVersion: EVAL_ATTESTATION_SCHEMA_VERSION, files }));
+  return suiteDigestOf(entries);
 }
 
 function count(values: Map<string, string>, flag: string): number {
@@ -96,7 +117,7 @@ async function readSetupDigests(root: string): Promise<{ appId: string; setupArt
   }
   const { appId, discoveryDigest } = artifact;
   const bundleDigest = artifact.prompts?.bundleDigest;
-  if (typeof appId !== 'string' || !UUID_PATTERN.test(appId)) {
+  if (typeof appId !== 'string' || !isUuidLike(appId)) {
     throw new EvalsStop(`${SETUP_ARTIFACT_PATH} names no appId.`, 2);
   }
   if (typeof discoveryDigest !== 'string' || !DIGEST_PATTERN.test(discoveryDigest)) {
@@ -115,10 +136,12 @@ function connection(env: Record<string, string | undefined>): { baseUrl: string;
   const configured = env.GLIRASTES_CONTROL_PLANE_URL?.trim();
   let baseUrl = DEFAULT_CONTROL_PLANE_URL;
   if (configured) {
-    let protocol: string | undefined;
-    try { protocol = new URL(configured).protocol; } catch { protocol = undefined; }
-    if (protocol !== 'https:' && protocol !== 'http:') {
-      throw new EvalsStop('GLIRASTES_CONTROL_PLANE_URL must be an http(s) URL; nothing was sent.', 2);
+    let url: URL | undefined;
+    try { url = new URL(configured); } catch { url = undefined; }
+    const loopback = url !== undefined
+      && (LOOPBACK_HOSTS.has(url.hostname) || /^127(?:\.\d{1,3}){3}$/.test(url.hostname));
+    if (url?.protocol !== 'https:' && !(url?.protocol === 'http:' && loopback)) {
+      throw new EvalsStop('GLIRASTES_CONTROL_PLANE_URL must be an https URL (http only for localhost); nothing was sent.', 2);
     }
     baseUrl = configured;
   }
@@ -146,7 +169,7 @@ async function attest(argv: readonly string[], deps: Required<EvalsCommandDepend
     suiteDigest = await computeSuiteDigest(resolve(deps.cwd, suite));
   } catch (caught) {
     if (caught instanceof EvalsStop) throw caught;
-    throw new EvalsStop('--suite names nothing readable.', 2);
+    throw new EvalsStop('--suite or an entry in the suite cannot be read.', 2);
   }
 
   const body: EvalAttestationRequest = EvalAttestationRequestSchema.parse({
@@ -167,10 +190,15 @@ async function attest(argv: readonly string[], deps: Required<EvalsCommandDepend
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
       body: JSON.stringify(body),
+      // The key must never follow a redirect to another origin.
+      redirect: 'manual',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {
     throw new EvalsStop('The Platform could not be reached; no attest was recorded.', 1);
+  }
+  if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+    throw new EvalsStop(`The Platform answered with a redirect (HTTP ${response.status}); it was not followed and nothing was recorded.`, 1);
   }
   if (!response.ok) {
     const code = await errorCode(response);
@@ -180,7 +208,7 @@ async function attest(argv: readonly string[], deps: Required<EvalsCommandDepend
   try {
     recorded = EvalAttestationResponseSchema.parse(await response.json());
   } catch {
-    throw new EvalsStop(`The Platform answered HTTP ${response.status} without an attestation id.`, 1);
+    throw new EvalsStop(`The Platform answered HTTP ${response.status} without a readable body: result unknown, the attestation may have been recorded.`, 1);
   }
 
   const summary = {
@@ -229,6 +257,9 @@ export async function runEvalsCommand(argv: readonly string[], d: EvalsCommandDe
       else deps.error(caught.message);
       return caught.exitCode;
     }
-    throw caught;
+    const message = `glirastes evals attest stopped unexpectedly (${caught instanceof Error ? caught.name : 'error'}).`;
+    if (json) deps.log(JSON.stringify({ error: message, exitCode: 2 }));
+    else deps.error(message);
+    return 2;
   }
 }
