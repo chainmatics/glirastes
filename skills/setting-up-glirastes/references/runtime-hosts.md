@@ -141,6 +141,9 @@ For authorized connected mode use platform `{ "enabled": true, "environment":
 platform deployment; a failed connection never selects standalone automatically.
 A retained revision can continue during transient outages, so remote revocation
 is not instantaneous while disconnected.
+A connected runner also syncs the signed environment control (kill switch);
+`glirastes.control()` shows it, and one that fails verification halts the
+runner locally with `control_unverifiable`.
 
 ## Frontend and acceptance
 

@@ -289,6 +289,34 @@ good state. Push notifications trigger an immediate sync; polling remains
 active as the fallback. Stable and canary deployments are cached together and
 selected by a deterministic subject cohort or an explicit approved pin.
 
+### Environment control
+
+The runner asks for the signed per-environment control with
+`controlVersion=1` on every sync and reports `capabilities.environmentControl: 1`
+at registration. A Platform without it answers as before and nothing changes.
+`EnvironmentControl` v1 (`glirastes/contracts`) carries `assistant`
+(`enabled` | `halted`), an optional `budgetCeiling` and `rateLimit`, and a
+`sequence` that grows strictly per environment. It is signed like revisions,
+over `canonicalRuntimeJson` without `signature`, and checked against the same
+JWKS.
+
+- A verified control of this tenant, app and environment with a higher
+  `sequence` is accepted and kept in the state store.
+- An equal or lower `sequence` is ignored, so an old `enabled` cannot be
+  replayed. `control: null` keeps the accepted control.
+- A control of another tenant, app or environment is rejected and reported as
+  `control_scope_mismatch`.
+- A control that fails its schema or signature halts the runner locally with
+  `control_unverifiable` until a valid control with a higher `sequence`
+  arrives. This is fail closed on purpose: a Platform signing fault stops
+  every assistant with this SDK. A JWKS request that fails is no verdict; the
+  sync fails and is retried.
+
+`glirastes.control()` returns the control in force, or the local halt.
+Rejections reach `onError` as a content-free `RuntimeEnvironmentControlError`.
+Turns enforce the control from the next SDK step on (halt, budget ceiling,
+rate limit); this release only verifies and stores it.
+
 Use `MemoryRuntimeStateStore` for the zero-setup embedded development path.
 Long-lived and unattended runners should use `FileRuntimeStateStore` or provide
 their own durable `RuntimeStateStore`.

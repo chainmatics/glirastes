@@ -1,0 +1,37 @@
+{
+  "id": "environment-control-sync",
+  "kind": "optional",
+  "summary": "Connected runners now sync and verify the signed per-environment control (kill switch, budget ceiling, rate limit) and expose it as glirastes.control(). Turns do not enforce it yet.",
+  "howTo": "Nothing to do. The runner sends controlVersion=1 on sync and reports capabilities.environmentControl: 1; an older Platform answers as before. A control that fails its schema or signature halts the runner locally with control_unverifiable and reaches onError as RuntimeEnvironmentControlError. A RuntimeSyncManager you construct yourself takes optional targetAppId and onControlRejected; a verifier you pass must implement verifyEnvironmentControl. State files written by older versions load unchanged.",
+  "skill": "setting-up-glirastes",
+  "affectedWhen": {
+    "symbols": [
+      "RuntimeSyncManager",
+      "RuntimeSyncApplyResult",
+      "RuntimeSyncState",
+      "createManagedRuntimeSync"
+    ]
+  },
+  "surface": [
+    "glirastes/contracts#ENVIRONMENT_CONTROL_CAPABILITY",
+    "glirastes/contracts#ENVIRONMENT_CONTROL_SCHEMA_VERSION",
+    "glirastes/contracts#ENVIRONMENT_CONTROL_SYNC_VERSION",
+    "glirastes/contracts#EffectiveEnvironmentControl",
+    "glirastes/contracts#EnvironmentControl",
+    "glirastes/contracts#EnvironmentControlBudgetCeiling",
+    "glirastes/contracts#EnvironmentControlBudgetCeilingSchema",
+    "glirastes/contracts#EnvironmentControlRateLimit",
+    "glirastes/contracts#EnvironmentControlRateLimitSchema",
+    "glirastes/contracts#EnvironmentControlReasonCodeSchema",
+    "glirastes/contracts#EnvironmentControlSchema",
+    "glirastes/contracts#LocalEnvironmentControlHalt",
+    "glirastes/contracts#LocalEnvironmentControlHaltSchema",
+    "glirastes/runtime#Glirastes.control",
+    "glirastes/sync#RuntimeControlOutcome",
+    "glirastes/sync#RuntimeControlState.*",
+    "glirastes/sync#RuntimeEnvironmentControlError",
+    "glirastes/sync#RuntimeEnvironmentControlErrorCode",
+    "glirastes/sync#RuntimeSyncApplyResult.control",
+    "glirastes/sync#RuntimeSyncState.control"
+  ]
+}
