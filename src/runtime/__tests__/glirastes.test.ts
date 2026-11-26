@@ -1095,11 +1095,18 @@ describe('createGlirastes canary cohorts', () => {
   const inStable = subjects.find((subject) => rolloutCohortBucket(SALT, subject) >= 50)!;
   const as = (subjectId: string) => ({ ...principal(TENANT_ID), subjectId });
 
-  async function connected(sync: () => RuntimeDeploymentBundle[], publicKey: KeyObject, control?: () => unknown) {
+  async function connected(
+    sync: () => RuntimeDeploymentBundle[],
+    publicKey: KeyObject,
+    control?: () => unknown,
+    extra: Partial<Parameters<typeof createGlirastes>[0]> & { syncFails?: () => boolean } = {},
+  ) {
+    const { syncFails, ...overrides } = extra;
     const http = platform({ publicKey });
     const fetchImpl = (async (input: string | URL | Request, init: RequestInit = {}) => {
       if (!String(input).includes('/sync?')) return http.fetchImpl(input, init);
       http.calls.push({ url: String(input), init });
+      if (syncFails?.()) return new Response('{}', { status: 503 });
       return json({
         cursor: '2026-07-29T00:02:00.000Z', activeSnapshotComplete: true, deployments: sync(), revocations: [],
         ...(control ? { control: control() } : {}),
@@ -1107,6 +1114,7 @@ describe('createGlirastes canary cohorts', () => {
     }) as typeof fetch;
     const glirastes = track(createGlirastes({
       generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
+      ...overrides,
     }));
     await glirastes.ready();
     return { glirastes, calls: http.calls };
@@ -1229,6 +1237,43 @@ describe('createGlirastes canary cohorts', () => {
     expect(halted.status).toBe(503);
     expect(await halted.json()).toEqual({ error: 'assistant_halted' });
     expect(snapshots).toHaveLength(1);
+  });
+
+  it('neither negotiates nor selects a canary without a metrics sink', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const { glirastes, calls } = await connected(() => deployments(privateKey), publicKey, undefined, { metrics: false });
+    const sync = calls.find(({ url }) => url.includes('/sync?'));
+    expect(new URL(sync!.url).searchParams.has('canaryVersion')).toBe(false);
+    const register = calls.find(({ url }) => url.endsWith('/register'));
+    expect(JSON.parse(String(register?.init.body)).capabilities).not.toHaveProperty('canarySelection');
+    for (const [index, subjectId] of subjects.slice(0, 40).entries()) {
+      const result = await turn(glirastes, subjectId, `ai-t${index}`);
+      expect(result.snapshot.policyRevision.revisionId).toBe(id('3908'));
+      expect(result.rollout).toBeUndefined();
+    }
+    for (const heartbeat of calls.filter(({ url }) => url.endsWith('/heartbeat'))) {
+      expect(JSON.parse(String(heartbeat.init.body)).technicalMetadata).not.toHaveProperty('canaryState');
+    }
+  });
+
+  it('stops selecting the canary once the last sync is stale and selects it again after a fresh one', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    let unreachable = false;
+    const { glirastes } = await connected(() => deployments(privateKey), publicKey, undefined, {
+      canaryMaxStalenessMs: 100, syncFails: () => unreachable,
+    });
+    expect((await turn(glirastes, inCanary, 'ai-t1')).rollout?.cohort).toBe('canary');
+
+    unreachable = true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const stale = await turn(glirastes, inCanary, 'ai-t2');
+    expect(stale.snapshot.policyRevision.revisionId).toBe(id('3908'));
+    expect(stale.rollout).toEqual({ deploymentId: id('3904'), cohort: 'stable' });
+
+    unreachable = false;
+    await vi.waitFor(async () => {
+      expect((await turn(glirastes, inCanary, `ai-t${Date.now()}`)).rollout?.cohort).toBe('canary');
+    }, { timeout: 1_000 });
   });
 
   it('adds no rollout in Standalone', async () => {

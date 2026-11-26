@@ -359,6 +359,24 @@ describe('RuntimeControlPlaneClient', () => {
       expect(new URL(fetchImpl.mock.calls[1][0]).searchParams.has('canaryVersion')).toBe(false);
     });
 
+    it('records when the last sync succeeded and keeps it through failed ones', async () => {
+      let fail = false;
+      const fetchImpl = vi.fn().mockImplementation(async () => (
+        fail ? new Response('{}', { status: 503 }) : syncBody()
+      ));
+      const client = new RuntimeControlPlaneClient({
+        ...baseOptions, fetchImpl, manager: { apply: vi.fn().mockResolvedValue({}) } as never,
+      });
+      expect(client.lastSyncedAt).toBeUndefined();
+      const before = Date.now();
+      await client.syncOnce();
+      const synced = client.lastSyncedAt;
+      expect(synced).toBeGreaterThanOrEqual(before);
+      fail = true;
+      await expect(client.syncOnce()).rejects.toThrow();
+      expect(client.lastSyncedAt).toBe(synced);
+    });
+
     it('refuses a caller-supplied canarySelection capability', async () => {
       const client = new RuntimeControlPlaneClient({
         ...baseOptions, fetchImpl: vi.fn(), manager: { apply: vi.fn() } as never,

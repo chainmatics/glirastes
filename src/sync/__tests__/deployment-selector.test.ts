@@ -184,6 +184,29 @@ describe('RolloutCohortSelector', () => {
     expect(canaryState({ stable, canary: null })).toBeUndefined();
   });
 
+  it('falls back to stable once the last successful sync is older than the staleness limit', () => {
+    let now = 10_000;
+    const wide = deployment('3902', 'canary', 99);
+    const inside = subjectIn(0, 99);
+    const selector = new RolloutCohortSelector({ now: () => now });
+    const fresh = { syncedAt: 9_000, maxStalenessMs: 1_000 };
+    expect(canaryState({ stable, canary: wide }, { ...fresh, now: () => now })).toBe('selectable');
+    expect(selector.select({ stable, canary: wide }, { subjectId: inside, conversationId: 'c-1', ...fresh })?.cohort)
+      .toBe('canary');
+
+    now = 10_001;
+    expect(canaryState({ stable, canary: wide }, { ...fresh, now: () => now })).toBe('unbound');
+    expect(selector.select({ stable, canary: wide }, { subjectId: inside, conversationId: 'c-2', ...fresh })?.cohort)
+      .toBe('stable');
+    expect(canaryState({ stable, canary: wide }, { syncedAt: undefined, maxStalenessMs: 1_000, now: () => now }))
+      .toBe('unbound');
+
+    expect(selector.select(
+      { stable, canary: wide },
+      { subjectId: inside, conversationId: 'c-3', syncedAt: now, maxStalenessMs: 1_000 },
+    )?.cohort).toBe('canary');
+  });
+
   it('has nothing to select without a stable deployment', () => {
     expect(new RolloutCohortSelector().select({ stable: null, canary }, { subjectId: 'alice', conversationId: 'c' }))
       .toBeUndefined();

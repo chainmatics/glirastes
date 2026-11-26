@@ -21,7 +21,8 @@ export type RolloutCohort = 'stable' | 'canary';
 
 /**
  * Why the canary in the state is (not) selectable on this runner: `unbound`
- * (no valid rollout binding), `revoked` (its agent or policy revision is),
+ * (no valid rollout binding, or the last successful sync is older than the
+ * staleness limit), `revoked` (its agent or policy revision is),
  * `prompt-unavailable` (its prompt digest is not one this runner holds).
  */
 export type CanaryState = 'selectable' | 'unbound' | 'revoked' | 'prompt-unavailable';
@@ -35,6 +36,13 @@ export interface RolloutDeployments {
 export interface CanaryStateOptions {
   /** Whether this runner holds the prompt of that digest; defaults to "the stable deployment's digest". */
   promptAvailable?: (promptDigest: string | undefined) => boolean;
+  /** Epoch ms of the last successful sync; read together with `maxStalenessMs`. */
+  syncedAt?: number;
+  /**
+   * With it, a canary is never selected once `syncedAt` is missing or older:
+   * a rollback the Platform decided while unreachable must not be missed.
+   */
+  maxStalenessMs?: number;
   now?: () => number;
 }
 
@@ -82,7 +90,12 @@ export function canaryState(
   const { stable, canary } = deployments;
   if (!canary) return undefined;
   if (!boundCanary(stable, canary)) return 'unbound';
-  if (revoked(canary, deployments.revocations ?? [], (options.now ?? Date.now)())) return 'revoked';
+  const now = (options.now ?? Date.now)();
+  if (
+    options.maxStalenessMs !== undefined
+    && (options.syncedAt === undefined || now - options.syncedAt > options.maxStalenessMs)
+  ) return 'unbound';
+  if (revoked(canary, deployments.revocations ?? [], now)) return 'revoked';
   const promptAvailable = options.promptAvailable
     ?? ((digest: string | undefined) => digest === stable?.promptDigest);
   return promptAvailable(canary.promptDigest) ? 'selectable' : 'prompt-unavailable';
@@ -121,7 +134,8 @@ export class RolloutCohortSelector {
 
   select(
     deployments: RolloutDeployments,
-    input: { subjectId?: string; conversationId: string } & Pick<CanaryStateOptions, 'promptAvailable'>,
+    input: { subjectId?: string; conversationId: string }
+      & Pick<CanaryStateOptions, 'promptAvailable' | 'syncedAt' | 'maxStalenessMs'>,
   ): RolloutSelection | undefined {
     const { stable, canary } = deployments;
     if (!stable) return undefined;
@@ -129,6 +143,9 @@ export class RolloutCohortSelector {
     const selectable = canary && canaryState(deployments, {
       now: () => now,
       ...(input.promptAvailable ? { promptAvailable: input.promptAvailable } : {}),
+      ...(input.maxStalenessMs !== undefined
+        ? { maxStalenessMs: input.maxStalenessMs, ...(input.syncedAt !== undefined ? { syncedAt: input.syncedAt } : {}) }
+        : {}),
     }) === 'selectable'
       ? canary
       : undefined;

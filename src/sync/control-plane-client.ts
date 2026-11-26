@@ -88,6 +88,7 @@ export class RuntimeControlPlaneClient {
   private controlReportedAt: number | undefined;
   private deploymentHeartbeat: HeartbeatInput | undefined;
   private cursor: string | null = null;
+  private syncedAt: number | undefined;
 
   constructor(private readonly options: {
     baseUrl: string;
@@ -256,6 +257,11 @@ export class RuntimeControlPlaneClient {
     }
   }
 
+  /** Epoch ms when a sync last succeeded; undefined before the first. */
+  get lastSyncedAt(): number | undefined {
+    return this.syncedAt;
+  }
+
   async syncOnce() {
     const query = new URLSearchParams({ runnerKey: this.options.runnerKey });
     if (this.cursor) query.set('cursor', this.cursor);
@@ -265,6 +271,7 @@ export class RuntimeControlPlaneClient {
       method: 'GET',
     });
     const result = await this.options.manager.apply(bundle);
+    this.syncedAt = Date.now();
     if (
       bundle
       && typeof bundle === 'object'
