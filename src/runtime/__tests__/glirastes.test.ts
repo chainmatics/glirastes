@@ -908,3 +908,102 @@ describe('createGlirastes connected', () => {
     expect(glirastes.currentSource().mode).toBe('standalone');
   });
 });
+
+describe('createGlirastes environment control enforcement', () => {
+  const env = { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: BASE_URL };
+
+  function signed(privateKey: KeyObject, patch: Record<string, unknown>) {
+    const unsigned = {
+      kind: 'environment-control' as const, schemaVersion: 1 as const, tenantId: TENANT_ID, targetAppId: APP_ID,
+      environmentId: ENVIRONMENT_ID, sequence: 1, assistant: 'enabled', reasonCode: 'operator-tighten',
+      issuedAt: '2026-11-26T09:00:00.000Z', ...patch,
+    };
+    return {
+      ...unsigned,
+      signature: {
+        algorithm: 'Ed25519' as const, keyId: 'runtime-key',
+        value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url'),
+      },
+    };
+  }
+
+  const request = new Request('https://app.example/api/chat', { method: 'POST' });
+
+  it('adds no control or rate limit in Standalone', async () => {
+    const glirastes = track(createGlirastes({ generated: generated(), localLimits: limits, env: {}, controlFreshness: 'required' }));
+    const turn = await glirastes.chatTurn(principal);
+    expect(turn.managedRuntime.loadControl).toBeUndefined();
+    expect(turn.managedRuntime.admitTurn).toBeUndefined();
+  });
+
+  it('hands the accepted halt to the turn, also after the connection dropped', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    let syncs = 0;
+    const halt = signed(privateKey, { assistant: 'halted', reasonCode: 'operator-halt' });
+    const http = platform({ publicKey, control: halt });
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('/sync?') && ++syncs > 1) return json({ code: 'environment_place_required' }, 409);
+      return http.fetchImpl(input, init);
+    }) as typeof fetch;
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
+    }));
+    const turn = await glirastes.chatTurn(principal);
+    expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'halted', code: 'assistant_halted' });
+    await vi.waitFor(() => expect(syncs).toBeGreaterThanOrEqual(3), { timeout: 1_000 });
+    expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'halted', code: 'assistant_halted' });
+  });
+
+  it('limits turns per principal in this process with the rate limit of the control', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const control = signed(privateKey, { rateLimit: { maxTurnsPerMinutePerPrincipal: 1 }, budgetCeiling: { maxToolCalls: 2 } });
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
+      fetchImpl: platform({ publicKey, control }).fetchImpl,
+    }));
+    const turn = await glirastes.chatTurn(principal);
+    expect(await turn.managedRuntime.loadControl!({ request })).toEqual({
+      assistant: 'enabled', budgetCeiling: { maxToolCalls: 2 }, rateLimit: { maxTurnsPerMinutePerPrincipal: 1 },
+    });
+    const alice = principal(TENANT_ID);
+    expect(await turn.managedRuntime.admitTurn!({ request, principal: alice })).toEqual({ admitted: true });
+    expect(await turn.managedRuntime.admitTurn!({ request, principal: alice })).toMatchObject({ admitted: false });
+    expect(await turn.managedRuntime.admitTurn!({ request, principal: { ...alice, subjectId: 'bob' } }))
+      .toEqual({ admitted: true });
+  });
+
+  it('runs turns on the local code before the first sync by default (best-effort)', async () => {
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => (
+      String(input).includes('/sync?') ? json({ code: 'unavailable' }, 503) : platform().fetchImpl(input, init)
+    )) as typeof fetch;
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 60_000, onError: vi.fn(),
+    }));
+    const turn = await glirastes.chatTurn(principal);
+    expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'enabled' });
+  });
+
+  it('refuses turns with control_unknown until the first sync succeeded (required)', async () => {
+    let available = false;
+    const http = platform();
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => (
+      String(input).includes('/sync?') && !available ? json({ code: 'unavailable' }, 503) : http.fetchImpl(input, init)
+    )) as typeof fetch;
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
+      controlFreshness: 'required',
+    }));
+    const turn = await glirastes.chatTurn(principal);
+    expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'halted', code: 'control_unknown' });
+    available = true;
+    await vi.waitFor(async () => {
+      expect(await turn.managedRuntime.loadControl!({ request })).toEqual({ assistant: 'enabled' });
+    }, { timeout: 1_000 });
+  });
+
+  it('rejects an unknown control freshness', () => {
+    expect(() => createGlirastes({
+      generated: generated(id('3998')), localLimits: limits, env: {}, controlFreshness: 'strict' as never,
+    })).toThrow(/controlFreshness/);
+  });
+});

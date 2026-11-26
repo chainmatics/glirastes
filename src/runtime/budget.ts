@@ -1,4 +1,4 @@
-import type { ExecutionBudget } from '../contracts/index.js';
+import type { EnvironmentControlBudgetCeiling, ExecutionBudget } from '../contracts/index.js';
 
 export interface ExecutionUsage {
   modelSteps: number;
@@ -180,4 +180,18 @@ export class ExecutionBudgetTracker {
     }
     return value;
   }
+}
+
+/** The budget lowered field by field to a signed ceiling; a ceiling never raises a limit. */
+export function applyBudgetCeiling(
+  budget: ExecutionBudget,
+  ceiling: EnvironmentControlBudgetCeiling | undefined,
+): ExecutionBudget {
+  if (!ceiling) return budget;
+  const next = { ...budget };
+  for (const field of Object.keys(ceiling) as Array<keyof EnvironmentControlBudgetCeiling>) {
+    const value = ceiling[field];
+    if (value !== undefined) next[field] = Math.min(budget[field], value);
+  }
+  return next;
 }

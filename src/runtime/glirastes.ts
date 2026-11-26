@@ -45,6 +45,8 @@ import type { ToolSearchSemanticsMap } from './tool-discovery.js';
 import type { ToolTextsMap } from './tool-texts.js';
 import type { ToolFailureClassifier } from './tool-failure.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
+import { turnControlOf, type ManagedTurnControl } from './turn-control.js';
+import { createTurnRateLimiter, type TurnAdmission } from './turn-rate-limit.js';
 
 const DEFAULT_FIRST_SYNC_TIMEOUT_MS = 5_000;
 const DEFAULT_RETRY_INTERVAL_MS = 30_000;
@@ -88,6 +90,14 @@ export interface CreateGlirastesOptions {
   /** How long `ready()` waits for the first sync (default 5 s). */
   firstSyncTimeoutMs?: number;
   /**
+   * Connected only. `best-effort` (default): until the first successful sync
+   * after process start, turns run on the local code, so a halt applies again
+   * only after that sync. `required`: turns are refused with
+   * `control_unknown` until then. The control lives in process memory; use
+   * `required` in production.
+   */
+  controlFreshness?: 'best-effort' | 'required';
+  /**
    * Classifies failed backend calls of endpoint tools as `'error'` or
    * `'expected'`; `chatTurn()` hands it to `createAiChatHandler` (see
    * `AiChatHandlerConfig.classifyToolFailure`). Expected failures are
@@ -120,6 +130,10 @@ export interface GlirastesChatTurn {
     resolvePrincipal: (request: Request) => Principal | undefined | Promise<Principal | undefined>;
     resolveTurnSnapshot: (context: { turnId: string; principal: Principal }) => TurnSnapshot;
     loadRevocations: (context: { request: Request; snapshot: TurnSnapshot }) => SecurityRevocation[];
+    /** Connected only: the environment control in force (see `controlFreshness`). */
+    loadControl?: (context: { request: Request }) => ManagedTurnControl;
+    /** Connected only: the per-process turn rate limit of the control. */
+    admitTurn?: (context: { request: Request; principal: Principal }) => TurnAdmission;
   };
   loadTools: (context: { turnSnapshot?: TurnSnapshot }) => ToolRegistry;
   toolSemantics?: ToolSearchSemanticsMap;
@@ -237,6 +251,13 @@ function instances(): Map<string, Glirastes> {
  */
 export function createGlirastes(options: CreateGlirastesOptions): Glirastes {
   assertMaxResultChars(options.maxResultChars, 'createGlirastes');
+  if (
+    options.controlFreshness !== undefined
+    && options.controlFreshness !== 'best-effort'
+    && options.controlFreshness !== 'required'
+  ) {
+    throw new Error("controlFreshness must be 'best-effort' or 'required'");
+  }
   const appId = AppSetupArtifactSchema.parse(options.generated.setupArtifact).appId;
   const existing = instances().get(appId);
   if (existing) return existing;
@@ -282,6 +303,9 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
 
   const base = localSource();
   const store = new AcceptedStateStore();
+  const rateLimiter = createTurnRateLimiter();
+  // Set by the first successful sync of this process; `required` refuses turns until then.
+  let controlKnown = options.controlFreshness !== 'required';
   const abort = new AbortController();
   const retryMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS);
   let resolved: ResolvedRuntimeConnection | undefined;
@@ -437,6 +461,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         }
         await sync.client.syncOnce();
         store.synced(environmentId);
+        controlKnown = true;
         break;
       } catch (error) {
         if (isPlaceRequired(error) || isReferenceChanged(error)) {
@@ -536,6 +561,15 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           resolvePrincipal: (request) => principal(tenantId, request),
           resolveTurnSnapshot: (context) => source.resolveTurnSnapshot(context),
           loadRevocations: () => store.revocations(),
+          ...(config
+            ? {
+                loadControl: () => turnControlOf(store.control(), { known: controlKnown }),
+                admitTurn: ({ principal: current }: { principal: Principal }) => {
+                  const control = turnControlOf(store.control());
+                  return rateLimiter.admit(current, control.assistant === 'enabled' ? control.rateLimit : undefined);
+                },
+              }
+            : {}),
         },
         loadTools: ({ turnSnapshot }) => (turnSnapshot
           ? materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: bound.bindings })

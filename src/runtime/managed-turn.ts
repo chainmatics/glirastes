@@ -21,6 +21,7 @@ import {
   isToolRevoked,
   type TurnSnapshot,
 } from './turn-snapshot.js';
+import { AssistantHaltedError, type ManagedTurnControl } from './turn-control.js';
 
 export interface ManagedTurnBudgetSignal {
   evaluation: BudgetEvaluation;
@@ -36,6 +37,8 @@ export interface ManagedTurnGuardOptions {
   onBudgetSignal?: (
     signal: ManagedTurnBudgetSignal,
   ) => void | Promise<void>;
+  /** The environment control in force, asked before every model step, tool call and approval check. */
+  loadControl?: () => ManagedTurnControl | Promise<ManagedTurnControl>;
 }
 
 export interface ManagedTurnGuard {
@@ -60,6 +63,8 @@ export interface ManagedTurnGuard {
    * `beforeToolCall`.
    */
   beforeSubjectLookup(call: AiSdkToolCall): Promise<{ requiresApproval: boolean }>;
+  /** Throws `AssistantHaltedError` while the environment control halts the assistant. */
+  beforeModelStep(): Promise<void>;
 }
 
 export function createManagedTurnGuard(
@@ -121,6 +126,15 @@ export function createManagedTurnGuard(
     return { authorization, manifestTool };
   };
 
+  const haltCode = async () => {
+    const control = await options.loadControl?.();
+    return control?.assistant === 'halted' ? control.code : undefined;
+  };
+  // A halt never cuts off a running call; it refuses the next one.
+  const assertNotHalted = async (toolName: string) => {
+    if (await haltCode()) throw new ToolExecutionDeniedError('assistant_halted', toolName);
+  };
+
   const emitBudgetSignal = async () => {
     const evaluation = tracker.evaluate();
     if (evaluation.state !== 'within-budget') {
@@ -138,6 +152,7 @@ export function createManagedTurnGuard(
     toolTimeoutMs: options.snapshot.budget.toolTimeoutMs,
 
     async beforeToolCall(call) {
+      await assertNotHalted(call.toolName);
       const currentBudget = await emitBudgetSignal();
       if (currentBudget.state === 'hard-limit') {
         throw new ToolExecutionDeniedError(
@@ -197,13 +212,20 @@ export function createManagedTurnGuard(
     },
 
     async resolveApproval(call) {
+      await assertNotHalted(call.toolName);
       const { authorization } = await authorize(call);
       return authorization.requiresApproval;
     },
 
     async beforeSubjectLookup(call) {
+      await assertNotHalted(call.toolName);
       const { authorization } = await authorize(call);
       return { requiresApproval: authorization.requiresApproval };
+    },
+
+    async beforeModelStep() {
+      const code = await haltCode();
+      if (code) throw new AssistantHaltedError(code);
     },
   };
 }

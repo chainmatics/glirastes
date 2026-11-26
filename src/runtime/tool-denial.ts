@@ -4,13 +4,13 @@ import type { BudgetLimitState, BudgetReason } from './budget.js';
 type AuthorizationDenialReason = Extract<ToolAuthorizationResult, { allowed: false }>['reason'];
 
 /** Why the managed turn guard refused a tool call. */
-export type ToolDenialReason = AuthorizationDenialReason | 'revoked' | 'budget_exhausted';
+export type ToolDenialReason = AuthorizationDenialReason | 'revoked' | 'budget_exhausted' | 'assistant_halted';
 
 /**
  * Denials the model receives as a failed tool call, after which the turn
  * continues: the tool is not available to this principal or this agent
  * revision. Every other reason (`missing_principal`, `tenant_mismatch`,
- * `revoked`, `budget_exhausted`) ends the turn as before.
+ * `revoked`, `budget_exhausted`, `assistant_halted`) ends the turn as before.
  */
 const RECOVERABLE_REASONS: ReadonlySet<ToolDenialReason> = new Set<ToolDenialReason>([
   'agent_tool_denied',
@@ -141,6 +141,7 @@ const DENIAL_TEXTS: Readonly<Record<Exclude<ToolDenialReason, 'budget_exhausted'
   missing_principal: 'The user could not be identified; tool call refused.',
   tenant_mismatch: 'Tool call refused for this account.',
   revoked: 'This tool has been disabled.',
+  assistant_halted: 'The assistant is halted.',
 };
 
 /**

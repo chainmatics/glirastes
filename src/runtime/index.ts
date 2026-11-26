@@ -54,6 +54,17 @@ export {
   type PlatformRevisionRefs,
 } from './local-runtime-source.js';
 export {
+  AssistantHaltedError,
+  turnControlOf,
+  type ManagedTurnControl,
+  type ManagedTurnHaltCode,
+} from './turn-control.js';
+export {
+  createTurnRateLimiter,
+  type TurnAdmission,
+  type TurnRateLimiter,
+} from './turn-rate-limit.js';
+export {
   createManagedTurnGuard,
   type ManagedTurnBudgetSignal,
   type ManagedTurnGuard,

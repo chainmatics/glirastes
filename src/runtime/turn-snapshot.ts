@@ -1,5 +1,6 @@
 import type {
   AgentRevision,
+  EnvironmentControlBudgetCeiling,
   ExecutionBudget,
   ManifestRevision,
   Principal,
@@ -7,6 +8,7 @@ import type {
   RuntimePolicyRevision,
   SecurityRevocation,
 } from '../contracts/index.js';
+import { applyBudgetCeiling } from './budget.js';
 import { applyPolicyOverlay } from './policy-overlay.js';
 
 export interface TurnSnapshot {
@@ -191,6 +193,16 @@ export function withTurnPrincipal(snapshot: TurnSnapshot, principal: Principal):
   }
   if (samePrincipal(snapshot.principal, principal)) return snapshot;
   return deepFreeze({ ...snapshot, principal: clone(principal) });
+}
+
+/** The pinned turn with its budget lowered to a signed environment control ceiling. */
+export function withBudgetCeiling(
+  snapshot: TurnSnapshot,
+  ceiling: EnvironmentControlBudgetCeiling | undefined,
+): TurnSnapshot {
+  const budget = applyBudgetCeiling(snapshot.budget, ceiling);
+  if (JSON.stringify(budget) === JSON.stringify(snapshot.budget)) return snapshot;
+  return deepFreeze({ ...snapshot, budget });
 }
 
 /**
