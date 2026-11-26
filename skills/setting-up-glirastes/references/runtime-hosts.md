@@ -149,14 +149,18 @@ signed `EnvironmentControl` (assistant `enabled` or `halted`, an optional
 locally with `control_unverifiable` and reaches `onError` as
 `RuntimeEnvironmentControlError` (`RuntimeEnvironmentControlErrorCode`:
 `control_unverifiable`, `control_scope_mismatch`, `control_sequence_conflict`).
-Once the Platform signs rollout bindings, `createGlirastes` runs a canary
-deployment for its cohort (salted bucket of the user), keeps a conversation on
+Once the Platform signs rollout bindings, a `createGlirastes` runner with a
+metrics sink runs a canary deployment for its cohort (salted bucket of the user), keeps a conversation on
 its deployment while it stays selectable, and reports turns as metric v3 with
 `deploymentId`, `cohort`, `approvalsRequested` and `approvalsDeclined`. Both
 stable and canary must be bound; an older binding is never applied again.
-Stickiness is per process. Prompts stay in the code: a canary with another
-prompt digest than stable is never selected (heartbeat
-`canaryState: 'prompt-unavailable'`) unless the runner holds that prompt.
+Stickiness is per process. Without a metrics sink (`metrics: false`) the
+runner negotiates no canary selection and stays on stable. Once the last
+successful sync is older than `canaryMaxStalenessMs` (default 5 minutes, at
+least three poll intervals) turns run on stable until a sync succeeds again
+(`canaryState: 'unbound'`). Prompts stay in the code, so prompt changes cannot
+be canaried: a canary with another prompt digest than stable is never selected
+(heartbeat `canaryState: 'prompt-unavailable'`).
 Heartbeats report the `CanaryState` (`selectable`, `unbound`, `revoked`,
 `prompt-unavailable`). The Platform signs a `RolloutBinding` per deployment; a
 binding older than the accepted one reaches `onError` as

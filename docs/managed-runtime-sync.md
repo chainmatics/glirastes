@@ -406,8 +406,12 @@ their own durable `RuntimeStateStore`.
 
 ### Canary cohorts
 
-A connected runner sends `canaryVersion=1` on sync and reports
-`capabilities.canarySelection: 1`; a Platform that knows it signs a
+A connected runner with a metrics sink sends `canaryVersion=1` on sync and
+reports `capabilities.canarySelection: 1`. Without one (`metrics: false`, a
+read-only development connection, or no sink configured) it negotiates nothing
+and every turn runs on stable: the Platform judges and rolls back a canary by its
+metrics, so it never gets a canary it cannot measure. A Platform that knows the
+capability signs a
 `RolloutBinding` (`glirastes/contracts`, golden vectors in
 `src/contracts/__vectors__/rollout-binding.v1.json`) into each deployment:
 `kind: 'rollout-binding'`, `deploymentId`, `environmentId`, `rolloutMode`,
@@ -436,11 +440,18 @@ instances agree on the cohort of a user, not on a conversation's history.
 
 A canary is selectable only when its `promptDigest` equals the stable one.
 Prompts stay in the customer's code: the embedded runner runs the prompt it was
-built with and holds no other, so a canary that changes the prompt is not
-selectable there (`canaryState: 'prompt-unavailable'`) unless the runner holds
-that prompt locally. Such a canary needs a build with the new prompt. Heartbeats carry
-`technicalMetadata.canaryState` while a canary is delivered: `selectable`,
-`unbound`, `revoked` or `prompt-unavailable`.
+built with, so prompt changes cannot be canaried in the embedded runtime. A
+canary with another prompt digest is never selected
+(`canaryState: 'prompt-unavailable'`); ship the new prompt as a new build.
+Heartbeats carry `technicalMetadata.canaryState` while a canary is delivered:
+`selectable`, `unbound`, `revoked` or `prompt-unavailable`.
+
+The runner fails closed when it loses the Platform. Once its last successful
+sync is older than `canaryMaxStalenessMs` (default 5 minutes, at least three
+poll intervals), turns stop selecting the canary and run on stable, so a
+rollback the Platform decided meanwhile cannot be missed; the next successful
+sync makes it selectable again. While stale, `canaryState` reports `unbound`.
+The signed binding carries no validity period: the limit is local.
 
 Once the stable deployment carries a verified binding, turn metrics are
 `TechnicalRuntimeEvent` v3 (`turn.finished` and `turn.continued`): v2 plus
@@ -448,7 +459,10 @@ Once the stable deployment carries a verified binding, turn metrics are
 `approvalsRequested` (approvals the request asked for) and `approvalsDeclined`
 (approvals it declined, each approval id counted once per process). Batches carry
 `schemaVersion: 3` and hold only v3 events; vectors in
-`src/contracts/__vectors__/runtime-metric-event.v3.json`.
+`src/contracts/__vectors__/runtime-metric-event.v3.json`. A custom stream that
+builds its own `createTurnMetricsRecorder` from the snapshot of
+`chatTurn().managedRuntime.resolveTurnSnapshot` reports v3 without passing
+`rollout`: the recorder reads the turn's rollout from that snapshot.
 
 ## Code report and Platform decisions
 
