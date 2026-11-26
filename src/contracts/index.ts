@@ -255,6 +255,13 @@ export {
   EnvironmentControlSchema,
   LocalEnvironmentControlHaltSchema,
 } from './environment-control.js';
+export {
+  CANARY_SELECTION_CAPABILITY,
+  CANARY_SELECTION_SYNC_VERSION,
+  ROLLOUT_BINDING_SCHEMA_VERSION,
+  RolloutBindingSchema,
+} from './rollout-binding.js';
+export type { RolloutBinding } from './rollout-binding.js';
 export type {
   EffectiveEnvironmentControl,
   EnvironmentControl,
