@@ -40,6 +40,7 @@ export const EnvironmentControlReasonCodeSchema = z.string()
  * without `signature`; `sequence` is strictly monotonic per environment.
  */
 export const EnvironmentControlSchema = z.object({
+  kind: z.literal('environment-control'),
   schemaVersion: z.literal(ENVIRONMENT_CONTROL_SCHEMA_VERSION),
   tenantId: uuid,
   targetAppId: uuid,
@@ -63,6 +64,8 @@ export const LocalEnvironmentControlHaltSchema = z.object({
   reasonCode: z.literal('control_unverifiable'),
   /** The sequence a replacement must exceed: the last accepted one, or 0. */
   sequence: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  /** Set when only verifying the accepted control failed; a verified copy of it lifts the halt. */
+  failedSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
   detectedAt: z.iso.datetime({ offset: true }),
 }).strict();
 

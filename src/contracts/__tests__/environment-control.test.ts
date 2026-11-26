@@ -32,7 +32,7 @@ interface ControlVectors {
  * The Platform keeps a byte-identical copy (T5) and pins the same digest.
  * Changing a vector means a new digest on both sides, never a one-sided edit.
  */
-const VECTORS_SHA256 = '9829b4e31408d0f5b21e7f444444ae3e1e857f18a2b93f90a304fa8a53be900b';
+const VECTORS_SHA256 = 'cfc8df81e5e54f56345e4d3d8327f911d43387e99300a43794082f13624c08ea';
 const raw = readFileSync(
   new URL('../__vectors__/environment-control.v1.json', import.meta.url),
 );
