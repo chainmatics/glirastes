@@ -676,6 +676,73 @@ describe('createDoctorReport', () => {
     });
   });
 
+  // Chat component props must be zod 4 schemas; on zod 3 only the bundled 'zod/v4' build is accepted.
+  describe('zod for chat views', () => {
+    const installZod = async (rootDir: string, version: string) => {
+      await writeJson(rootDir, 'node_modules/zod/package.json', { name: 'zod', version });
+    };
+    const defineIn = async (rootDir: string, zodSpecifier: string) => {
+      await mkdir(join(rootDir, 'src/chat'), { recursive: true });
+      await writeFile(join(rootDir, 'src/chat/order.ts'),
+        `import { z } from '${zodSpecifier}';\nimport { defineChatComponent } from 'glirastes';\n`
+        + "export const order = defineChatComponent({ id: 'Order', schemaVersion: 1, description: 'x', props: z.object({}), text: {} });\n");
+    };
+    const zodCheck = async (rootDir: string) => (await createDoctorReport({ rootDir })).checks
+      .find(({ name }) => name === 'chat-views-zod');
+
+    it("warns on zod 3 when a definition file imports the classic 'zod' entry, naming 'zod/v4'", async () => {
+      const rootDir = await fixture();
+      await defineIn(rootDir, 'zod');
+      await installZod(rootDir, '3.25.76');
+
+      const report = await createDoctorReport({ rootDir });
+
+      expect(report.checks).toContainEqual({
+        name: 'chat-views-zod', status: 'warn', code: 'E-SETUP-110', remediation: 'import-zod-v4-for-chat-views',
+      });
+      const text = formatDoctorReport(report);
+      expect(text).toContain('Chat component schemas (zod)');
+      expect(text).toContain("import { z } from 'zod/v4'");
+    });
+
+    it("passes on zod 3.25 with 'zod/v4' imports and on zod 4", async () => {
+      const rootDir = await fixture();
+      await defineIn(rootDir, 'zod/v4');
+      await installZod(rootDir, '3.25.76');
+      expect(await zodCheck(rootDir)).toEqual({ name: 'chat-views-zod', status: 'pass', code: 'E-SETUP-110', remediation: 'none' });
+
+      await defineIn(rootDir, 'zod');
+      await installZod(rootDir, '4.4.3');
+      expect((await zodCheck(rootDir))?.status).toBe('pass');
+    });
+
+    it('asks for zod 3.25 or later below it, also when only the generated manifest shows chat views', async () => {
+      const rootDir = await fixture();
+      await writeJson(rootDir, '.glirastes/chat-components.json', { v: 1, components: [] });
+      await installZod(rootDir, '3.22.4');
+      expect(await zodCheck(rootDir)).toEqual({
+        name: 'chat-views-zod', status: 'warn', code: 'E-SETUP-110', remediation: 'upgrade-zod-for-chat-views',
+      });
+    });
+
+    it('adds no check without chat views, for definitions in test files only, or without an installed zod', async () => {
+      const plain = await fixture();
+      await installZod(plain, '3.25.76');
+      expect(await zodCheck(plain)).toBeUndefined();
+
+      const testsOnly = await fixture();
+      await installZod(testsOnly, '3.25.76');
+      await mkdir(join(testsOnly, 'src'), { recursive: true });
+      await writeFile(join(testsOnly, 'src/order.test.ts'),
+        "import { z } from 'zod';\nimport { defineChatComponent } from 'glirastes';\ndefineChatComponent;\n");
+      expect(await zodCheck(testsOnly)).toBeUndefined();
+
+      const uninstalled = await fixture();
+      await defineIn(uninstalled, 'zod');
+      expect(await zodCheck(uninstalled)).toBeUndefined();
+    });
+  });
+
   describe('apps without Next.js', () => {
     const key = 'gl_abcdefghijklmnopqrstuvwxyz123456';
 
