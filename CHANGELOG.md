@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A handler subscribed on the UI action bus directly (`UiActionBus.subscribeById`, `subscribeByType`, `useAiClientActionById`, `useAiClientActionByType`) that returns or resolves `false` declined the action: every handler of the action still runs as before (same order, same count), then `UiActionBus.dispatch` rejects with a `UiActionRejectedError` (reason `handler`), and the chat reports `rejected-handler` instead of `ok` (#179). `true` and `undefined` stay `ok`. A handler that throws still stops the handlers after it and rejects with its error, which wins over an earlier `false` (code `failed`). **Breaking** for a handler that filters with `&&`, such as `bus.subscribeByType('glirastes.action', (a) => a.actionId === 'x' && run())`: it returns `false` for every other action of the type, so those are now reported as declined; return nothing (`undefined`) for an action that is not yours. Limit: with two SDK copies on a page, the copy that created the shared bus first decides; an older copy keeps `false` = `ok`. `UiActionHandler` returns `void | boolean | Promise<void | boolean>` (was `void | Promise<void>`), so `() => false` type-checks. **Behaviour change** for apps whose bus handlers return `false` today: the model reads "declined" instead of "confirmed", `dispatchToolResultUiActions` rejects for them, and `bus.dispatch(...)` rejects with a `UiActionRejectedError`: an app that calls `bus.dispatch()` (or `dispatchToolResultUiActions`) itself without awaiting or catching it now gets an unhandled promise rejection when a handler returns `false`; add a `.catch`. The SDK's own callers handle it: an entity chip click (`entityLinks`) whose navigation is declined (a handler or a guarded router `push` returning `false`, e.g. the user keeps unsaved changes) stays on the page without an unhandled rejection or error UI (this was already unhandled before for a bridge `push` returning `false` or a throwing handler; a throwing handler now logs a warning instead, a declined navigation logs nothing).
+
 ## [0.30.0] - 2026-11-26
 
 ### Added

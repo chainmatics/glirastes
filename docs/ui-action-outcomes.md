@@ -141,7 +141,15 @@ with `awaitsOutcome` there to not run them twice.
   `registerNavigationBridge`, `registerDocumentNavigation`), otherwise
   navigation reports `unavailable`.
 - Handlers return `false` (or throw) instead of failing silently, and resolve
-  once the effect is visible.
+  once the effect is visible. This holds for every handler on the bus
+  (`subscribeById`, `subscribeByType`, `useAiClientActionById`,
+  `useAiClientActionByType`), not only `registerAiClientAction`: `false` is
+  reported as `rejected-handler`. Every matching handler still runs; the
+  dispatch rejects after them. A handler that filters with `&&`
+  (`(a) => a.actionId === 'x' && run()`) returns `false` for every other
+  action and now declines it: return nothing for an action that is not
+  yours. With two SDK copies on a page, an older copy that created the shared
+  bus first keeps `false` = `ok`.
 - Code that reads `success` on UI tool results reads `handedOff` too (it
   gets `handedOff` only for requests with the flag, or with
   `uiToolResultShape: 'handoff'`).

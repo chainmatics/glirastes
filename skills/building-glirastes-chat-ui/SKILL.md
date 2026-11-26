@@ -133,8 +133,8 @@ single-segment id or one starting with `navigate.`, `filter.` or `action.` moves
 contract as the third argument of `useAiClientAction` so the payload is typed and checked before the
 handler runs. An action that lives on one page takes that page's path as fourth argument,
 `{ route: '/templates' }`, in the page component: from another page the chat navigates there first and
-runs the action once it is registered. A handler returns `false` if it could not work
-(the dispatch fails; the model is only told "handed to the app"). Never register a global handler that
+runs the action once it is registered. Any handler (also `useAiClientActionById`, `useAiClientActionByType`)
+returns `false` if it could not work (the dispatch fails; the chat reports `rejected-handler`). Never register a global handler that
 only fires a window event for a listener on one page. A chat UI that does not use the SDK provider must
 pass each tool result to `runToolResultUiActions` (`glirastes/browser`), or no UI tool runs.
 

@@ -421,7 +421,7 @@ turn; an answered approval `'approval'`): count turns on the calls without
 | --- | --- |
 | `ok` | every handler resolved (resolve once the effect is visible) |
 | `rejected-contract` | the payload failed the contract, or an unsafe route or target |
-| `rejected-handler` | a handler or the bridge's `push` returned `false` |
+| `rejected-handler` | a handler (also one subscribed on the bus directly; all still run first) or the bridge's `push` returned `false`; a handler that only filters returns nothing, not `false` |
 | `failed` | a handler threw |
 | `unavailable` | no handler: no navigation bridge, unknown action, a page-bound action that never registered on its route |
 | `initiated` | a reloading navigation (`registerDocumentNavigation()`, `reloads: true`) started; nothing after it runs on the page |
