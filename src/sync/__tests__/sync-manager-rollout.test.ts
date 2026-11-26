@@ -108,3 +108,55 @@ describe('RuntimeSyncManager rollout bindings', () => {
     expect(result.state.canary?.rolloutBinding).toBeUndefined();
   });
 });
+
+describe('RuntimeSyncManager rollout binding replay', () => {
+  function manager() {
+    const rejected: string[] = [];
+    const store = new MemoryRuntimeStateStore();
+    const sync = new RuntimeSyncManager({
+      environmentId,
+      store,
+      verifier: new RuntimeRevisionVerifier({ getKey: async () => jwk }),
+      onRolloutBindingRejected: (code) => { rejected.push(code); },
+    });
+    let cursor = 0;
+    const apply = (deployments: RuntimeDeploymentBundle[]) => sync.apply({
+      cursor: new Date(Date.UTC(2026, 10, 26, 10, 0, cursor++)).toISOString(),
+      activeSnapshotComplete: true, deployments, revocations: [],
+    });
+    return { apply, rejected, store };
+  }
+  const stable = bound(deployment('stable', '21'));
+  const canaryAt = (targetPercentage: number, issuedAt: string, patch: Partial<RolloutBinding> = {}) => {
+    const value = { ...deployment('canary', '22'), targetPercentage };
+    return bound(value, { issuedAt, ...patch });
+  };
+
+  it('drops an older binding replayed after a newer one was accepted', async () => {
+    const { apply, rejected, store } = manager();
+    const ten = canaryAt(10, '2026-11-26T10:00:00.000Z');
+    expect((await apply([stable, ten])).state.canary?.rolloutBinding).toEqual(ten.rolloutBinding);
+    expect((await store.load())?.rolloutBindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ deploymentId: ten.deploymentId, issuedAt: '2026-11-26T10:00:00.000Z' }),
+    ]));
+
+    const replayed = canaryAt(50, '2026-11-26T09:00:00.000Z');
+    const result = await apply([stable, replayed]);
+    expect(result.state.canary?.deploymentId).toBe(replayed.deploymentId);
+    expect(result.state.canary?.rolloutBinding).toBeUndefined();
+    expect(rejected).toEqual(['rollout_binding_stale']);
+
+    const newer = canaryAt(50, '2026-11-26T11:00:00.000Z');
+    expect((await apply([stable, newer])).state.canary?.rolloutBinding).toEqual(newer.rolloutBinding);
+  });
+
+  it('drops and reports a different binding with the same issuedAt, keeps an identical one', async () => {
+    const { apply, rejected } = manager();
+    const ten = canaryAt(10, '2026-11-26T10:00:00.000Z');
+    await apply([stable, ten]);
+    expect((await apply([stable, ten])).state.canary?.rolloutBinding).toEqual(ten.rolloutBinding);
+    const conflicting = canaryAt(10, '2026-11-26T10:00:00.000Z', { cohortSalt: 'Xk9mR2tP7vQa4sLd1uWz0A' });
+    expect((await apply([stable, conflicting])).state.canary?.rolloutBinding).toBeUndefined();
+    expect(rejected).toEqual(['rollout_binding_conflict']);
+  });
+});

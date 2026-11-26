@@ -30,6 +30,15 @@ export interface RuntimeSyncState {
   updatedAt: string;
   /** Absent until a Platform with environment control answered; old state files lack it. */
   control?: RuntimeControlState;
+  /** The newest accepted rollout binding per deployment, so an older one is never applied again. */
+  rolloutBindings?: RuntimeRolloutBindingRecord[];
+}
+
+export interface RuntimeRolloutBindingRecord {
+  deploymentId: string;
+  issuedAt: string;
+  /** sha256 (base64url) of the canonical signed binding. */
+  digest: string;
 }
 
 const RuntimeSyncStateSchema: z.ZodType<RuntimeSyncState> = z.object({
@@ -43,6 +52,11 @@ const RuntimeSyncStateSchema: z.ZodType<RuntimeSyncState> = z.object({
     accepted: EnvironmentControlSchema.nullable(),
     localHalt: LocalEnvironmentControlHaltSchema.nullable(),
   }).strict().optional(),
+  rolloutBindings: z.array(z.object({
+    deploymentId: z.uuid(),
+    issuedAt: z.iso.datetime({ offset: true }),
+    digest: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  }).strict()).max(64).optional(),
 }).strict();
 
 export interface RuntimeStateStore {

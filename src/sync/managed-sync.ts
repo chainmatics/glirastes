@@ -13,6 +13,7 @@ import {
 } from './state-store.js';
 import {
   RuntimeEnvironmentControlError,
+  RuntimeRolloutBindingError,
   RuntimeSyncManager,
 } from './sync-manager.js';
 import {
@@ -85,6 +86,9 @@ export function createManagedRuntimeSync(options: {
     validateDeployment: options.validateDeployment,
     onControlRejected: (code) => {
       options.onError?.(new RuntimeEnvironmentControlError(code));
+    },
+    onRolloutBindingRejected: (code) => {
+      options.onError?.(new RuntimeRolloutBindingError(code));
     },
     onPending: async (deployments) => {
       if (options.readOnly) return;

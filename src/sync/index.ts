@@ -13,16 +13,19 @@ export {
 } from './state-store.js';
 export type {
   RuntimeControlState,
+  RuntimeRolloutBindingRecord,
   RuntimeStateStore,
   RuntimeSyncState,
 } from './state-store.js';
 export {
   RuntimeEnvironmentControlError,
+  RuntimeRolloutBindingError,
   RuntimeSyncManager,
 } from './sync-manager.js';
 export type {
   RuntimeControlOutcome,
   RuntimeEnvironmentControlErrorCode,
+  RuntimeRolloutBindingErrorCode,
   RuntimeSyncApplyResult,
 } from './sync-manager.js';
 export {
