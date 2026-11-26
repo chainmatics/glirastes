@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "root": "card",
+    "caption": "Open invoices",
+    "elements": {
+      "card": { "type": "Card", "props": { "title": "Invoices" }, "children": ["total"] },
+      "total": { "type": "Metric", "props": { "label": "Total", "value": { "$sum": { "$ref": "r1", "path": "items[*].amount" } } } }
+    }
+  },
+  "manifest": {
+    "v": 1,
+    "components": [
+      { "id": "Card", "schemaVersion": 1, "description": "A card", "props": { "type": "object" }, "bindable": [], "refOnly": [], "children": "any", "text": { "label": "title" } },
+      { "id": "Metric", "schemaVersion": 1, "description": "A number", "whenToUse": "One key figure", "props": { "type": "object" }, "bindable": ["value"], "refOnly": [], "children": "none", "text": { "label": "label", "value": "value" } }
+    ]
+  },
+  "resolved": {
+    "v": 1,
+    "root": "card",
+    "caption": "Open invoices",
+    "elements": {
+      "card": { "type": "Card", "schemaVersion": 1, "props": { "title": "Invoices" }, "children": ["total"] },
+      "total": { "type": "Metric", "schemaVersion": 1, "props": { "label": "Total", "value": 1250 }, "said": true }
+    }
+  }
+}

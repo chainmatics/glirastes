@@ -244,3 +244,29 @@ export type {
   ViewContextSanitizeResult,
   ViewContextSelection,
 } from './view-context.js';
+
+export {
+  CHAT_VIEW_LIMITS,
+  RENDER_VIEW_TOOL_NAME,
+  chatComponentManifestDigest,
+  chatComponentManifestEntrySchema,
+  chatComponentManifestSchema,
+  chatItemRefSchema,
+  chatOperatorSchema,
+  chatSaidSchema,
+  chatValueRefSchema,
+  chatViewCapabilitiesSchema,
+  chatViewSpecSchema,
+  resolvedChatViewSchema,
+} from './chat-view.js';
+export type {
+  ChatComponentManifest,
+  ChatComponentManifestEntry,
+  ChatItemRef,
+  ChatOperator,
+  ChatSaid,
+  ChatValueRef,
+  ChatViewCapabilities,
+  ChatViewSpec,
+  ResolvedChatView,
+} from './chat-view.js';

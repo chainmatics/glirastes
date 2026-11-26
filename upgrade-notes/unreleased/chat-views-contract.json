@@ -1,0 +1,30 @@
+{
+  "id": "chat-views-contract",
+  "kind": "optional",
+  "summary": "Optional Chat Views contract in glirastes/contracts: the render_view spec, component manifest and resolved view schemas (generative UI in chat).",
+  "howTo": "Nothing to do. The schemas, CHAT_VIEW_LIMITS and chatComponentManifestDigest are the base for the optional Chat Views feature; later releases add the server tool and React renderer.",
+  "skill": "building-glirastes-chat-ui",
+  "surface": [
+    "glirastes/contracts#CHAT_VIEW_LIMITS",
+    "glirastes/contracts#RENDER_VIEW_TOOL_NAME",
+    "glirastes/contracts#chatComponentManifestDigest",
+    "glirastes/contracts#chatComponentManifestEntrySchema",
+    "glirastes/contracts#chatComponentManifestSchema",
+    "glirastes/contracts#chatItemRefSchema",
+    "glirastes/contracts#chatOperatorSchema",
+    "glirastes/contracts#chatSaidSchema",
+    "glirastes/contracts#chatValueRefSchema",
+    "glirastes/contracts#chatViewCapabilitiesSchema",
+    "glirastes/contracts#chatViewSpecSchema",
+    "glirastes/contracts#resolvedChatViewSchema",
+    "glirastes/contracts#ChatComponentManifest",
+    "glirastes/contracts#ChatComponentManifestEntry",
+    "glirastes/contracts#ChatItemRef",
+    "glirastes/contracts#ChatOperator",
+    "glirastes/contracts#ChatSaid",
+    "glirastes/contracts#ChatValueRef",
+    "glirastes/contracts#ChatViewCapabilities",
+    "glirastes/contracts#ChatViewSpec",
+    "glirastes/contracts#ResolvedChatView"
+  ]
+}
