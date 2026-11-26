@@ -28,6 +28,7 @@ import type { UiToolResultShapeOption } from '../../core/index.js';
 import type { ToolTextsMap } from '../../../runtime/tool-texts.js';
 import type { ManagedTurnControl } from '../../../runtime/turn-control.js';
 import type { TurnAdmission } from '../../../runtime/turn-rate-limit.js';
+import type { TurnRollout } from '../../../runtime/metrics/turn-recorder.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHandleLimits, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
@@ -113,6 +114,8 @@ export interface ResolveTurnSnapshotContext {
   request: Request;
   turnId: string;
   principal: Principal;
+  /** The chat id of the request body, else the first user message id; the key of cohort stickiness. */
+  conversationId?: string;
 }
 
 export interface ManagedLocalRuntimeConfig {
@@ -158,6 +161,12 @@ export interface ManagedLocalRuntimeConfig {
   loadControl?: (
     context: { request: Request },
   ) => ManagedTurnControl | Promise<ManagedTurnControl>;
+
+  /**
+   * The deployment and cohort of a turn whose snapshot was resolved; when
+   * present, its metrics are reported as v3. Undefined keeps them v2.
+   */
+  turnRollout?: (context: { turnId: string }) => TurnRollout | undefined;
 
   /** Admits the request of a principal; a refusal answers 429 `turn_rate_limited`. */
   admitTurn?: (

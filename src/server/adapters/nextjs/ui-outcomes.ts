@@ -192,6 +192,16 @@ export function turnContinuationOf(messages: ReadonlyArray<unknown>): TurnContin
   return undefined;
 }
 
+/** Approvals the last step of the history declined (an approval continuation answers them). */
+export function declinedApprovalsOf(messages: ReadonlyArray<unknown>): number {
+  const last = messages.at(-1) as { role?: unknown; parts?: unknown } | undefined;
+  if (!last || last.role !== 'assistant') return 0;
+  return (stepsOf(last).at(-1) ?? []).filter((part) => isToolPart(part)
+    && part.state === 'approval-responded'
+    && isRecord(part.approval)
+    && part.approval.approved === false).length;
+}
+
 /**
  * Tool names the running turn already called or `find_tools` found (for a
  * continuation's start set). Only candidates: discovery keeps a name only

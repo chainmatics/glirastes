@@ -1,4 +1,5 @@
 import type { EffectiveEnvironmentControl, SecurityRevocation } from '../contracts/index.js';
+import type { RolloutDeployments } from '../sync/deployment-selector.js';
 import {
   materializeDeploymentRevisions,
   type MaterializedDeploymentRevisions,
@@ -15,6 +16,7 @@ export class AcceptedStateStore {
   // bind and clear start a new generation; a view of an older one is inert.
   private generation = 0;
   private stable: MaterializedDeploymentRevisions | undefined;
+  private canary: { deploymentId: string; revisions: MaterializedDeploymentRevisions } | undefined;
   private environmentId: string | undefined;
   // An unsigned connection error must never lift a signed halt.
   private retained: { environmentId: string; control: RuntimeControlState } | undefined;
@@ -56,6 +58,28 @@ export class AcceptedStateStore {
   private save(state: RuntimeSyncState): void {
     this.state = structuredClone(state);
     this.stable = state.stable ? materializeDeploymentRevisions(state.stable) : undefined;
+    this.canary = undefined;
+    if (state.canary) {
+      try {
+        this.canary = { deploymentId: state.canary.deploymentId, revisions: materializeDeploymentRevisions(state.canary) };
+      } catch {
+        // A canary that does not materialize is never selected.
+      }
+    }
+  }
+
+  /** The accepted stable and canary deployments; a canary only when it materialized. */
+  deployments(): RolloutDeployments {
+    return {
+      stable: this.state?.stable ?? null,
+      canary: this.canary ? this.state?.canary ?? null : null,
+      revocations: this.state?.revocations ?? [],
+    };
+  }
+
+  /** The materialized canary of that deployment id, if it is the accepted one. */
+  acceptedCanary(deploymentId: string): MaterializedDeploymentRevisions | undefined {
+    return this.canary?.deploymentId === deploymentId ? this.canary.revisions : undefined;
   }
 
   accepted(): MaterializedDeploymentRevisions | undefined {
@@ -70,6 +94,7 @@ export class AcceptedStateStore {
     }
     this.state = null;
     this.stable = undefined;
+    this.canary = undefined;
   }
 
   revocations(): SecurityRevocation[] {

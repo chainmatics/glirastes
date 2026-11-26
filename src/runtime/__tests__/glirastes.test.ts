@@ -14,6 +14,7 @@ import type {
 } from '../../contracts/index.js';
 import { endpointToolToTool } from '../../server/core/index.js';
 import { canonicalRuntimeJson } from '../../sync/signature-verifier.js';
+import { rolloutCohortBucket } from '../../sync/deployment-selector.js';
 import { RuntimeControlPlaneRequestError } from '../../sync/control-plane-client.js';
 import { RuntimeEnvironmentControlError } from '../../sync/sync-manager.js';
 import type {
@@ -1045,5 +1046,132 @@ describe('createGlirastes environment control enforcement', () => {
     expect(() => createGlirastes({
       generated: generated(id('3998')), localLimits: limits, env: {}, controlFreshness: 'strict' as never,
     })).toThrow(/controlFreshness/);
+  });
+});
+
+describe('createGlirastes canary cohorts', () => {
+  const env = { GLIRASTES_API_KEY: API_KEY, GLIRASTES_CONTROL_PLANE_URL: BASE_URL };
+  const SALT = 'q3Zr8Kc1VtW0xYbHnL5pJg';
+  const CANARY_ID = id('3914');
+  const CANARY_POLICY_ID = id('3918');
+  const request = new Request('https://app.example/api/chat', { method: 'POST' });
+
+  function signedBinding(privateKey: KeyObject, deployment: RuntimeDeploymentBundle) {
+    const unsigned = {
+      kind: 'rollout-binding' as const, schemaVersion: 1 as const, deploymentId: deployment.deploymentId,
+      environmentId: ENVIRONMENT_ID, rolloutMode: deployment.rolloutMode, targetPercentage: deployment.targetPercentage,
+      cohortSalt: SALT, issuedAt: '2026-11-26T09:00:00.000Z',
+    };
+    return {
+      ...unsigned,
+      signature: {
+        algorithm: 'Ed25519' as const, keyId: 'runtime-key',
+        value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url'),
+      },
+    };
+  }
+
+  function deployments(privateKey: KeyObject, options: { bound?: boolean; canary?: boolean } = {}) {
+    const stable = activeDeployment(privateKey);
+    const base = activeDeployment(privateKey);
+    const canary: RuntimeDeploymentBundle = {
+      ...base, deploymentId: CANARY_ID, rolloutMode: 'canary', targetPercentage: 50,
+      policyRevision: revision(privateKey, {
+        schemaVersion: 1, revision: 2, tenantId: TENANT_ID, targetAppId: APP_ID, publishedAt: '2026-07-29T00:00:00.000Z',
+        revisionId: CANARY_POLICY_ID, revisionType: 'policy', environmentId: ENVIRONMENT_ID,
+        payload: { budget: limits, toolPolicies: [] },
+      }),
+    };
+    const bind = (deployment: RuntimeDeploymentBundle) => (options.bound === false
+      ? deployment
+      : { ...deployment, rolloutBinding: signedBinding(privateKey, deployment) });
+    return options.canary === false ? [bind(stable)] : [bind(stable), bind(canary)];
+  }
+
+  const subjects = Array.from({ length: 200 }, (_, index) => `user-${index}`);
+  const inCanary = subjects.find((subject) => rolloutCohortBucket(SALT, subject) < 50)!;
+  const inStable = subjects.find((subject) => rolloutCohortBucket(SALT, subject) >= 50)!;
+  const as = (subjectId: string) => ({ ...principal(TENANT_ID), subjectId });
+
+  async function connected(sync: () => RuntimeDeploymentBundle[], publicKey: KeyObject) {
+    const http = platform({ publicKey });
+    const fetchImpl = (async (input: string | URL | Request, init: RequestInit = {}) => {
+      if (!String(input).includes('/sync?')) return http.fetchImpl(input, init);
+      http.calls.push({ url: String(input), init });
+      return json({ cursor: '2026-07-29T00:02:00.000Z', activeSnapshotComplete: true, deployments: sync(), revocations: [] });
+    }) as typeof fetch;
+    const glirastes = track(createGlirastes({
+      generated: generated(), localLimits: limits, env, fetchImpl, push: false, pollIntervalMs: 20, onError: vi.fn(),
+    }));
+    await glirastes.ready();
+    return { glirastes, calls: http.calls };
+  }
+
+  async function turn(glirastes: Glirastes, subjectId: string, turnId: string, conversationId = turnId) {
+    const chat = await glirastes.chatTurn(principal);
+    const snapshot = await chat.managedRuntime.resolveTurnSnapshot({ request, turnId, conversationId, principal: as(subjectId) });
+    return { snapshot, rollout: chat.managedRuntime.turnRollout?.({ turnId }) };
+  }
+
+  it('negotiates canary selection at registration and sync', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const { calls } = await connected(() => deployments(privateKey), publicKey);
+    const sync = calls.find(({ url }) => url.includes('/sync?'));
+    expect(new URL(sync!.url).searchParams.get('canaryVersion')).toBe('1');
+    const register = calls.find(({ url }) => url.endsWith('/register'));
+    expect(JSON.parse(String(register?.init.body)).capabilities).toMatchObject({ canarySelection: 1 });
+  });
+
+  it('runs a bound canary for its cohort and the stable deployment for the rest, reported per turn', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const { glirastes } = await connected(() => deployments(privateKey), publicKey);
+
+    const canary = await turn(glirastes, inCanary, 'ai-t1');
+    expect(canary.snapshot.policyRevision.revisionId).toBe(CANARY_POLICY_ID);
+    expect(canary.rollout).toEqual({ deploymentId: CANARY_ID, cohort: 'canary' });
+
+    const stable = await turn(glirastes, inStable, 'ai-t2');
+    expect(stable.snapshot.policyRevision.revisionId).toBe(id('3908'));
+    expect(stable.rollout).toEqual({ deploymentId: id('3904'), cohort: 'stable' });
+    expect(glirastes.accepted()?.policyRevision.revisionId).toBe(id('3908'));
+  });
+
+  it('keeps a continuation on the snapshot of its turn', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const { glirastes } = await connected(() => deployments(privateKey), publicKey);
+    const first = await turn(glirastes, inCanary, 'ai-t1', 'chat-1');
+    const continued = await turn(glirastes, inCanary, 'ai-t1', 'chat-1');
+    expect(continued.snapshot).toBe(first.snapshot);
+    expect(continued.rollout).toEqual(first.rollout);
+  });
+
+  it('keeps a conversation on stable when another user would be canary, and moves it after a withdrawal', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    let withCanary = true;
+    const { glirastes } = await connected(() => deployments(privateKey, { canary: withCanary }), publicKey);
+    expect((await turn(glirastes, inCanary, 'ai-t1', 'chat-1')).rollout?.cohort).toBe('canary');
+    expect((await turn(glirastes, inStable, 'ai-t2', 'chat-1')).rollout?.cohort).toBe('stable');
+    expect((await turn(glirastes, inCanary, 'ai-t3', 'chat-1')).rollout?.cohort).toBe('canary');
+
+    withCanary = false;
+    await vi.waitFor(async () => {
+      expect((await turn(glirastes, inCanary, `ai-t${Date.now()}`, 'chat-1')).rollout).toEqual({ deploymentId: id('3904'), cohort: 'stable' });
+    }, { timeout: 1_000 });
+  });
+
+  it('never runs an unbound canary, reports it in the heartbeat and no cohort without negotiated bindings', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const { glirastes, calls } = await connected(() => deployments(privateKey, { bound: false }), publicKey);
+    const result = await turn(glirastes, inCanary, 'ai-t1');
+    expect(result.snapshot.policyRevision.revisionId).toBe(id('3908'));
+    expect(result.rollout).toBeUndefined();
+    const heartbeat = calls.find(({ url }) => url.endsWith('/heartbeat'));
+    expect(JSON.parse(String(heartbeat?.init.body)).technicalMetadata).toMatchObject({ canaryState: 'unbound' });
+  });
+
+  it('adds no rollout in Standalone', async () => {
+    const glirastes = track(createGlirastes({ generated: generated(id('3997')), localLimits: limits, env: {} }));
+    const chat = await glirastes.chatTurn(principal);
+    expect(chat.managedRuntime.turnRollout?.({ turnId: 'ai-t1' })).toBeUndefined();
   });
 });

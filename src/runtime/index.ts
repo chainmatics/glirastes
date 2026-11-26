@@ -188,7 +188,9 @@ export {
   type TurnMetricsOutcome,
   type TurnMetricsRecorder,
   type TurnMetricsRecorderOptions,
+  type TurnMetricsEvent,
   type TurnMetricsStep,
+  type TurnRollout,
 } from './metrics/turn-recorder.js';
 export {
   createRuntimeMetricsSink,

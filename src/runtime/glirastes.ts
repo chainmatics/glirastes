@@ -14,6 +14,7 @@ import {
   type RuntimePushConnector,
 } from '../sync/control-plane-client.js';
 import { validateLocalDeploymentBindings } from '../sync/local-deployment-validator.js';
+import { canaryState, RolloutCohortSelector } from '../sync/deployment-selector.js';
 import { createManagedRuntimeSync } from '../sync/managed-sync.js';
 import type { MaterializedDeploymentRevisions } from '../sync/materialize-deployment.js';
 import { AcceptedStateStore } from './accepted-state-store.js';
@@ -35,7 +36,7 @@ import {
   createRuntimeMetricsSinkFromEnv,
   type RuntimeMetricsSinkOptions,
 } from './metrics/sink.js';
-import type { RuntimeMetricsSink } from './metrics/turn-recorder.js';
+import type { RuntimeMetricsSink, TurnRollout } from './metrics/turn-recorder.js';
 import { policyOverlayFromRevision } from './policy-overlay.js';
 import { resolveRuntimeConnectionConfig } from './runtime-mode.js';
 import { resolveLocalLimits, type LocalLimits } from './local-limits.js';
@@ -50,6 +51,7 @@ import { createTurnRateLimiter, type TurnAdmission } from './turn-rate-limit.js'
 
 const DEFAULT_FIRST_SYNC_TIMEOUT_MS = 5_000;
 const DEFAULT_RETRY_INTERVAL_MS = 30_000;
+const TURN_ROLLOUT_LIMIT = 256;
 
 /** The module `glirastes tools refresh` emits (`tools.generated.ts`). */
 export interface GlirastesGeneratedModule extends GeneratedToolModule {
@@ -128,12 +130,14 @@ export type GlirastesPrincipalFactory = (
 export interface GlirastesChatTurn {
   managedRuntime: {
     resolvePrincipal: (request: Request) => Principal | undefined | Promise<Principal | undefined>;
-    resolveTurnSnapshot: (context: { turnId: string; principal: Principal }) => TurnSnapshot;
+    resolveTurnSnapshot: (context: { turnId: string; principal: Principal; conversationId?: string }) => TurnSnapshot;
     loadRevocations: (context: { request: Request; snapshot: TurnSnapshot }) => SecurityRevocation[];
     /** Connected only: the environment control in force (see `controlFreshness`). */
     loadControl?: (context: { request: Request }) => ManagedTurnControl;
     /** Connected only: the per-process turn rate limit of the control. */
     admitTurn?: (context: { request: Request; principal: Principal }) => TurnAdmission;
+    /** Connected only: the deployment and cohort of a resolved turn, once the Platform signs rollout bindings. */
+    turnRollout?: (context: { turnId: string }) => TurnRollout | undefined;
   };
   loadTools: (context: { turnSnapshot?: TurnSnapshot }) => ToolRegistry;
   toolSemantics?: ToolSearchSemanticsMap;
@@ -311,6 +315,10 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
   const base = localSource();
   const store = new AcceptedStateStore();
   const rateLimiter = createTurnRateLimiter();
+  const cohorts = new RolloutCohortSelector();
+  let canarySource: { deploymentId: string; source: LocalRuntimeSource } | undefined;
+  // A continuation reuses the source and cohort of its turn.
+  const turns = new Map<string, { source: LocalRuntimeSource; rollout?: TurnRollout }>();
   let controlRequired = options.controlFreshness === 'required';
   // The environment whose sync succeeded on the current connection; `required` refuses turns for any other.
   let syncedEnvironment: string | undefined;
@@ -376,6 +384,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     resolved = undefined;
     connectedBase = undefined;
     managed = undefined;
+    canarySource = undefined;
+    turns.clear();
     metrics = undefined;
     syncedEnvironment = undefined;
     store.clear();
@@ -443,6 +453,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         ...(options.push !== undefined ? { push: options.push } : {}),
         pollIntervalMs: retryMs,
+        canarySelection: true,
+        canaryState: () => canaryState(store.deployments()),
       });
     } catch (error) {
       onError(error);
@@ -517,6 +529,57 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     }
   };
 
+  const canarySourceOf = (deploymentId: string, tenantId: string): LocalRuntimeSource | undefined => {
+    const revisions = store.acceptedCanary(deploymentId);
+    if (!resolved || !revisions || revisions.policyRevision.tenantId !== tenantId) return undefined;
+    if (canarySource?.deploymentId !== deploymentId) {
+      canarySource = {
+        deploymentId,
+        source: localSource(
+          {
+            tenantId,
+            targetAppId: resolved.appId,
+            ...(resolved.environmentId ? { environmentId: resolved.environmentId } : {}),
+          },
+          { accepted: () => revisions },
+        ),
+      };
+    }
+    return canarySource.source;
+  };
+
+  const turnOf = (
+    source: LocalRuntimeSource,
+    context: { turnId: string; principal: Principal; conversationId?: string },
+  ): { source: LocalRuntimeSource; rollout?: TurnRollout } => {
+    const known = turns.get(context.turnId);
+    if (known) return known;
+    let turn: { source: LocalRuntimeSource; rollout?: TurnRollout } = { source };
+    if (managed && source === managed.source) {
+      const deployments = store.deployments();
+      const selection = cohorts.select(deployments, {
+        subjectId: context.principal.subjectId,
+        // Per subject: a client-chosen conversation id never carries another user's cohort.
+        conversationId: `${context.principal.subjectId}\n${context.conversationId ?? context.turnId}`,
+      });
+      if (selection) {
+        const canary = selection.cohort === 'canary'
+          ? canarySourceOf(selection.deployment.deploymentId, managed.tenantId)
+          : undefined;
+        const deployment = canary ? selection.deployment : deployments.stable!;
+        turn = {
+          source: canary ?? source,
+          ...(deployments.stable?.rolloutBinding
+            ? { rollout: { deploymentId: deployment.deploymentId, cohort: canary ? 'canary' : 'stable' } }
+            : {}),
+        };
+      }
+    }
+    turns.set(context.turnId, turn);
+    if (turns.size > TURN_ROLLOUT_LIMIT) turns.delete(turns.keys().next().value!);
+    return turn;
+  };
+
   const instance: Glirastes = {
     mode: config ? 'connected' : 'standalone',
     bindings: bound.bindings,
@@ -571,7 +634,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       return {
         managedRuntime: {
           resolvePrincipal: (request) => principal(tenantId, request),
-          resolveTurnSnapshot: (context) => source.resolveTurnSnapshot(context),
+          resolveTurnSnapshot: (context) => turnOf(source, context).source.resolveTurnSnapshot(context),
           loadRevocations: () => store.revocations(),
           ...(config
             ? {
@@ -580,6 +643,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
                   const control = turnControlOf(store.control());
                   return rateLimiter.admit(current, control.assistant === 'enabled' ? control.rateLimit : undefined);
                 },
+                turnRollout: ({ turnId }: { turnId: string }) => turns.get(turnId)?.rollout,
               }
             : {}),
         },

@@ -160,6 +160,7 @@ import {
   type ManagedTurnGuard,
   type RuntimePriceTable,
   type TurnMetricsRecorder,
+  type TurnRollout,
 } from '../../../runtime/index.js';
 import { toolResultFailure } from '../../../runtime/tool-failure.js';
 import {
@@ -172,6 +173,7 @@ import { defaultIntentRouterFor, previousTurnScope } from './default-intent-rout
 import {
   assertUiActionOutcomesOption,
   currentTurnToolNames,
+  declinedApprovalsOf,
   readUiOutcomesFlag,
   stepAwaitsUiOutcome,
   turnContinuationOf,
@@ -1807,6 +1809,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
 
       let managedTurn: ManagedTurnGuard | undefined;
       let managedPrincipal: Principal | undefined;
+      let turnRollout: TurnRollout | undefined;
       /** The principal of this request, resolved again at every call (managed turns). */
       let resolveTurnPrincipal: (() => Promise<Principal | undefined>) | undefined;
       /** The manifest tool ids the guard would allow right now; empty when that cannot be decided. */
@@ -1830,6 +1833,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           request: req,
           turnId,
           principal: principalResult.data,
+          conversationId: conversationIdOf(body.value, requestMessages, turnId),
         });
         if (
           resolvedSnapshot.turnId !== turnId
@@ -1848,6 +1852,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           startControl?.assistant === 'enabled' ? startControl.budgetCeiling : undefined,
         );
         managedPrincipal = principalResult.data;
+        turnRollout = managedRuntime.turnRollout?.({ turnId });
 
         const resolveCurrentPrincipal = async () => {
           const current = PrincipalSchema.safeParse(
@@ -1887,6 +1892,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             sink: metrics,
             snapshot: managedTurn?.snapshot,
             startedAtMs: requestStart,
+            ...(turnRollout ? { rollout: turnRollout, approvalsDeclined: declinedApprovalsOf(requestMessages) } : {}),
             // A budget continuation is a request the user asked for: a finished turn for the
             // Platform, whose contract knows only approval and UI outcome continuations.
             ...(continuation && continuation !== 'budget'
@@ -2772,6 +2778,17 @@ function findHandlerBuiltins(
 // ============================================================================
 // PII Shield Helpers
 // ============================================================================
+
+const MAX_CONVERSATION_ID_CHARS = 200;
+
+/** The chat id of the body (AI SDK `id`), else the first user message id, else the turn. */
+function conversationIdOf(body: unknown, messages: ReadonlyArray<unknown>, turnId: string): string {
+  const id = (body as { id?: unknown } | null)?.id;
+  if (typeof id === 'string' && id.length > 0 && id.length <= MAX_CONVERSATION_ID_CHARS) return id;
+  const first = messages.find((message) => (message as { role?: unknown } | null)?.role === 'user') as
+    { id?: unknown } | undefined;
+  return typeof first?.id === 'string' ? `ai-${first.id}` : turnId;
+}
 
 function deriveSessionId(messages: unknown[]): string {
   // Use the last user message's ID — groups approval continuations (same
