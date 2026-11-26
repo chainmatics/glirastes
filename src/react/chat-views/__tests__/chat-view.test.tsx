@@ -4,7 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { ResolvedChatView } from '../../../contracts/chat-view.js';
-import { defineChatComponent } from '../../../chat-views/define.js';
+import { defineChatComponent, refOnly } from '../../../chat-views/define.js';
+import { chatElementId } from '../../../chat-views/element-id.js';
 import { starterChatComponents } from '../../../chat-views/starter-catalog.js';
 import { UiActionBus } from '../../../browser/ui-action-bus.js';
 import { readChatViewCapabilities } from '../../../server/adapters/nextjs/render-view.js';
@@ -141,7 +142,8 @@ describe('chat views in the message list', () => {
     };
     renderChat(view, { chatViews: {} });
     const fallbacks = [...document.querySelectorAll('[data-element="text-fallback"]')].map((node) => node.textContent);
-    expect(fallbacks).toEqual(['', 'blocked']);
+    // The unknown Chart has no text and no children: nothing at all, not an empty span.
+    expect(fallbacks).toEqual(['blocked']);
     expect(document.querySelector('[data-element="status-badge"]')?.textContent).toBe('done');
   });
 
@@ -330,6 +332,49 @@ describe('createChatViewRegistry', () => {
     expect(registry.resolve('Note', 2, { text: 'x' })?.entry.schemaVersion).toBe(2);
     expect(registry.resolve('Note', 3, { body: 'x' })?.entry.schemaVersion).toBe(1);
     expect(registry.resolve('Note', 1, { text: 'x' })).toBeUndefined();
+  });
+});
+
+describe('ChatView with an app table-like component', () => {
+  const orderGrid = defineChatComponent({
+    id: 'OrderGrid',
+    schemaVersion: 1,
+    description: 'Orders',
+    props: z.object({
+      orders: refOnly(z.array(z.record(z.string(), z.unknown()))),
+      fields: z.array(z.object({ title: z.string(), element: chatElementId() })),
+    }),
+    itemScope: { rowsProp: 'orders', cellsProp: 'fields' },
+    text: { rows: 'orders', columns: 'fields' },
+  });
+  const view: ResolvedChatView = {
+    v: 1,
+    root: 'grid',
+    elements: {
+      grid: { type: 'OrderGrid', schemaVersion: 1, props: { fields: [{ title: 'Order', element: 'no' }] }, rows: [{ no: { label: 'A-1', tone: 'neutral' } }] },
+      no: { type: 'StatusBadge', schemaVersion: 1, props: {} },
+    },
+  };
+
+  it('renders the app binding with its cells', () => {
+    const Grid: ChatComponentBinding['component'] = ({ props, rows, renderCell }) => (
+      <table data-element="order-grid">
+        <tbody>
+          {(rows ?? []).map((_row, index) => (
+            <tr key={index}>{(props.fields as Array<{ element: string }>).map((field) => <td key={field.element}>{renderCell(index, field.element)}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    );
+    render(<ChatView view={view} registry={createChatViewRegistry([...starterChatBindings, bindChatComponent(orderGrid, Grid)])} />);
+    expect(document.querySelector('[data-element="order-grid"] [data-element="status-badge"]')?.textContent).toBe('A-1');
+  });
+
+  it('renders the text table when the binding exists for the manifest but not the client', () => {
+    // A client registry with the app's entry but no app binding falls back per element through the manifest.
+    const registry = createChatViewRegistry([...starterChatBindings, bindChatComponent(orderGrid, () => { throw new Error('broken'); })]);
+    render(<ChatView view={{ ...view, root: 'wrap', elements: { ...view.elements, wrap: { type: 'Group', schemaVersion: 1, props: {}, children: ['grid'] } } }} registry={registry} />);
+    expect(document.querySelector('[data-element="text-fallback"]')?.textContent).toBe('| Order |\n| --- |\n| A-1 |');
   });
 });
 

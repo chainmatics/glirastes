@@ -68,9 +68,11 @@ export function ChatView({ view, registry, locale = 'en', texts, dispatch }: Cha
   const root = elementOf(view, view.root);
   if (!registry || !root || !registry.resolve(root.type, root.schemaVersion, root.props)) return wholeText;
 
-  const elementText = (target: ResolvedChatView, id: string) => (
-    <span data-element="text-fallback">{chatElementToText(target, id, manifest, { locale, format: 'plain' })}</span>
-  );
+  // An element without any text (an unknown type without children) renders nothing, not an empty span.
+  const elementText = (target: ResolvedChatView, id: string) => {
+    const text = chatElementToText(target, id, manifest, { locale, format: 'plain' });
+    return text ? <span data-element="text-fallback">{text}</span> : null;
+  };
 
   function renderCell(tableId: string, rowIndex: number, cellId: string): ReactNode {
     const row = elementOf(view, tableId)?.rows?.[rowIndex];

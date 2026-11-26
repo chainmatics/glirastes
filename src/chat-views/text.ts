@@ -15,6 +15,7 @@ import type {
   ChatComponentManifestEntry,
   ResolvedChatView,
 } from '../contracts/chat-view.js';
+import { cellIdFields } from './element-id.js';
 
 export interface ChatViewTextOptions {
   /** BCP 47 locale for numbers, dates and fixed phrases; default `en`. */
@@ -145,18 +146,29 @@ function inlineText(context: Context, type: string, props: Json): string {
 /** A table cell: values are already escaped (Markdown) or raw (plain); only line breaks fold. */
 const cell = collapseLines;
 
+/** The header of a table column: its `header`, else its first other text field. */
+function columnHeader(column: Json, idField: string): string {
+  if (typeof column.header === 'string') return column.header;
+  const other = Object.entries(column).find(([key, value]) => key !== idField && typeof value === 'string');
+  return other ? (other[1] as string) : '';
+}
+
+/** An item-scope (table-like) component: a column per cells-prop entry, a line per resolved row. */
 function tableText(context: Context, element: Element, entry: ChatComponentManifestEntry): string {
-  const columnsProp = entry.text.columns ?? 'columns';
+  const columnsProp = entry.text.columns ?? entry.itemScope?.cellsProp ?? 'columns';
+  const idField = cellIdFields(entry)[0] ?? 'cell';
   const columns = (Array.isArray(element.props[columnsProp]) ? element.props[columnsProp] : [])
     .filter(isRecord)
-    .map((column) => ({ header: scalarText(column.header), cell: scalarText(column.cell) }));
+    .map((column) => ({ header: columnHeader(column, idField), cell: scalarText(column[idField]) }));
   const lines: string[] = [];
   if (columns.length > 0) {
     lines.push(`| ${columns.map((column) => cell(context.value(column.header))).join(' | ')} |`);
     lines.push(`| ${columns.map(() => '---').join(' | ')} |`);
     for (const row of element.rows ?? []) {
       const texts = columns.map((column) => {
-        const cellElement = context.view.elements[column.cell];
+        const cellElement = Object.prototype.hasOwnProperty.call(context.view.elements, column.cell)
+          ? context.view.elements[column.cell]
+          : undefined;
         const cellProps = row[column.cell];
         if (!cellElement || !isRecord(cellProps)) return '';
         return cell(inlineText(context, cellElement.type, cellProps));
@@ -170,32 +182,54 @@ function tableText(context: Context, element: Element, entry: ChatComponentManif
   return lines.join('\n');
 }
 
-function keyValueText(context: Context, element: Element, entry: ChatComponentManifestEntry): string {
-  const itemsProp = entry.text.rows ?? 'items';
-  const items = Array.isArray(element.props[itemsProp]) ? element.props[itemsProp] : [];
+/** A list prop (`text.rows` without an item scope): `label: value` per entry, else its scalar values. */
+function listText(context: Context, element: Element, rowsProp: string): string {
+  const items = Array.isArray(element.props[rowsProp]) ? element.props[rowsProp] : [];
   return items
     .filter(isRecord)
-    .map((item) => `${context.value(scalarText(item.label))}: ${context.value(scalarText(item.value))}`)
+    .map((item) => {
+      if (hasOwn(item, 'label') && hasOwn(item, 'value')) {
+        return `${context.value(scalarText(item.label))}: ${context.value(scalarText(item.value))}`;
+      }
+      return Object.values(item)
+        .filter((value) => ['string', 'number', 'boolean'].includes(typeof value))
+        .map((value) => context.value(scalarText(value)))
+        .join(' · ');
+    })
+    .filter((line) => line.length > 0)
     .join('\n');
 }
 
+const hasOwn = (value: Json, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+
+/**
+ * An element's own text, by its manifest entry's rule: an item scope is a
+ * table, `rows` alone a list, a container with only a `label` a title, else
+ * the inline `label: value`.
+ */
+function ownText(context: Context, element: Element, entry: ChatComponentManifestEntry): string {
+  const rule = entry.text;
+  if (entry.itemScope) return tableText(context, element, entry);
+  if (rule.rows) return listText(context, element, rule.rows);
+  if (entry.children !== 'none' && rule.label && !rule.value) {
+    const title = context.value(scalarText(element.props[rule.label]));
+    return title && context.markdown ? `**${title}**` : title;
+  }
+  const own = inlineText(context, element.type, element.props);
+  return own && element.said ? `${own}${context.phrases.said}` : own;
+}
+
+/**
+ * An element and its subtree. An element whose type the manifest does not
+ * know (a catalog that evolved, a client without the app's components) is
+ * the text of its children, else nothing.
+ */
 function elementText(context: Context, id: string, seen: Set<string>): string {
-  const element = context.view.elements[id];
+  const element = Object.prototype.hasOwnProperty.call(context.view.elements, id) ? context.view.elements[id] : undefined;
   if (!element || seen.has(id)) return '';
   seen.add(id);
   const entry = context.entries.get(element.type);
-  const blocks: string[] = [];
-  if (entry) {
-    if (element.type === 'Table') blocks.push(tableText(context, element, entry));
-    else if (element.type === 'KeyValue') blocks.push(keyValueText(context, element, entry));
-    else if (element.type === 'Card' && entry.text.label) {
-      const title = context.value(scalarText(element.props[entry.text.label]));
-      if (title) blocks.push(context.markdown ? `**${title}**` : title);
-    } else {
-      const own = inlineText(context, element.type, element.props);
-      blocks.push(element.type === 'Stat' && element.said ? `${own}${context.phrases.said}` : own);
-    }
-  }
+  const blocks: string[] = entry ? [ownText(context, element, entry)] : [];
   for (const childId of element.children ?? []) blocks.push(elementText(context, childId, seen));
   seen.delete(id);
   return blocks.filter((block) => block.length > 0).join('\n\n');

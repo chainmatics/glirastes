@@ -105,6 +105,41 @@ describe('chatViewToText', () => {
     expect(chatViewToText(view, custom)).toBe('Order 7: shipped');
   });
 
+  it('derives list and title text from the rule of an app component', () => {
+    const custom = toChatComponentManifest([
+      ...starterChatComponents,
+      defineChatComponent({
+        id: 'Facts',
+        schemaVersion: 1,
+        description: 'Facts',
+        props: z.object({ entries: z.array(z.object({ name: z.string(), amount: z.number() })) }),
+        text: { rows: 'entries' },
+      }),
+      defineChatComponent({
+        id: 'Panel',
+        schemaVersion: 1,
+        description: 'Panel',
+        props: z.object({ heading: z.string() }),
+        children: 'any',
+        text: { label: 'heading' },
+      }),
+    ]);
+    const view: ResolvedChatView = {
+      v: 1,
+      root: 'panel',
+      elements: {
+        panel: v('Panel', { heading: 'Summary' }, { children: ['facts'] }),
+        facts: v('Facts', { entries: [{ name: 'Open', amount: 2 }, { name: 'Paid', amount: 5 }] }),
+      },
+    };
+    expect(chatViewToText(view, custom)).toBe('**Summary**\n\nOpen · 2\nPaid · 5');
+  });
+
+  it('renders nothing for an unknown type without children', () => {
+    const view: ResolvedChatView = { v: 1, root: 'x', elements: { x: v('FutureThing', { a: 1 }) } };
+    expect(chatViewToText(view, manifest)).toBe('');
+  });
+
   it('degrades an unknown type to the text of its children', () => {
     const view: ResolvedChatView = {
       v: 1,

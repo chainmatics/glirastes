@@ -5,6 +5,7 @@ export {
   refOnly,
   toChatComponentManifest,
 } from './define.js';
+export { chatElementId } from './element-id.js';
 export type {
   ChatComponentChildren,
   ChatComponentDefinition,

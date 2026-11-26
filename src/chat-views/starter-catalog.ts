@@ -11,9 +11,8 @@ import {
   toChatComponentManifest,
   type ChatComponentDefinition,
 } from './define.js';
+import { chatElementId } from './element-id.js';
 
-/** An element id in the same spec (rendered as `#id` in the catalog text). */
-const elementId = () => z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).describe('#id');
 const scalar = () => z.union([z.string(), z.number(), z.boolean()]);
 const isoDateOrDateTime = () => z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
 
@@ -59,7 +58,7 @@ export const starterChatComponents: ChatComponentDefinition[] = [
     whenToUse: '4+ like records',
     props: z.object({
       rows: refOnly(z.array(z.record(z.string(), z.unknown()))),
-      columns: z.array(z.object({ header: z.string().max(40), cell: elementId() })).max(8),
+      columns: z.array(z.object({ header: z.string().max(40), cell: chatElementId() })).max(8),
     }),
     itemScope: { rowsProp: 'rows', cellsProp: 'columns' },
     text: { rows: 'rows', columns: 'columns' },

@@ -15,6 +15,9 @@ import {
   type ChatViewSpec,
 } from '../contracts/chat-view.js';
 import { starterChatComponentManifest } from './starter-catalog.js';
+import { ELEMENT_ID_MARKER, cellIdFields } from './element-id.js';
+
+export { cellIdFields };
 
 export interface ValidateChatViewSpecOptions {
   /** `narrow` tightens the table column limit to `maxNarrowTableColumns`. */
@@ -27,8 +30,6 @@ export type ChatViewSpecValidation =
 
 const MAX_REPORTED_ERRORS = 20;
 
-/** Marker the catalog puts on string props that name another element. */
-const ELEMENT_ID_MARKER = '#id';
 
 const REF_KEYS = ['$ref', '$item', '$count', '$sum', '$said'] as const;
 type RefKind = (typeof REF_KEYS)[number];
@@ -442,18 +443,6 @@ function checkRef(
   }
   const shapeError = refShapeError(kind, value);
   if (shapeError) errors.push(at(display, shapeError));
-}
-
-/** Names of the `#id` fields of the items of an item-scope cells prop. */
-export function cellIdFields(entry: ChatComponentManifestEntry): string[] {
-  const scope = entry.itemScope;
-  const props = isRecord(entry.props.properties) ? entry.props.properties : {};
-  const cells = scope ? props[scope.cellsProp] : undefined;
-  const items = isRecord(cells) && isRecord(cells.items) ? cells.items : undefined;
-  const fields = items && isRecord(items.properties) ? items.properties : {};
-  return Object.entries(fields)
-    .filter(([, schema]) => isRecord(schema) && schema.description === ELEMENT_ID_MARKER)
-    .map(([name]) => name);
 }
 
 /**

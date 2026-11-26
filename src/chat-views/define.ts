@@ -8,6 +8,7 @@ import type {
   ChatComponentManifest,
   ChatComponentManifestEntry,
 } from '../contracts/chat-view.js';
+import { cellIdFields } from './element-id.js';
 
 type ChatPropMark = 'bindable' | 'refOnly';
 
@@ -124,6 +125,26 @@ function collectMarks(
   }
 }
 
+/**
+ * An item-scope component names its cell elements in a `chatElementId()`
+ * field of its cells prop's entries; without one no cell can be placed.
+ * Props that cannot become JSON Schema are left to `toChatComponentManifest`.
+ */
+function assertCellIdField(def: ChatComponentDefinition): void {
+  let props: Record<string, unknown>;
+  try {
+    props = propsJsonSchema(def);
+  } catch {
+    return;
+  }
+  if (cellIdFields({ props, itemScope: def.itemScope }).length === 0) {
+    throw new Error(
+      `chat component ${def.id}: itemScope.cellsProp "${def.itemScope!.cellsProp}" must be a list of objects `
+        + 'with a chatElementId() field naming the cell element',
+    );
+  }
+}
+
 export function defineChatComponent<P extends z.ZodRawShape>(
   def: ChatComponentDefinitionInput<P>,
 ): ChatComponentDefinition<P> {
@@ -145,7 +166,9 @@ export function defineChatComponent<P extends z.ZodRawShape>(
   }
   const marks: Record<ChatPropMark, string[]> = { bindable: [], refOnly: [] };
   collectMarks(def.props, '', marks);
-  return { ...def, children: def.children ?? 'none', ...marks };
+  const defined: ChatComponentDefinition<P> = { ...def, children: def.children ?? 'none', ...marks };
+  if (def.itemScope) assertCellIdField(defined);
+  return defined;
 }
 
 function propsJsonSchema(def: ChatComponentDefinition): Record<string, unknown> {
