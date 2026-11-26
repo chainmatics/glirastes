@@ -19,6 +19,7 @@ import {
   bindChatComponent,
   ChatView,
   createChatViewRegistry,
+  mergeChatComponentBindings,
   starterChatBindings,
   type ChatComponentBinding,
 } from '../../index.js';
@@ -335,6 +336,28 @@ describe('createChatViewRegistry', () => {
   });
 });
 
+describe('mergeChatComponentBindings', () => {
+  const note = (schemaVersion: number) => defineChatComponent({
+    id: 'Note', schemaVersion, description: 'n', props: z.object({ body: z.string() }), text: {},
+  });
+  const bound = (schemaVersion: number) => bindChatComponent(note(schemaVersion), () => null);
+
+  it('lets a later binding of the same id and schemaVersion replace an earlier one, keeping first-appearance order', () => {
+    const early = bound(1);
+    const other = bound(2);
+    const late = bound(1);
+    const merged = mergeChatComponentBindings([early, other], [late]);
+    expect(merged).toEqual([late, other]);
+    expect(merged[0]).toBe(late);
+    expect(() => createChatViewRegistry(merged)).not.toThrow();
+  });
+
+  it('keeps createChatViewRegistry strict for duplicates inside one list', () => {
+    expect(() => createChatViewRegistry([bound(1), bound(1)])).toThrow();
+    expect(() => createChatViewRegistry([...starterChatBindings, ...starterChatBindings])).toThrow();
+  });
+});
+
 describe('ChatView with an app table-like component', () => {
   const orderGrid = defineChatComponent({
     id: 'OrderGrid',
@@ -439,6 +462,15 @@ describe('chat view capabilities in the request body', () => {
     expect(chatViews.components.map((component) => component.id)).toEqual(starterChatComponents.map((definition) => definition.id));
     // Round trip: the server's parser (Task 6) reads exactly this field and shape.
     expect(readChatViewCapabilities(body)).toEqual(chatViews);
+  });
+
+  it('lets an app binding override a starter component without throwing', async () => {
+    const group = starterChatComponents.find((definition) => definition.id === 'Group')!;
+    const mine = bindChatComponent(group, () => null);
+    const body = await bodyOf({ chatViews: { components: [mine] } });
+    const chatViews = body.chatViews as { components: Array<{ id: string; schemaVersion: number }> };
+    expect(chatViews.components.filter((component) => component.id === 'Group')).toHaveLength(1);
+    expect(chatViews.components).toHaveLength(starterChatBindings.length);
   });
 
   it('sends nothing the server would read as capabilities without the option', async () => {
