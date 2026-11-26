@@ -336,6 +336,38 @@ describe('render_view (chat views)', () => {
     expect(JSON.stringify(model.doStreamCalls[0]!.prompt)).toContain('APP-OWNED-VIEW');
   });
 
+  it('source memo names no data-derived keys', async () => {
+    const { registry } = invoiceTools();
+    const model = scriptedModel(['Fine.']);
+    const part = (toolCallId: string, output: unknown) => ({
+      type: 'tool-invoices_list', toolCallId, state: 'output-available', input: {}, output,
+    });
+    const history = [
+      userMessage('u0', 'Show'),
+      {
+        id: 'a0',
+        role: 'assistant',
+        parts: [
+          // A map keyed by e-mail addresses and ids: no list, so only `value`.
+          part('call-map', { success: true, 'alice@example.com': { total: 1 }, cust_12345: { total: 2 } }),
+          // A list whose entries carry data-derived keys next to real field names.
+          part('call-list', { success: true, data: [{ id: 'a', 'bob@example.com': 1, acct_98765: 2, total: 3 }] }),
+          { type: 'text', text: 'Done.' },
+        ],
+      },
+      userMessage('u1', 'Thanks'),
+    ];
+    const handler = createAiChatHandler({ tools: registry, model, systemPrompt: 'Assistant', chatViews: {} });
+    await (await handler(post(history))).text();
+    const prompt = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    expect(prompt).toContain('call-map · invoices_list · value');
+    expect(prompt).toContain('call-list · invoices_list · data[] (1) · fields: id, total');
+    // The memo is one JSON string in the prompt (the history's tool parts hold the keys themselves).
+    const memo = /Tool results of earlier turns(?:[^"\\]|\\.)*/.exec(prompt)![0];
+    expect(memo).toContain('call-map');
+    for (const key of ['alice@example.com', 'cust_12345', 'bob@example.com', 'acct_98765']) expect(memo).not.toContain(key);
+  });
+
   it('capabilities narrow the catalog', async () => {
     const { registry } = invoiceTools();
     const turn = harness({ tools: registry, chatViews: {} });

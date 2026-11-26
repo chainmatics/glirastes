@@ -32,6 +32,7 @@ import {
 import { defineTool, type Tool } from '../../../types.js';
 import { MAX_MAX_RESULT_CHARS } from '../../../runtime/result-limit.js';
 import { withToolModelOutput } from '../../core/tool-model-output.js';
+import { echoableKey } from '../../core/read-result-tool.js';
 import type { ResultStore } from '../../core/index.js';
 import type { TurnResults } from './result-handles.js';
 import { NON_DOMAIN_TOOL_NAMES } from './tool-discovery.js';
@@ -426,18 +427,27 @@ export function withoutChatViewProjections<T>(messages: T[]): T[] {
 const MAX_MEMO_FIELDS = 12;
 const MAX_MEMO_SAMPLE = 20;
 
+/**
+ * Field names of a list's entries the model may see: identifiers without a
+ * run of three digits, as `read_result` echoes them. The memo is added after
+ * the PII shield ran, so a key that is data (an e-mail-keyed map, an id)
+ * must never appear in it.
+ */
 function fieldNames(entries: ReadonlyArray<unknown>): string[] {
   const names: string[] = [];
   for (const entry of entries.slice(0, MAX_MEMO_SAMPLE)) {
     if (!isRecord(entry)) continue;
     for (const key of Object.keys(entry)) {
-      if (!key.startsWith('_') && !names.includes(key)) names.push(key);
+      if (!key.startsWith('_') && echoableKey(key) && !names.includes(key)) names.push(key);
     }
   }
   return names.slice(0, MAX_MEMO_FIELDS);
 }
 
-/** The shape of one result: its list (path and count) and field names, never values. */
+/**
+ * The shape of one result: its list (path and count) and field names, never
+ * values; any other result is just `value` (its keys may be data).
+ */
 function shapeOf(output: unknown): string {
   const list = (path: string, entries: unknown[]) => {
     const fields = fieldNames(entries);
@@ -447,11 +457,9 @@ function shapeOf(output: unknown): string {
   if (!isRecord(output)) return 'value';
   const listKey = Array.isArray(output.data)
     ? 'data'
-    : Object.keys(output).find((key) => !key.startsWith('_') && Array.isArray(output[key])
+    : Object.keys(output).find((key) => !key.startsWith('_') && echoableKey(key) && Array.isArray(output[key])
       && (output[key] as unknown[]).some(isRecord));
-  if (listKey) return list(listKey, output[listKey] as unknown[]);
-  const fields = Object.keys(output).filter((key) => !key.startsWith('_') && key !== 'success' && key !== 'uiAction');
-  return `fields: ${fields.slice(0, MAX_MEMO_FIELDS).join(', ')}`;
+  return listKey ? list(listKey, output[listKey] as unknown[]) : 'value';
 }
 
 /**
