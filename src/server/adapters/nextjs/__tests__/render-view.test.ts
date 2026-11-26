@@ -290,6 +290,52 @@ describe('render_view (chat views)', () => {
     expect(prompt).toContain('call-old · invoices_list · data[] (5) · fields: id, customer, total, status');
   });
 
+  it.each([
+    ['legacy', false],
+    ['pipeline', true],
+  ] as const)('history: view stripped from model input with chatViews off (%s)', async (_label, withPipeline) => {
+    const { registry } = invoiceTools();
+    const model = scriptedModel(['Fine.']);
+    const viewPart = {
+      type: 'tool-render_view', toolCallId: 'call-view', state: 'output-available',
+      input: tableSpec('call-old'),
+      output: { shown: true, elements: 1, view: { v: 1, root: 'card', elements: { card: { type: 'Card', schemaVersion: 1, props: { title: 'SECRET-PROJECTION' } } } } },
+    };
+    const handler = createAiChatHandler({
+      tools: registry, model, systemPrompt: 'Assistant',
+      ...(withPipeline
+        ? {
+            pipeline: {
+              process: async (input: string) => ({
+                model: { modelId: 'm' }, tools: ['invoices_list'], toolSelection: 'explicit' as const, sanitizedInput: input,
+                intent: { intent: 'x', confidence: 1 }, module: null, followupsEnabled: false,
+              }),
+            },
+          }
+        : {}),
+    });
+    await (await handler(post([...earlierTurn([viewPart]), userMessage('u1', 'Thanks')]))).text();
+    const prompt = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    expect(prompt).not.toContain('SECRET-PROJECTION');
+    expect(prompt).toContain('"shown":true');
+    // Still off: no tool and no source memo.
+    expect(model.doStreamCalls[0]!.tools?.map((tool) => tool.name) ?? []).not.toContain('render_view');
+    expect(prompt).not.toContain('call-old ·');
+  });
+
+  it('an app tool named render_view keeps its parts in model input', async () => {
+    const { registry } = invoiceTools();
+    const appTool = defineTool({ id: 'render_view', description: 'App view.', inputSchema: z.object({}).strict(), execute: async () => ({ shown: true }) });
+    const model = scriptedModel(['Fine.']);
+    const viewPart = {
+      type: 'tool-render_view', toolCallId: 'call-view', state: 'output-available', input: {},
+      output: { shown: true, elements: 1, view: { v: 1, note: 'APP-OWNED-VIEW' } },
+    };
+    const handler = createAiChatHandler({ tools: { ...registry, render_view: appTool }, model, systemPrompt: 'Assistant', chatViews: {} });
+    await (await handler(post([...earlierTurn([viewPart]), userMessage('u1', 'Thanks')]))).text();
+    expect(JSON.stringify(model.doStreamCalls[0]!.prompt)).toContain('APP-OWNED-VIEW');
+  });
+
   it('capabilities narrow the catalog', async () => {
     const { registry } = invoiceTools();
     const turn = harness({ tools: registry, chatViews: {} });

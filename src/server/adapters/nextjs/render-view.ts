@@ -397,7 +397,17 @@ export function beginChatViewTurn(options: {
 // Model input
 // ---------------------------------------------------------------------------
 
-/** UI messages without the resolved `view` of `render_view` outputs: projections never reach the model. */
+/** The SDK's `render_view` answer with a resolved view (`{ shown: true, elements, view: { v: 1, … } }`). */
+function isSdkViewOutput(output: unknown): output is Json {
+  return isRecord(output) && output.shown === true && isRecord(output.view) && output.view.v === 1;
+}
+
+/**
+ * UI messages without the resolved `view` of `render_view` outputs:
+ * projections never reach the model. The handler applies it on every
+ * request, also with `chatViews` off, unless the app registers its own
+ * `render_view` tool.
+ */
 export function withoutChatViewProjections<T>(messages: T[]): T[] {
   return messages.map((message) => {
     const parts = partsOf(message);
@@ -405,7 +415,7 @@ export function withoutChatViewProjections<T>(messages: T[]): T[] {
     let changed = false;
     const next = parts.map((raw) => {
       const part = toolPartOf(raw);
-      if (part?.toolName !== RENDER_VIEW_TOOL_NAME || !isRecord(part.output) || !hasOwn(part.output, 'view')) return raw;
+      if (part?.toolName !== RENDER_VIEW_TOOL_NAME || !isSdkViewOutput(part.output)) return raw;
       changed = true;
       return { ...(raw as Json), output: renderViewModelOutput(part.output) };
     });

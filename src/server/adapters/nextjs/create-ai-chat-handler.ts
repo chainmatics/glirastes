@@ -2084,6 +2084,13 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         views && registry[RENDER_VIEW_TOOL_NAME] === views.tool ? RENDER_VIEW_TOOL_NAME : undefined
       );
       /**
+       * Whether the registry holds an app tool named `render_view` (not the
+       * handler's own): then its parts are the app's and stay as they are.
+       */
+      const appViewTool = (registry: ToolRegistry, views: ChatViewTurn | undefined): boolean => (
+        registry[RENDER_VIEW_TOOL_NAME] !== undefined && registry[RENDER_VIEW_TOOL_NAME] !== views?.tool
+      );
+      /**
        * The approval-subject lookups of this request (docs/approval-subjects.md),
        * or undefined when no tool declares them (then nothing changes).
        * Lookups run through `context` (this request's transport, the user's
@@ -2469,7 +2476,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           maxContextMessages;
         // A view's projection never reaches the model, the chat memory's model included.
         const viewSources = processedMessages;
-        if (chatViews) processedMessages = withoutChatViewProjections(processedMessages);
+        // Whether or not chatViews is on for this request (it may have been switched off since).
+        if (!appViewTool(registry, chatViews)) processedMessages = withoutChatViewProjections(processedMessages);
         const memory = await prepareMemory(processedMessages, model, sessionId);
         let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
         let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
@@ -2691,7 +2699,8 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
       // A view's projection never reaches the model, the chat memory's model included.
       const viewSources = processedMessages;
-      if (chatViews) processedMessages = withoutChatViewProjections(processedMessages);
+      // Whether or not chatViews is on for this request (it may have been switched off since).
+      if (!appViewTool(registry, chatViews)) processedMessages = withoutChatViewProjections(processedMessages);
       const memory = await prepareMemory(processedMessages, model, legacySessionId);
       let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
       let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
