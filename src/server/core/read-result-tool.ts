@@ -27,7 +27,7 @@ import {
   setOwn,
   type ParsedPath,
   type PathStep,
-} from './result-paths.js';
+} from '../../contracts/result-paths.js';
 import type { ResultHandle, ResultStore } from './result-store.js';
 import { truncateToolResult } from './truncate-tool-result.js';
 

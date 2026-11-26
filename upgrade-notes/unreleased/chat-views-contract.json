@@ -2,7 +2,7 @@
   "id": "chat-views-contract",
   "kind": "optional",
   "summary": "Optional Chat Views contract and catalog authoring (generative UI in chat): the render_view spec, component manifest and resolved view schemas in glirastes/contracts; defineChatComponent, the starter catalog and describeChatCatalog in glirastes.",
-  "howTo": "Nothing to do. The schemas, CHAT_VIEW_LIMITS, chatComponentManifestDigest and the catalog helpers (defineChatComponent, bindable, refOnly, toChatComponentManifest, mergeChatManifests, starterChatComponents) and the spec validation (validateChatViewSpec, effectiveChatManifest) are the base for the optional Chat Views feature; later releases add the server tool and React renderer.",
+  "howTo": "Nothing to do. The schemas, CHAT_VIEW_LIMITS, chatComponentManifestDigest and the catalog helpers (defineChatComponent, bindable, refOnly, toChatComponentManifest, mergeChatManifests, starterChatComponents) the spec validation (validateChatViewSpec, effectiveChatManifest) and the reference resolution (resolveChatView) are the base for the optional Chat Views feature; later releases add the server tool and React renderer.",
   "skill": "building-glirastes-chat-ui",
   "surface": [
     "glirastes/contracts#CHAT_VIEW_LIMITS",
@@ -42,6 +42,10 @@
     "glirastes#effectiveChatManifest",
     "glirastes#validateChatViewSpec",
     "glirastes#ChatViewSpecValidation",
-    "glirastes#ValidateChatViewSpecOptions.*"
+    "glirastes#ValidateChatViewSpecOptions.*",
+    "glirastes#resolveChatView",
+    "glirastes#ChatViewResolution",
+    "glirastes#ChatViewSource.*",
+    "glirastes#ChatViewSourceLookup"
   ]
 }

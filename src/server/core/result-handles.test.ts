@@ -6,7 +6,7 @@ import { createReadResultTool, readResultHandle, type ReadResultInput, type Read
 import { buildResultOverview, identityFieldsOf, type ResultOverviewMarker } from './result-overview.js';
 import {
   formatResultPath, isSelectablePath, mixedArraySelections, parseResultPath, projectResult, type ParsedPath, type PathStep,
-} from './result-paths.js';
+} from '../../contracts/result-paths.js';
 import { createPiiShield } from '../pii-shield/create-pii-shield.js';
 import { createFakeDataGenerator } from '../pii-shield/fake-data.js';
 import { createResultStore, DEFAULT_RESULT_HANDLE_LIMITS, type ResultHandle } from './result-store.js';

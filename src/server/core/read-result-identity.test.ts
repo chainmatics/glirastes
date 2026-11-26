@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { defineTool, type Tool, type ToolContext } from '../../types.js';
 import { toolToAiTool } from './index.js';
 import { createReadResultTool, readResultHandle, type ReadResultInput, type ReadResultMarker } from './read-result-tool.js';
-import { parseResultPath } from './result-paths.js';
+import { parseResultPath } from '../../contracts/result-paths.js';
 import { createResultStore, type ResultHandle } from './result-store.js';
 
 type Answer = Record<string, unknown> & { _result: ReadResultMarker };

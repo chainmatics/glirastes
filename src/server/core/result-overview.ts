@@ -26,7 +26,7 @@ import {
   type OutputEntityDeclaration,
 } from '../../contracts/entity-declaration.js';
 import { leftOutFields, outputFieldTree, projectOutputFields, type LeftOutField } from './output-fields.js';
-import { formatResultPath, isSelectablePath, setOwn, type PathStep } from './result-paths.js';
+import { formatResultPath, isSelectablePath, setOwn, type PathStep } from '../../contracts/result-paths.js';
 
 /** The `_result` marker of an overview. */
 export interface ResultOverviewMarker {

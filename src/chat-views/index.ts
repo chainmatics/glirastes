@@ -16,3 +16,5 @@ export { starterChatComponentManifest, starterChatComponents } from './starter-c
 export { describeChatCatalog } from './describe.js';
 export { effectiveChatManifest, validateChatViewSpec } from './validate.js';
 export type { ChatViewSpecValidation, ValidateChatViewSpecOptions } from './validate.js';
+export { resolveChatView } from './resolve.js';
+export type { ChatViewResolution, ChatViewSource, ChatViewSourceLookup } from './resolve.js';

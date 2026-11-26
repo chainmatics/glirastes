@@ -443,7 +443,7 @@ function checkRef(
 }
 
 /** Names of the `#id` fields of the items of an item-scope cells prop. */
-function cellIdFields(entry: ChatComponentManifestEntry): string[] {
+export function cellIdFields(entry: ChatComponentManifestEntry): string[] {
   const scope = entry.itemScope;
   const props = isRecord(entry.props.properties) ? entry.props.properties : {};
   const cells = scope ? props[scope.cellsProp] : undefined;

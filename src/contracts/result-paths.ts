@@ -7,6 +7,9 @@
  * the element at that index (`data[2].items`). A root array is `[]` or `[n]`.
  * A path selects the whole subtree it reaches. No wildcards, negation or
  * filters.
+ *
+ * Dependency-free and not exported from `glirastes/contracts`: shared by the
+ * server core and the neutral chat-view resolver so both use one grammar.
  */
 
 export const MAX_RESULT_PATHS = 50;
@@ -143,6 +146,37 @@ export function resultPathExists(root: unknown, steps: ReadonlyArray<PathStep>):
     return isPlainObject(value) && hasOwn(value, step.key) && reach(value[step.key], index + 1);
   };
   return reach(root, 0);
+}
+
+/**
+ * The value `steps` reach in `root`. Without `[]` it is the one value there;
+ * with `[]` it is the flat list of every value reached through the arrays
+ * (`data[]`: the entries, `data[].total`: the totals of the entries that
+ * have one). `found: false` when the path reaches nothing
+ * (`resultPathExists`).
+ */
+export function readResultPath(
+  root: unknown,
+  steps: ReadonlyArray<PathStep>,
+): { found: true; value: unknown } | { found: false } {
+  if (!resultPathExists(root, steps)) return { found: false };
+  const values: unknown[] = [];
+  const collect = (value: unknown, index: number): void => {
+    if (index === steps.length) {
+      values.push(value);
+      return;
+    }
+    const step = steps[index]!;
+    if (step.kind === 'each') {
+      if (Array.isArray(value)) for (const entry of value) collect(entry, index + 1);
+    } else if (step.kind === 'index') {
+      if (Array.isArray(value) && step.index < value.length) collect(value[step.index], index + 1);
+    } else if (isPlainObject(value) && hasOwn(value, step.key)) {
+      collect(value[step.key], index + 1);
+    }
+  };
+  collect(root, 0);
+  return { found: true, value: steps.some((step) => step.kind === 'each') ? values : values[0] };
 }
 
 /** At most this many values are visited to describe a path that selects nothing. */

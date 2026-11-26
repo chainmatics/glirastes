@@ -28,7 +28,7 @@ import { prepareModelMessages } from '../adapters/nextjs/prepare-model-messages.
 import { endpointToolToTool, toolToAiTool } from './index.js';
 import { readResultHandle } from './read-result-tool.js';
 import { buildResultOverview, type ResultOverviewMarker } from './result-overview.js';
-import { parseResultPath } from './result-paths.js';
+import { parseResultPath } from '../../contracts/result-paths.js';
 import type { ResultHandle } from './result-store.js';
 
 type Entry = Record<string, unknown>;

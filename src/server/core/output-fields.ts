@@ -9,7 +9,7 @@
  * result as the model sees it: a list or scalar answer of an endpoint travels
  * under `data`. Pure and dependency-free apart from the path grammar.
  */
-import { MAX_PATH_STEPS, MAX_RESULT_PATH_CHARS, parseResultPath, setOwn } from './result-paths.js';
+import { MAX_PATH_STEPS, MAX_RESULT_PATH_CHARS, parseResultPath, setOwn } from '../../contracts/result-paths.js';
 
 /** Most paths one declaration may hold. */
 export const MAX_OUTPUT_FIELDS = 200;
