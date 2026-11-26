@@ -136,6 +136,24 @@ describe('resolveChatView', () => {
     expect(errors.join('\n')).toContain('data[].customer');
   });
 
+  it('rejects $sum when an entry lacks the field, and $count counts the entries', async () => {
+    const data = [{ total: 10 }, { other: 1 }, { total: 5 }];
+    const lookup = { call_1: source({ data }) };
+    const errors = await errorsOf(statSpec({ $sum: ref('data[].total') }), lookup);
+    expect(errors.join('\n')).toContain('1 of 3 entries have no such field');
+    const count = await resolve(statSpec({ $count: ref('data[].total') }), lookup);
+    if (!count.ok) throw new Error(count.errors.join('; '));
+    expect(count.view.elements.stat!.props.value).toBe(3);
+  });
+
+  it('marks a table from a truncated source as partial', async () => {
+    const partial = await resolve(tableSpec(), { call_1: source({ data: invoices(3) }, true) });
+    const full = await resolve(tableSpec(), { call_1: source({ data: invoices(3) }) });
+    if (!partial.ok || !full.ok) throw new Error('expected both to resolve');
+    expect(partial.view.elements.table!.props.partial).toBe(true);
+    expect(full.view.elements.table!.props.partial).toBeUndefined();
+  });
+
   it('rejects $count over something that is not a list', async () => {
     const errors = await errorsOf(statSpec({ $count: ref('meta.name') }), {
       call_1: source({ meta: { name: 'x' } }),

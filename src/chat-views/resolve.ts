@@ -84,6 +84,8 @@ interface TableRows {
   rows: unknown[];
   /** Steps that reach every row (`data[]`), for naming `$item` paths in errors. */
   rowSteps: PathStep[];
+  /** The source of the rows is a cut or overview form. */
+  partial: boolean;
 }
 
 /**
@@ -162,7 +164,17 @@ export async function resolveChatView(
       report(`"${kind}" needs a list; path "${ref.path}" of ${ref.$ref} is not a list`);
       return OMIT;
     }
-    if (kind === '$count') return read.value.length;
+    // For `data[].field` the entries are the list entries, not only those that have the field.
+    const lastEach = read.steps.map((step) => step.kind).lastIndexOf('each');
+    const entries = lastEach >= 0 ? readResultPath(read.source.value, read.steps.slice(0, lastEach + 1)) : undefined;
+    const entryCount = entries?.found && Array.isArray(entries.value) ? entries.value.length : read.value.length;
+    if (kind === '$count') return entryCount;
+    if (read.value.length < entryCount) {
+      report(
+        `"$sum" over "${ref.path}" of ${ref.$ref}: ${entryCount - read.value.length} of ${entryCount} entries have no such field; every entry needs a numeric value, so sum a field all entries have`,
+      );
+      return OMIT;
+    }
     if (!read.value.every((item) => typeof item === 'number' && Number.isFinite(item))) {
       report(`"$sum" needs numbers; path "${ref.path}" of ${ref.$ref} holds a value that is not a number`);
       return OMIT;
@@ -242,7 +254,7 @@ export async function resolveChatView(
     const rowSteps: PathStep[] = read.steps.some((step) => step.kind === 'each')
       ? read.steps
       : [...read.steps, { kind: 'each' }];
-    tables.set(id, { rows: read.value, rowSteps });
+    tables.set(id, { rows: read.value, rowSteps, partial: read.source.truncated });
     const cells: string[] = [];
     const columns = element.props[scope.cellsProp];
     const fields = cellIdFields(entry);
@@ -299,6 +311,7 @@ export async function resolveChatView(
     const table = tables.get(id);
     if (table) {
       const shown = table.rows.slice(0, CHAT_VIEW_LIMITS.maxTableRows);
+      if (table.partial) props.partial = true;
       if (table.rows.length > shown.length) props.truncatedRows = table.rows.length - shown.length;
       resolved.rows = shown.map((row) => {
         const output: Json = {};
