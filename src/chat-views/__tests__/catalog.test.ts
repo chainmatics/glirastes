@@ -64,6 +64,16 @@ describe('starter catalog', () => {
     expect(keyValue.properties.items.items).toMatchObject({ additionalProperties: false });
   });
 
+  it('Text takes only its text (Text@1 is public contract)', () => {
+    const text = starterChatComponentManifest.components.find((c) => c.id === 'Text')!;
+    expect(text.props).toEqual({
+      type: 'object',
+      properties: { text: { type: 'string' } },
+      required: ['text'],
+      additionalProperties: false,
+    });
+  });
+
   it('Action accepts at most label ≤ 40 and both optional targets in the schema', () => {
     const action = starterChatComponents.find((c) => c.id === 'Action')!;
     expect(action.props.safeParse({ label: 'x'.repeat(41), prompt: 'go' }).success).toBe(false);

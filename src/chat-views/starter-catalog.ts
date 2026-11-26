@@ -38,7 +38,7 @@ export const starterChatComponents: ChatComponentDefinition[] = [
     id: 'Text',
     schemaVersion: 1,
     description: 'Short paragraph',
-    props: z.object({ text: z.string(), markdown: z.boolean().optional() }),
+    props: z.object({ text: z.string() }),
     text: { value: 'text' },
   }),
   defineChatComponent({
