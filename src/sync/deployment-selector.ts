@@ -140,7 +140,13 @@ export class RolloutCohortSelector {
     const { stable, canary } = deployments;
     if (!stable) return undefined;
     const now = this.now();
-    const selectable = canary && canaryState(deployments, {
+    const eligible = canary && canaryState(deployments, {
+      now: () => now,
+      ...(input.promptAvailable ? { promptAvailable: input.promptAvailable } : {}),
+    }) === 'selectable'
+      ? canary
+      : undefined;
+    const selectable = eligible && canaryState(deployments, {
       now: () => now,
       ...(input.promptAvailable ? { promptAvailable: input.promptAvailable } : {}),
       ...(input.maxStalenessMs !== undefined
@@ -154,6 +160,11 @@ export class RolloutCohortSelector {
     const sticky = this.conversations.get(key);
     let selection: RolloutSelection;
     if (sticky && now - sticky.seenAt < this.ttlMs) {
+      if (!selectable && eligible && sticky.deploymentId === eligible.deploymentId) {
+        // Only a stale sync blocks the canary: run stable now, keep the conversation on the canary.
+        this.remember(key, subject, sticky.deploymentId, now);
+        return { deployment: stable, cohort: 'stable' };
+      }
       selection = selectable && sticky.deploymentId === selectable.deploymentId
         ? { deployment: selectable, cohort: 'canary' }
         : { deployment: stable, cohort: 'stable' };

@@ -98,6 +98,8 @@ export interface RuntimeSyncApplyResult {
   state: RuntimeSyncState;
   rejectedDeploymentIds: string[];
   rejectedRevocationIds: string[];
+  /** True when an active deployment failed verification: the active set was kept, not replaced. */
+  rejectedActive: boolean;
   control: RuntimeControlOutcome;
 }
 
@@ -287,6 +289,7 @@ export class RuntimeSyncManager {
       state,
       rejectedDeploymentIds,
       rejectedRevocationIds,
+      rejectedActive,
       control: controlResult.outcome,
     };
   }

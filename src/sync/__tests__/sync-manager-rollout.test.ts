@@ -89,6 +89,12 @@ describe('RuntimeSyncManager rollout bindings', () => {
     expect(result.state.canary?.rolloutBinding).toEqual(canary.rolloutBinding);
   });
 
+  it('flags a sync whose active set it rejected, and only that one', async () => {
+    const tampered = { ...deployment('stable', '21'), policyRevision: { ...revision('policy', '13'), revision: 2 } };
+    expect((await apply([tampered])).rejectedActive).toBe(true);
+    expect((await apply([deployment('stable', '21')])).rejectedActive).toBe(false);
+  });
+
   it('accepts deployments without bindings as before (old Platform)', async () => {
     const result = await apply([deployment('stable', '21'), deployment('canary', '22')]);
     expect(result.state.stable?.rolloutBinding).toBeUndefined();

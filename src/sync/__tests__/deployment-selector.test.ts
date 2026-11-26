@@ -207,6 +207,25 @@ describe('RolloutCohortSelector', () => {
     )?.cohort).toBe('canary');
   });
 
+  it('returns a canary conversation to the canary after a stale period; one started while stale stays stable', () => {
+    let now = 10_000;
+    const wide = deployment('3902', 'canary', 99);
+    const inside = subjectIn(0, 99);
+    const selector = new RolloutCohortSelector({ now: () => now });
+    const at = (syncedAt: number) => ({ syncedAt, maxStalenessMs: 1_000 });
+    expect(selector.select({ stable, canary: wide }, { subjectId: inside, conversationId: 'c-1', ...at(now) })?.cohort)
+      .toBe('canary');
+    now = 20_000;
+    for (const conversationId of ['c-1', 'c-2']) {
+      expect(selector.select({ stable, canary: wide }, { subjectId: inside, conversationId, ...at(10_000) })?.cohort)
+        .toBe('stable');
+    }
+    expect(selector.select({ stable, canary: wide }, { subjectId: inside, conversationId: 'c-1', ...at(now) })?.cohort)
+      .toBe('canary');
+    expect(selector.select({ stable, canary: wide }, { subjectId: inside, conversationId: 'c-2', ...at(now) })?.cohort)
+      .toBe('stable');
+  });
+
   it('has nothing to select without a stable deployment', () => {
     expect(new RolloutCohortSelector().select({ stable: null, canary }, { subjectId: 'alice', conversationId: 'c' }))
       .toBeUndefined();

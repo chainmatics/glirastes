@@ -257,7 +257,7 @@ export class RuntimeControlPlaneClient {
     }
   }
 
-  /** Epoch ms when a sync last succeeded; undefined before the first. */
+  /** Epoch ms when a sync last succeeded without rejecting the active set; undefined before the first. */
   get lastSyncedAt(): number | undefined {
     return this.syncedAt;
   }
@@ -271,7 +271,8 @@ export class RuntimeControlPlaneClient {
       method: 'GET',
     });
     const result = await this.options.manager.apply(bundle);
-    this.syncedAt = Date.now();
+    // A kept active set may hold a canary the Platform already withdrew.
+    if (!result?.rejectedActive) this.syncedAt = Date.now();
     if (
       bundle
       && typeof bundle === 'object'

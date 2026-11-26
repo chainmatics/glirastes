@@ -1277,6 +1277,22 @@ describe('createGlirastes canary cohorts', () => {
     }, { timeout: 1_000 });
   });
 
+  it('falls back to stable once syncs keep delivering an active set it rejects', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const { privateKey: foreignKey } = generateKeyPairSync('ed25519');
+    let rejected = false;
+    const { glirastes } = await connected(
+      () => (rejected ? deployments(foreignKey) : deployments(privateKey)),
+      publicKey,
+      undefined,
+      { canaryMaxStalenessMs: 100 },
+    );
+    expect((await turn(glirastes, inCanary, 'ai-t1')).rollout?.cohort).toBe('canary');
+    rejected = true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await turn(glirastes, inCanary, 'ai-t2')).rollout).toEqual({ deploymentId: id('3904'), cohort: 'stable' });
+  });
+
   it('reports a canary turn as v3 to a custom recorder that passes only the snapshot', async () => {
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const { glirastes } = await connected(() => deployments(privateKey), publicKey);

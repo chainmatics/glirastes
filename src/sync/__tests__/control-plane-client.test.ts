@@ -377,6 +377,20 @@ describe('RuntimeControlPlaneClient', () => {
       expect(client.lastSyncedAt).toBe(synced);
     });
 
+    it('does not count a sync as fresh when the manager rejected the active set', async () => {
+      const apply = vi.fn().mockResolvedValue({ rejectedActive: false });
+      const client = new RuntimeControlPlaneClient({
+        ...baseOptions, fetchImpl: vi.fn().mockImplementation(async () => syncBody()), manager: { apply } as never,
+      });
+      await client.syncOnce();
+      const synced = client.lastSyncedAt;
+      expect(synced).toBeDefined();
+      apply.mockResolvedValue({ rejectedActive: true });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await client.syncOnce();
+      expect(client.lastSyncedAt).toBe(synced);
+    });
+
     it('refuses a caller-supplied canarySelection capability', async () => {
       const client = new RuntimeControlPlaneClient({
         ...baseOptions, fetchImpl: vi.fn(), manager: { apply: vi.fn() } as never,
