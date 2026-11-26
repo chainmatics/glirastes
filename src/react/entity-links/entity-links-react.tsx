@@ -16,7 +16,6 @@ import type { ChatEntitySearchData } from '../../contracts/chat-interactions.js'
 import { GLIRASTES_NAVIGATE_ACTION_ID } from '../../browser/navigation.js';
 import { fillTemplate } from '../utils/fill-template.js';
 import { getDefaultUiActionBus, type UiActionBus } from '../../browser/ui-action-bus.js';
-import { isUiActionRejectedError } from '../../browser/ui-action-signals.js';
 import { MentionChip as DefaultMentionChip } from '../components/mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
 import { useMessageChat } from '../provider/message-chat-context.js';
@@ -209,14 +208,10 @@ export function ChatEntityLinksProvider({
     if (current?.open && (current.canOpen?.(reference.type) ?? true) && current.open(reference) !== false) return;
     const href = entityNavigationHref(interactions?.entity(reference.type), reference.id);
     if (!href) return;
-    // A bus of another SDK copy may not return a promise.
-    Promise.resolve((busRef.current ?? getDefaultUiActionBus()).dispatch({
+    void (busRef.current ?? getDefaultUiActionBus()).dispatch({
       type: 'glirastes.navigate',
       actionId: GLIRASTES_NAVIGATE_ACTION_ID,
       payload: { href },
-    })).catch((error: unknown) => {
-      // A handler or router that declined (`false`, e.g. unsaved changes) keeps the page, as before; a failure is logged.
-      if (!isUiActionRejectedError(error)) console.warn('[glirastes] An entity link could not be opened');
     });
   }, [interactions]);
 
