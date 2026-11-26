@@ -1,0 +1,213 @@
+{
+  "contract": "EvalAttestationRequest",
+  "schemaVersion": 1,
+  "endpoint": {
+    "method": "POST",
+    "path": "/v1/apps/:appId/eval-attestations",
+    "auth": "x-api-key: the app's CI API key (GLIRASTES_API_KEY)"
+  },
+  "sources": {
+    "setupArtifactDigest": ".glirastes/setup-artifact.json#discoveryDigest (the Platform stores it on every config revision as setupArtifactDigest)",
+    "promptDigest": ".glirastes/setup-artifact.json#prompts.bundleDigest (the deployment's promptDigest)",
+    "result": "pass when failed is 0, otherwise fail"
+  },
+  "suiteDigest": {
+    "algorithm": "sha256 base64url over canonicalRuntimeJson({ schemaVersion: 1, files }), files sorted by path in code point order; each entry { path: relative POSIX path, sha256: sha256 base64url of the file bytes }; a single file is listed under its base name",
+    "files": [
+      { "path": "cases/routing.jsonl", "utf8": "{\"input\":\"x\"}\n" },
+      { "path": "README.md", "utf8": "suite\n" },
+      { "path": "cases/approvals.jsonl", "utf8": "{\"input\":\"y\"}\n" }
+    ],
+    "canonical": "{\"files\":[{\"path\":\"README.md\",\"sha256\":\"sha256:SJ5g8qewCvMErNUhoXnXLx531wS3MxfKQ0o8NLCJt_o\"},{\"path\":\"cases/approvals.jsonl\",\"sha256\":\"sha256:MyBI6_6SBMGomJMtUMc-ZOFtCMIgao-fdE93oVOxyL4\"},{\"path\":\"cases/routing.jsonl\",\"sha256\":\"sha256:OvLWWsOf7SgafD3rp755rVsFSZ3YF1ZBDaPdedGjBqk\"}],\"schemaVersion\":1}",
+    "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874"
+  },
+  "valid": [
+    {
+      "name": "valid/pass",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "valid/fail-with-run-ref",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "fail",
+        "total": 120,
+        "failed": 3,
+        "ranAt": "2026-11-26T10:00:00+01:00",
+        "ciRunRef": "github/chainmatics/app/actions/runs/123456789"
+      }
+    },
+    {
+      "name": "valid/all-failed",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "fail",
+        "total": 1,
+        "failed": 1,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "invalid/pass-with-failures",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 1,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/fail-without-failures",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "fail",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/failed-above-total",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "fail",
+        "total": 2,
+        "failed": 3,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/total-zero",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 0,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/total-above-limit",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 100001,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/runtime-digest-instead-of-setup-artifact-digest",
+      "body": {
+        "schemaVersion": 1,
+        "runtimeDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/extra-field",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "model": "gpt-4o"
+      }
+    },
+    {
+      "name": "invalid/schema-version-2",
+      "body": {
+        "schemaVersion": 2,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/digest-not-sha256",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "md5:abc",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/ran-at-without-offset",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00"
+      }
+    },
+    {
+      "name": "invalid/run-ref-free-text",
+      "body": {
+        "schemaVersion": 1,
+        "setupArtifactDigest": "sha256:j7bV836AVc5yC9Cx1WWH-IwAcfKFlmuhfnKysSZyqnM",
+        "promptDigest": "sha256:zwcZTuIy61MeFfaQAA0ZhG3qac8FUEeCZYr8-suSKKI",
+        "suiteDigest": "sha256:tF7v7HGa_8hs8yziiL3UxDqP5yWLv6npqft8f6lN874",
+        "result": "pass",
+        "total": 120,
+        "failed": 0,
+        "ranAt": "2026-11-26T09:00:00.000Z",
+        "ciRunRef": "nightly run with prompt changes"
+      }
+    }
+  ]
+}

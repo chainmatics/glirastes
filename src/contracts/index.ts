@@ -269,6 +269,13 @@ export {
   RolloutBindingSchema,
 } from './rollout-binding.js';
 export type { RolloutBinding } from './rollout-binding.js';
+export {
+  EVAL_ATTESTATION_MAX_TOTAL,
+  EVAL_ATTESTATION_SCHEMA_VERSION,
+  EvalAttestationRequestSchema,
+  EvalAttestationResponseSchema,
+} from './eval-attestation.js';
+export type { EvalAttestationRequest, EvalAttestationResponse } from './eval-attestation.js';
 export type {
   EffectiveEnvironmentControl,
   EnvironmentControl,
