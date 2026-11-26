@@ -37,6 +37,7 @@ export {
   type PrepareModelMessagesOptions,
 } from './prepare-model-messages.js';
 export { executeTool } from './server-action-helper.js';
+export { type ChatViewsConfig } from './render-view.js';
 export {
   createHybridToolDiscovery,
   NON_DOMAIN_TOOL_NAMES,

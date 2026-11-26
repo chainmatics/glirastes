@@ -1,8 +1,8 @@
 {
   "id": "chat-views-contract",
   "kind": "optional",
-  "summary": "Optional Chat Views contract and catalog authoring (generative UI in chat): the render_view spec, component manifest and resolved view schemas in glirastes/contracts; defineChatComponent, the starter catalog and describeChatCatalog in glirastes.",
-  "howTo": "Nothing to do. The schemas, CHAT_VIEW_LIMITS, chatComponentManifestDigest and the catalog helpers (defineChatComponent, bindable, refOnly, toChatComponentManifest, mergeChatManifests, starterChatComponents) the spec validation (validateChatViewSpec, effectiveChatManifest) and the reference resolution (resolveChatView) and the deterministic text rendering (chatViewToText, chatElementToText) are the base for the optional Chat Views feature; later releases add the server tool and React renderer.",
+  "summary": "Optional Chat Views (generative UI in chat): the render_view spec, manifest and resolved view schemas in glirastes/contracts; catalog authoring and resolution in glirastes; the render_view tool behind the chatViews handler option.",
+  "howTo": "Nothing to do. The schemas, CHAT_VIEW_LIMITS, chatComponentManifestDigest and the catalog helpers (defineChatComponent, bindable, refOnly, toChatComponentManifest, mergeChatManifests, starterChatComponents) the spec validation (validateChatViewSpec, effectiveChatManifest) and the reference resolution (resolveChatView) and the deterministic text rendering (chatViewToText, chatElementToText) are the base for the optional Chat Views feature. To let the model show views, set `chatViews: {}` (starter catalog) or `chatViews: { catalog }` on createAiChatHandler; without it nothing changes. A later release adds the React renderer.",
   "skill": "building-glirastes-chat-ui",
   "surface": [
     "glirastes/contracts#CHAT_VIEW_LIMITS",
@@ -49,6 +49,9 @@
     "glirastes#ChatViewSourceLookup",
     "glirastes#chatViewToText",
     "glirastes#chatElementToText",
-    "glirastes#ChatViewTextOptions.*"
+    "glirastes#ChatViewTextOptions.*",
+    "*#AiChatHandlerConfig.chatViews",
+    "*#AiChatHandlerFullConfig.chatViews",
+    "*#ChatViewsConfig.*"
   ]
 }

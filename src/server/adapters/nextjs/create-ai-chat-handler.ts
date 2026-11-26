@@ -12,6 +12,15 @@ import { READ_RESULT_TOOL_NAME } from '../../../contracts/result-handle.js';
 import { createChatMemory, type ChatMemoryTurn, type PreparedChatMemory } from './chat-memory.js';
 import { clearWhenDone, createTurnResults, resolveResultHandles, type TurnResults } from './result-handles.js';
 import type { ResultStore } from '../../core/index.js';
+import { RENDER_VIEW_TOOL_NAME } from '../../../contracts/chat-view.js';
+import {
+  beginChatViewTurn,
+  chatViewSourceMemo,
+  readChatViewCapabilities,
+  resolveChatViews,
+  withoutChatViewProjections,
+  type ChatViewTurn,
+} from './render-view.js';
 
 /** Handler-created built-ins that stay callable for every tool selection. */
 const ALWAYS_ON_BUILTINS: ReadonlyArray<string> = [
@@ -616,6 +625,8 @@ interface RequestTurnState {
    * shield and the guardrails, never in the chat or the stream.
    */
   escapeViewContextTags?: boolean;
+  /** With `chatViews`: the source memo of tool results a view may reference (`chatViewSourceMemo`). */
+  chatViewSourceMemo?: string;
 }
 
 /**
@@ -769,6 +780,7 @@ async function defaultStreamHandler(
         }
       : { maxContextMessages: ctx.maxContextMessages, history: ctx.history, ...(toolEntities ? { entities: toolEntities } : {}), ...historyExtras },
     request.escapeViewContextTags ? withViewContextTagsEscaped : undefined,
+    request.chatViewSourceMemo,
   );
   // User role, not system: memory is background a user could have written.
   const withMemory = ctx.memory?.preamble
@@ -1339,6 +1351,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     uiActionOutcomes = 'confirm',
     uiToolResultShape = 'auto',
     viewContext: viewContextOption,
+    chatViews: chatViewsOption,
   } = config;
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
   assertToolMiddleware(toolMiddleware);
@@ -1409,6 +1422,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     }
   };
   const resultHandleLimits = resolveResultHandles(resultHandles, 'createAiChatHandler');
+  // Chat Views: the merged catalog, or null when off (then nothing of the feature exists).
+  const chatViewsManifest = resolveChatViews(chatViewsOption, 'createAiChatHandler');
+  const alwaysOnBuiltins: ReadonlyArray<string> = chatViewsManifest
+    ? [...ALWAYS_ON_BUILTINS, RENDER_VIEW_TOOL_NAME]
+    : ALWAYS_ON_BUILTINS;
   const chatMemory = memoryConfig ? createChatMemory(memoryConfig, process.env, { temperature }) : null;
   /**
    * With `history.seenObjects` (default on): the messages the window or the chat memory
@@ -1542,7 +1560,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
   /** Keeps the always-on built-ins of `source` next to a scoped selection. */
   const keepAlwaysOn = <T,>(scoped: Record<string, T>, source: Record<string, T>) => {
     const kept = { ...scoped };
-    for (const name of ALWAYS_ON_BUILTINS) {
+    for (const name of alwaysOnBuiltins) {
       if (source[name]) kept[name] = source[name];
     }
     return kept;
@@ -1990,7 +2008,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         // a built-in's name are never listed here and stay discoverable only
         // through the manifest-checked index.
         const builtinToolNames = handlerBuiltinNames.filter((name) =>
-          ALWAYS_ON_BUILTINS.includes(name) || initialToolNames.includes(name));
+          alwaysOnBuiltins.includes(name) || initialToolNames.includes(name));
         // A UI outcome or budget continuation keeps the tools the turn already called, also those `find_tools` added.
         if (continuation === 'ui-outcome' || continuation === 'budget') {
           initialToolNames = [...new Set([...initialToolNames, ...currentTurnToolNames(requestMessages)])];
@@ -2061,6 +2079,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const ownReadResult = (registry: ToolRegistry, results: TurnResults | undefined): string | undefined => (
         results && registry[READ_RESULT_TOOL_NAME] === results.tool ? READ_RESULT_TOOL_NAME : undefined
       );
+      /** The registry name of the handler's own `render_view` (by identity): see `wrapToolsWithShield`. */
+      const ownViewTool = (registry: ToolRegistry, views: ChatViewTurn | undefined): string | undefined => (
+        views && registry[RENDER_VIEW_TOOL_NAME] === views.tool ? RENDER_VIEW_TOOL_NAME : undefined
+      );
       /**
        * The approval-subject lookups of this request (docs/approval-subjects.md),
        * or undefined when no tool declares them (then nothing changes).
@@ -2095,6 +2117,33 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const withResultTool = (registry: ToolRegistry, results: TurnResults | undefined): ToolRegistry => (
         results ? { ...registry, [results.tool.id]: results.tool } : registry
       );
+      /**
+       * The `render_view` of a model turn when `chatViews` is on. A registry
+       * tool named `render_view` stays the app's tool, and the turn then has
+       * no chat views. `history` returns the request's messages.
+       */
+      const chatViewCapabilities = chatViewsManifest ? readChatViewCapabilities(body.value) : undefined;
+      const beginChatViews = (
+        registry: ToolRegistry,
+        results: TurnResults | undefined,
+        history: () => ReadonlyArray<unknown>,
+      ): ChatViewTurn | undefined => {
+        if (!chatViewsManifest || registry[RENDER_VIEW_TOOL_NAME]) return undefined;
+        return beginChatViewTurn({
+          manifest: chatViewsManifest,
+          ...(chatViewCapabilities ? { capabilities: chatViewCapabilities } : {}),
+          history,
+          ...(results ? { results } : {}),
+        });
+      };
+      const withViewTool = (registry: ToolRegistry, views: ChatViewTurn | undefined): ToolRegistry => (
+        views ? { ...registry, [RENDER_VIEW_TOOL_NAME]: views.tool } : registry
+      );
+      /** The request state with the source memo of chat views (model input only). */
+      const withChatViewMemo = (state: RequestTurnState, views: ChatViewTurn | undefined, history: ReadonlyArray<unknown>): RequestTurnState => {
+        const memo = views ? chatViewSourceMemo(history) : undefined;
+        return memo ? { ...state, chatViewSourceMemo: memo } : state;
+      };
 
       // Emit session.started for audit + telemetry
       if (sessionId && (onAudit || telemetry)) {
@@ -2219,9 +2268,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         }
         const turnResults = beginTurnResults(registry, () => sessionId);
         registry = withResultTool(withMemoryTools(withAlwaysOnBuiltins(registry)), turnResults);
+        const chatViews = beginChatViews(registry, turnResults, () => processedMessages);
+        registry = withViewTool(registry, chatViews);
         const handlerBuiltinNames = findHandlerBuiltins(
           registry,
-          [followupTool, clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
+          [followupTool, clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null, chatViews?.tool ?? null],
         );
         const pipelineToolOptions: ToolToAiToolOptions = {
           ...toolOptions,
@@ -2416,6 +2467,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         const contextWindow =
           pipelineResult.module?.executionDefaults?.contextWindow ??
           maxContextMessages;
+        // A view's projection never reaches the model, the chat memory's model included.
+        const viewSources = processedMessages;
+        if (chatViews) processedMessages = withoutChatViewProjections(processedMessages);
         const memory = await prepareMemory(processedMessages, model, sessionId);
         let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
         let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
@@ -2424,8 +2478,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         if (piiShield) {
           recentMessages = await anonymizeMessages(recentMessages, piiShield, sessionId);
           if (earlierMessages) earlierMessages = await anonymizeMessages(earlierMessages, piiShield, sessionId);
-          aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
+          aiTools = wrapToolsWithShield(aiTools, piiShield, sessionId, turnResults?.store, ownReadResult(registry, turnResults), ownViewTool(registry, chatViews)) as typeof aiTools;
         }
+        // After the shield: a view references what the tool part holds.
+        if (chatViews) aiTools = chatViews.recordOutputs(aiTools);
 
         // Lancer Approvals: delegate approval decisions to Glirastes
         if (lancer?.approvals) {
@@ -2438,7 +2494,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           requestStart,
           modelId: resolvedModelId,
         // A request the guardrails blocked gets no view context (fail closed).
-        } : undefined, pipelineResult.blocked ? requestState : await withViewContext(requestState, unscopedAiTools, sessionId));
+        } : undefined, pipelineResult.blocked ? requestState : withChatViewMemo(await withViewContext(requestState, unscopedAiTools, sessionId), chatViews, viewSources));
 
         return clearWhenDone(await pipelineStreamHandler({
           tools: discoveryController
@@ -2509,9 +2565,11 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       // The shield session of the legacy path is derived below; results are sealed only once tools run.
       const turnResults = beginTurnResults(registry, () => legacySessionId);
       registry = withResultTool(withMemoryTools(withAlwaysOnBuiltins(registry)), turnResults);
+      const chatViews = beginChatViews(registry, turnResults, () => processedMessages);
+      registry = withViewTool(registry, chatViews);
       const handlerBuiltinNames = findHandlerBuiltins(
         registry,
-        [clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null],
+        [clarificationTool, planTool, ...(memoryTurn?.tools ?? []), turnResults?.tool ?? null, chatViews?.tool ?? null],
       );
       const legacyToolOptions: ToolToAiToolOptions = {
         ...toolOptions,
@@ -2533,7 +2591,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         ? Object.fromEntries(Object.entries(registry).filter(([name]) => isOffered(name)))
         : registry;
       const allToolNames = Object.keys(routableRegistry)
-        .filter((name) => !ALWAYS_ON_BUILTINS.includes(name));
+        .filter((name) => !alwaysOnBuiltins.includes(name));
 
       // PII Shield: anonymize for legacy mode
       const legacySessionId = piiShield ? legacyShieldSessionOf() : '';
@@ -2631,6 +2689,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           managedTurn?.snapshot.budget.maxModelSteps,
       });
       const contextWindow = routing?.contextWindow ?? maxContextMessages;
+      // A view's projection never reaches the model, the chat memory's model included.
+      const viewSources = processedMessages;
+      if (chatViews) processedMessages = withoutChatViewProjections(processedMessages);
       const memory = await prepareMemory(processedMessages, model, legacySessionId);
       let recentMessages = memory?.messages ?? processedMessages.slice(-contextWindow);
       let earlierMessages = seenObjectsSource(processedMessages, recentMessages, aiTools);
@@ -2639,8 +2700,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       if (piiShield) {
         recentMessages = await anonymizeMessages(recentMessages, piiShield, legacySessionId);
         if (earlierMessages) earlierMessages = await anonymizeMessages(earlierMessages, piiShield, legacySessionId);
-        aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId, turnResults?.store, ownReadResult(registry, turnResults)) as typeof aiTools;
+        aiTools = wrapToolsWithShield(aiTools, piiShield, legacySessionId, turnResults?.store, ownReadResult(registry, turnResults), ownViewTool(registry, chatViews)) as typeof aiTools;
       }
+      // After the shield: a view references what the tool part holds.
+      if (chatViews) aiTools = chatViews.recordOutputs(aiTools);
 
       // Lancer Approvals: delegate approval decisions to Glirastes (legacy mode)
       if (lancer?.approvals) {
@@ -2651,7 +2714,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
       const legacyStreamHandler = createStreamHandler(req, (onAudit || telemetry) ? {
         sessionId: legacySessionId || sessionId,
         requestStart,
-      } : undefined, await withViewContext(requestState, offeredAiTools, legacySessionId));
+      } : undefined, withChatViewMemo(await withViewContext(requestState, offeredAiTools, legacySessionId), chatViews, viewSources));
 
       // Delegate streaming to consumer's handler
       return clearWhenDone(await legacyStreamHandler({
@@ -2846,7 +2909,10 @@ interface SdkAiToolForShield {
  * from the copy the store sealed once with this shield and is not shielded
  * again: detection depends on the surrounding text, so shielding excerpts
  * separately could leave a value raw in one of them, and a pseudonym that
- * looks like PII itself would be mapped again.
+ * looks like PII itself would be mapped again. The handler's own
+ * `render_view` (`viewTool`) passes untouched: its arguments are a spec of
+ * references and its view is built from results that already passed the
+ * shield, so neither is rehydrated nor sealed again.
  */
 function wrapToolsWithShield(
   aiTools: Record<string, unknown>,
@@ -2854,10 +2920,15 @@ function wrapToolsWithShield(
   sessionId: string,
   resultStore?: ResultStore,
   plainArgsTool?: string,
+  viewTool?: string,
 ): Record<string, unknown> {
   const wrapped: Record<string, unknown> = {};
 
   for (const [name, raw] of Object.entries(aiTools)) {
+    if (name === viewTool) {
+      wrapped[name] = raw;
+      continue;
+    }
     const sdkTool = raw as SdkAiToolForShield;
     const originalExecute = sdkTool.execute;
 

@@ -205,12 +205,14 @@ export async function prepareModelMessages(
  * `prepareModelMessages` with `historyOnly` applied to the messages that
  * come from `uiMessages` only, before the seen-objects memo (written by the
  * SDK) is put ahead of them; the memo is built from the unchanged messages.
- * Internal: not part of the public options.
+ * `sourceMemo` (Chat Views) is appended to the seen-objects memo, or sent in
+ * its place when there is none. Internal: not part of the public options.
  */
 export async function prepareHistoryMessages(
   uiMessages: UIMessage[],
   options?: PrepareModelMessagesOptions,
   historyOnly?: <T>(messages: T[]) => T[],
+  sourceMemo?: string,
 ): Promise<unknown[]> {
   const maxCtx = options?.maxContextMessages ?? 12;
 
@@ -253,7 +255,8 @@ export async function prepareHistoryMessages(
       )
     : undefined;
   const fromHistory = historyOnly ? historyOnly(stripped) : stripped;
-  const result = seen ? [seen.message as (typeof stripped)[number], ...fromHistory] : fromHistory;
+  const memo = withSourceMemo(seen?.message, sourceMemo);
+  const result = memo ? [memo as (typeof stripped)[number], ...fromHistory] : fromHistory;
   if (options?.onBreakdown) {
     try {
       const unresolvedMentionMarkers = await unresolvedMarkerCount(raw as ModelMessageLike[], options.earlierMessages, options.entities);
@@ -271,6 +274,18 @@ export async function prepareHistoryMessages(
     }
   }
   return result;
+}
+
+/** The seen-objects memo with the Chat Views source memo appended (or the source memo alone). */
+function withSourceMemo(seen: ModelMessageLike | undefined, sourceMemo: string | undefined): ModelMessageLike | undefined {
+  if (!sourceMemo) return seen;
+  if (!seen) return { role: 'user', content: [{ type: 'text', text: sourceMemo }] };
+  const parts = Array.isArray(seen.content) ? seen.content as Array<{ type?: unknown; text?: unknown }> : [];
+  const last = parts.at(-1);
+  if (last?.type !== 'text' || typeof last.text !== 'string') {
+    return { ...seen, content: [...parts, { type: 'text', text: sourceMemo }] };
+  }
+  return { ...seen, content: [...parts.slice(0, -1), { ...last, text: `${last.text}\n\n${sourceMemo}` }] };
 }
 
 type ResolvedHistory = Required<Omit<HistoryOptions, 'seenObjects'>> & Pick<HistoryOptions, 'seenObjects'>;

@@ -40,6 +40,23 @@ export function resolveResultHandles(value: unknown, label: string): ResultHandl
 export interface TurnResults {
   store: ResultStore;
   tool: Tool;
+  /**
+   * The full sealed result behind a handle, read with the guard of
+   * `read_result` (owner check; in a managed turn the origin tool's guard,
+   * counted as its call). `missing` for an unknown or cleared handle,
+   * `denied`/`budget_exhausted` when the guard refuses; a throw ends the
+   * call like a denied domain tool. The value is a private copy.
+   */
+  readStored(id: string): Promise<
+    | { status: 'ok'; toolName: string; value: Record<string, unknown> }
+    | { status: 'missing' | 'denied' | 'budget_exhausted' }
+  >;
+  /**
+   * The approval-time check of `read_result` for a handle (managed turns):
+   * throws for the conditions that end the turn. Undefined without a
+   * managed turn.
+   */
+  precheckStored?: (id: string) => Promise<void>;
 }
 
 /**
@@ -131,7 +148,24 @@ export function createTurnResults(options: {
         },
       }
     : {};
-  return { store, tool: createReadResultTool(store, guard) };
+  const readStored: TurnResults['readStored'] = async (id) => {
+    const handle = store.get(id);
+    if (!handle) return { status: 'missing' };
+    const input = { resultId: id };
+    const decision = await guard.beforeRead?.({ handle, input });
+    if (decision) return { status: decision };
+    const startedAt = Date.now();
+    const value = JSON.parse(JSON.stringify(handle.value)) as Record<string, unknown>;
+    await guard.afterRead?.({ handle, input, result: value, durationMs: Date.now() - startedAt });
+    return { status: 'ok', toolName: handle.toolName, value };
+  };
+  const precheckStored = guard.precheck
+    ? async (id: string) => {
+        const handle = store.get(id);
+        if (handle) await guard.precheck!({ handle, input: { resultId: id } });
+      }
+    : undefined;
+  return { store, tool: createReadResultTool(store, guard), readStored, ...(precheckStored ? { precheckStored } : {}) };
 }
 
 /**

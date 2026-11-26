@@ -53,6 +53,7 @@ import {
 } from './tool-failure-result.js';
 import type { ResultStore } from './result-store.js';
 import { isResultReader } from './read-result-tool.js';
+import { toolModelOutputOf } from './tool-model-output.js';
 import { cleanToolResult } from './clean-tool-result.js';
 import { assertToolMiddleware, composeToolMiddleware, type ToolMiddleware } from './tool-middleware.js';
 export {
@@ -1044,9 +1045,12 @@ export function toolToAiTool(
   const defaultTree = defaultFields ? outputFieldTree(defaultFields) : undefined;
   const outputEntities = validOutputEntities(tool.outputEntities);
   const inputEntities = validInputEntities(tool.inputEntities);
+  const modelOutput = toolModelOutputOf(tool);
 
   return {
     _toolId: tool.id,
+    // What the model gets of a result, when it differs from the tool part (see tool-model-output.ts).
+    ...(modelOutput ? { _modelOutput: modelOutput } : {}),
     // Strictly read-only (a GET or HEAD call that needs no approval): a budget continuation may run it again.
     ...(method !== undefined && readOnly && !requiresApproval ? { _readOnly: true as const } : {}),
     // A UI tool whose own actions take part in the outcome protocol (`defineUiTool({ outcome: 'confirm' })`).

@@ -21,6 +21,7 @@ import type { ApprovalSubjectLimits } from './approval-subject-lookup.js';
 import type { DefaultIntentRoutingOptions } from './default-intent-routing.js';
 import type { HistoryOptions, ModelInputBreakdown } from './prepare-model-messages.js';
 import type { ChatMemoryConfig } from './chat-memory.js';
+import type { ChatViewsConfig } from './render-view.js';
 import type { BudgetStopTexts } from './budget-stop-notice.js';
 import type { ChatServerLocales } from './chat-texts.js';
 import type { UiActionOutcomesOption } from './ui-outcomes.js';
@@ -664,6 +665,21 @@ export interface AiChatHandlerConfig {
    * invalid value throws when the handler is created.
    */
   resultHandles?: boolean | ResultHandleLimits;
+  /**
+   * Chat Views (optional, off by default): the model can show tool results
+   * as a small view composed from a component catalog, through the
+   * built-in `render_view` tool. Values are references into tool results of
+   * the conversation that the server resolves (still in their PII-shielded
+   * form); the browser renders the resolved view from the tool part, the
+   * model only learns `{ shown, elements }`. `catalog` is the app's
+   * components (a manifest or `defineChatComponent` definitions), merged
+   * over the SDK starter catalog; without it the starter catalog alone. A
+   * request may narrow the catalog with its `chatViews` field
+   * (`ChatViewCapabilities`), never widen it. One view per answer. Without
+   * this option there is no `render_view` tool, no catalog text and no
+   * request field. An invalid value throws when the handler is created.
+   */
+  chatViews?: ChatViewsConfig;
   /**
    * Called after pipeline classification and tool scoping, before streaming.
    * Use this to log which intent, module, model, and tools were selected.
