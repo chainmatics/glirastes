@@ -349,12 +349,12 @@ hold-to-talk on the mic button and a hotkey (default `mod+shift+space`) next to
 tap-to-toggle. Pass `voice.routeKey` (for example the pathname) so navigation
 stops recording and keeps the speech as draft; back/forward, session switches and
 unmount release the microphone as well. `voice.adapter` plugs in another provider
-(an `SttProviderAdapter`; `DeepgramSttAdapter` and `RecordedSttAdapter` ship in
-`glirastes/stt`); keep its identity stable. Every voice input (`RecordedSttAdapter` too) needs the audio worklet served: chain `glirastes stt worklet` into `predev`/`prebuild`, see [speech worklet](references/hooks-and-building-blocks.md#speech-worklet).
+(an `SttProviderAdapter` from `glirastes/stt`, identity stable). Without it the chat uses
+`DeepgramSttAdapter` (Deepgram live socket, no server shipped); a Whisper-style service needs a
+module-scope `new RecordedSttAdapter()` ([adapter and route](references/hooks-and-building-blocks.md#speech-adapter-and-route)). Every voice input needs the audio worklet served: chain `glirastes stt worklet` into `predev`/`prebuild`, see [speech worklet](references/hooks-and-building-blocks.md#speech-worklet).
 
-A finished recording (`RecordedSttAdapter`, `audio/wav` to
-`/api/ai/speech-recognize`) needs one route to the app's transcription service,
-or to [local speech recognition](references/local-speech.md) in its own server:
+A finished recording (`RecordedSttAdapter`, `audio/wav` to `/api/ai/speech-recognize`) needs one
+route to the app's transcription service, or to [local speech recognition](references/local-speech.md) in its own server:
 
 ```ts
 // src/app/api/ai/speech-recognize/route.ts
@@ -364,7 +364,7 @@ import { resolvePrincipal } from '@/lib/glirastes-principal';
 export const runtime = 'nodejs';
 export const POST = createRecordingTranscriptionHandler({
   authorize: async (request) => Boolean(await resolvePrincipal(request)),
-  url: process.env.STT_RECORDING_URL,
+  url: process.env.STT_RECORDING_URL, // base without /v1: https://openrouter.ai/api, https://api.openai.com
   apiKey: process.env.STT_RECORDING_API_KEY,
   model: process.env.STT_RECORDING_MODEL,
 });

@@ -375,6 +375,58 @@ two jobs:
 
 See the skill [`building-glirastes-chat-ui`](skills/building-glirastes-chat-ui/SKILL.md).
 
+### Voice input: adapter and route
+
+`voice: { enabled: true }` alone uses `DeepgramSttAdapter`: it streams the
+microphone over a WebSocket to `/api/ai/speech-stream` (or `voice.baseUrl`,
+with `voice.getToken` as `?token=`) and expects Deepgram live results there.
+This package ships no server for that socket; the app provides it.
+
+For a Whisper-style service (OpenAI, OpenRouter, a local Parakeet or Whisper
+server with `POST /v1/audio/transcriptions`) pass a `RecordedSttAdapter`. It
+records until stop and posts one `audio/wav` to `/api/ai/speech-recognize`:
+
+```tsx
+'use client';
+import { VercelAiChat } from 'glirastes/react/vercel';
+import { RecordedSttAdapter } from 'glirastes/stt';
+
+// Module scope keeps the instance stable; a new one restarts the controller.
+const speech = new RecordedSttAdapter();
+
+export function Assistant() {
+  return <VercelAiChat endpoint="/api/chat" voice={{ enabled: true, adapter: speech }} />;
+}
+```
+
+The route forwards the recording with `createRecordingTranscriptionHandler`;
+URL, key and model stay on the server:
+
+```ts
+// app/api/ai/speech-recognize/route.ts
+import { createRecordingTranscriptionHandler } from 'glirastes/server/nextjs';
+import { resolvePrincipal } from '@/lib/auth'; // your own session check
+
+export const runtime = 'nodejs';
+export const POST = createRecordingTranscriptionHandler({
+  authorize: async (request) => Boolean(await resolvePrincipal(request)),
+  url: 'https://api.openai.com', // OpenRouter: 'https://openrouter.ai/api'
+  apiKey: process.env.OPENAI_API_KEY,
+  model: 'whisper-1', // OpenRouter: 'openai/whisper-1'
+});
+```
+
+- `url` is the base without `/v1`: the handler appends
+  `/v1/audio/transcriptions`. `https://openrouter.ai/api/v1` would call
+  `/api/v1/v1/…` and fail.
+- `authorize` returning `false` answers 401 before the audio is read; an unset
+  `url` answers 503. `languages` and `defaultLanguage` (default `de`) limit the
+  `?language=` the browser sends.
+- Transcribing inside your own server instead: `transcribe` with
+  `createLocalTranscriber` from `glirastes/server/stt-local`
+  ([docs/local-stt.md](docs/local-stt.md), experimental).
+- Both adapters need the audio worklet below.
+
 ### Voice input needs the audio worklet
 
 Every recording loads `/audio-worklet-processor.js` (package export
