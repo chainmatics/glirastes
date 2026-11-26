@@ -82,3 +82,15 @@ describe('shipped styles for the new chat surfaces', () => {
     expect(rule('[data-component="ai-chat-panel"] [data-element="detail-label"]::after')).toContain('content: ":"');
   });
 });
+
+describe('composer scrollbar', () => {
+  it('gives a long draft a thin thumb without a track in every editor', () => {
+    const scroll = rule(
+      '[data-component="ai-chat-panel"] [data-component="rich-mention-input"] [data-element="editor"],\n' +
+        '[data-component="ai-chat-panel"] [data-component="chat-input"] textarea,\n' +
+        '[data-component="ai-chat-panel"] [data-component="mention-input"] textarea',
+    );
+    expect(scroll).toContain('scrollbar-width: thin');
+    expect(scroll).toMatch(/scrollbar-color: .+ transparent;/);
+  });
+});

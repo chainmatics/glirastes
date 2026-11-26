@@ -898,6 +898,13 @@
   border-color: var(--cm-primary);
   box-shadow: 0 0 0 3px var(--cm-primary-ring);
 }
+/* A long draft scrolls with a thin thumb and no track, not the platform's boxed scrollbar. */
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] [data-element="editor"],
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="chat-input"] textarea,
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="mention-input"] textarea {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, currentColor 30%, transparent) transparent;
+}
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="rich-mention-input"] [data-element="placeholder"] {
   position: absolute;
   top: 0.5rem;
