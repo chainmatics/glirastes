@@ -429,6 +429,54 @@ describe('render_view (chat views)', () => {
     });
   });
 
+  it('pii: oversized result read from the store stays sealed', async () => {
+    const names = ['Alice Doe', 'Bob Roe'];
+    const detector: PiiDetector = {
+      detect(text) {
+        const found: PiiEntity[] = [];
+        for (const name of names) {
+          for (const match of text.matchAll(new RegExp(name, 'g'))) {
+            found.push({ type: 'person', start: match.index!, end: match.index! + name.length, score: 0.9, text: name });
+          }
+        }
+        return found;
+      },
+    };
+    const shield = createPiiShield({ locale: 'en-US', detector });
+    const anonymize = vi.spyOn(shield, 'anonymizeResult');
+    const rehydrate = vi.spyOn(shield, 'rehydrateArgs');
+    const rehydrateAsync = shield.rehydrateArgsAsync ? vi.spyOn(shield, 'rehydrateArgsAsync') : undefined;
+    // 20 invoices whose long body names the customer: over the result limit, so the model sees an overview.
+    const rows = () => Array.from({ length: 20 }, (_, index) => ({
+      id: `inv_${index}`, customer: names[index % 2]!, total: 10, status: 'open',
+      body: `${'x'.repeat(900)} for ${names[index % 2]!}`,
+    }));
+    const { registry } = invoiceTools(rows);
+    const turn = harness({ tools: registry, piiShield: shield, chatViews: {} });
+    await turn.run(async (call) => {
+      const overview = await call('invoices_list', {}, 'call-1') as { _result: { omitted?: Array<{ path: string }> } };
+      expect(overview._result.omitted?.map((entry) => entry.path)).toContain('data[].body');
+      const sealedCalls = anonymize.mock.calls.length;
+      expect(sealedCalls).toBeGreaterThan(0);
+      rehydrate.mockClear();
+      rehydrateAsync?.mockClear();
+
+      const shown = await call('render_view', tableSpec('call-1', 'body'), 'call-2') as {
+        view: { elements: Record<string, { rows?: Array<{ cell: { label: string } }> }> };
+      };
+      const labels = shown.view.elements.table!.rows!.map((row) => row.cell.label);
+      // The full bodies from the store, in their sealed form: a pseudonym in place of each name.
+      expect(labels).toHaveLength(20);
+      for (const label of labels) expect(label).toMatch(/^x{900} for \S/);
+      for (const name of names) expect(JSON.stringify(shown)).not.toContain(name);
+      expect(new Set(labels).size).toBe(2);
+      // Neither rehydrated nor sealed again.
+      expect(rehydrate).not.toHaveBeenCalled();
+      if (rehydrateAsync) expect(rehydrateAsync).not.toHaveBeenCalled();
+      expect(anonymize).toHaveBeenCalledTimes(sealedCalls);
+    });
+  });
+
   it('second render_view in a turn is rejected', async () => {
     const { registry } = invoiceTools();
     const turn = harness({ tools: registry, chatViews: {} });
