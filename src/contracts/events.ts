@@ -235,12 +235,13 @@ export const TurnContinuedEventSchema = z.object({
 
 export const RuntimeRolloutCohortSchema = z.enum(['stable', 'canary']);
 
-/** v3: the deployment and cohort the turn ran in, and the approvals its request declined. */
+/** v3: the deployment and cohort the turn ran in, and the approvals its request raised and declined. */
 const turnEventV3Fields = {
   ...turnEventFields,
   schemaVersion: z.literal(RUNTIME_METRIC_EVENT_SCHEMA_VERSION_V3),
   deploymentId: z.uuid().nullable(),
   cohort: RuntimeRolloutCohortSchema.nullable(),
+  approvalsRequested: callCount,
   approvalsDeclined: callCount,
 };
 

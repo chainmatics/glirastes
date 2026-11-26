@@ -158,7 +158,7 @@ describe('createRuntimeMetricsSink', () => {
     const http = recordingFetch();
     const { sink, drops } = sinkWith(http.fetch);
     const v3 = (cohort: 'stable' | 'canary') => ({
-      ...event(), schemaVersion: 3, deploymentId: '019fbd00-0000-7000-8000-0000000000d2', cohort, approvalsDeclined: 0,
+      ...event(), schemaVersion: 3, deploymentId: '019fbd00-0000-7000-8000-0000000000d2', cohort, approvalsRequested: 0, approvalsDeclined: 0,
     }) as never;
 
     sink.record(v3('canary'));

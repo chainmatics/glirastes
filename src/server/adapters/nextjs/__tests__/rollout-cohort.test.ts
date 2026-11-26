@@ -14,7 +14,7 @@ import { createTurnSnapshot } from '../../../../runtime/turn-snapshot.js';
 import { defineTool } from '../../../../types.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
 import type { ManagedLocalRuntimeConfig, ResolveTurnSnapshotContext } from '../types.js';
-import { declinedApprovalsOf } from '../ui-outcomes.js';
+import { createDeclinedApprovalCounter } from '../ui-outcomes.js';
 
 const DEPLOYMENT_ID = '019fb900-0000-7000-8000-0000000000d1';
 const usage = {
@@ -43,14 +43,19 @@ function sink() {
   return { sink: value, events };
 }
 
-function runtime(extra: Partial<ManagedLocalRuntimeConfig> = {}) {
+const approvalPolicy = {
+  ...policyRevision,
+  toolPolicies: policyRevision.toolPolicies.map((policy) => ({ ...policy, requiresApproval: true })),
+};
+
+function runtime(extra: Partial<ManagedLocalRuntimeConfig> = {}, policy = policyRevision) {
   const contexts: ResolveTurnSnapshotContext[] = [];
   const config: ManagedLocalRuntimeConfig = {
     resolvePrincipal: async () => principal,
     resolveTurnSnapshot: async (context) => {
       contexts.push(context);
       return createTurnSnapshot({
-        turnId: context.turnId, agentRevision, manifestRevision, policyRevision, principal, localLimits,
+        turnId: context.turnId, agentRevision, manifestRevision, policyRevision: policy, principal, localLimits,
       });
     },
     ...extra,
@@ -58,7 +63,13 @@ function runtime(extra: Partial<ManagedLocalRuntimeConfig> = {}) {
   return { config, contexts };
 }
 
-function handler(managedRuntime: ManagedLocalRuntimeConfig, metrics: RuntimeMetricsSink) {
+const approvalStep = () => convertArrayToReadableStream([
+  { type: 'stream-start', warnings: [] },
+  { type: 'tool-call', toolCallId: 'call-1', toolName: 'list_tasks', input: JSON.stringify({ query: 'all' }) },
+  { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+] as never);
+
+function handler(managedRuntime: ManagedLocalRuntimeConfig, metrics: RuntimeMetricsSink, needsApproval = false) {
   return createAiChatHandler({
     tools: {
       list_tasks: defineTool({
@@ -66,7 +77,8 @@ function handler(managedRuntime: ManagedLocalRuntimeConfig, metrics: RuntimeMetr
         inputSchema: z.object({ query: z.string() }), execute: async () => ({ tasks: [] }),
       }),
     },
-    model: new MockLanguageModelV3({ doStream: async () => ({ stream: textStep() }) as never }),
+    approvalSecret: 'rollout-cohort-approval-secret-32chars!',
+    model: new MockLanguageModelV3({ doStream: async () => ({ stream: needsApproval ? approvalStep() : textStep() }) as never }),
     systemPrompt: 'Assistant',
     managedRuntime,
     metrics,
@@ -90,7 +102,16 @@ describe('rollout cohorts in createAiChatHandler', () => {
     const finished = events.filter((event) => event.eventType === 'turn.finished');
     expect(finished).toHaveLength(1);
     expect(TechnicalRuntimeEventV3Schema.parse(finished[0])).toMatchObject({
-      schemaVersion: 3, deploymentId: DEPLOYMENT_ID, cohort: 'canary', approvalsDeclined: 0,
+      schemaVersion: 3, deploymentId: DEPLOYMENT_ID, cohort: 'canary', approvalsRequested: 0, approvalsDeclined: 0,
+    });
+  });
+
+  it('counts the approvals a turn asks for', async () => {
+    const { sink: metrics, events } = sink();
+    const { config } = runtime({ turnRollout: () => ({ deploymentId: DEPLOYMENT_ID, cohort: 'stable' }) }, approvalPolicy);
+    await (await handler(config, metrics, true)(post({ id: 'chat-8', messages: [user('u1')] }))).text();
+    expect(events.find((event) => event.eventType === 'turn.finished')).toMatchObject({
+      schemaVersion: 3, approvalsRequested: 1, approvalsDeclined: 0,
     });
   });
 
@@ -112,26 +133,43 @@ describe('rollout cohorts in createAiChatHandler', () => {
     await (await handler(config, metrics)(post({ id: 'x'.repeat(300), messages: [user('u1')] }))).text();
     expect(contexts[0]?.conversationId).toBe('ai-u1');
   });
+
+  it('bounds a conversation id taken from a huge message id', async () => {
+    const { sink: metrics } = sink();
+    const { config, contexts } = runtime();
+    const huge = 'm'.repeat(100_000);
+    for (let index = 0; index < 2; index += 1) {
+      await (await handler(config, metrics)(post({ messages: [user(huge)] }))).text();
+    }
+    expect(contexts[0]!.conversationId!.length).toBeLessThanOrEqual(200);
+    expect(contexts[1]!.conversationId).toBe(contexts[0]!.conversationId);
+  });
 });
 
-describe('declinedApprovalsOf', () => {
+describe('createDeclinedApprovalCounter', () => {
   const answered = (approved: boolean, id: string) => ({
     type: 'tool-tasks_archive', toolCallId: id, state: 'approval-responded', input: {}, approval: { id, approved },
   });
+  const continuation = (...parts: unknown[]) => [user('u1'), { id: 'a1', role: 'assistant', parts }];
 
   it('counts the declined approvals of the last step only', () => {
-    const messages = [user('u1'), {
-      id: 'a1', role: 'assistant', parts: [
-        answered(false, 'old'),
-        { type: 'step-start' },
-        answered(false, 'c1'), answered(true, 'c2'), answered(false, 'c3'),
-      ],
-    }];
-    expect(declinedApprovalsOf(messages)).toBe(2);
+    const counter = createDeclinedApprovalCounter();
+    expect(counter.count(continuation(
+      answered(false, 'old'), { type: 'step-start' }, answered(false, 'c1'), answered(true, 'c2'), answered(false, 'c3'),
+    ))).toBe(2);
+  });
+
+  it('counts a resent continuation once', () => {
+    const counter = createDeclinedApprovalCounter();
+    const messages = continuation(answered(false, 'c1'));
+    expect(counter.count(messages)).toBe(1);
+    expect(counter.count(messages)).toBe(0);
+    expect(counter.count(continuation(answered(false, 'c1'), answered(false, 'c4')))).toBe(1);
   });
 
   it('counts nothing for a new user message', () => {
-    expect(declinedApprovalsOf([user('u1')])).toBe(0);
-    expect(declinedApprovalsOf([])).toBe(0);
+    const counter = createDeclinedApprovalCounter();
+    expect(counter.count([user('u1')])).toBe(0);
+    expect(counter.count([])).toBe(0);
   });
 });

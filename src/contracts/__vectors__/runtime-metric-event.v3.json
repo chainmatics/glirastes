@@ -50,6 +50,7 @@
     ],
     "deploymentId": "019fbd00-0000-7000-8000-0000000000d2",
     "cohort": "canary",
+    "approvalsRequested": 1,
     "approvalsDeclined": 0
   },
   "valid": [
@@ -81,7 +82,8 @@
         "approvalsDeclined": 2,
         "toolCallCount": 0,
         "toolErrorCount": 0,
-        "tools": []
+        "tools": [],
+        "approvalsRequested": 0
       }
     },
     {
@@ -102,7 +104,8 @@
     {
       "name": "valid/declined-at-call-limit",
       "patch": {
-        "approvalsDeclined": 10000
+        "approvalsDeclined": 10000,
+        "approvalsRequested": 10000
       }
     }
   ],
@@ -129,6 +132,12 @@
       "name": "invalid/missing-approvals-declined",
       "patch": {
         "approvalsDeclined": "__absent__"
+      }
+    },
+    {
+      "name": "invalid/missing-approvals-requested",
+      "patch": {
+        "approvalsRequested": "__absent__"
       }
     },
     {
@@ -171,6 +180,24 @@
       "name": "invalid/approvals-declined-beyond-limit",
       "patch": {
         "approvalsDeclined": 10001
+      }
+    },
+    {
+      "name": "invalid/negative-approvals-requested",
+      "patch": {
+        "approvalsRequested": -1
+      }
+    },
+    {
+      "name": "invalid/fractional-approvals-requested",
+      "patch": {
+        "approvalsRequested": 1.5
+      }
+    },
+    {
+      "name": "invalid/approvals-requested-beyond-limit",
+      "patch": {
+        "approvalsRequested": 10001
       }
     },
     {

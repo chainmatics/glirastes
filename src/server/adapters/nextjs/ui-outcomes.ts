@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Outcome protocol of UI actions on the server (protocol version 1).
  *
@@ -192,14 +193,31 @@ export function turnContinuationOf(messages: ReadonlyArray<unknown>): TurnContin
   return undefined;
 }
 
-/** Approvals the last step of the history declined (an approval continuation answers them). */
-export function declinedApprovalsOf(messages: ReadonlyArray<unknown>): number {
-  const last = messages.at(-1) as { role?: unknown; parts?: unknown } | undefined;
-  if (!last || last.role !== 'assistant') return 0;
-  return (stepsOf(last).at(-1) ?? []).filter((part) => isToolPart(part)
-    && part.state === 'approval-responded'
-    && isRecord(part.approval)
-    && part.approval.approved === false).length;
+const MAX_COUNTED_DECLINES = 10_000;
+
+/**
+ * Counts the approvals the last step of a history declined, each approval id
+ * once per process, so a resent continuation adds nothing. Bounded.
+ */
+export function createDeclinedApprovalCounter(): { count(messages: ReadonlyArray<unknown>): number } {
+  const counted = new Set<string>();
+  return {
+    count(messages) {
+      const last = messages.at(-1) as { role?: unknown; parts?: unknown } | undefined;
+      if (!last || last.role !== 'assistant') return 0;
+      let declined = 0;
+      for (const part of stepsOf(last).at(-1) ?? []) {
+        if (!isToolPart(part) || part.state !== 'approval-responded' || !isRecord(part.approval)) continue;
+        if (part.approval.approved !== false || typeof part.approval.id !== 'string') continue;
+        const key = createHash('sha256').update(part.approval.id).digest('base64url');
+        if (counted.has(key)) continue;
+        counted.add(key);
+        if (counted.size > MAX_COUNTED_DECLINES) counted.delete(counted.values().next().value!);
+        declined += 1;
+      }
+      return declined;
+    },
+  };
 }
 
 /**

@@ -409,7 +409,8 @@ describe('metric v3 of a runner that selects a cohort per turn', () => {
     const event = finishedWith({ rollout: { deploymentId: DEPLOYMENT_ID, cohort: 'canary' }, approvalsDeclined: 2 });
     expect(TechnicalRuntimeEventV3Schema.safeParse(event).success).toBe(true);
     expect(event).toMatchObject({
-      schemaVersion: 3, eventType: 'turn.finished', deploymentId: DEPLOYMENT_ID, cohort: 'canary', approvalsDeclined: 2,
+      schemaVersion: 3, eventType: 'turn.finished', deploymentId: DEPLOYMENT_ID, cohort: 'canary',
+      approvalsRequested: 0, approvalsDeclined: 2,
     });
   });
 
@@ -420,6 +421,20 @@ describe('metric v3 of a runner that selects a cohort per turn', () => {
     });
     expect(TurnContinuedEventV3Schema.safeParse(event).success).toBe(true);
     expect(event).toMatchObject({ schemaVersion: 3, eventType: 'turn.continued', cohort: 'stable', approvalsDeclined: 1 });
+  });
+
+  it('sums the approvals the steps raised', () => {
+    const { sink } = fakeSink();
+    const recorder = createTurnMetricsRecorder({
+      sink, snapshot, startedAtMs: 0, now: () => 10, rollout: { deploymentId: DEPLOYMENT_ID, cohort: 'canary' },
+    });
+    const step = { model: 'm', inputTokens: 1, outputTokens: 1, cost: provider(0.001), toolNames: [], failedToolNames: [] };
+    recorder.recordStep({ ...step, approvalRequests: 2 });
+    recorder.recordStep({ ...step, approvalRequests: 1 });
+    recorder.recordStep(step);
+    expect(recorder.finish({ status: 'completed', errorCode: null })).toMatchObject({
+      approvalsRequested: 3, approvalsDeclined: 0,
+    });
   });
 
   it('stays v2 and byte-identical without the negotiation', () => {

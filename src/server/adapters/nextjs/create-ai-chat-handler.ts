@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   toolsToAiTools,
   createFollowupTool,
@@ -173,7 +174,7 @@ import { defaultIntentRouterFor, previousTurnScope } from './default-intent-rout
 import {
   assertUiActionOutcomesOption,
   currentTurnToolNames,
-  declinedApprovalsOf,
+  createDeclinedApprovalCounter,
   readUiOutcomesFlag,
   stepAwaitsUiOutcome,
   turnContinuationOf,
@@ -1078,6 +1079,7 @@ async function defaultStreamHandler(
               cost,
               toolNames: event.toolCalls.map((call) => call.toolName),
               failedToolNames: failedToolNames(event.content),
+              approvalRequests: event.content.filter((part) => part.type === 'tool-approval-request').length,
             });
             const report = buildStepReport({
               stepNumber: event.stepNumber,
@@ -1344,6 +1346,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     uiToolResultShape = 'auto',
     viewContext: viewContextOption,
   } = config;
+  const declinedApprovals = createDeclinedApprovalCounter();
   assertMaxResultChars(maxResultChars, 'createAiChatHandler');
   assertToolMiddleware(toolMiddleware);
   // Server lookups behind approval cards: only the built-in stream handler makes them.
@@ -1892,7 +1895,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             sink: metrics,
             snapshot: managedTurn?.snapshot,
             startedAtMs: requestStart,
-            ...(turnRollout ? { rollout: turnRollout, approvalsDeclined: declinedApprovalsOf(requestMessages) } : {}),
+            ...(turnRollout ? { rollout: turnRollout, approvalsDeclined: declinedApprovals.count(requestMessages) } : {}),
             // A budget continuation is a request the user asked for: a finished turn for the
             // Platform, whose contract knows only approval and UI outcome continuations.
             ...(continuation && continuation !== 'budget'
@@ -2787,7 +2790,10 @@ function conversationIdOf(body: unknown, messages: ReadonlyArray<unknown>, turnI
   if (typeof id === 'string' && id.length > 0 && id.length <= MAX_CONVERSATION_ID_CHARS) return id;
   const first = messages.find((message) => (message as { role?: unknown } | null)?.role === 'user') as
     { id?: unknown } | undefined;
-  return typeof first?.id === 'string' ? `ai-${first.id}` : turnId;
+  const fallback = typeof first?.id === 'string' ? `ai-${first.id}` : turnId;
+  return fallback.length <= MAX_CONVERSATION_ID_CHARS
+    ? fallback
+    : `ai-sha256:${createHash('sha256').update(fallback).digest('base64url')}`;
 }
 
 function deriveSessionId(messages: unknown[]): string {

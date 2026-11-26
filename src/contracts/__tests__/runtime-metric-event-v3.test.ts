@@ -22,7 +22,7 @@ interface MetricEventV3Vectors {
  * The Platform keeps a byte-identical copy (T15) and pins the same digest.
  * Changing a vector means a new digest on both sides, never a one-sided edit.
  */
-const VECTORS_SHA256 = 'aff815961d0edd9f132fba0ca6177f81f2f1a692946a267102be00c7b5923552';
+const VECTORS_SHA256 = '50e9020aae74f5937056718c5a53de7852217e8d83fa92ee835683e63226a6b5';
 const raw = readFileSync(new URL('../__vectors__/runtime-metric-event.v3.json', import.meta.url));
 const vectors = JSON.parse(raw.toString('utf8')) as MetricEventV3Vectors;
 
@@ -53,8 +53,10 @@ describe('TechnicalRuntimeEvent v3 golden vectors', () => {
     expect(RuntimeMetricEventSchema.safeParse(event).success).toBe(false);
   });
 
-  it('is v2 plus deploymentId, cohort and approvalsDeclined', () => {
-    const { deploymentId: _deploymentId, cohort: _cohort, approvalsDeclined: _declined, ...v2 } = vectors.base;
+  it('is v2 plus deploymentId, cohort, approvalsRequested and approvalsDeclined', () => {
+    const {
+      deploymentId: _deploymentId, cohort: _cohort, approvalsRequested: _requested, approvalsDeclined: _declined, ...v2
+    } = vectors.base;
     expect(TechnicalRuntimeEventV2Schema.safeParse({ ...v2, schemaVersion: 2 }).success).toBe(true);
   });
 
@@ -65,7 +67,7 @@ describe('TechnicalRuntimeEvent v3 golden vectors', () => {
     expect(TechnicalRuntimeEventBatchSchema.safeParse({ schemaVersion: 3, events: [continued] }).success).toBe(true);
     expect(TechnicalRuntimeEventBatchSchema.safeParse({ schemaVersion: 2, events: [finished] }).success).toBe(false);
     expect(TechnicalRuntimeEventBatchSchema.safeParse({ schemaVersion: 3, events: [finished, continued] }).success).toBe(false);
-    const { deploymentId: _d, cohort: _c, approvalsDeclined: _a, ...v2 } = finished;
+    const { deploymentId: _d, cohort: _c, approvalsRequested: _r, approvalsDeclined: _a, ...v2 } = finished;
     expect(TechnicalRuntimeEventBatchSchema.safeParse({ schemaVersion: 3, events: [{ ...v2, schemaVersion: 2 }] }).success)
       .toBe(false);
   });

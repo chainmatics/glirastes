@@ -57,6 +57,8 @@ export interface TurnMetricsStep {
   toolNames: ReadonlyArray<string>;
   /** Model-facing names of the calls that failed (one entry per failure). */
   failedToolNames: ReadonlyArray<string>;
+  /** Approvals the step asked the user for. */
+  approvalRequests?: number;
 }
 
 /** A turn event of either schema version. */
@@ -119,7 +121,7 @@ export interface TurnMetricsRecorderOptions {
   /**
    * Set only by a runner that selects a cohort per turn (canary
    * negotiation): the turn is then reported as schema version 3 with these
-   * fields and `approvalsDeclined`. Without it the event stays v2.
+   * fields, `approvalsRequested` and `approvalsDeclined`. Without it the event stays v2.
    */
   rollout?: TurnRollout;
   /** Approvals this request declined; reported with `rollout` only. */
@@ -176,6 +178,7 @@ export function createTurnMetricsRecorder(
   let outputTokens = 0;
   let toolCallCount = 0;
   let toolErrorCount = 0;
+  let approvalRequests = 0;
   let finished = false;
 
   const usageOf = (toolName: string) => {
@@ -234,6 +237,7 @@ export function createTurnMetricsRecorder(
         schemaVersion: 3,
         deploymentId: options.rollout.deploymentId,
         cohort: options.rollout.cohort,
+        approvalsRequested: bounded(approvalRequests, MAX_CALLS),
         approvalsDeclined: bounded(options.approvalsDeclined ?? 0, MAX_CALLS),
       };
       if (options.continuation) {
@@ -272,6 +276,7 @@ export function createTurnMetricsRecorder(
       costs.push(step.cost);
       toolCallCount += step.toolNames.length;
       toolErrorCount += step.failedToolNames.length;
+      approvalRequests += Number.isInteger(step.approvalRequests) && step.approvalRequests! > 0 ? step.approvalRequests! : 0;
       for (const name of step.toolNames) {
         const entry = usageOf(name);
         if (entry) entry.calls += 1;
