@@ -25,19 +25,21 @@ export function BulkApprovalCard({
   const labels = toolLabels.labels?.[toolName] ?? { singular: toolName, plural: toolName };
   const actionLabel = count === 1 ? labels.singular : labels.plural;
 
-  // Extract one primary detail per approval (first detail value = typically the title)
+  // Lines every approval states alike (a scope, a team) are shown once under the header;
+  // each item then shows its first line that differs, so six notes are not six "scope" lines.
+  const sharedLines = count > 1 ? sharedDetailLines(approvals.map((approval) => approval.details ?? [])) : [];
   const primaryDetails: string[] = [];
   for (const approval of approvals) {
     // The name of the call's id comes first, as on the single card.
     const subject = approvalSubjectLines(approval, locale)[0];
     if (subject) {
       primaryDetails.push(subject.names.join(', '));
-    } else if (approval.details && approval.details.length > 0) {
-      const first = approval.details[0];
-      const colonIndex = first.indexOf(':');
-      const value = colonIndex > -1 ? first.substring(colonIndex + 1).trim() : first;
-      if (value) primaryDetails.push(value);
+      continue;
     }
+    const details = approval.details ?? [];
+    const line = details.find((detail) => !sharedLines.includes(detail)) ?? details[0];
+    const value = line === undefined ? '' : detailValue(line);
+    if (value) primaryDetails.push(value);
   }
   const flagged = flaggedApprovalSubjects(approvals);
   const warningId = useId();
@@ -63,6 +65,14 @@ export function BulkApprovalCard({
           {count} {actionLabel}?
         </span>
       </div>
+
+      {sharedLines.length > 0 && (
+        <div data-element="shared-details">
+          {sharedLines.map((line) => (
+            <div key={line} data-element="shared-detail">{line}</div>
+          ))}
+        </div>
+      )}
 
       {/* One primary detail per approval */}
       {visibleDetails.length > 0 && (
@@ -107,4 +117,18 @@ export function BulkApprovalCard({
       </div>
     </div>
   );
+}
+
+function detailValue(line: string): string {
+  const colonIndex = line.indexOf(':');
+  return (colonIndex > -1 ? line.substring(colonIndex + 1) : line).trim();
+}
+
+/** Detail lines that every approval states, in the order of the first. */
+function sharedDetailLines(detailsPerApproval: ReadonlyArray<readonly string[]>): string[] {
+  const [first, ...rest] = detailsPerApproval;
+  if (!first) return [];
+  const shared = first.filter((line) => rest.every((details) => details.includes(line)));
+  // When nothing tells the items apart, keep showing their first line instead.
+  return shared.length === first.length ? [] : shared;
 }
