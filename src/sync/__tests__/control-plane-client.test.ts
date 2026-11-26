@@ -193,4 +193,32 @@ describe('RuntimeControlPlaneClient', () => {
     );
     expect(error.message).not.toContain('sensitive upstream detail');
   });
+
+  it('negotiates environment control on sync and reports the capability', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      cursor: '2026-07-28T20:00:00.000Z', activeSnapshotComplete: true, deployments: [], revocations: [],
+    }), { status: 200 }));
+    const client = new RuntimeControlPlaneClient({
+      ...baseOptions, fetchImpl, manager: { apply: vi.fn().mockResolvedValue({}) } as never,
+    });
+
+    await client.register({ capabilities: { aiSdk: true } });
+    await client.syncOnce();
+
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).capabilities).toEqual({
+      aiSdk: true,
+      environmentControl: 1,
+    });
+    const syncUrl = new URL(fetchImpl.mock.calls[1][0]);
+    expect(syncUrl.searchParams.get('controlVersion')).toBe('1');
+    expect(syncUrl.searchParams.get('runnerKey')).toBe(baseOptions.runnerKey);
+  });
+
+  it('refuses a caller-supplied environmentControl capability that differs', async () => {
+    const client = new RuntimeControlPlaneClient({
+      ...baseOptions, fetchImpl: vi.fn(), manager: { apply: vi.fn() } as never,
+    });
+    await expect(client.register({ capabilities: { environmentControl: 2 } }))
+      .rejects.toThrow(/environmentControl/);
+  });
 });

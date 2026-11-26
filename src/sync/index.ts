@@ -12,13 +12,17 @@ export {
   MemoryRuntimeStateStore,
 } from './state-store.js';
 export type {
+  RuntimeControlState,
   RuntimeStateStore,
   RuntimeSyncState,
 } from './state-store.js';
 export {
+  RuntimeEnvironmentControlError,
   RuntimeSyncManager,
 } from './sync-manager.js';
 export type {
+  RuntimeControlOutcome,
+  RuntimeEnvironmentControlErrorCode,
   RuntimeSyncApplyResult,
 } from './sync-manager.js';
 export {

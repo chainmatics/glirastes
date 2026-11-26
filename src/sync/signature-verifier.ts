@@ -9,6 +9,7 @@ import type {
   RuntimeRevisionEnvelope,
   SecurityRevocation,
 } from '../contracts/revisions.js';
+import type { EnvironmentControl } from '../contracts/environment-control.js';
 import type {
   PromptBundle,
   SignedPromptBinding,
@@ -114,6 +115,11 @@ export class RuntimeRevisionVerifier {
 
   async verifyRevocation(revocation: SecurityRevocation): Promise<void> {
     const { signature, ...unsigned } = revocation;
+    await this.verifyEnvelope(unsigned, signature);
+  }
+
+  async verifyEnvironmentControl(control: EnvironmentControl): Promise<void> {
+    const { signature, ...unsigned } = control;
     await this.verifyEnvelope(unsigned, signature);
   }
 

@@ -122,7 +122,7 @@ describe('runner registration with the code version', () => {
       .rejects.toThrow(/policyRelaxations/);
 
     expect(requests(fetchImpl).map((request) => request.body))
-      .toEqual([expect.objectContaining({ capabilities: { engine: 'vercel-ai-sdk' } })]);
+      .toEqual([expect.objectContaining({ capabilities: { engine: 'vercel-ai-sdk', environmentControl: 1 } })]);
   });
 
   it('reports relaxation support next to the code version once the sync has the setup artifact', async () => {

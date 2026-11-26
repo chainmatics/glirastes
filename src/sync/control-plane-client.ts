@@ -1,5 +1,9 @@
 import { findForbiddenContentPath } from '../contracts/content-boundary.js';
 import {
+  ENVIRONMENT_CONTROL_CAPABILITY,
+  ENVIRONMENT_CONTROL_SYNC_VERSION,
+} from '../contracts/environment-control.js';
+import {
   DISCOVERY_DIGEST_PATTERN,
   POLICY_RELAXATIONS_VERSION,
 } from './capability-report.js';
@@ -138,6 +142,13 @@ export class RuntimeControlPlaneClient {
       throw new Error('capabilities.policyRelaxations is reported by the runtime');
     }
     if (relaxations !== undefined) capabilities.policyRelaxations = relaxations;
+    if (
+      capabilities.environmentControl !== undefined
+      && capabilities.environmentControl !== ENVIRONMENT_CONTROL_CAPABILITY
+    ) {
+      throw new Error('capabilities.environmentControl is reported by the runtime');
+    }
+    capabilities.environmentControl = ENVIRONMENT_CONTROL_CAPABILITY;
     this.assertTechnicalMetadata(capabilities);
     this.assertTechnicalMetadata(input.technicalMetadata ?? {});
     this.assertWritable('register');
@@ -173,6 +184,7 @@ export class RuntimeControlPlaneClient {
   async syncOnce() {
     const query = new URLSearchParams({ runnerKey: this.options.runnerKey });
     if (this.cursor) query.set('cursor', this.cursor);
+    query.set('controlVersion', String(ENVIRONMENT_CONTROL_SYNC_VERSION));
     const bundle = await this.request(`sync?${query.toString()}`, {
       method: 'GET',
     });

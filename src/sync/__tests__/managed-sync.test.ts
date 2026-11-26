@@ -11,6 +11,7 @@ import type {
 } from '../../contracts/revisions.js';
 import { canonicalRuntimeJson } from '../signature-verifier.js';
 import { createManagedRuntimeSync } from '../managed-sync.js';
+import { RuntimeEnvironmentControlError } from '../sync-manager.js';
 
 const environmentId = '019fa9a9-d5f7-7ec3-a3c7-8899de1d3901';
 const budget = {
@@ -141,5 +142,54 @@ describe('createManagedRuntimeSync', () => {
           '019fa9a9-d5f7-7ec3-a3c7-8899de1d3904',
       }),
     );
+  });
+
+  it('scopes controls to its app and reports a rejected control content-free', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'runtime-key', alg: 'EdDSA', use: 'sig' }],
+    }), { status: 200 }));
+    const onError = vi.fn();
+    const { manager, store } = createManagedRuntimeSync({
+      baseUrl: 'https://control.example',
+      apiKey: 'runtime-secret',
+      appId: common.targetAppId,
+      environmentId,
+      runnerKey: 'get-it-done-production',
+      version: '1.0.0',
+      fetchImpl,
+      push: false,
+      onError,
+    });
+    const unsigned = {
+      schemaVersion: 1 as const,
+      tenantId: common.tenantId,
+      targetAppId: '019fa9a9-d5f7-7ec3-a3c7-8899de1d39ff',
+      environmentId,
+      sequence: 1,
+      assistant: 'halted' as const,
+      reasonCode: 'operator-halt',
+      issuedAt: '2026-11-26T09:00:00.000Z',
+    };
+    const control = {
+      ...unsigned,
+      signature: {
+        algorithm: 'Ed25519' as const,
+        keyId: 'runtime-key',
+        value: sign(null, Buffer.from(canonicalRuntimeJson(unsigned)), privateKey).toString('base64url'),
+      },
+    };
+    const bundle = {
+      cursor: '2026-11-26T09:00:00.000Z', activeSnapshotComplete: true, deployments: [], revocations: [],
+    };
+
+    expect((await manager.apply({ ...bundle, control })).control).toBe('scope_mismatch');
+    expect((await manager.apply({ ...bundle, control: { ...control, targetAppId: common.targetAppId } })).control)
+      .toBe('unverifiable');
+
+    expect(onError.mock.calls.map(([error]) => (error as RuntimeEnvironmentControlError).code))
+      .toEqual(['control_scope_mismatch', 'control_unverifiable']);
+    expect(onError.mock.calls[0]![0]).toBeInstanceOf(RuntimeEnvironmentControlError);
+    expect((await store.load())?.control?.localHalt?.reasonCode).toBe('control_unverifiable');
   });
 });

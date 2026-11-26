@@ -11,7 +11,10 @@ import {
   MemoryRuntimeStateStore,
   type RuntimeStateStore,
 } from './state-store.js';
-import { RuntimeSyncManager } from './sync-manager.js';
+import {
+  RuntimeEnvironmentControlError,
+  RuntimeSyncManager,
+} from './sync-manager.js';
 import {
   RuntimeControlPlaneClient,
   type RuntimePushConnector,
@@ -72,9 +75,13 @@ export function createManagedRuntimeSync(options: {
   let client: RuntimeControlPlaneClient;
   const manager = new RuntimeSyncManager({
     environmentId: options.environmentId,
+    targetAppId: options.appId,
     store,
     verifier,
     validateDeployment: options.validateDeployment,
+    onControlRejected: (code) => {
+      options.onError?.(new RuntimeEnvironmentControlError(code));
+    },
     onPending: async (deployments) => {
       if (options.readOnly) return;
       for (const deployment of deployments) {

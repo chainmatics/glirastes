@@ -5,8 +5,16 @@ import {
   type RuntimeDeploymentBundle,
   type SecurityRevocation,
 } from '../contracts/revisions.js';
-import type { RuntimeRevisionVerifier } from './signature-verifier.js';
 import {
+  EnvironmentControlSchema,
+  type EnvironmentControl,
+} from '../contracts/environment-control.js';
+import {
+  RuntimeSyncVerificationError,
+  type RuntimeRevisionVerifier,
+} from './signature-verifier.js';
+import {
+  type RuntimeControlState,
   type RuntimeStateStore,
   type RuntimeSyncState,
 } from './state-store.js';
@@ -18,17 +26,48 @@ const WireSyncBundleSchema = z.object({
   activeSnapshotComplete: z.literal(true),
   deployments: z.array(z.unknown()),
   revocations: z.array(z.unknown()),
+  control: z.unknown().optional(),
 }).strict();
+
+/**
+ * What a sync did with the environment control: `absent` (Platform without
+ * control), `kept` (null after an accepted one, or none yet), `accepted`,
+ * `stale` (sequence not higher), `scope_mismatch`, `unverifiable` (local halt).
+ */
+export type RuntimeControlOutcome =
+  | 'absent'
+  | 'kept'
+  | 'accepted'
+  | 'stale'
+  | 'scope_mismatch'
+  | 'unverifiable';
+
+export type RuntimeEnvironmentControlErrorCode =
+  | 'control_unverifiable'
+  | 'control_scope_mismatch';
+
+/** Content-free report of a delivered control the runner did not accept. */
+export class RuntimeEnvironmentControlError extends Error {
+  constructor(readonly code: RuntimeEnvironmentControlErrorCode) {
+    super(code === 'control_unverifiable'
+      ? 'Glirastes environment control could not be verified; the assistant is halted'
+      : 'Glirastes environment control names another tenant, app or environment');
+    this.name = 'RuntimeEnvironmentControlError';
+  }
+}
 
 export interface RuntimeSyncApplyResult {
   state: RuntimeSyncState;
   rejectedDeploymentIds: string[];
   rejectedRevocationIds: string[];
+  control: RuntimeControlOutcome;
 }
 
 export class RuntimeSyncManager {
   constructor(private readonly options: {
     environmentId: string;
+    /** When set, a control of another app is rejected. */
+    targetAppId?: string;
     store: RuntimeStateStore;
     verifier: RuntimeRevisionVerifier;
     validateDeployment?: (
@@ -38,11 +77,18 @@ export class RuntimeSyncManager {
     onRevocations?: (revocations: SecurityRevocation[]) => void | Promise<void>;
     onPending?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
     onActivated?: (deployments: RuntimeDeploymentBundle[]) => void | Promise<void>;
+    onControlRejected?: (code: RuntimeEnvironmentControlErrorCode) => void;
   }) {}
 
   async apply(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
     const wire = WireSyncBundleSchema.parse(rawBundle);
     let state = await this.options.store.load() ?? this.emptyState();
+    // First, so a failed key lookup aborts the sync before anything else applies.
+    const controlResult = await this.applyControl(wire, state);
+    if (controlResult.next) {
+      state = { ...state, control: controlResult.next };
+      await this.options.store.saveAtomic(state);
+    }
     const rejectedRevocationIds: string[] = [];
     const acceptedRevocations: SecurityRevocation[] = [];
 
@@ -161,7 +207,75 @@ export class RuntimeSyncManager {
       await this.options.onActivated?.(active);
     }
 
-    return { state, rejectedDeploymentIds, rejectedRevocationIds };
+    return {
+      state,
+      rejectedDeploymentIds,
+      rejectedRevocationIds,
+      control: controlResult.outcome,
+    };
+  }
+
+  private async applyControl(
+    wire: z.infer<typeof WireSyncBundleSchema>,
+    state: RuntimeSyncState,
+  ): Promise<{ outcome: RuntimeControlOutcome; next?: RuntimeControlState }> {
+    if (!('control' in wire)) return { outcome: 'absent' };
+    if (wire.control === null) return { outcome: 'kept' };
+    const current = state.control ?? { accepted: null, localHalt: null };
+    const parsed = EnvironmentControlSchema.safeParse(wire.control);
+    if (!parsed.success) return this.unverifiable(current);
+    try {
+      await this.options.verifier.verifyEnvironmentControl(parsed.data);
+    } catch (error) {
+      // A JWKS outage is no verdict on the control; retry with the next sync.
+      if (!(error instanceof RuntimeSyncVerificationError)) throw error;
+      return this.unverifiable(current);
+    }
+    if (!this.controlScopeMatches(parsed.data, current, state)) {
+      this.options.onControlRejected?.('control_scope_mismatch');
+      return { outcome: 'scope_mismatch' };
+    }
+    if (parsed.data.sequence <= this.controlBaseline(current)) {
+      return { outcome: 'stale' };
+    }
+    return { outcome: 'accepted', next: { accepted: parsed.data, localHalt: null } };
+  }
+
+  private unverifiable(
+    current: RuntimeControlState,
+  ): { outcome: RuntimeControlOutcome; next?: RuntimeControlState } {
+    this.options.onControlRejected?.('control_unverifiable');
+    if (current.localHalt) return { outcome: 'unverifiable' };
+    return {
+      outcome: 'unverifiable',
+      next: {
+        accepted: current.accepted,
+        localHalt: {
+          kind: 'local',
+          assistant: 'halted',
+          reasonCode: 'control_unverifiable',
+          sequence: this.controlBaseline(current),
+          detectedAt: new Date().toISOString(),
+        },
+      },
+    };
+  }
+
+  private controlBaseline(current: RuntimeControlState): number {
+    return Math.max(current.accepted?.sequence ?? 0, current.localHalt?.sequence ?? 0);
+  }
+
+  private controlScopeMatches(
+    control: EnvironmentControl,
+    current: RuntimeControlState,
+    state: RuntimeSyncState,
+  ): boolean {
+    const knownTenantId = current.accepted?.tenantId
+      ?? state.stable?.agentRevision.tenantId;
+    return control.environmentId === this.options.environmentId
+      && (this.options.targetAppId === undefined
+        || control.targetAppId === this.options.targetAppId)
+      && (knownTenantId === undefined || control.tenantId === knownTenantId);
   }
 
   private deploymentScopeMatches(deployment: RuntimeDeploymentBundle): boolean {
