@@ -66,6 +66,10 @@ jobs:
       - name: Install the pg floor fixture
         run: bun install --frozen-lockfile --cwd tests/fixtures/pg-floor
 
+      # zod 3.25 (classic and its zod/v4 build), for the chat views tests on zod 3.
+      - name: Install the zod 3 fixture
+        run: bun install --frozen-lockfile --cwd tests/fixtures/zod3
+
       # Without Python the Vue+FastAPI tests skip visibly here; the reference-fastapi job runs them.
       - name: Test
         run: bun run test

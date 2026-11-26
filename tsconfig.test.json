@@ -26,5 +26,5 @@
     }
   },
   "include": ["src", "tests"],
-  "exclude": ["src/cli/deferred-full.ts"]
+  "exclude": ["src/cli/deferred-full.ts", "tests/fixtures/zod3"]
 }

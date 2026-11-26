@@ -5,7 +5,12 @@ import type {
   ChatComponentManifestEntry,
   ChatViewCapabilities,
 } from '../../contracts/chat-view.js';
-import { toChatComponentManifest, type ChatComponentDefinition } from '../../chat-views/define.js';
+import {
+  toChatComponentManifest,
+  type ChatComponentDefinition,
+  type ChatPropSchema,
+  type ChatPropsOf,
+} from '../../chat-views/define.js';
 import { validateResolvedChatElementProps } from '../../chat-views/validate.js';
 
 /** What a view element may do: both targets are existing chat paths. */
@@ -16,10 +21,14 @@ export interface ChatViewDispatch {
   uiAction(id: string, args?: Record<string, unknown>): void;
 }
 
-/** Props of an app's (or the SDK's) component for one chat view element. */
-export interface ChatComponentProps<P extends z.ZodRawShape = z.ZodRawShape> {
+/**
+ * Props of an app's (or the SDK's) component for one chat view element, for
+ * its props schema `S` (`typeof def.props`). The shape (`typeof def.props.shape`)
+ * still works with the SDK's own zod 4; with `zod/v4` of zod 3.25 use the schema.
+ */
+export interface ChatComponentProps<S extends ChatPropSchema | z.ZodRawShape = ChatPropSchema> {
   /** The element's resolved props, checked against its schema version. */
-  props: z.infer<z.ZodObject<P>>;
+  props: S extends ChatPropSchema ? ChatPropsOf<S> : S extends z.ZodRawShape ? z.infer<z.ZodObject<S>> : never;
   /** The rendered child elements. */
   children?: ReactNode;
   /** The value is a statement of the assistant; the SDK marks it next to the element. */
@@ -41,13 +50,22 @@ export interface ChatComponentBinding {
   readonly component: ComponentType<ChatComponentProps<any>>;
 }
 
-export function bindChatComponent<P extends z.ZodRawShape>(
-  definition: ChatComponentDefinition<P>,
-  component: ComponentType<ChatComponentProps<P>>,
+export function bindChatComponent<S extends ChatPropSchema>(
+  definition: ChatComponentDefinition<S>,
+  component: ComponentType<ChatComponentProps<S>>,
+): ChatComponentBinding;
+/** A component typed by the props shape (`ChatComponentProps<typeof def.props.shape>`, SDK zod 4). */
+export function bindChatComponent<S extends ChatPropSchema & { shape: z.ZodRawShape }>(
+  definition: ChatComponentDefinition<S>,
+  component: ComponentType<ChatComponentProps<S['shape']>>,
+): ChatComponentBinding;
+export function bindChatComponent(
+  definition: ChatComponentDefinition<ChatPropSchema>,
+  component: unknown,
 ): ChatComponentBinding {
   return {
-    definition: definition as unknown as ChatComponentDefinition,
-    component: component as ComponentType<ChatComponentProps<z.ZodRawShape>>,
+    definition,
+    component: component as ComponentType<ChatComponentProps>,
   };
 }
 
