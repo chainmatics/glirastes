@@ -20,6 +20,7 @@ export const NON_DOMAIN_TOOL_NAMES = Object.freeze([
   'memory_remember',
   'memory_forget',
   'read_result',
+  'render_view',
 ] as const);
 
 /**

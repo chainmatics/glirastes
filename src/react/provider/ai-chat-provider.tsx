@@ -60,6 +60,10 @@ import {
   type PendingChatCommand,
 } from '../interactions/registry.js';
 import { createToolResultRendererRegistry } from '../tool-renderers/registry.js';
+import { createChatViewRegistry, mergeChatComponentBindings } from '../chat-views/registry.js';
+import { starterChatBindings } from '../chat-views/starter-bindings.js';
+import { CHAT_VIEW_PHRASES } from '../../chat-views/text.js';
+import { RENDER_VIEW_TOOL_NAME, type ChatViewCapabilities } from '../../contracts/chat-view.js';
 import { ChatComposerQueueProvider } from '../composer/chat-composer.js';
 import { createComposerDraftController, type ComposerDraftController } from '../composer/composer-drafts.js';
 import { ChatMarkdownOptionsContext, NO_MARKDOWN_OPTIONS } from '../markdown-options.js';
@@ -215,6 +219,9 @@ export const DEFAULT_LOCALE: ChatLocale = {
   commandArgumentsNoMatches: 'No matches',
   removeMentionLabel: 'Remove {label}',
   openEntityLabel: 'Open {label}',
+  chatViewSaidMarker: CHAT_VIEW_PHRASES.en.said,
+  chatViewPartialNote: CHAT_VIEW_PHRASES.en.partial,
+  chatViewMoreRows: CHAT_VIEW_PHRASES.en.more,
   chatAboutLabel: 'Chat about this',
   attachButtonLabel: 'Attach files',
   plusMenuButtonLabel: 'More actions',
@@ -734,6 +741,7 @@ export function AiChatProvider({
   markdown,
   onOpenRequest,
   toolRenderers,
+  chatViews,
   toolResults: userToolResults,
   activityLog: userActivityLog,
   messageFooter: userMessageFooter,
@@ -861,6 +869,20 @@ export function AiChatProvider({
       ? createToolResultRendererRegistry(toolRenderers)
       : undefined),
     [toolRenderers],
+  );
+  // Keyed on the fields, so an inline `chatViews={{ … }}` with a memoized array does not re-render every message.
+  const chatViewsOn = chatViews !== undefined && chatViews !== null;
+  const chatViewComponents = chatViews?.components;
+  const chatViewSurface = chatViews?.surface === 'narrow' || chatViews?.surface === 'workspace' ? chatViews.surface : undefined;
+  const chatViewRegistry = useMemo(
+    () => (chatViewsOn ? createChatViewRegistry(mergeChatComponentBindings(starterChatBindings, chatViewComponents ?? [])) : undefined),
+    [chatViewsOn, chatViewComponents],
+  );
+  const chatViewCapabilities = useMemo<ChatViewCapabilities | null>(
+    () => (chatViewRegistry
+      ? { components: chatViewRegistry.capabilities(), ...(chatViewSurface ? { surface: chatViewSurface } : {}) }
+      : null),
+    [chatViewRegistry, chatViewSurface],
   );
   const attachmentOptions = useMemo(() => resolveAttachmentOptions(userAttachments), [userAttachments]);
   const voiceConfig = useMemo(
@@ -1352,6 +1374,12 @@ export function AiChatProvider({
     setRequestLanguage(requestLanguage);
     return () => setRequestLanguage(null);
   }, [setRequestLanguage, requestLanguage]);
+  const setChatViewCapabilities = resolvedTransport.setChatViewCapabilities;
+  useEffect(() => {
+    if (!setChatViewCapabilities) return undefined;
+    setChatViewCapabilities(chatViewCapabilities);
+    return () => setChatViewCapabilities(null);
+  }, [setChatViewCapabilities, chatViewCapabilities]);
   const setUiOutcomeReporting = resolvedTransport.setUiOutcomeReporting;
   useEffect(() => {
     if (!setUiOutcomeReporting) return undefined;
@@ -1796,6 +1824,34 @@ export function AiChatProvider({
       }
     });
   }, [reportUiOutcome, trackUiWork]);
+
+  // A chat view's button runs a client action as a generated client action of the view's call, classified
+  // like any UI action; there is no tool result to write the outcome into, so it is only reported to the app.
+  const runChatViewAction = useCallback((actionId: string, args: Record<string, unknown> | undefined, toolCallId: string) => {
+    const action = { type: 'glirastes.action', actionId, payload: { ...(args ?? {}) } };
+    void runToolResultUiActions(
+      { success: true, uiAction: action },
+      uiActionBusRef.current ?? getDefaultUiActionBus(),
+      uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {},
+    ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }))
+      .then((run) => {
+        if (!run || !mountedRef.current) return;
+        if (run.code !== 'ok' && run.code !== 'initiated') console.warn('[glirastes] A chat view action was not carried out');
+        try {
+          onUiActionOutcomeRef.current?.({
+            toolName: RENDER_VIEW_TOOL_NAME,
+            toolCallId,
+            code: run.code,
+            actions: [{ type: action.type, actionId }],
+            reported: false,
+            durationMs: run.durationMs,
+            ...(run.error !== undefined ? { error: run.error } : {}),
+          });
+        } catch {
+          console.warn('[glirastes] onUiActionOutcome threw');
+        }
+      });
+  }, []);
 
   // Process tool results and approvals from streaming messages
   useEffect(() => {
@@ -3027,6 +3083,8 @@ export function AiChatProvider({
       activityLog: activityLogConfig,
       messageFooter: messageFooterConfig,
       toolRendererRegistry,
+      ...(chatViewRegistry ? { chatViewRegistry } : {}),
+      runChatViewAction,
       attachments: attachmentOptions,
       voice: voiceConfig,
       mentionConfig: mentions,
@@ -3137,6 +3195,8 @@ export function AiChatProvider({
       approvalSubjects,
       approvalDisplayConfig,
       toolRendererRegistry,
+      chatViewRegistry,
+      runChatViewAction,
       attachmentOptions,
       voiceConfig,
       mentions,

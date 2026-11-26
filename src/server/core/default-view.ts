@@ -6,7 +6,7 @@
  * it leaves out cannot be read in this turn, so the answer does not point to
  * `read_result`. Pure and deterministic.
  */
-import { isSelectablePath } from './result-paths.js';
+import { isSelectablePath } from '../../contracts/result-paths.js';
 import { leftOutFields, projectOutputFields, type OutputFieldNode } from './output-fields.js';
 import { approx } from './result-overview.js';
 import { truncateToolResult, type TruncatedMarker } from './truncate-tool-result.js';

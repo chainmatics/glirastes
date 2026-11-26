@@ -49,6 +49,8 @@ import { AiChatPanel } from '../components/ai-chat-panel.js';
 import { AiChatProvider, type AiChatProviderProps } from '../provider/ai-chat-provider.js';
 import type { AiChatProviderConfig, ChatMessage, MentionChipProps } from '../types.js';
 import { StreamingChat } from './streaming-chat.js';
+import { bindChatComponent } from '../chat-views/registry.js';
+import { starterChatComponents } from '../../chat-views/starter-catalog.js';
 
 const TURNS = 4;
 const DECLARED: EntityDeclarationsByTool = {
@@ -136,6 +138,7 @@ function perChunk(count: number): 'all' | 'none' | 'some' {
 
 const R1 = () => <span data-renderer-mark="one">one</span>;
 const R2 = () => <span data-renderer-mark="two">two</span>;
+const GROUP_BINDING = bindChatComponent(starterChatComponents[0]!, R1);
 const SCHEMA = { safeParse: (value: unknown) => ({ success: true as const, data: value }) };
 function ChipB({ mention }: MentionChipProps) {
   return <span data-chip-b={mention.id}>{mention.displayName}</span>;
@@ -316,6 +319,11 @@ const ROWS: Row[] = [
     prop: 'suggestions', sample: () => ({ suggestions: { placement: 'composer' } }), other: () => ({ suggestions: { placement: 'message', count: 2 } }),
     expected: { inline: 'none', read: 'yes' },
   },
+  {
+    // Keyed on its fields: an inline object with the same (memoized) components array is no change.
+    prop: 'chatViews', sample: () => ({ chatViews: {} }), other: () => ({ chatViews: { components: [GROUP_BINDING] } }),
+    expected: { inline: 'none', read: 'yes' },
+  },
   // Not read by messages: neither a new value nor building it inline renders a finished message.
   { prop: 'transport', sample: () => ({}), expected: { inline: 'none', read: 'no' } },
   { prop: 'mentions', sample: () => ({ mentions: { search: async () => [], resolve: async (id: string, type: string) => ({ id, type, label: id }), types: ['task'] } }), expected: { inline: 'none', read: 'no' } },
@@ -353,7 +361,7 @@ const ROWS: Row[] = [
  * D not read by messages.
  */
 const GROUPS: Record<'A' | 'B' | 'C' | 'D', ReadonlyArray<keyof AiChatProviderProps>> = {
-  A: ['language', 'approvalSubjects', 'activityLog', 'messageFooter', 'approvalDisplay', 'suggestions'],
+  A: ['language', 'approvalSubjects', 'activityLog', 'messageFooter', 'approvalDisplay', 'suggestions', 'chatViews'],
   B: ['classNames', 'components', 'toolLabels', 'toolResults', 'entityDeclarations', 'composer', 'markdown', 'toolRenderers', 'chatInteractions'],
   C: ['locale', 'locales', 'triggers', 'entityLinks', 'approvalDescription'],
   D: [
@@ -404,6 +412,7 @@ const COVERED: Record<Exclude<keyof AiChatProviderProps, 'children'>, true> = {
   messageFooter: true,
   approvalDisplay: true,
   suggestions: true,
+  chatViews: true,
   transport: true,
   mentions: true,
   completionContext: true,

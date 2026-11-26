@@ -27,6 +27,7 @@ import { CHAT_LANGUAGE_HEADER, chatLanguageOf } from '../../contracts/localized-
 import { shouldContinueChat } from '../utils/ui-outcome-continuation.js';
 import { BUDGET_CONTINUATION, CONTINUATION_REQUEST_FIELD } from '../../contracts/budget-continuation.js';
 import type { BrowserMemoryStore } from '../utils/local-memory-store.js';
+import type { ChatViewCapabilities } from '../../contracts/chat-view.js';
 
 import type { MaybePromise } from '../types.js';
 
@@ -55,15 +56,20 @@ function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {
   return typeof (value as Promise<T> | null)?.then === 'function';
 }
 
+/** Request body field of the chat view components the page can render. */
+const CHAT_VIEWS_REQUEST_FIELD = 'chatViews';
+
 /**
  * Body of each chat request: the client actions the open page handles, so
- * the server refuses the others, plus the host's extras.
+ * the server refuses the others, the chat views the page renders (only with
+ * the provider's `chatViews`), plus the host's extras.
  * @internal
  */
 export function chatRequestBody(
   extras: Record<string, unknown> | (() => Record<string, unknown>) | undefined,
   memory?: BrowserMemoryStore,
   reportsUiOutcomes = false,
+  chatViews: ChatViewCapabilities | null = null,
 ): Record<string, unknown> {
   const resolved = !extras ? {} : typeof extras === 'function' ? extras() : extras;
   return {
@@ -71,6 +77,7 @@ export function chatRequestBody(
     // The chat reports UI outcomes and sends the history again (protocol version 1).
     ...(reportsUiOutcomes ? { [UI_OUTCOMES_REQUEST_FIELD]: UI_OUTCOME_PROTOCOL_VERSION } : {}),
     ...(memory ? { [MEMORY_BODY_FIELD]: { user: memory.read() } } : {}),
+    ...(chatViews ? { [CHAT_VIEWS_REQUEST_FIELD]: chatViews } : {}),
     ...resolved,
   };
 }
@@ -146,6 +153,12 @@ export function useVercelAiChatTransport(
     languageRef.current = language;
   }, []);
 
+  // Set by the provider: the chat views the page renders (`chatViews`), or null.
+  const chatViewsRef = useRef<ChatViewCapabilities | null>(null);
+  const setChatViewCapabilities = useCallback((capabilities: ChatViewCapabilities | null) => {
+    chatViewsRef.current = capabilities;
+  }, []);
+
   const onDataRef = useRef(onData);
   onDataRef.current = onData;
 
@@ -165,7 +178,7 @@ export function useVercelAiChatTransport(
       new DefaultChatTransport({
         api: endpoint,
         headers: () => chatRequestHeaders(headersRef.current, languageRef.current),
-        body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current, reportsUiOutcomes()),
+        body: () => chatRequestBody(bodyExtrasRef.current, memoryRef.current, reportsUiOutcomes(), chatViewsRef.current),
         // Same body as the default, with file data only in the latest user turns.
         prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => ({
           body: {
@@ -253,10 +266,11 @@ export function useVercelAiChatTransport(
       addToolApprovalResponse,
       subscribeToData,
       setRequestLanguage,
+      setChatViewCapabilities,
       continueAfterBudgetStop,
       ...(uiActionOutcomes ? { addToolOutput: writeToolOutput, continueTurn, setUiOutcomeReporting } : {}),
     }),
     [rawMessages, status, error, send, stop, setMessages, addToolApprovalResponse, subscribeToData,
-      setRequestLanguage, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
+      setRequestLanguage, setChatViewCapabilities, uiActionOutcomes, writeToolOutput, continueTurn, setUiOutcomeReporting, continueAfterBudgetStop],
   );
 }

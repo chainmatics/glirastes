@@ -34,6 +34,7 @@ import type { CompletionSearch } from '../completions/completion-search.js';
 import type { ResolvedAttachmentOptions } from '../utils/attachments.js';
 import type { ChatInteractionRegistry, PendingChatCommand } from '../interactions/registry.js';
 import type { ToolResultRendererRegistry } from '../tool-renderers/registry.js';
+import type { ChatViewRegistry } from '../chat-views/registry.js';
 
 /** The trigger char of the legacy `mentions` search (`@` or `/`); null when none is active. */
 type MentionTrigger = string | null;
@@ -75,6 +76,13 @@ export interface ChatContextValue {
   activityLog: Required<ActivityLogConfig>;
   /** Custom result components; absent when none are configured. */
   toolRendererRegistry?: ToolResultRendererRegistry;
+  /** Bound chat view components (`chatViews`); absent when the option is not set. */
+  chatViewRegistry?: ChatViewRegistry;
+  /**
+   * Runs a client action a chat view's button names through the UI action
+   * bus and reports its outcome (`onUiActionOutcome`, tool `render_view`).
+   */
+  runChatViewAction?: (actionId: string, args: Record<string, unknown> | undefined, toolCallId: string) => void;
   /** Resolved attachment limits; null while attachments are off. */
   attachments: ResolvedAttachmentOptions | null;
   voice: VoiceInputConfig;

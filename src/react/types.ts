@@ -6,6 +6,8 @@ import type { UiActionRunCode } from '../browser/client-actions.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { ViewContextEntry } from '../contracts/view-context.js';
 import type { AnyToolResultRenderer } from './tool-renderers/registry.js';
+import type { ChatComponentBinding } from './chat-views/registry.js';
+import type { ChatViewCapabilities } from '../contracts/chat-view.js';
 import type { ChatInteractionsConfig, ChatMentionContext, PendingChatCommand } from './interactions/registry.js';
 import type { AttachmentBlobStore } from './utils/attachment-blob-store.js';
 import type { ChatEntityLinksConfig } from './entity-links/entity-links.js';
@@ -123,6 +125,12 @@ export interface ChatTransport {
    * (`Content-Language`), or null for none (`sendLanguage: false`, unknown).
    */
   setRequestLanguage?(language: string | null): void;
+  /**
+   * Called by the provider with the chat view components the page can
+   * render (`chatViews`), sent as `chatViews` in each request body, or null
+   * for none (the option is not set: no field).
+   */
+  setChatViewCapabilities?(capabilities: ChatViewCapabilities | null): void;
 }
 
 /**
@@ -1578,6 +1586,13 @@ export interface ChatLocale {
   // Pills and entity chips
   removeMentionLabel: string;         // supports `{label}`
   openEntityLabel: string;            // supports `{label}`
+  // Chat views
+  /** Marks a value the assistant stated in a view; default `computed by the assistant`. */
+  chatViewSaidMarker?: string;
+  /** Under a view table from a cut or an overview; default `excerpt — not all entries shown`. */
+  chatViewPartialNote?: string;
+  /** Under a view table with rows left out; supports `{count}`; default `+{count} more`. */
+  chatViewMoreRows?: string;
   chatAboutLabel: string;             // a "Chat about this" menu entry (`useChatComposer`)
   // Attachments
   attachButtonLabel: string;
@@ -1848,6 +1863,14 @@ export interface ChatQueueProps {
 // Provider Config
 // ============================================================================
 
+/** `AiChatProviderConfig.chatViews`. */
+export interface ChatViewsOptions {
+  /** The app's bindings (`bindChatComponent`); merged over `starterChatBindings`. */
+  components?: ReadonlyArray<ChatComponentBinding>;
+  /** `narrow` asks the server for at most 3 table columns. */
+  surface?: 'narrow' | 'workspace';
+}
+
 export interface AiChatProviderConfig {
   mentions?: MentionConfig;
   /**
@@ -1856,6 +1879,14 @@ export interface AiChatProviderConfig {
    * version's schema, and throwing renderers use the default block.
    */
   toolRenderers?: ReadonlyArray<AnyToolResultRenderer>;
+  /**
+   * Chat views (generative UI): renders the server's `render_view` results
+   * through the starter bindings plus `components` (merged by
+   * `id@schemaVersion`, the app's win) and sends what the page can render
+   * as `chatViews` in each request. Memoize the array. Without this option
+   * nothing is sent and a view renders as text.
+   */
+  chatViews?: ChatViewsOptions;
   /**
    * Generic `/` and `@` providers. Memoize the array: a new identity
    * rebuilds the search. When set, the composer uses provider search with

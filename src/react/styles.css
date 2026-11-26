@@ -864,6 +864,142 @@
   color: var(--cm-text-muted);
 }
 
+/* ---------- Chat view (render_view) ---------- */
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) {
+  margin: 0.375rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 13px;
+  color: var(--cm-text);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="caption"] {
+  margin: 0;
+  font-weight: 600;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="text-fallback"] {
+  white-space: pre-wrap;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="group"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="group"][data-emphasis="subtle"],
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="group"][data-emphasis="strong"] {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-bg-muted);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="group"][data-emphasis="strong"] {
+  border: 1px solid var(--cm-primary);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="card"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-bg);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="card-title"] {
+  font-weight: 600;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="text"] {
+  margin: 0;
+  white-space: pre-wrap;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="key-value"] {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="key-value-item"] {
+  display: contents;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="key-value"] dt {
+  color: var(--cm-text-muted);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="key-value"] dd {
+  margin: 0;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="table"] {
+  max-width: 100%;
+  overflow-x: auto;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="table"] table {
+  width: 100%;
+  border-collapse: collapse;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="table"] th,
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="table"] td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--cm-border);
+  text-align: left;
+  vertical-align: top;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="table"] th {
+  font-weight: 600;
+  color: var(--cm-text-muted);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="table-note"] {
+  margin: 0;
+  font-size: 12px;
+  color: var(--cm-text-muted);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="status-badge"] {
+  display: inline-block;
+  padding: 0 0.375rem;
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-bg-muted);
+  font-size: 12px;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="status-badge"][data-tone="success"] {
+  background: color-mix(in srgb, #16a34a 15%, transparent);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="status-badge"][data-tone="warning"] {
+  background: color-mix(in srgb, #d97706 18%, transparent);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="status-badge"][data-tone="danger"] {
+  background: color-mix(in srgb, var(--cm-danger) 15%, transparent);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="stat"] {
+  display: inline-flex;
+  flex-direction: column;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="stat-label"] {
+  font-size: 12px;
+  color: var(--cm-text-muted);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="stat-value"] {
+  font-size: 18px;
+  font-weight: 600;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="said-marker"] {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--cm-text-muted);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="action"] {
+  align-self: flex-start;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--cm-primary);
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  color: var(--cm-primary);
+  font: inherit;
+  cursor: pointer;
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="action"]:hover:not(:disabled) {
+  background: var(--cm-primary-tint);
+}
+[data-component="chat-view"]:where(:not([data-unstyled], [data-unstyled] *)) [data-element="action"]:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
 /* ---------- Provider composer, '/' and '@' list ---------- */
 /* The wrapper above is flex, but the editor, mic and Send sit inside a bare
    <form> (classNames.input is empty by default). Without this rule the form

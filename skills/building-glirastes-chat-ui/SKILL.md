@@ -1,6 +1,6 @@
 ---
 name: building-glirastes-chat-ui
-description: Use when integrating or customizing the Glirastes React chat or browser-only web component in Angular/SvelteKit/Nuxt/Vue, tool cards, approvals, sessions, mentions and slash commands (derived `@` entities and `/` commands, direct commands), suggestions, UI actions, themes, floating window behavior, or speech-to-text.
+description: Use when integrating or customizing the Glirastes React chat or browser-only web component in Angular/SvelteKit/Nuxt/Vue, tool cards, approvals, sessions, mentions and slash commands (derived `@` entities and `/` commands, direct commands), suggestions, UI actions, themes, floating window behavior, speech-to-text, or optional chat views (generative UI from the app's components).
 ---
 
 # Building the Glirastes Chat UI
@@ -221,18 +221,21 @@ and the selected item's own id reaches the model in the mention marker.
 Role filtering only hides entries: the server and the app still authorize.
 Memoize the providers array; a new identity rebuilds the search.
 
-Enable `clarification` on `createAiChatHandler`. The model asks one targeted
-question through the built-in clarification tool inside its normal step, no
-extra planner call. `ClarificationCard` renders the options and a free-text
-answer; the answer resumes the original request, and typing into the composer
+Enable `clarification` on `createAiChatHandler`. The model asks one targeted question through the built-in clarification tool inside its normal step, no
+extra planner call. `ClarificationCard` renders the options and a free-text answer; the answer resumes the original request, and typing into the composer
 while a question is open answers it too.
 
 ## Result components
 
-`toolRenderers` maps a tool's `definitionId` and `schemaVersion` to a compact
-local component built with `defineToolResultRenderer`. Each version's
-`outputSchema` guards stored messages: when no version accepts the output or
-the component throws, the default `ToolResultBlock` renders instead.
+`toolRenderers` maps a tool's `definitionId` and `schemaVersion` to a compact local component built with `defineToolResultRenderer`.
+Each version's `outputSchema` guards stored messages: when no version accepts the output or the component throws, the default `ToolResultBlock` renders instead.
+
+## Chat views
+
+Optional, off unless both sides opt in: `chatViews: {}` on `createAiChatHandler` adds the `render_view` tool (starter catalog), `chatViews={{}}` on `VercelAiChat` renders the views.
+App components: `defineChatComponent` → `bindChatComponent` → `glirastes tools refresh` writes `.glirastes/chat-components.json` → `chatViews: { catalog }`.
+Values are references to tool results (shielded form under `piiShield`), a view is a snapshot, one per answer, buttons only send a prompt or a client action.
+Setup, test recipe and troubleshooting: [references/chat-views.md](references/chat-views.md).
 
 ## Non-React hosts
 
@@ -306,10 +309,8 @@ and `load` from its own server instead.
 
 ## Floating window
 
-`FloatingChatUI`, `ChatWindow` and `AiTriggerButton` provide the portal-mounted
-widget; `useDragResizePanel` and `useDraggablePosition` carry drag, resize,
-viewport constraint and snapback (bounded, persisted). Mount it through the
-shipped portal, which keeps it clear of transformed or clipping ancestors.
+`FloatingChatUI`, `ChatWindow` and `AiTriggerButton` provide the portal-mounted widget; `useDragResizePanel` and `useDraggablePosition` carry drag, resize,
+viewport constraint and snapback (bounded, persisted). Mount it through the shipped portal, which keeps it clear of transformed or clipping ancestors.
 
 ## Placing the assistant
 
@@ -322,9 +323,8 @@ Example, width, shortcuts, look, own layout: [references/placing-the-assistant.m
 
 ## Approvals
 
-Self-confirmation stays in the initiating chat. Organizational approval creates
-a durable Platform request and stays fail-closed while unavailable. Test
-denial, expiry, replay, cross-app and cross-tenant cases.
+Self-confirmation stays in the initiating chat. Organizational approval creates a durable Platform request and stays fail-closed while unavailable.
+Test denial, expiry, replay, cross-app and cross-tenant cases.
 
 `ApprovalCard` handles one request; `BulkApprovalCard` groups same-tool requests
 but keeps each approval independent (no bulk authorization). A failed approval

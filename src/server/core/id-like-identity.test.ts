@@ -7,7 +7,7 @@ import { compactHistoryResult, HISTORY_MARKER_KEY, type HistoryMarker } from '..
 import { toolToAiTool } from './index.js';
 import { createReadResultTool, readResultHandle, type ReadResultMarker } from './read-result-tool.js';
 import { buildResultOverview, type ResultOverviewMarker } from './result-overview.js';
-import { parseResultPath } from './result-paths.js';
+import { parseResultPath } from '../../contracts/result-paths.js';
 import { createResultStore, type ResultHandle } from './result-store.js';
 
 type Entry = Record<string, unknown>;

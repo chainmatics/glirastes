@@ -260,10 +260,15 @@ export function createAiSdkTools(
       remember(rawInput, checked.value);
       return checked.value;
     };
+    // A converted tool whose model-facing result differs from its tool part (`_modelOutput`, internal).
+    const modelOutput = (rawTool as { _modelOutput?: unknown } | null)?._modelOutput;
     wrapped[toolName] = tool({
       description: source.description,
       inputSchema,
       needsApproval: needsApproval as Parameters<typeof tool>[0]['needsApproval'],
+      ...(typeof modelOutput === 'function'
+        ? { toModelOutput: ({ output }: { output: unknown }) => ({ type: 'json', value: (modelOutput as (value: unknown) => unknown)(output) ?? null }) }
+        : {}),
       execute: async (rawInput: unknown, executionOptions: unknown) => {
         const incomingSignal = (executionOptions as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
         incomingSignal?.throwIfAborted();

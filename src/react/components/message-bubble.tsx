@@ -27,6 +27,8 @@ import { MessageFooter } from './message-footer.js';
 import { readActivitySteps, readLatestPlan, withoutHiddenTools, type ActivityDetailSource, type ActivityStep, type ActivityStepStatus } from '../utils/activity.js';
 import { PLAN_TOOL_NAME } from '../../contracts/plan.js';
 import { RendererBoundary } from '../tool-renderers/renderer-boundary.js';
+import { ChatView, readChatViewPart } from '../chat-views/chat-view.js';
+import { RENDER_VIEW_TOOL_NAME } from '../../contracts/chat-view.js';
 import {
   CLARIFICATION_TOOL_NAME,
   stripClarificationMarkers,
@@ -72,6 +74,8 @@ function shouldRenderToolResult(
   if (toolName === CLARIFICATION_TOOL_NAME) return false;
   // The plan renders as a checklist.
   if (toolName === PLAN_TOOL_NAME) return false;
+  // A chat view renders as the view (or its text), never as raw output.
+  if (toolName === RENDER_VIEW_TOOL_NAME) return false;
   if (mode === 'hidden') return false;
   if (mode === 'allowlist') return allowlist.includes(toolName);
   return true;
@@ -276,6 +280,8 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     components,
     toolResults,
     toolRendererRegistry,
+    chatViewRegistry,
+    runChatViewAction,
     messages,
     send,
     isLoading,
@@ -444,6 +450,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   ) {
     const hasVisibleToolOutput = message.parts.some(p => {
       if (readClarificationPart(p)) return true;
+      if (readChatViewPart(p)?.view) return true;
       if (!isRecord(p)) return false;
       const t = typeof p.type === 'string' ? p.type : '';
       if (t.startsWith('tool-') && p.state === 'output-available') {
@@ -541,6 +548,30 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
             answer: answer.text,
             ...(answer.optionId ? { optionId: answer.optionId } : {}),
           }))}
+        />
+      );
+    }
+
+    const chatView = readChatViewPart(part);
+    if (chatView) {
+      // Running or failed: nothing here (the model answers in text).
+      if (!chatView.view) return null;
+      const { toolCallId } = chatView;
+      return (
+        <ChatView
+          key={`chat-view-${toolCallId || i}`}
+          view={chatView.view}
+          {...(chatViewRegistry ? { registry: chatViewRegistry } : {})}
+          locale={language ?? 'en'}
+          texts={{
+            ...(locale.chatViewSaidMarker ? { said: locale.chatViewSaidMarker } : {}),
+            ...(locale.chatViewPartialNote ? { partial: locale.chatViewPartialNote } : {}),
+            ...(locale.chatViewMoreRows ? { more: locale.chatViewMoreRows } : {}),
+          }}
+          dispatch={{
+            prompt: (text) => { send(text); },
+            uiAction: (id, args) => runChatViewAction?.(id, args, toolCallId),
+          }}
         />
       );
     }

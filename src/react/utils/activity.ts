@@ -1,3 +1,4 @@
+import { RENDER_VIEW_TOOL_NAME } from '../../contracts/chat-view.js';
 import { CLARIFICATION_TOOL_NAME } from '../../contracts/clarification.js';
 import { PLAN_TOOL_NAME, readPlanItems, type PlanItem } from '../../contracts/plan.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
@@ -66,8 +67,9 @@ function uiOutcomeStep(output: unknown): { status: ActivityStepStatus; uiOutcome
   return { status: code === 'initiated' ? 'done' : 'error', uiOutcome: code };
 }
 
-/** SDK built-ins render elsewhere (plan, clarification card, suggestions) or are internal (find_tools, read_result). */
+/** SDK built-ins render elsewhere (plan, clarification card, suggestions, chat view) or are internal (find_tools, read_result). */
 const BUILTIN_TOOL_NAMES = new Set<string>([
+  RENDER_VIEW_TOOL_NAME,
   'find_tools',
   'suggest_followups',
   CLARIFICATION_TOOL_NAME,

@@ -24,6 +24,8 @@ export const TOOLS_PATHS = {
   runtimeManifest: '.glirastes/build/runtime-manifest.json',
   promptManifest: '.glirastes/build/prompt-manifest.json',
   receipt: '.glirastes/setup-receipt.json',
+  /** Optional Chat Views: the app's own `defineChatComponent` entries; written only when there are some. */
+  chatComponents: '.glirastes/chat-components.json',
 } as const;
 
 export const DEFAULT_GENERATED_MODULE = 'src/generated/glirastes/tools.generated.ts';

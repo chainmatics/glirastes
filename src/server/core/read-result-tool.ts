@@ -27,7 +27,7 @@ import {
   setOwn,
   type ParsedPath,
   type PathStep,
-} from './result-paths.js';
+} from '../../contracts/result-paths.js';
 import type { ResultHandle, ResultStore } from './result-store.js';
 import { truncateToolResult } from './truncate-tool-result.js';
 
@@ -144,7 +144,7 @@ const MAX_LISTED_PARENT_KEYS = 12;
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
 const DIGIT_RUN = /\d{3}/;
 
-function echoableKey(key: string): boolean {
+export function echoableKey(key: string): boolean {
   return IDENTIFIER.test(key) && !DIGIT_RUN.test(key);
 }
 
