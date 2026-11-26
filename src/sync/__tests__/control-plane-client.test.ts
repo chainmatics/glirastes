@@ -264,12 +264,11 @@ describe('RuntimeControlPlaneClient', () => {
       await client.syncOnce();
       expect(heartbeats()).toEqual([
         { runnerKey: baseOptions.runnerKey, health: 'healthy', technicalMetadata: { controlSequence: 3, assistantState: 'halted' } },
-        { runnerKey: baseOptions.runnerKey, health: 'degraded', technicalMetadata: { controlSequence: 3, assistantState: 'halted' } },
       ]);
       expect(JSON.stringify(heartbeats())).not.toContain('operator-halt');
     });
 
-    it('keeps the last reported deployment health in the control report', async () => {
+    it('keeps the last deployment health and technical metadata in the control report', async () => {
       const enabled = { accepted: { sequence: 1, assistant: 'enabled' }, localHalt: null };
       const { client, heartbeats } = clientWith([
         applied('accepted', enabled),
@@ -277,12 +276,26 @@ describe('RuntimeControlPlaneClient', () => {
       ]);
       await client.heartbeat({ health: 'unhealthy', lastAppliedDeploymentId: 'deployment-1' });
       await client.syncOnce();
-      await client.heartbeat({ health: 'healthy', lastAppliedDeploymentId: 'deployment-1' });
+      await client.heartbeat({
+        health: 'healthy',
+        lastAppliedDeploymentId: 'deployment-1',
+        technicalMetadata: { validationStage: 'signature-schema', activationStage: 'signature-schema-bindings' },
+      });
       await client.syncOnce();
-      expect(heartbeats().slice(1).map(({ health, lastAppliedDeploymentId }) => ({ health, lastAppliedDeploymentId }))).toEqual([
-        { health: 'unhealthy', lastAppliedDeploymentId: 'deployment-1' },
-        { health: 'healthy', lastAppliedDeploymentId: 'deployment-1' },
-        { health: 'degraded', lastAppliedDeploymentId: 'deployment-1' },
+      expect(heartbeats().slice(1)).toEqual([
+        { runnerKey: baseOptions.runnerKey, health: 'unhealthy', lastAppliedDeploymentId: 'deployment-1', technicalMetadata: { controlSequence: 1, assistantState: 'enabled' } },
+        {
+          runnerKey: baseOptions.runnerKey,
+          health: 'healthy',
+          lastAppliedDeploymentId: 'deployment-1',
+          technicalMetadata: { validationStage: 'signature-schema', activationStage: 'signature-schema-bindings', controlSequence: 1, assistantState: 'enabled' },
+        },
+        {
+          runnerKey: baseOptions.runnerKey,
+          health: 'healthy',
+          lastAppliedDeploymentId: 'deployment-1',
+          technicalMetadata: { validationStage: 'signature-schema', activationStage: 'signature-schema-bindings', controlSequence: 1, assistantState: 'halted' },
+        },
       ]);
     });
 

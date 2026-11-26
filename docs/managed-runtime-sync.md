@@ -395,7 +395,8 @@ When the Platform delivers the control, the runner sends a heartbeat with
 `technicalMetadata.controlSequence` (the accepted sequence, 0 without one)
 and `technicalMetadata.assistantState` (`enabled` or `halted`) whenever they
 change and again with the first sync after 60 seconds; a local halt reports
-`health: 'degraded'`, otherwise the health of the last deployment heartbeat.
+`assistantState: 'halted'`. These control reports repeat the health and
+technical metadata of the last deployment heartbeat unchanged.
 Deployment heartbeats carry the same two fields. A
 development (read-only) connection sends no heartbeat.
 

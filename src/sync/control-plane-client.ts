@@ -38,8 +38,6 @@ interface HeartbeatInput {
   technicalMetadata?: Record<string, unknown>;
 }
 
-const HEALTH_RANK = { healthy: 0, degraded: 1, unhealthy: 2 } as const;
-
 function controlStatusOf(control: RuntimeControlState | undefined): ControlHeartbeatStatus {
   return {
     controlSequence: control?.accepted?.sequence ?? 0,
@@ -81,9 +79,9 @@ export class RuntimeControlPlaneRequestError extends Error {
 
 export class RuntimeControlPlaneClient {
   private abortController: AbortController | null = null;
-  private controlStatus: (ControlHeartbeatStatus & { localHalt: boolean }) | undefined;
+  private controlStatus: ControlHeartbeatStatus | undefined;
   private controlReportedAt: number | undefined;
-  private deploymentHeartbeat: Pick<HeartbeatInput, 'health' | 'validatedDeploymentId' | 'lastAppliedDeploymentId'> | undefined;
+  private deploymentHeartbeat: HeartbeatInput | undefined;
   private cursor: string | null = null;
 
   constructor(private readonly options: {
@@ -196,12 +194,8 @@ export class RuntimeControlPlaneClient {
   }
 
   async heartbeat(input: HeartbeatInput) {
-    const { health, validatedDeploymentId, lastAppliedDeploymentId } = input;
-    this.deploymentHeartbeat = {
-      health,
-      ...(validatedDeploymentId !== undefined ? { validatedDeploymentId } : {}),
-      ...(lastAppliedDeploymentId !== undefined ? { lastAppliedDeploymentId } : {}),
-    };
+    this.assertTechnicalMetadata(input.technicalMetadata ?? {});
+    this.deploymentHeartbeat = input;
     return this.sendHeartbeat(input);
   }
 
@@ -225,21 +219,18 @@ export class RuntimeControlPlaneClient {
   private async reportControl(result: RuntimeSyncApplyResult | undefined): Promise<void> {
     if (this.options.readOnly || !result?.control || result.control === 'absent') return;
     const control = result.state?.control;
-    const status = { ...controlStatusOf(control), localHalt: Boolean(control?.localHalt) };
+    const status = controlStatusOf(control);
     const now = Date.now();
     const changed = this.controlStatus === undefined
       || this.controlStatus.controlSequence !== status.controlSequence
-      || this.controlStatus.assistantState !== status.assistantState
-      || this.controlStatus.localHalt !== status.localHalt;
+      || this.controlStatus.assistantState !== status.assistantState;
     const due = this.controlReportedAt === undefined
       || now - this.controlReportedAt >= (this.options.controlHeartbeatIntervalMs ?? CONTROL_HEARTBEAT_INTERVAL_MS);
     this.controlStatus = status;
     if (!changed && !due) return;
     try {
-      const last = this.deploymentHeartbeat;
-      const base = last?.health ?? 'healthy';
-      const health = status.localHalt && HEALTH_RANK[base] < HEALTH_RANK.degraded ? 'degraded' : base;
-      await this.sendHeartbeat({ ...last, health });
+      // Control-only reports must not change the deployment health or its metadata.
+      await this.sendHeartbeat(this.deploymentHeartbeat ?? { health: 'healthy' });
       this.controlReportedAt = now;
     } catch (error) {
       this.options.onError?.(error);
