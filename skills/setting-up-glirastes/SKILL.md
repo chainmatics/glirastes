@@ -249,7 +249,10 @@ eval gate is on, a step after it reports the result with
 `glirastes evals attest --suite <file|dir> --total <n> --failed <n>`. It sends
 digests and counts only, reads both digests from the committed
 `.glirastes/setup-artifact.json` and authenticates with `GLIRASTES_API_KEY`
-(the app's CI key, set by the developer). It never runs the suite. See
+(the app's CI key, set by the developer). It never runs the suite. Tooling that
+posts the attest itself validates the body with `EvalAttestationRequestSchema`
+(type `EvalAttestationRequest`) and the answer with `EvalAttestationResponseSchema`
+(type `EvalAttestationResponse`) from `glirastes/contracts`. See
 `docs/eval-attestation.md`.
 
 ## Commands
