@@ -26,6 +26,8 @@ import type { ChatServerLocales } from './chat-texts.js';
 import type { UiActionOutcomesOption } from './ui-outcomes.js';
 import type { UiToolResultShapeOption } from '../../core/index.js';
 import type { ToolTextsMap } from '../../../runtime/tool-texts.js';
+import type { ManagedTurnControl } from '../../../runtime/turn-control.js';
+import type { TurnAdmission } from '../../../runtime/turn-rate-limit.js';
 import type { ClarificationConfig, InternalApiCaller, PlanningConfig, ResultHandleLimits, ToolFailureClassifier } from '../../core/index.js';
 import type {
   Principal,
@@ -146,6 +148,21 @@ export interface ManagedLocalRuntimeConfig {
   onBudgetSignal?: (
     signal: ManagedTurnBudgetSignal,
   ) => void | Promise<void>;
+
+  /**
+   * The environment control in force. Asked at the start of every request
+   * (a halt answers 503 `assistant_halted` or `control_unknown` before
+   * anything else runs), before every model step, tool call and approval
+   * check. Its budget ceiling lowers the turn budget; it never raises it.
+   */
+  loadControl?: (
+    context: { request: Request },
+  ) => ManagedTurnControl | Promise<ManagedTurnControl>;
+
+  /** Admits the request of a principal; a refusal answers 429 `turn_rate_limited`. */
+  admitTurn?: (
+    context: { request: Request; principal: Principal },
+  ) => TurnAdmission | Promise<TurnAdmission>;
 }
 
 export interface StepUsage {

@@ -233,4 +233,101 @@ describe('RuntimeControlPlaneClient', () => {
     await expect(client.heartbeat({ health: 'healthy' })).rejects.toThrow();
     expect(fetchImpl.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal);
   });
+  describe('environment control heartbeat', () => {
+    const syncResponse = () => new Response(JSON.stringify({
+      cursor: '2026-07-28T20:00:00.000Z', activeSnapshotComplete: true, deployments: [], revocations: [], control: null,
+    }), { status: 200 });
+    const applied = (outcome: string, control: unknown) => ({ control: outcome, state: { control } });
+
+    function clientWith(results: unknown[], options: Record<string, unknown> = {}) {
+      const fetchImpl = vi.fn().mockImplementation(async (url: string) => (
+        url.includes('/sync?') ? syncResponse() : new Response(JSON.stringify({ ok: true }), { status: 200 })
+      ));
+      const apply = vi.fn();
+      for (const result of results) apply.mockResolvedValueOnce(result);
+      const client = new RuntimeControlPlaneClient({ ...baseOptions, fetchImpl, manager: { apply } as never, ...options });
+      const heartbeats = () => fetchImpl.mock.calls
+        .filter(([url]) => String(url).endsWith('/heartbeat'))
+        .map(([, init]) => JSON.parse(init.body));
+      return { client, heartbeats };
+    }
+
+    it('reports the applied control sequence and assistant state, content-free, when it changes', async () => {
+      const halt = { accepted: { sequence: 3, assistant: 'halted', reasonCode: 'operator-halt' }, localHalt: null };
+      const { client, heartbeats } = clientWith([
+        applied('accepted', halt),
+        applied('stale', halt),
+        applied('unverifiable', { accepted: halt.accepted, localHalt: { kind: 'local', sequence: 3 } }),
+      ]);
+      await client.syncOnce();
+      await client.syncOnce();
+      await client.syncOnce();
+      expect(heartbeats()).toEqual([
+        { runnerKey: baseOptions.runnerKey, health: 'healthy', technicalMetadata: { controlSequence: 3, assistantState: 'halted' } },
+      ]);
+      expect(JSON.stringify(heartbeats())).not.toContain('operator-halt');
+    });
+
+    it('keeps the last deployment health and technical metadata in the control report', async () => {
+      const enabled = { accepted: { sequence: 1, assistant: 'enabled' }, localHalt: null };
+      const { client, heartbeats } = clientWith([
+        applied('accepted', enabled),
+        applied('unverifiable', { accepted: enabled.accepted, localHalt: { kind: 'local', sequence: 2 } }),
+      ]);
+      await client.heartbeat({ health: 'unhealthy', lastAppliedDeploymentId: 'deployment-1' });
+      await client.syncOnce();
+      await client.heartbeat({
+        health: 'healthy',
+        lastAppliedDeploymentId: 'deployment-1',
+        technicalMetadata: { validationStage: 'signature-schema', activationStage: 'signature-schema-bindings' },
+      });
+      await client.syncOnce();
+      expect(heartbeats().slice(1)).toEqual([
+        { runnerKey: baseOptions.runnerKey, health: 'unhealthy', lastAppliedDeploymentId: 'deployment-1', technicalMetadata: { controlSequence: 1, assistantState: 'enabled' } },
+        {
+          runnerKey: baseOptions.runnerKey,
+          health: 'healthy',
+          lastAppliedDeploymentId: 'deployment-1',
+          technicalMetadata: { validationStage: 'signature-schema', activationStage: 'signature-schema-bindings', controlSequence: 1, assistantState: 'enabled' },
+        },
+        {
+          runnerKey: baseOptions.runnerKey,
+          health: 'healthy',
+          lastAppliedDeploymentId: 'deployment-1',
+          technicalMetadata: { validationStage: 'signature-schema', activationStage: 'signature-schema-bindings', controlSequence: 1, assistantState: 'halted' },
+        },
+      ]);
+    });
+
+    it('repeats the report after the heartbeat interval', async () => {
+      const enabled = { accepted: { sequence: 1, assistant: 'enabled' }, localHalt: null };
+      const { client, heartbeats } = clientWith(
+        [applied('accepted', enabled), applied('stale', enabled)],
+        { controlHeartbeatIntervalMs: 0 },
+      );
+      await client.syncOnce();
+      await client.syncOnce();
+      expect(heartbeats()).toHaveLength(2);
+      expect(heartbeats()[1].technicalMetadata).toEqual({ controlSequence: 1, assistantState: 'enabled' });
+    });
+
+    it('sends nothing for a Platform without control or a read-only connection', async () => {
+      const absent = clientWith([applied('absent', undefined)]);
+      await absent.client.syncOnce();
+      expect(absent.heartbeats()).toEqual([]);
+
+      const readOnly = clientWith([applied('accepted', { accepted: { sequence: 1, assistant: 'halted' }, localHalt: null })], { readOnly: true });
+      await readOnly.client.syncOnce();
+      expect(readOnly.heartbeats()).toEqual([]);
+    });
+
+    it('adds the control state to deployment heartbeats once known', async () => {
+      const { client, heartbeats } = clientWith([applied('kept', { accepted: null, localHalt: null })]);
+      await client.syncOnce();
+      await client.heartbeat({ health: 'healthy', technicalMetadata: { activationStage: 'signature-schema-bindings' } });
+      expect(heartbeats().at(-1).technicalMetadata).toEqual({
+        activationStage: 'signature-schema-bindings', controlSequence: 0, assistantState: 'enabled',
+      });
+    });
+  });
 });

@@ -2,6 +2,7 @@ import { InvalidToolInputError, NoSuchToolError } from 'ai';
 import { ModelFacingInputError } from '../../../runtime/ai-sdk/engine.js';
 import { ToolExecutionDeniedError, toolDenialDisplayText } from '../../../runtime/tool-denial.js';
 import { ToolInputValidationError } from '../../../runtime/tool-input-error.js';
+import { AssistantHaltedError } from '../../../runtime/turn-control.js';
 import type { AiChatErrorInfo } from './types.js';
 import { isGermanTextLocale } from './budget-stop-notice.js';
 import { APPROVAL_SUBJECT_REFUSAL_DISPLAY_TEXTS, ApprovalSubjectRefusedError } from './approval-subject-lookup.js';
@@ -95,6 +96,9 @@ export function withModelFacingToolErrors<T>(messages: ReadonlyArray<T>, invalid
 /** The chat's text for a call of a tool the model was not offered. */
 export const UNAVAILABLE_TOOL_TEXT = 'This tool is not available in this chat.';
 
+/** The chat's text for a turn its environment control halted. */
+export const ASSISTANT_HALTED_TEXT = 'The assistant is halted.';
+
 /**
  * The text the chat receives for an error in the UI message stream. Only the
  * SDK's own errors get their own fixed text: a denial of the managed turn
@@ -104,6 +108,7 @@ export const UNAVAILABLE_TOOL_TEXT = 'This tool is not available in this chat.';
  */
 export function streamErrorText(error: unknown, texts: StreamErrorTexts = EN_STREAM_ERROR_TEXTS): string {
   if (error instanceof ToolExecutionDeniedError) return toolDenialDisplayText(error);
+  if (error instanceof AssistantHaltedError) return ASSISTANT_HALTED_TEXT;
   if (InvalidToolInputError.isInstance(error)) return texts.invalidToolInput;
   if (NoSuchToolError.isInstance(error)) return UNAVAILABLE_TOOL_TEXT;
   return texts.streamError;
@@ -131,6 +136,7 @@ export function createToolStreamErrorMask(texts: StreamErrorTexts = EN_STREAM_ER
     if (typeof error === 'string') {
       return { text: invalidCallTexts.get(error) ?? texts.streamError };
     }
+    if (error instanceof AssistantHaltedError) return { text: ASSISTANT_HALTED_TEXT };
     if (error instanceof ToolExecutionDeniedError) {
       const text = toolDenialDisplayText(error);
       return error.recoverable ? { text } : { text, report: { error, info: { source: 'tool-call', kind: 'denied' } } };

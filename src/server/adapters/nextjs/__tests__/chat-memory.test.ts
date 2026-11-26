@@ -5,6 +5,8 @@ import { defineTool } from '../../../../types.js';
 import { createInMemoryMemoryStore, verifyMemoryStore, type MemoryStore } from '../../../core/memory-store.js';
 import { contextWindowOf, createChatMemory, parseAutoCompact } from '../chat-memory.js';
 import { createAiChatHandler } from '../create-ai-chat-handler.js';
+import type { ManagedTurnControl } from '../../../../runtime/turn-control.js';
+import { principal, snapshot } from './command-fixtures.js';
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -209,6 +211,31 @@ describe('chat memory: auto-compact', () => {
     expect(summary.prompts.length).toBeGreaterThan(1);
     expect(summary.prompts.join('')).toContain('4711 euros');
     expect(parts.find((part) => part.type === 'data-memory-summary')).toMatchObject({ data: { upTo: 'a2' } });
+  });
+
+  it('stops summarizing once the assistant is halted mid-turn', async () => {
+    let control: ManagedTurnControl = { assistant: 'enabled' };
+    const summary = summaryModel();
+    const generate = summary.model.doGenerate.bind(summary.model);
+    summary.model.doGenerate = async (options) => {
+      control = { assistant: 'halted', code: 'assistant_halted' };
+      return generate(options);
+    };
+    const handler = createAiChatHandler({
+      tools: registry, model: chatModel().model, systemPrompt: 'App prompt.',
+      memory: { model: summary.model, chat: { autoCompact: 120 } },
+      managedRuntime: {
+        resolvePrincipal: async () => principal(),
+        resolveTurnSnapshot: async ({ turnId }) => snapshot(turnId),
+        loadControl: () => control,
+      },
+    });
+    const long = `${'Background of the project. '.repeat(600)}The budget limit is 4711 euros.`;
+
+    const parts = await streamParts(await handler(request([user('u1', long), ...conversation.slice(1)])));
+
+    expect(summary.prompts).toHaveLength(1);
+    expect(parts.some((part) => part.type === 'data-memory-summary')).toBe(false);
   });
 
   it('covers only what one turn can read and leaves the rest verbatim', async () => {

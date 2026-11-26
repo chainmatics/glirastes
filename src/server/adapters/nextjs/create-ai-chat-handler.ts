@@ -29,6 +29,7 @@ import { scopePipelineTools } from './scope-pipeline-tools.js';
 import {
   DEFAULT_ATTACHMENT_MAX_BODY_BYTES,
   checkRequestHeaders,
+  controlRefusal,
   readJsonBody,
   validateAttachments,
 } from './request-guards.js';
@@ -146,7 +147,7 @@ import {
 import { z } from 'zod';
 import { authorizedTurnToolIds } from '../../../runtime/authorization.js';
 import { modelFacingToolName } from '../../../runtime/local-tool-bindings.js';
-import { withTurnPrincipal } from '../../../runtime/turn-snapshot.js';
+import { withBudgetCeiling, withTurnPrincipal } from '../../../runtime/turn-snapshot.js';
 import {
   createManagedTurnGuard,
   createRegistryToolDiscovery,
@@ -998,6 +999,7 @@ async function defaultStreamHandler(
           ? { activeTools: [...ctx.toolDiscovery.activeToolNames()] }
           : {}),
         prepareStep: withModelInput(async ({ messages }) => {
+          await ctx.managedTurn?.beforeModelStep();
           if (budgetExhausted()) {
             // The summary call: no tools, and the instruction to close the
             // answer (for this call only; it is no part of the chat).
@@ -1672,6 +1674,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
     // The result handles of this turn; dropped when the turn ends.
     let turnResultStore: ResultStore | undefined;
     try {
+      // Before anything else runs: a halt also refuses continuations and direct commands.
+      const startControl = await managedRuntime?.loadControl?.({ request: req });
+      if (startControl?.assistant === 'halted') return controlRefusal(503, startControl.code);
       const body = await readJsonBody(req, maxBodyBytes);
       if (!body.ok) return body.response;
       // The language of this turn: the request's (requestLocale, else the chat UI's), else the configured one.
@@ -1733,6 +1738,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           messages,
           model,
           abortSignal: req.signal,
+          ...(managedRuntime?.loadControl
+            ? { halted: async () => (await managedRuntime.loadControl!({ request: req })).assistant === 'halted' }
+            : {}),
           ...(piiShield
             ? {
                 anonymize: (text: string) => piiShield.outbound(text, shieldSessionId),
@@ -1813,6 +1821,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
             { status: 401, headers: { 'Content-Type': 'application/json' } },
           );
         }
+        const admission = await managedRuntime.admitTurn?.({ request: req, principal: principalResult.data });
+        if (admission && !admission.admitted) {
+          return controlRefusal(429, 'turn_rate_limited', admission.retryAfterMs);
+        }
 
         const resolvedSnapshot = await managedRuntime.resolveTurnSnapshot({
           request: req,
@@ -1831,7 +1843,10 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         }
         // The revisions stay pinned; what the turn offers and names follows
         // the principal of this request.
-        const snapshot = withTurnPrincipal(resolvedSnapshot, principalResult.data);
+        const snapshot = withBudgetCeiling(
+          withTurnPrincipal(resolvedSnapshot, principalResult.data),
+          startControl?.assistant === 'enabled' ? startControl.budgetCeiling : undefined,
+        );
         managedPrincipal = principalResult.data;
 
         const resolveCurrentPrincipal = async () => {
@@ -1849,6 +1864,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           resolvePrincipal: resolveCurrentPrincipal,
           loadRevocations: loadCurrentRevocations,
           onBudgetSignal: managedRuntime.onBudgetSignal,
+          ...(managedRuntime.loadControl
+            ? { loadControl: () => managedRuntime.loadControl!({ request: req }) }
+            : {}),
         });
         // The same sources as the guard, asked again; fails closed.
         currentToolIds = async () => {

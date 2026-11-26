@@ -69,6 +69,7 @@ export const deChatLocale: ChatLocale = {
   activityFailureAccountRefused: 'Tool-Aufruf für dieses Konto abgelehnt.',
   activityFailureToolDisabled: 'Dieses Tool wurde deaktiviert.',
   activityFailureRefused: 'Tool-Aufruf abgelehnt.',
+  activityFailureAssistantHalted: 'Der Assistent ist angehalten.',
   activityFailureLimitReached: 'Limit für diesen Durchlauf erreicht.',
   activityFailureLimitToolCalls: 'Limit für Tool-Aufrufe in diesem Durchlauf erreicht ({limit}).',
   activityFailureLimitModelSteps: 'Schrittlimit für diesen Durchlauf erreicht ({limit}).',

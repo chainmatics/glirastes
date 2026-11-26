@@ -31,6 +31,32 @@ describe('createRecordingTranscriptionHandler', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('refuses with 503 while the environment control halts the assistant, before the audio is read', async () => {
+    const fetch = service();
+    const transcribe = vi.fn<RecordingTranscriber>(async () => ({ text: 'x' }));
+    const authorize = vi.fn(allow);
+    for (const code of ['assistant_halted', 'control_unknown'] as const) {
+      const remote = createRecordingTranscriptionHandler({
+        authorize, url: 'http://stt', fetch, loadControl: () => ({ assistant: 'halted', code }),
+      });
+      const local = createRecordingTranscriptionHandler({
+        authorize, transcribe, loadControl: async () => ({ assistant: 'halted', code }),
+      });
+      for (const handler of [remote, local]) {
+        const response = await handler(request());
+        expect(response.status).toBe(503);
+        expect(await response.json()).toEqual({ error: code });
+      }
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(authorize).not.toHaveBeenCalled();
+    const enabled = createRecordingTranscriptionHandler({
+      authorize: allow, url: 'http://stt', fetch, loadControl: () => ({ assistant: 'enabled' }),
+    });
+    expect((await enabled(request())).status).toBe(200);
+  });
+
   it('answers 503 when no transcription service is configured', async () => {
     const handler = createRecordingTranscriptionHandler({ authorize: allow, url: undefined, fetch: service() });
     expect((await handler(request())).status).toBe(503);

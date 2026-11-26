@@ -45,6 +45,8 @@ import type { ToolSearchSemanticsMap } from './tool-discovery.js';
 import type { ToolTextsMap } from './tool-texts.js';
 import type { ToolFailureClassifier } from './tool-failure.js';
 import type { TurnSnapshot } from './turn-snapshot.js';
+import { turnControlOf, type ManagedTurnControl } from './turn-control.js';
+import { createTurnRateLimiter, type TurnAdmission } from './turn-rate-limit.js';
 
 const DEFAULT_FIRST_SYNC_TIMEOUT_MS = 5_000;
 const DEFAULT_RETRY_INTERVAL_MS = 30_000;
@@ -88,6 +90,14 @@ export interface CreateGlirastesOptions {
   /** How long `ready()` waits for the first sync (default 5 s). */
   firstSyncTimeoutMs?: number;
   /**
+   * Connected only. `best-effort` (default): until the first successful sync
+   * after process start, turns run on the local code, so a halt applies again
+   * only after that sync. `required`: turns are refused with
+   * `control_unknown` until then. The control lives in process memory; use
+   * `required` in production.
+   */
+  controlFreshness?: 'best-effort' | 'required';
+  /**
    * Classifies failed backend calls of endpoint tools as `'error'` or
    * `'expected'`; `chatTurn()` hands it to `createAiChatHandler` (see
    * `AiChatHandlerConfig.classifyToolFailure`). Expected failures are
@@ -120,6 +130,10 @@ export interface GlirastesChatTurn {
     resolvePrincipal: (request: Request) => Principal | undefined | Promise<Principal | undefined>;
     resolveTurnSnapshot: (context: { turnId: string; principal: Principal }) => TurnSnapshot;
     loadRevocations: (context: { request: Request; snapshot: TurnSnapshot }) => SecurityRevocation[];
+    /** Connected only: the environment control in force (see `controlFreshness`). */
+    loadControl?: (context: { request: Request }) => ManagedTurnControl;
+    /** Connected only: the per-process turn rate limit of the control. */
+    admitTurn?: (context: { request: Request; principal: Principal }) => TurnAdmission;
   };
   loadTools: (context: { turnSnapshot?: TurnSnapshot }) => ToolRegistry;
   toolSemantics?: ToolSearchSemanticsMap;
@@ -216,6 +230,9 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 const INSTANCES = Symbol.for('glirastes.runtime.instances');
 type InstanceHolder = { [INSTANCES]?: Map<string, Glirastes> };
 
+// Raises a cached instance to `controlFreshness: 'required'`; never lowers it.
+const requireFreshControl = new WeakMap<Glirastes, () => void>();
+
 function instances(): Map<string, Glirastes> {
   const holder = globalThis as InstanceHolder;
   holder[INSTANCES] ??= new Map();
@@ -226,7 +243,8 @@ function instances(): Map<string, Glirastes> {
  * The Glirastes runtime of one app: the tools derived from the code, and,
  * connected, the Platform connection behind them. One instance per app and
  * process: a second call with the same generated app returns the first
- * instance (its options are ignored), so route bundles can each call it.
+ * instance (its options are ignored, except that `controlFreshness:
+ * 'required'` raises it), so route bundles can each call it.
  *
  * Without `GLIRASTES_API_KEY` the app runs Standalone and never touches the
  * network. With it, the first `ready()` (or `chatTurn()`) asks the Platform
@@ -237,9 +255,19 @@ function instances(): Map<string, Glirastes> {
  */
 export function createGlirastes(options: CreateGlirastesOptions): Glirastes {
   assertMaxResultChars(options.maxResultChars, 'createGlirastes');
+  if (
+    options.controlFreshness !== undefined
+    && options.controlFreshness !== 'best-effort'
+    && options.controlFreshness !== 'required'
+  ) {
+    throw new Error("controlFreshness must be 'best-effort' or 'required'");
+  }
   const appId = AppSetupArtifactSchema.parse(options.generated.setupArtifact).appId;
   const existing = instances().get(appId);
-  if (existing) return existing;
+  if (existing) {
+    if (options.controlFreshness === 'required') requireFreshControl.get(existing)?.();
+    return existing;
+  }
   const instance = createInstance(options, appId);
   instances().set(appId, instance);
   return instance;
@@ -282,6 +310,12 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
 
   const base = localSource();
   const store = new AcceptedStateStore();
+  const rateLimiter = createTurnRateLimiter();
+  let controlRequired = options.controlFreshness === 'required';
+  // The environment whose sync succeeded on the current connection; `required` refuses turns for any other.
+  let syncedEnvironment: string | undefined;
+  const controlKnown = () => !controlRequired
+    || (syncedEnvironment !== undefined && syncedEnvironment === resolved?.environmentId);
   const abort = new AbortController();
   const retryMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS);
   let resolved: ResolvedRuntimeConnection | undefined;
@@ -343,6 +377,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
     connectedBase = undefined;
     managed = undefined;
     metrics = undefined;
+    syncedEnvironment = undefined;
     store.clear();
     reportedNotBound.clear();
     await closing?.close().catch(onError);
@@ -378,6 +413,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       return true;
     }
     notedNoReference = false;
+    syncedEnvironment = undefined;
 
     let placeLost = false;
     let sync: ReturnType<typeof createManagedRuntimeSync>;
@@ -437,6 +473,7 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
         }
         await sync.client.syncOnce();
         store.synced(environmentId);
+        syncedEnvironment = environmentId;
         break;
       } catch (error) {
         if (isPlaceRequired(error) || isReferenceChanged(error)) {
@@ -536,6 +573,15 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
           resolvePrincipal: (request) => principal(tenantId, request),
           resolveTurnSnapshot: (context) => source.resolveTurnSnapshot(context),
           loadRevocations: () => store.revocations(),
+          ...(config
+            ? {
+                loadControl: () => turnControlOf(store.control(), { known: controlKnown() }),
+                admitTurn: ({ principal: current }: { principal: Principal }) => {
+                  const control = turnControlOf(store.control());
+                  return rateLimiter.admit(current, control.assistant === 'enabled' ? control.rateLimit : undefined);
+                },
+              }
+            : {}),
         },
         loadTools: ({ turnSnapshot }) => (turnSnapshot
           ? materializeManifestToolRegistry({ snapshot: turnSnapshot, bindings: bound.bindings })
@@ -556,5 +602,8 @@ function createInstance(options: CreateGlirastesOptions, appId: string): Glirast
       await metrics?.close();
     },
   };
+  requireFreshControl.set(instance, () => {
+    controlRequired = true;
+  });
   return instance;
 }

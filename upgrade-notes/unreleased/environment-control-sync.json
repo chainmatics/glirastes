@@ -1,7 +1,7 @@
 {
   "id": "environment-control-sync",
   "kind": "optional",
-  "summary": "Connected runners now sync and verify the signed per-environment control (kill switch, budget ceiling, rate limit) and expose it as glirastes.control(). Turns do not enforce it yet.",
+  "summary": "Connected runners now sync and verify the signed per-environment control (kill switch, budget ceiling, rate limit) and expose it as glirastes.control(); see environment-control-enforcement for how turns enforce it.",
   "howTo": "Nothing to do. The runner sends controlVersion=1 on sync and reports capabilities.environmentControl: 1; an older Platform answers as before. A control that fails its schema or signature, names another scope, or changes without a new sequence halts the runner locally with control_unverifiable and reaches onError as RuntimeEnvironmentControlError. createGlirastes keeps the control in memory only: after a restart the halt applies again after the first sync. A RuntimeSyncManager you construct yourself takes optional targetAppId and onControlRejected; a verifier you pass must implement verifyEnvironmentControl. State files written by older versions load unchanged.",
   "skill": "setting-up-glirastes",
   "affectedWhen": {
