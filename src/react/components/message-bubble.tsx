@@ -35,7 +35,7 @@ import {
 } from '../../contracts/clarification.js';
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
-import { endsWithContinuableBudgetStop } from '../../contracts/budget-continuation.js';
+import { endsWithContinuableBudgetStop, readBudgetStopPart } from '../../contracts/budget-continuation.js';
 import type {
   ActivityLogDetails,
   ChatLocale,
@@ -190,6 +190,14 @@ function partKind(part: unknown): MessagePartKind {
   if (isTextPart(part)) return 'text';
   if (isFilePart(part)) return 'file';
   return isRecord(part) && toolPartName(part) !== null ? 'tool' : 'other';
+}
+
+/** The text without its last paragraph (after the last blank line); a text of one paragraph stays. */
+function withoutLastParagraph(text: string): string {
+  const trimmed = text.trimEnd();
+  let cut = -1;
+  for (const match of trimmed.matchAll(/\n[ \t]*\n/g)) cut = match.index;
+  return cut > 0 ? trimmed.slice(0, cut) : text;
 }
 
 function isTextPart(part: unknown): part is TextPart {
@@ -389,13 +397,26 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     && (activityLog?.noticePlacement ?? 'log') === 'log'
     && activitySteps.length > 0;
 
+  // The stop notice of a continuable budget stop ends with how to go on
+  // (`continueHint`, "use the button below"). Once the stop was continued or
+  // the user wrote on, the button is gone and that last paragraph goes too.
+  // A chat without the button keeps it: such an app sets its own text.
+  const stopStillOpen = message.role === 'assistant' && isLatestMessage && endsWithContinuableBudgetStop(message);
+  let lastStopIndex = message.parts.length - 1;
+  while (lastStopIndex >= 0 && !readBudgetStopPart(message.parts[lastStopIndex])) lastStopIndex -= 1;
+  const withoutStaleContinueHint = (text: string, index: number): string => {
+    if (!readBudgetStopPart(message.parts[index - 1])?.continuable) return text;
+    if (stopStillOpen && index - 1 === lastStopIndex) return text;
+    return withoutLastParagraph(text);
+  };
+
   // Extract tool result summaries as fallback text when no text parts exist
   const textEntries = message.parts
     .map((part, index) => ({ part, index }))
     .filter((entry): entry is { part: TextPart; index: number } => isTextPart(entry.part))
     .filter((entry) => entry.part.text.trim())
     .map(({ part, index }) => {
-      const text = stripChatCommandMarkers(stripClarificationMarkers(stripContextBlocks(part.text)));
+      const text = stripChatCommandMarkers(stripClarificationMarkers(stripContextBlocks(withoutStaleContinueHint(part.text, index))));
       return { index, text: message.role === 'assistant' ? extractTrailingFollowupSuggestions(text).text : text };
     });
   const cleanTextParts = textEntries.map((entry) => entry.text);
