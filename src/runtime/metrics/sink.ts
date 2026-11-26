@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   PlatformConnectionDescriptorSchema,
-  RUNTIME_METRIC_EVENT_SCHEMA_VERSION,
   RUNTIME_METRIC_LABEL_PATTERN,
   RUNTIME_METRIC_MAX_BATCH,
   RuntimeMetricEventSchema,
@@ -102,11 +101,11 @@ export function createRuntimeMetricsSink(
     buildId: config.buildId,
     instanceId: config.instanceId,
   });
-  // One queue per event type: a batch never mixes types, so a Platform that
-  // does not know `tool_contract_rejected` or `turn.continued` yet refuses
-  // only those batches. Finished turns are listed first, so they are sent
-  // first whatever arrives first.
-  const queues = new Map<RuntimeMetricEvent['eventType'], RuntimeMetricEvent[]>([['turn.finished', []]]);
+  // One queue per event type and schema version: a batch never mixes them, so
+  // a Platform that does not know `tool_contract_rejected`, `turn.continued`
+  // or v3 yet refuses only those batches. Finished v2 turns are listed first,
+  // so they are sent first whatever arrives first.
+  const queues = new Map<string, RuntimeMetricEvent[]>([['turn.finished/2', []]]);
   const queued = () => [...queues.values()].reduce((sum, events) => sum + events.length, 0);
   let timer: ReturnType<typeof setInterval> | undefined;
   let inFlight: Promise<void> | undefined;
@@ -123,10 +122,10 @@ export function createRuntimeMetricsSink(
 
   const send = async (events: RuntimeMetricEvent[]): Promise<boolean> => {
     try {
-      const body: TechnicalRuntimeEventBatch = {
-        schemaVersion: RUNTIME_METRIC_EVENT_SCHEMA_VERSION,
+      const body = {
+        schemaVersion: events[0]!.schemaVersion,
         events,
-      };
+      } as TechnicalRuntimeEventBatch;
       const response = await fetchImpl(endpoint, {
         method: 'POST',
         headers: {
@@ -210,8 +209,9 @@ export function createRuntimeMetricsSink(
           drop('queue-full', 1);
           return;
         }
-        const queue = queues.get(checked.data.eventType) ?? [];
-        queues.set(checked.data.eventType, queue);
+        const key = `${checked.data.eventType}/${checked.data.schemaVersion}`;
+        const queue = queues.get(key) ?? [];
+        queues.set(key, queue);
         queue.push(checked.data);
         ensureTimer();
         if (queue.length >= config.maxBatchSize) scheduleFlush();

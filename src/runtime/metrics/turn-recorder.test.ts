@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   TechnicalRuntimeEventV2Schema,
+  TechnicalRuntimeEventV3Schema,
+  TurnContinuedEventV3Schema,
   type TechnicalRuntimeEventV2,
 } from '../../contracts/index.js';
 import {
@@ -387,5 +389,44 @@ describe('a request that continues a turn', () => {
     const event = recorder.finish({ status: 'completed', errorCode: null });
     expect(event?.eventType).toBe('turn.finished');
     expect(event).not.toHaveProperty('turnId');
+  });
+});
+
+describe('metric v3 of a runner that selects a cohort per turn', () => {
+  const DEPLOYMENT_ID = '019fbd00-0000-7000-8000-0000000000d2';
+  const finishedWith = (options: Partial<Parameters<typeof createTurnMetricsRecorder>[0]>) => {
+    const { sink } = fakeSink();
+    const time = clock();
+    const recorder = createTurnMetricsRecorder({
+      sink, snapshot, startedAtMs: time.now(), now: time.now,
+      createEventId: () => '019fb900-0000-7000-8000-000000000001', ...options,
+    });
+    time.advance(50);
+    return recorder.finish({ status: 'completed', errorCode: null });
+  };
+
+  it('reports deployment, cohort and declined approvals as v3', () => {
+    const event = finishedWith({ rollout: { deploymentId: DEPLOYMENT_ID, cohort: 'canary' }, approvalsDeclined: 2 });
+    expect(TechnicalRuntimeEventV3Schema.safeParse(event).success).toBe(true);
+    expect(event).toMatchObject({
+      schemaVersion: 3, eventType: 'turn.finished', deploymentId: DEPLOYMENT_ID, cohort: 'canary', approvalsDeclined: 2,
+    });
+  });
+
+  it('reports a continuation of a canary turn as v3 turn.continued', () => {
+    const event = finishedWith({
+      rollout: { deploymentId: DEPLOYMENT_ID, cohort: 'stable' }, approvalsDeclined: 1,
+      continuation: 'approval', continuedTurn: { turnId: 'ai-message-1', secret: SECRET },
+    });
+    expect(TurnContinuedEventV3Schema.safeParse(event).success).toBe(true);
+    expect(event).toMatchObject({ schemaVersion: 3, eventType: 'turn.continued', cohort: 'stable', approvalsDeclined: 1 });
+  });
+
+  it('stays v2 and byte-identical without the negotiation', () => {
+    const plain = finishedWith({});
+    const declined = finishedWith({ approvalsDeclined: 3 });
+    expect(plain?.schemaVersion).toBe(2);
+    expect(JSON.stringify(declined)).toBe(JSON.stringify(plain));
+    expect(Object.keys(plain!)).not.toContain('cohort');
   });
 });

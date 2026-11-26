@@ -4,16 +4,21 @@ import {
   RUNTIME_METRIC_MAX_COUNT,
   RUNTIME_METRIC_MAX_TOOLS,
   TechnicalRuntimeEventV2Schema,
+  TechnicalRuntimeEventV3Schema,
   ToolContractRejectedEventSchema,
   TurnContinuedEventSchema,
+  TurnContinuedEventV3Schema,
   type RuntimeMetricEvent,
   type TurnContinuation,
   type TurnContinuedEvent,
   type RuntimeTurnCost,
   type RuntimeTurnErrorCode,
   type RuntimeTurnStatus,
+  type RuntimeRolloutCohort,
   type TechnicalRuntimeEventV2,
+  type TechnicalRuntimeEventV3,
   type ToolContractRejectedEvent,
+  type TurnContinuedEventV3,
 } from '../../contracts/index.js';
 import { modelFacingToolName } from '../local-tool-bindings.js';
 import type { TurnSnapshot } from '../turn-snapshot.js';
@@ -54,6 +59,19 @@ export interface TurnMetricsStep {
   failedToolNames: ReadonlyArray<string>;
 }
 
+/** A turn event of either schema version. */
+export type TurnMetricsEvent =
+  | TechnicalRuntimeEventV2
+  | TurnContinuedEvent
+  | TechnicalRuntimeEventV3
+  | TurnContinuedEventV3;
+
+/** The deployment and cohort a turn ran in; null for a turn on the local code. */
+export interface TurnRollout {
+  readonly deploymentId: string | null;
+  readonly cohort: RuntimeRolloutCohort | null;
+}
+
 export interface TurnMetricsOutcome {
   status: RuntimeTurnStatus;
   errorCode: RuntimeTurnErrorCode | null;
@@ -67,7 +85,7 @@ export interface TurnMetricsRecorder {
    * Builds the turn's event and hands it to the sink exactly once. Returns
    * the event, or undefined when the turn was already finished. Never throws.
    */
-  finish(outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | TurnContinuedEvent | undefined;
+  finish(outcome: TurnMetricsOutcome): TurnMetricsEvent | undefined;
   /**
    * An endpoint refused a call its tool schema accepted (spec 4.7). Hands a
    * content-free `tool_contract_rejected` event to the sink right away and
@@ -98,6 +116,14 @@ export interface TurnMetricsRecorderOptions {
    * a turn the same value, also after a restart.
    */
   continuedTurn?: { readonly turnId: string; readonly secret: string };
+  /**
+   * Set only by a runner that selects a cohort per turn (canary
+   * negotiation): the turn is then reported as schema version 3 with these
+   * fields and `approvalsDeclined`. Without it the event stays v2.
+   */
+  rollout?: TurnRollout;
+  /** Approvals this request declined; reported with `rollout` only. */
+  approvalsDeclined?: number;
   now?: () => number;
   createEventId?: () => string;
 }
@@ -175,7 +201,7 @@ export function createTurnMetricsRecorder(
     .slice(0, RUNTIME_METRIC_MAX_TOOLS)
     .sort((left, right) => left.toolId.localeCompare(right.toolId));
 
-  const build = (outcome: TurnMetricsOutcome): TechnicalRuntimeEventV2 | TurnContinuedEvent | undefined => {
+  const build = (outcome: TurnMetricsOutcome): TurnMetricsEvent | undefined => {
     const endedAtMs = now();
     const totalMs = bounded(endedAtMs - options.startedAtMs, MAX_DURATION_MS);
     const firstTokenMs = firstChunkAtMs === undefined
@@ -202,6 +228,25 @@ export function createTurnMetricsRecorder(
       toolErrorCount: Math.min(calls, toolErrorCount),
       tools: listedTools(),
     };
+    if (options.rollout) {
+      const v3 = {
+        ...fields,
+        schemaVersion: 3,
+        deploymentId: options.rollout.deploymentId,
+        cohort: options.rollout.cohort,
+        approvalsDeclined: bounded(options.approvalsDeclined ?? 0, MAX_CALLS),
+      };
+      if (options.continuation) {
+        const turnId = opaqueTurnId(options.sink.identity, options.continuedTurn);
+        if (!turnId) return undefined;
+        const continued = TurnContinuedEventV3Schema.safeParse({
+          ...v3, eventType: 'turn.continued', continuation: options.continuation, turnId,
+        });
+        return continued.success ? continued.data : undefined;
+      }
+      const parsed = TechnicalRuntimeEventV3Schema.safeParse({ ...v3, eventType: 'turn.finished' });
+      return parsed.success ? parsed.data : undefined;
+    }
     if (options.continuation) {
       const turnId = opaqueTurnId(options.sink.identity, options.continuedTurn);
       if (!turnId) return undefined;
