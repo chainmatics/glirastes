@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Upgrade hint (breaking for some apps):** `glirastes/react/styles.css` and `pills.css` are now inside `@layer glirastes`, so Tailwind utilities and other app CSS override SDK styles without `!` (before, the unlayered SDK styles beat every Tailwind utility; e.g. the 150px `max-width` on `[data-element="display-name"]` needed `max-w-[8.5rem]!`). Tailwind v4: declare `@layer theme, base, glirastes, components, utilities;` before the imports. Unlayered global resets (Tailwind v3 preflight, `button {}`) now also win over the SDK styles; such apps import the new `glirastes/react/styles.unlayered.css` / `pills.unlayered.css`, which are the previous files. The embedded widget is unchanged.
+- **Upgrade hint (breaking for explicit generics):** `defineChatComponent`, `ChatComponentDefinition`, `ChatComponentDefinitionInput`, `bindable` and `refOnly` are typed against the structural `ChatPropSchema` (new, with `ChatPropsOf`); the generic of `ChatComponentDefinition` is now the props schema, not its shape. With zod 3.25's `zod/v4` build, an app's `tsc` no longer runs out of memory (reproduced: OOM at a 1 GB and a 4 GB heap before; now passes at 1 GB in about 2 s), and the manifest equals the one built with zod 4 (`.describe()`/`.meta()` of the foreign zod were lost before). zod 3 classic schemas are rejected with an error that names `import { z } from 'zod/v4'`; `glirastes tools refresh` reports `chat-component-invalid` with that hint instead of `import-failed` / `schema.clone is not a function`.
+- `render_view`: with `chatViews` the SDK adds a short answer-format rule to the system prompt whenever its `render_view` is offered in a request (`CHAT_VIEW_PROMPT_RULE`: from 4 like records, a comparison or a status overview a view instead of a text or Markdown list or table, at most one sentence after it, never for single values, confirmations or questions). New option `chatViews.promptRule: string | false` replaces or switches off the rule. The tool description states positively when to use a view (was "Default is text"). Before, the real model answered lists as text even with the catalog in the tool description.
+- A message bubble that renders a chat view carries `data-has-chat-view` and gets a definite width (100% under the existing `max-width`), so `@container` queries inside a view have a size and tables scroll inside the view in a narrow sidebar.
+- `glirastes install` without a TTY fails with `E-SETUP-035` naming the flags to pass (`--with-setup-skills` / `--without-setup-skills`, `--host <codex|claude|gemini>`, `--force`) instead of the generic `E-SETUP-999`.
+
+### Added
+
+- Chat-view types (`ChatViewSpec`, `ResolvedChatView`, `ChatComponentManifest`, `ChatComponentManifestEntry`, `ChatViewCapabilities`, `ChatValueRef`, `ChatItemRef`, `ChatOperator`, `ChatSaid`) are exported from `glirastes` too, next to `resolveChatView`.
+- `mergeChatComponentBindings(...lists)` from `glirastes/react`: combines starter and app bindings, a later binding with the same id and schema version replaces the earlier one (the provider already did this internally); `createChatViewRegistry` stays strict about duplicates.
+- `glirastes doctor` check `chat-views-zod` (`E-SETUP-110`, warning): chat components with a resolved zod 3 get the exact import line, and below zod 3.25 an upgrade hint.
+
 ## [0.31.0] - 2026-11-26
 
 ### Added

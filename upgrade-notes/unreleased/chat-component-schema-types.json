@@ -1,0 +1,9 @@
+{
+  "id": "chat-component-schema-types",
+  "kind": "breaking",
+  "summary": "defineChatComponent, bindable and refOnly accept zod/v4 schemas of zod 3.25 without exhausting tsc; the generic of ChatComponentDefinition is now the props schema instead of the props shape. zod 3 classic schemas are rejected with a clear error.",
+  "howTo": "Most apps change nothing. Change explicit generics: ChatComponentDefinition<typeof shape> / ChatComponentDefinitionInput<typeof shape> become ChatComponentDefinition<typeof props> (the z.object(...) schema); for bound props prefer ChatComponentProps<typeof def.props>. A ChatComponentDefinition[] without generic types props only structurally (ChatPropSchema), so call .safeParse on your own schema reference. Apps on zod 3.25: import { z } from 'zod/v4' in chat component modules (plain 'zod' there is zod 3 classic and now throws 'this is a zod 3 schema … import { z } from \"zod/v4\"'; tools refresh reports chat-component-invalid with the same hint). Remove an alias like \"zod-v4\": \"npm:zod@4…\" that only worked around the tsc out-of-memory of 0.31.0. glirastes doctor warns (chat-views-zod) when chat components meet zod 3.",
+  "skill": "building-glirastes-chat-ui",
+  "affectedWhen": { "symbols": ["defineChatComponent", "ChatComponentDefinition", "ChatComponentDefinitionInput", "bindable", "refOnly"] },
+  "surface": ["glirastes#ChatPropSchema.*", "glirastes#ChatPropsOf"]
+}
