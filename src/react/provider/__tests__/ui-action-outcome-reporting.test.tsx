@@ -170,6 +170,18 @@ describe('AiChatProvider reports UI outcomes into marked results', () => {
     expect(written[0]!.output.outcome).toEqual(outcome);
   });
 
+  it.each([
+    ['by id', (bus: UiActionBus) => bus.subscribeById(GLIRASTES_NAVIGATE_ACTION_ID, () => false)],
+    ['by type, async', (bus: UiActionBus) => bus.subscribeByType('glirastes.navigate', async () => false)],
+  ])('writes rejected-handler, not ok, when a handler subscribed on the bus %s returns false (#179)', async (_name, subscribe) => {
+    const { bus, outcomes } = setup();
+    cleanups.push(subscribe(bus));
+    await stream([user, assistant(uiPart('c1'))]);
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0]!.output.outcome).toEqual({ v: 1, code: 'rejected-handler' });
+    expect(outcomes).toEqual([expect.objectContaining({ code: 'rejected-handler', reported: true })]);
+  });
+
   it('writes no code on a timeout (not confirmed)', async () => {
     const { bus, outcomes } = setup({ uiActionOutcomeTimeoutMs: 20 });
     cleanups.push(registerNavigationBridge({ bus, push: () => new Promise(() => {}) }));
