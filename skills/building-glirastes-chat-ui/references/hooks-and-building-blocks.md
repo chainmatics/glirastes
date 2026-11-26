@@ -209,9 +209,8 @@ Defaults keep today's markup; everything below is opt-in.
   `continueAfterBudgetStop()` of the chat context (present only when the transport has
   `ChatTransport.continueAfterBudgetStop`, as `useVercelAiChatTransport` does), which resends the
   history with `glirastesContinuation: 'budget'`. A custom transport implements it the same way
-  or the button is not shown. Once the stop was continued or a later message followed, the
-  notice is shown without its last paragraph (`continueHint`, "use the button below"); the
-  stored message keeps it.
+  or the button is not shown. A transport with continuation support hides the exact `continueHint`
+  after continuation or a later message. The stored message keeps it.
 - `parts` (in `MessagePartsProps` and from `useMessageParts`): every part of
   the message in message order as a `MessagePartEntry` `{ key, index, kind,
   part, toolName?, toolCallId?, node, approval? }` (`MessagePartKind`

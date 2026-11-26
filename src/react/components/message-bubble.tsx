@@ -35,7 +35,7 @@ import {
 } from '../../contracts/clarification.js';
 import { stripChatCommandMarkers } from '../../contracts/chat-command.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
-import { endsWithContinuableBudgetStop, readBudgetStopPart } from '../../contracts/budget-continuation.js';
+import { DEFAULT_CONTINUE_HINTS, endsWithContinuableBudgetStop, readBudgetStopPart } from '../../contracts/budget-continuation.js';
 import type {
   ActivityLogDetails,
   ChatLocale,
@@ -190,14 +190,6 @@ function partKind(part: unknown): MessagePartKind {
   if (isTextPart(part)) return 'text';
   if (isFilePart(part)) return 'file';
   return isRecord(part) && toolPartName(part) !== null ? 'tool' : 'other';
-}
-
-/** The text without its last paragraph (after the last blank line); a text of one paragraph stays. */
-function withoutLastParagraph(text: string): string {
-  const trimmed = text.trimEnd();
-  let cut = -1;
-  for (const match of trimmed.matchAll(/\n[ \t]*\n/g)) cut = match.index;
-  return cut > 0 ? trimmed.slice(0, cut) : text;
 }
 
 function isTextPart(part: unknown): part is TextPart {
@@ -405,9 +397,16 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
   let lastStopIndex = message.parts.length - 1;
   while (lastStopIndex >= 0 && !readBudgetStopPart(message.parts[lastStopIndex])) lastStopIndex -= 1;
   const withoutStaleContinueHint = (text: string, index: number): string => {
-    if (!readBudgetStopPart(message.parts[index - 1])?.continuable) return text;
+    const stop = readBudgetStopPart(message.parts[index - 1]);
+    if (!continueAfterBudgetStop || !stop?.continuable) return text;
     if (stopStillOpen && index - 1 === lastStopIndex) return text;
-    return withoutLastParagraph(text);
+    // Older persisted stops identify only the built-in English and German hints.
+    const hints = stop.continueHint ? [stop.continueHint] : Object.values(DEFAULT_CONTINUE_HINTS);
+    for (const hint of hints) {
+      const suffix = '\n\n' + hint;
+      if (text.endsWith(suffix)) return text.slice(0, -suffix.length);
+    }
+    return text;
   };
 
   // Extract tool result summaries as fallback text when no text parts exist

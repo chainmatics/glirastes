@@ -872,7 +872,7 @@ async function defaultStreamHandler(
       limits = finalSummary.budget;
     }
     if (!limits || limits.length === 0) return undefined;
-    const stop = budgetStopPart(ctx.messages, request.budgetContinuable === true);
+    const stop = budgetStopPart(ctx.messages, request.budgetContinuable === true, budgetStopTexts.continueHint);
     // The calls of earlier requests of the turn, then this request's (a call resumed here replaces its earlier entry).
     const ids = new Set(requestCalls.flatMap((call) => (call.id ? [call.id] : [])));
     const calls = [...turnCalls.filter((call) => !call.id || !ids.has(call.id)), ...requestCalls];

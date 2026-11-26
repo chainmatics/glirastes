@@ -115,10 +115,11 @@ export function readBudgetContinuation(body: unknown, messages: ReadonlyArray<un
 }
 
 /** The data of the stop part this request writes: continuable while the turn has continuations left. */
-export function budgetStopPart(messages: ReadonlyArray<unknown>, offered: boolean) {
+export function budgetStopPart(messages: ReadonlyArray<unknown>, offered: boolean, continueHint?: string) {
+  const continuable = offered && budgetStopsSoFar(messages) < MAX_BUDGET_CONTINUATIONS;
   return {
     type: BUDGET_STOP_PART_TYPE,
-    data: { v: 1 as const, continuable: offered && budgetStopsSoFar(messages) < MAX_BUDGET_CONTINUATIONS },
+    data: { v: 1 as const, continuable, ...(continuable && continueHint && { continueHint }) },
   };
 }
 

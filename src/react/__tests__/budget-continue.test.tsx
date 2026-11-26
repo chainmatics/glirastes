@@ -159,6 +159,32 @@ describe('the continue hint of a stop notice', () => {
     expect(continueButton()).toBeNull();
   });
 
+  it.each([
+    ['legacy notice', {}, 'Still open: confirm the date.', true],
+    ['custom hint', { continueHint: 'First hint.\n\nSecond hint.' }, 'First hint.\n\nSecond hint.', true],
+    ['custom hint without button support', { continueHint: 'First hint.' }, 'First hint.', false],
+  ] as const)('preserves notice content for %s', async (_, metadata, ending, supported) => {
+    const chat = stoppedChat();
+    const marker = stop(true);
+    chat.messages = [chat.messages[0]!, {
+      id: 'a-stop', role: 'assistant', parts: [
+        { ...marker, data: { ...marker.data, ...metadata } },
+        { type: 'text', text: 'Original summary.\n\n' + ending },
+        { type: 'step-start' }, { type: 'text', text: 'Later answer.' },
+      ],
+    } as unknown as ChatMessage];
+    if (supported) withContinue(chat);
+    render(<Host chat={chat} />);
+    await waitFor(() => expect(bubbleText()).toContain('Later answer.'));
+    expect(bubbleText()).toContain('Original summary.');
+    if (supported && 'continueHint' in metadata) {
+      expect(bubbleText()).not.toContain('First hint.');
+      expect(bubbleText()).not.toContain('Second hint.');
+    } else {
+      expect(bubbleText()).toContain(ending);
+    }
+  });
+
   it('keeps the typed hint of a stop that cannot be continued', async () => {
     const typed = 'Write “continue” to go on with the open steps.';
     const chat = new StreamingChat();
