@@ -2,7 +2,7 @@
   "id": "environment-control-enforcement",
   "kind": "optional",
   "summary": "Connected turns now enforce the signed environment control: a halt refuses turns, continuations, direct commands and the next model step or tool call; a budget ceiling only lowers limits; a per-process rate limit caps turns per principal. New option controlFreshness.",
-  "howTo": "Nothing to do for createGlirastes().chatTurn(): it now hands loadControl and admitTurn to createAiChatHandler and createChatInteractionsHandler. While halted the chat answers HTTP 503 { error: 'assistant_halted' } (or 'control_unknown' with controlFreshness: 'required' before the first successful sync after process start); a running turn ends at its next model step or tool call with the error text 'The assistant is halted.' (a tool call already running finishes). A refused rate limit answers HTTP 429 { error: 'turn_rate_limited' } with Retry-After; the limit counts every chat request of a principal in this process, not across instances. The chat shows its generic error for these; a refused tool step reads the new locale key activityFailureAssistantHalted. The control lives in process memory: set controlFreshness: 'required' in production so a restarted process serves no turn before its first sync. A custom streamHandler calls ctx.managedTurn.beforeModelStep() before each model call. Heartbeats now carry technicalMetadata.controlSequence and assistantState.",
+  "howTo": "Nothing to do for createGlirastes().chatTurn(): it now hands loadControl and admitTurn to createAiChatHandler and createChatInteractionsHandler. While halted the chat answers HTTP 503 { error: 'assistant_halted' } (or 'control_unknown' with controlFreshness: 'required' before the first successful sync after process start); a running turn ends at its next model step or tool call with the error text 'The assistant is halted.' (a tool call already running finishes). A refused rate limit answers HTTP 429 { error: 'turn_rate_limited' } with Retry-After; the limit counts every chat request of a principal in this process, not across instances. The chat shows its generic error for these; a refused tool step reads the new locale key activityFailureAssistantHalted. The control lives in process memory: set controlFreshness: 'required' in production so a restarted process serves no turn before its first sync. A custom streamHandler calls ctx.managedTurn.beforeModelStep() before each model call. createRecordingTranscriptionHandler accepts the same optional loadControl (from chatTurn()) and answers 503 while halted. controlFreshness: 'required' applies per environment and a later createGlirastes call with it raises a cached instance. The runtime container uses 'required'. Not covered: the NestJS adapter, the executeTool server action and the agent runner. Heartbeats now carry technicalMetadata.controlSequence and assistantState.",
   "skill": "integrating-glirastes-nextjs",
   "affectedWhen": {
     "symbols": [
@@ -11,7 +11,8 @@
       "createChatInteractionsHandler",
       "createManagedTurnGuard",
       "ManagedLocalRuntimeConfig",
-      "RuntimeControlPlaneClient"
+      "RuntimeControlPlaneClient",
+      "createRecordingTranscriptionHandler"
     ]
   },
   "surface": [
@@ -28,6 +29,8 @@
     "*#ManagedLocalRuntimeConfig.loadControl",
     "*#ManagedLocalRuntimeConfig.admitTurn",
     "glirastes/react#ChatLocale.activityFailureAssistantHalted",
-    "locale#activityFailureAssistantHalted"
+    "locale#activityFailureAssistantHalted",
+    "*#RecordingTranscriptionHandlerConfig.loadControl",
+    "*#LocalRecordingTranscriptionHandlerConfig.loadControl"
   ]
 }

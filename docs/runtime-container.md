@@ -146,7 +146,10 @@ platform deployment before readiness. No automatic fallback on failed pairing or
 startup sync. An already accepted SDK revision remains usable during a transient
 platform outage; revocations apply when received. A cold restart waits for a fresh
 accepted revision. This is not a guarantee of instantaneous remote revocation
-while disconnected. Local SDK budgets remain hard upper bounds.
+while disconnected. Local SDK budgets remain hard upper bounds. The container
+runs with `controlFreshness: 'required'`: the environment control (halt, budget
+ceiling, rate limit) applies to every turn, and no turn runs before the first
+successful sync of the current environment.
 
 The model uses an OpenAI-compatible chat API, defaulting to OpenRouter. Configure
 an operator-controlled `model.baseUrl` if necessary; it is a separate trust

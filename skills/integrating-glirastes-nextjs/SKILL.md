@@ -89,7 +89,9 @@ second, hand-maintained catalogue.
    call, the budget ceiling only lowers limits, and the rate limit answers 429
    `turn_rate_limited` (counted per process). Production sets
    `controlFreshness: 'required'` on `createGlirastes`, so a restarted process
-   serves no turn (503 `control_unknown`) before its first sync. `toolDiscovery: true`
+   serves no turn (503 `control_unknown`) before its first sync. The recording
+   route takes the same `loadControl` (`turn.managedRuntime.loadControl`) and
+   answers 503 while halted. `toolDiscovery: true`
    offers `find_tools`; it grants no tool, and a fixed note after the system
    prompt tells the model to search before it says it cannot do something. It also turns on the default
    routing: each turn starts with the tools of the modules the request
