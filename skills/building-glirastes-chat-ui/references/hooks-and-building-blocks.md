@@ -185,12 +185,22 @@ Defaults keep today's markup; everything below is opt-in.
   module constant (`const LOCALE = { … }` outside the component), `useMemo`
   for config that depends on state. This matters when the component holding
   the provider renders per chunk (it calls `useVercelAiChatTransport`
-  itself) and builds `locale`, `classNames`, `components`, `toolLabels`,
-  `triggers`, `toolResults`, `composer`, `entityDeclarations`, `entityLinks`,
-  `toolRenderers`, `approvalDescription` or `markdown` inline. Pass a new
-  object after a change: an in-place change to `classNames`, `components` or
-  a `toolLabels` entry shows in a finished message only once it renders
-  again. Replace changed messages, do not mutate them.
+  itself) and builds config inline. Per prop (probed):
+  - as before, inline is fine: `language`, `approvalSubjects`,
+    `activityLog`, `messageFooter`, `approvalDisplay`, `suggestions`;
+  - inline renders every message per chunk, and an in-place change passed
+    as the same object shows in a finished message only once it renders
+    again: `classNames`, `components`, `toolLabels` entries, `toolResults`
+    (`allowlist`), `entityDeclarations` entries, `composer`, `markdown`
+    (`remarkPlugins`: every Markdown parses), `toolRenderers` entries,
+    `chatInteractions` entities;
+  - inline renders every message per chunk, in place as before: `locale`,
+    `locales`, `triggers`, `entityLinks` (and `matchers`),
+    `approvalDescription`;
+  - not read by messages: every other prop (callbacks, `transport`,
+    `session`, `queue`, `theme`, `voice`, `attachments`, …).
+  After a change pass a new object. Replace changed messages, do not mutate
+  them.
 - `continuation`: the "Continue" button (`locale.continueButton`, German "Weitermachen") under
   the latest answer when the server's stop notice ends it with a continuable `data-budget-stop`
   part; a `<button type="button" data-action="continue-after-stop">` in

@@ -99,7 +99,10 @@ const entityLinks = useMemo(() => ({
   render React later discards.
 - New `matchers` restart the matcher chips right after the render that
   passes them, also in finished messages. Keep `entityLinks` (and its
-  `matchers`) stable: a new object renders every message.
+  `matchers`), `entityDeclarations` and `chatInteractions` stable: a new
+  object renders every message; pass a new object after a change (an
+  in-place change to a declaration or an entity shows in a finished message
+  only once it renders again).
 
 ## Attachments
 
