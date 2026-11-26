@@ -244,3 +244,21 @@ export type {
   ViewContextSanitizeResult,
   ViewContextSelection,
 } from './view-context.js';
+
+export {
+  ENVIRONMENT_CONTROL_CAPABILITY,
+  ENVIRONMENT_CONTROL_SCHEMA_VERSION,
+  ENVIRONMENT_CONTROL_SYNC_VERSION,
+  EnvironmentControlBudgetCeilingSchema,
+  EnvironmentControlRateLimitSchema,
+  EnvironmentControlReasonCodeSchema,
+  EnvironmentControlSchema,
+  LocalEnvironmentControlHaltSchema,
+} from './environment-control.js';
+export type {
+  EffectiveEnvironmentControl,
+  EnvironmentControl,
+  EnvironmentControlBudgetCeiling,
+  EnvironmentControlRateLimit,
+  LocalEnvironmentControlHalt,
+} from './environment-control.js';

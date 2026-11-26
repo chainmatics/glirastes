@@ -1,0 +1,455 @@
+{
+  "contract": "EnvironmentControl",
+  "schemaVersion": 1,
+  "negotiation": {
+    "syncQuery": {
+      "controlVersion": "1"
+    },
+    "registrationCapability": {
+      "environmentControl": 1
+    }
+  },
+  "signing": {
+    "algorithm": "Ed25519",
+    "input": "canonicalRuntimeJson of the control without signature",
+    "testKey": {
+      "keyId": "environment-control-vector-key",
+      "publicJwk": {
+        "crv": "Ed25519",
+        "x": "2j2_3wMFTCBlsy6bjqqJravrYxx5cFspqmt99pBuV9A",
+        "kty": "OKP",
+        "kid": "environment-control-vector-key",
+        "alg": "EdDSA",
+        "use": "sig"
+      },
+      "privateJwkTestOnly": {
+        "crv": "Ed25519",
+        "d": "JgNo3pHoK5MZgndwxoj3PGR0hBGQ9zRd3YZmUUItUeo",
+        "x": "2j2_3wMFTCBlsy6bjqqJravrYxx5cFspqmt99pBuV9A",
+        "kty": "OKP"
+      }
+    }
+  },
+  "valid": [
+    {
+      "name": "valid/halted-minimal",
+      "canonical": "{\"assistant\":\"halted\",\"environmentId\":\"019fbc00-0000-7000-8000-0000000000a3\",\"issuedAt\":\"2026-11-26T09:00:00.000Z\",\"reasonCode\":\"operator-halt\",\"schemaVersion\":1,\"sequence\":2,\"targetAppId\":\"019fbc00-0000-7000-8000-0000000000a2\",\"tenantId\":\"019fbc00-0000-7000-8000-0000000000a1\"}",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "valid/enabled-with-ceiling-and-rate-limit",
+      "canonical": "{\"assistant\":\"enabled\",\"budgetCeiling\":{\"maxEstimatedCostUsd\":0.25,\"maxInputTokens\":8000,\"maxModelSteps\":4,\"maxOutputTokens\":1000,\"maxToolCalls\":3,\"totalTimeoutMs\":30000},\"environmentId\":\"019fbc00-0000-7000-8000-0000000000a3\",\"issuedAt\":\"2026-11-26T10:00:00+01:00\",\"rateLimit\":{\"maxTurnsPerMinutePerPrincipal\":6},\"reasonCode\":\"operator-tighten\",\"schemaVersion\":1,\"sequence\":3,\"targetAppId\":\"019fbc00-0000-7000-8000-0000000000a2\",\"tenantId\":\"019fbc00-0000-7000-8000-0000000000a1\"}",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 3,
+        "assistant": "enabled",
+        "budgetCeiling": {
+          "maxModelSteps": 4,
+          "maxToolCalls": 3,
+          "totalTimeoutMs": 30000,
+          "maxInputTokens": 8000,
+          "maxOutputTokens": 1000,
+          "maxEstimatedCostUsd": 0.25
+        },
+        "rateLimit": {
+          "maxTurnsPerMinutePerPrincipal": 6
+        },
+        "reasonCode": "operator-tighten",
+        "issuedAt": "2026-11-26T10:00:00+01:00",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "eIpXDJQMW_OufWQ_WwxoZfK6E17PNFbnViXuAAfz8NPuRWA08QbyaL8po1-r45TTeX0TNzwxzriwYSFLXTUTDA"
+        }
+      }
+    },
+    {
+      "name": "valid/resume-partial-ceiling",
+      "canonical": "{\"assistant\":\"enabled\",\"budgetCeiling\":{\"maxEstimatedCostUsd\":0},\"environmentId\":\"019fbc00-0000-7000-8000-0000000000a3\",\"issuedAt\":\"2026-11-26T11:00:00.000Z\",\"reasonCode\":\"operator-resume\",\"schemaVersion\":1,\"sequence\":4,\"targetAppId\":\"019fbc00-0000-7000-8000-0000000000a2\",\"tenantId\":\"019fbc00-0000-7000-8000-0000000000a1\"}",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 4,
+        "assistant": "enabled",
+        "budgetCeiling": {
+          "maxEstimatedCostUsd": 0
+        },
+        "reasonCode": "operator-resume",
+        "issuedAt": "2026-11-26T11:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "VGl6eYUb2I0PFHTjIk41U5BnhsAdIs161FaFd5q1aSCQPtwaUAysIF94Vqt1N0rJMmPYNf-uPKSimE-E4lIEBQ"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "invalid/missing-sequence",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/missing-signature",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid/missing-environment-id",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/sequence-zero",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 0,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/sequence-fraction",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 1.5,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/unknown-assistant-state",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "paused",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/unknown-schema-version",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 2,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/extra-field",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        },
+        "note": "x"
+      }
+    },
+    {
+      "name": "invalid/extra-budget-field",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        },
+        "budgetCeiling": {
+          "maxModelSteps": 2,
+          "toolTimeoutMs": 1000
+        }
+      }
+    },
+    {
+      "name": "invalid/empty-budget-ceiling",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        },
+        "budgetCeiling": {}
+      }
+    },
+    {
+      "name": "invalid/rate-limit-zero",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        },
+        "rateLimit": {
+          "maxTurnsPerMinutePerPrincipal": 0
+        }
+      }
+    },
+    {
+      "name": "invalid/rate-limit-above-600",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        },
+        "rateLimit": {
+          "maxTurnsPerMinutePerPrincipal": 601
+        }
+      }
+    },
+    {
+      "name": "invalid/reason-code-free-text",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "Halted because Jane said so",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/issued-at-without-offset",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/non-uuid-tenant",
+      "failure": "schema",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "tenant-1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/tampered-assistant",
+      "failure": "signature",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "enabled",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/tampered-sequence",
+      "failure": "signature",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 99,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "environment-control-vector-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    },
+    {
+      "name": "invalid/unknown-key-id",
+      "failure": "signature",
+      "control": {
+        "schemaVersion": 1,
+        "tenantId": "019fbc00-0000-7000-8000-0000000000a1",
+        "targetAppId": "019fbc00-0000-7000-8000-0000000000a2",
+        "environmentId": "019fbc00-0000-7000-8000-0000000000a3",
+        "sequence": 2,
+        "assistant": "halted",
+        "reasonCode": "operator-halt",
+        "issuedAt": "2026-11-26T09:00:00.000Z",
+        "signature": {
+          "algorithm": "Ed25519",
+          "keyId": "unknown-key",
+          "value": "B0nhJy0Gwz6nmAAp0F17x9xA6Gwr_IFeK6SZattZwM98DBQpgopNR01A0HaMUuAmY4BUfhY-Fhv82hpHm6NaAg"
+        }
+      }
+    }
+  ]
+}

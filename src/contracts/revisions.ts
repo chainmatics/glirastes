@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ExecutionBudgetSchema } from './runtime.js';
+import { EnvironmentControlSchema } from './environment-control.js';
 import { findForbiddenContentPath } from './content-boundary.js';
 import { ToolOverrideDeltaSchema, ToolRiskClassSchema } from './tool-policy-entry.js';
 
@@ -340,6 +341,8 @@ export const RuntimeSyncBundleSchema = z.object({
   activeSnapshotComplete: z.literal(true),
   deployments: z.array(RuntimeDeploymentBundleSchema),
   revocations: z.array(SecurityRevocationSchema),
+  /** Only present when the runner negotiated `controlVersion=1`. */
+  control: EnvironmentControlSchema.nullable().optional(),
 }).strict();
 
 export type RevisionSignature = z.infer<typeof RevisionSignatureSchema>;
