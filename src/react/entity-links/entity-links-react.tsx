@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import type { ChatEntitySearchData } from '../../contracts/chat-interactions.js';
@@ -17,6 +18,7 @@ import { fillTemplate } from '../utils/fill-template.js';
 import { getDefaultUiActionBus, type UiActionBus } from '../../browser/ui-action-bus.js';
 import { MentionChip as DefaultMentionChip } from '../components/mention-chip.js';
 import { useChatContext } from '../provider/chat-context.js';
+import { useMessageChat } from '../provider/message-chat-context.js';
 import type { Mention } from '../types.js';
 import { MARKER_CHARS, MARKER_EDGE, MARKER_SPAN, escapeMarkerLabel } from './marker-text.js';
 import {
@@ -73,7 +75,33 @@ function matchKey(segment: { matcher: number; text: string; match?: string }): s
  * 0.29.0 remounted on every render did: never with a result of other matchers
  * or of another hit, and a chip still waiting asks again.
  */
-const MATCH_CACHE_CLEARED = new WeakMap<ChatEntityLinks, { readonly current: number }>();
+const MATCH_CACHE_CLEARED = new WeakMap<ChatEntityLinks, MatchCacheClearings>();
+
+/**
+ * The clearings of one provider. A clearing for other `matchers` tells the
+ * linked texts, so a finished message (which no longer renders while a later
+ * one streams) starts its matcher chips over right after it, too.
+ */
+interface MatchCacheClearings {
+  current: number;
+  readonly listeners: Set<() => void>;
+  readonly subscribe: (listener: () => void) => () => void;
+}
+
+function createMatchCacheClearings(): MatchCacheClearings {
+  const listeners = new Set<() => void>();
+  return {
+    current: 0,
+    listeners,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+}
+
+const NO_CLEARINGS: MatchCacheClearings = createMatchCacheClearings();
+const noClearings = () => 0;
 
 const LINKIFIED_TAGS = ['p', 'li', 'td', 'th', 'strong', 'em', 'h1', 'h2', 'h3', 'h4'] as const;
 
@@ -124,12 +152,15 @@ export function ChatEntityLinksProvider({
   busRef.current = uiActionBus;
   const cache = useRef(new Map<string, Promise<ChatEntityReference | undefined>>());
   const settled = useRef(new Map<string, ChatEntityReference | null>());
-  const cleared = useRef(0);
+  const [cleared] = useState(createMatchCacheClearings);
   // As in 0.29.0: cleared after the render that passes other matchers, and once after mounting.
   useEffect(() => {
     cache.current = new Map();
     settled.current = new Map();
     cleared.current += 1;
+    // The linked texts start their matcher chips over now, not on their next render: a finished message
+    // no longer renders while a later one streams.
+    for (const listener of [...cleared.listeners]) listener();
   }, [config?.matchers]);
 
   // Per message and weak: a streamed chunk reads the streaming message again, not the settled history.
@@ -305,7 +336,8 @@ function linkifyChildren(children: ReactNode, links: ChatEntityLinks): ReactNode
 }
 
 function EntityTextSegments({ segments }: { segments: ChatEntityTextSegment[] }) {
-  const cleared = MATCH_CACHE_CLEARED.get(useChatEntityLinks())?.current ?? 0;
+  const clearings = MATCH_CACHE_CLEARED.get(useChatEntityLinks()) ?? NO_CLEARINGS;
+  const cleared = useSyncExternalStore(clearings.subscribe, () => clearings.current, noClearings);
   return (
     <>
       {segments.map((segment, index) => (
@@ -348,7 +380,7 @@ function MatchedEntityChip({ segment }: { segment: Extract<ChatEntityTextSegment
  */
 export function EntityLinkChip({ reference, text }: { reference: ChatEntityReference; text?: string }) {
   const links = useChatEntityLinks();
-  const { components } = useChatContext();
+  const { components } = useMessageChat();
   const Chip = components.MentionChip ?? DefaultMentionChip;
   const openable = links.canOpen(reference.type);
   return (
@@ -429,7 +461,7 @@ function MarkerText({ text }: { text: string }) {
 
 function MarkerChip({ mention }: { mention: Mention }) {
   const links = useChatEntityLinks();
-  const { components } = useChatContext();
+  const { components } = useMessageChat();
   const Chip = components.MentionChip ?? DefaultMentionChip;
   const reference = { type: mention.type, id: mention.id, label: mention.displayName };
   return (

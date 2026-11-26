@@ -1,9 +1,29 @@
-import { Fragment, useRef, useEffect, useCallback } from 'react';
+import { Fragment, memo, useRef, useEffect, useCallback, useState, type ComponentType } from 'react';
 import { useChatContext } from '../provider/chat-context.js';
+import type { ComposerContextValue } from '../provider/composer-context.js';
+import { createMessageChats, MessageChatProvider, type MessageChat } from '../provider/message-chat-context.js';
 import { MessageBubble as DefaultMessageBubble, statusNotice } from './message-bubble.js';
 import { TurnNotice as DefaultTurnNotice } from './activity-log.js';
 import { turnStartId } from '../utils/turn-outcomes.js';
-import type { MessageListProps } from '../types.js';
+import type { ChatMessage, MessageBubbleProps, MessageListProps, TurnOutcome } from '../types.js';
+
+/**
+ * One message with its view of the chat. Renders again only when the view,
+ * the message, the bubble component or the turn outcome is new: a finished
+ * message does not render while a later one streams.
+ */
+const MessageSlot = memo(function MessageSlot({ chat, Bubble, message, outcome }: {
+  chat: MessageChat;
+  Bubble: ComponentType<MessageBubbleProps>;
+  message: ChatMessage;
+  outcome: TurnOutcome | null;
+}) {
+  return (
+    <MessageChatProvider value={chat}>
+      <Bubble message={message} {...(outcome ? { turnOutcome: outcome } : {})} />
+    </MessageChatProvider>
+  );
+});
 
 /**
  * Scrollable message list with auto-scroll and pagination.
@@ -12,9 +32,12 @@ import type { MessageListProps } from '../types.js';
  * Supports `loadMore` for infinite scroll upwards.
  */
 export function MessageList({ className }: MessageListProps) {
+  const chat = useChatContext();
   const {
     messages, isLoading, hasMore, loadMore, classNames, components, locale, turnOutcomes, activityLog,
-  } = useChatContext();
+  } = chat;
+  const [messageChats] = useState(createMessageChats);
+  const chatOf = messageChats(chat as typeof chat & ComposerContextValue, messages);
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
@@ -74,7 +97,7 @@ export function MessageList({ className }: MessageListProps) {
           : undefined;
         return (
           <Fragment key={message.id}>
-            <BubbleComponent message={message} {...(outcome ? { turnOutcome: outcome } : {})} />
+            <MessageSlot chat={chatOf(message, index)} Bubble={BubbleComponent} message={message} outcome={outcome} />
             {standalone && (
               <TurnNoticeComponent text={standalone.text} status={standalone.status} placement="message" outcome={outcome!} />
             )}

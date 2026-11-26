@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { useChatContext } from '../provider/chat-context.js';
+import { useMessageChat } from '../provider/message-chat-context.js';
 import { sanitizeSubjectText } from '../../contracts/approval-subject.js';
 import { fillTemplate } from '../utils/fill-template.js';
 import type { ApprovalCardProps, ApprovalPreviewItem, ApprovalSubject, ChatLocale, PendingApproval } from '../types.js';
@@ -43,7 +43,7 @@ export function previewValueText(item: ApprovalPreviewItem, language: string | u
 const LONG_TEXT_LENGTH = 100;
 
 function DetailValue({ value, items }: { value: string; items?: string[] }) {
-  const { locale } = useChatContext();
+  const { locale } = useMessageChat();
   const [expanded, setExpanded] = useState(false);
   const isList = !!items && items.length > COLLAPSED_ITEMS;
   const isLong = !isList && value.length > LONG_TEXT_LENGTH;
@@ -136,7 +136,7 @@ function seenApprovalSubjects(approval: PendingApproval): ApprovalSubject[] {
  * `aria-describedby`.
  */
 export function ApprovalIdWarning({ id, subjects }: { id: string; subjects: ReadonlyArray<ApprovalSubject> }) {
-  const { locale } = useChatContext();
+  const { locale } = useMessageChat();
   // A speaking key (declared) the user types needs no warning: it is readable on its own.
   // Not checkable comes first and has its own text: the record may well exist.
   const unchecked = subjects.filter(isUnchecked);
@@ -216,7 +216,7 @@ export function ApprovalCard({
   className,
   isProcessing,
 }: ApprovalCardProps) {
-  const { classNames, locale, language } = useChatContext();
+  const { classNames, locale, language } = useMessageChat();
   const warningId = useId();
   const subjectLines = approvalSubjectLines(approval, locale);
   const flagged = flaggedApprovalSubjects([approval]);

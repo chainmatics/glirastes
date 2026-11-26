@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useComposerContext } from '../provider/composer-context.js';
+import { useMessageChat } from '../provider/message-chat-context.js';
 import { fillTemplate } from '../utils/fill-template.js';
 import { readMessageSources } from '../utils/message-sources.js';
 import { readMessageFollowups } from '../utils/followup-suggestions.js';
@@ -44,7 +44,7 @@ export function formatDuration(ms: number, language?: string): string {
 
 /** The running turn's elapsed time; ticks on its own, so only it re-renders. */
 function Elapsed({ language }: { language: string | undefined }) {
-  const { turnWorkedMs } = useComposerContext();
+  const { turnWorkedMs } = useMessageChat();
   const read = () => turnWorkedMs?.() ?? null;
   const [ms, setMs] = useState<number>(() => read() ?? 0);
   useEffect(() => {
@@ -63,7 +63,7 @@ function Elapsed({ language }: { language: string | undefined }) {
 type CopyState = 'idle' | 'copied' | 'failed';
 
 function CopyButton({ text }: { text: string }) {
-  const { locale } = useComposerContext();
+  const { locale } = useMessageChat();
   const [state, setState] = useState<CopyState>('idle');
   const mounted = useRef(true);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,7 +135,7 @@ const ENDED_PIPELINE = new Set(['aborted', 'error', 'safety-stop']);
  * approval or clarification is open.
  */
 function useFollowups(message: ChatMessage, isLatest: boolean, turnOutcome: TurnOutcome | null): string[] {
-  const { suggestions, isLoading, isTurnRunning, pendingApprovals, messages, pipelineState } = useComposerContext();
+  const { suggestions, isLoading, isTurnRunning, pendingApprovals, messages, pipelineState } = useMessageChat();
   const count = suggestions?.count ?? 3;
   const candidates = useMemo(
     () => (suggestions?.placement === 'message' && message.role === 'assistant' ? readMessageFollowups(message, count) : []),
@@ -157,7 +157,7 @@ function useFollowups(message: ChatMessage, isLatest: boolean, turnOutcome: Turn
  * answer. Renders nothing when no part applies.
  */
 export function MessageFooter({ message, text, hasText, isLastOfTurn, isLatest, turnOutcome, active }: MessageFooterProps): ReactNode {
-  const { messageFooter, locale, language, stop, canCompose, selectSuggestion } = useComposerContext();
+  const { messageFooter, locale, language, stop, canCompose, selectSuggestion } = useMessageChat();
   const sourcesId = useId();
   const followupsId = useId();
   const [sourcesOpen, setSourcesOpen] = useState(false);

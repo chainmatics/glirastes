@@ -1,12 +1,11 @@
-import { Fragment, Suspense, lazy, useCallback, useContext, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { MentionChip as DefaultMentionChip } from './mention-chip.js';
 import { useChatMarkdownOptions } from '../markdown-options.js';
-import { ChatContext, useChatContext } from '../provider/chat-context.js';
 import { unescapeMarkerLabels } from '../entity-links/marker-text.js';
 import { markdownLoadingLimit, markdownModuleForLazy, markdownOverdue, markdownTimedOut, subscribeMarkdownTimeout } from '../markdown-module.js';
 import { loadingMarkdownSources } from '../utils/copy-message.js';
 import { readStepFailurePartCodes } from '../../contracts/step-failure.js';
-import { useComposerContext } from '../provider/composer-context.js';
+import { useMessageChat, useOptionalMessageChat } from '../provider/message-chat-context.js';
 import { parseMentionSegments, stripContextBlocks } from '../utils/mention-markup.js';
 import {
   EntityText,
@@ -300,7 +299,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
     suggestions,
     isTurnRunning,
     continueAfterBudgetStop,
-  } = useComposerContext();
+  } = useMessageChat();
   const ApprovalCardComponent = components.ApprovalCard ?? DefaultApprovalCard;
   const ApprovalEntryComponent = components.ApprovalEntry ?? DefaultApprovalEntry;
   const MarkdownComponent = components.Markdown ?? DefaultMarkdown;
@@ -759,7 +758,7 @@ function useMessagePartsWithLogs(message: ChatMessage): MessageParts & { logsAt:
  * Uses `data-role` attribute for styling (user/assistant/system).
  */
 export function MessageBubble({ message, className }: MessageBubbleProps) {
-  const { classNames, components, approvalDisplay } = useChatContext();
+  const { classNames, components, approvalDisplay } = useMessageChat();
   const { visible, parts, logsAt, turnOutcome, ...nodes } = useMessagePartsWithLogs(message);
   if (!visible) return null;
   // With `approvalDisplay` placing approvals at their tool part, a message that
@@ -814,7 +813,7 @@ function DefaultMarkdown({ content, className }: { content: string; className?: 
   const { remarkPlugins, loadingTimeoutMs } = useChatMarkdownOptions();
   const limit = markdownLoadingLimit(loadingTimeoutMs);
   // Optional: rendered outside the provider (print, renderToStaticMarkup) it behaves as before.
-  const chat = useContext(ChatContext);
+  const chat = useOptionalMessageChat();
   // Outside a provider both snapshots are `false`: no re-render after hydration, as before.
   const client = useSyncExternalStore(subscribeNothing, chat ? onClient : onServer, onServer);
   // Skeleton or raw text while react-markdown loads, decided on the first render
