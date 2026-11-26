@@ -5,7 +5,7 @@ import { defineChatComponent, toChatComponentManifest } from '../../../chat-view
 import { z } from 'zod';
 import { createAppFixture, removeAppFixtures, SDK_ROOT, type AppFixture } from '../__tests__/app-fixture.js';
 import { TOOLS_PATHS } from '../config.js';
-import { runToolsPipeline } from '../pipeline.js';
+import { runToolsPipeline, ToolsPipelineFailure } from '../pipeline.js';
 import { createSchemaProbe } from '../schema-probe.js';
 import { renderChatComponentManifest, scanChatComponents } from './chat-components.js';
 
@@ -103,5 +103,23 @@ describe('chat component manifest scan', { timeout: 60_000 }, () => {
     const result = await runToolsPipeline({ root: without.root, mode: 'write' });
     expect(result.outputs[TOOLS_PATHS.chatComponents]).toBeUndefined();
     expect(await without.read(TOOLS_PATHS.chatComponents).catch(() => 'absent')).toBe('absent');
+  });
+
+  it('removes a stale manifest on write and reports it as drift in check mode once the app drops every component', async () => {
+    const fixture = await appWith({
+      'src/app/api/ping/route.ts': "export async function GET() { return Response.json({ ok: true }); }\n",
+      'src/chat/order-card.ts': WIDGET,
+    });
+    await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(await fixture.read(TOOLS_PATHS.chatComponents)).toContain('OrderCard');
+    await fixture.remove('src/chat/order-card.ts');
+    const check = await runToolsPipeline({ root: fixture.root, mode: 'frozen' }).catch((error: unknown) => error);
+    expect(check).toBeInstanceOf(ToolsPipelineFailure);
+    expect((check as ToolsPipelineFailure).result.driftPaths).toContain(TOOLS_PATHS.chatComponents);
+    const written = await runToolsPipeline({ root: fixture.root, mode: 'write' });
+    expect(written.wrote).toBe(true);
+    expect(await fixture.read(TOOLS_PATHS.chatComponents).catch(() => 'absent')).toBe('absent');
+    const clean = await runToolsPipeline({ root: fixture.root, mode: 'frozen' });
+    expect(clean.driftPaths).toEqual([]);
   });
 });

@@ -980,6 +980,12 @@ async function generate(
   });
   findings.push(...chatComponents.findings);
   if (chatComponents.manifest) outputs[TOOLS_PATHS.chatComponents] = renderChatComponentManifest(chatComponents.manifest);
+  // The app dropped every component: the file would keep serving a catalog that no longer exists.
+  // A scan that failed (an error finding) proves nothing, so then the file stays.
+  const staleChatComponents = !chatComponents.manifest && !chatComponents.findings.some(isError)
+    && (await lstat(resolve(root, TOOLS_PATHS.chatComponents)).catch(() => undefined)) !== undefined
+    ? TOOLS_PATHS.chatComponents
+    : undefined;
   const unreadable = unreadableOutputs(outputs);
   if (unreadable.length > 0) {
     findings.push(...unreadable);
@@ -987,21 +993,28 @@ async function generate(
   }
   const driftPaths = await diffOutputs(root, outputs);
   if (options.mode !== 'write') {
-    for (const path of driftPaths) {
+    const reported = staleChatComponents ? [...driftPaths, staleChatComponents] : driftPaths;
+    for (const path of reported) {
       findings.push(toolFinding('tool-outputs-drift', 'error', path, `${path} is out of date with the code.`));
     }
-    return result({ changes: generation.changes, outputs, driftPaths });
+    return result({ changes: generation.changes, outputs, driftPaths: reported });
   }
   const stale = await staleSetupArtifactPath(root);
-  if (driftPaths.length === 0 && !stale) return result({ changes: generation.changes, outputs, driftPaths });
-  const linked = await linkedOutputPath(root, stale ? [...driftPaths, stale] : driftPaths);
+  const removals = [stale, staleChatComponents].filter((path): path is string => path !== undefined);
+  if (driftPaths.length === 0 && removals.length === 0) return result({ changes: generation.changes, outputs, driftPaths });
+  const linked = await linkedOutputPath(root, [...driftPaths, ...removals]);
   if (linked) {
     findings.push(toolFinding('output-path-linked', 'error', linked, `${linked} resolves outside the app.`));
     return result({ changes: generation.changes, outputs, driftPaths });
   }
   if (driftPaths.length > 0) await writeOutputs(root, outputs, driftPaths);
-  if (stale) await rm(resolve(root, stale));
-  return result({ changes: generation.changes, outputs, driftPaths, wrote: driftPaths.length > 0 });
+  for (const path of removals) await rm(resolve(root, path));
+  return result({
+    changes: generation.changes,
+    outputs,
+    driftPaths,
+    wrote: driftPaths.length > 0 || staleChatComponents !== undefined,
+  });
 }
 
 function receiptModeOf(raw: string | undefined): 'standalone' | 'managed' {
