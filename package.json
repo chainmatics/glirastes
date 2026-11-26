@@ -304,6 +304,7 @@
     "docs/chat-route-security.md",
     "docs/concepts.md",
     "docs/entity-identity.md",
+    "docs/eval-attestation.md",
     "docs/history-measurement.md",
     "docs/local-stt.md",
     "docs/managed-runtime-sync.md",

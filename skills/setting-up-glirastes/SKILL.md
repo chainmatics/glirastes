@@ -244,6 +244,14 @@ no model on every pull request and push to `main`.
   staging Platform needs its own key, add `--ci-environment <name>`: the job
   then reads all three from that GitHub environment.
 
+When the developer runs an eval suite of their own in CI and the Platform's
+eval gate is on, a step after it reports the result with
+`glirastes evals attest --suite <file|dir> --total <n> --failed <n>`. It sends
+digests and counts only, reads both digests from the committed
+`.glirastes/setup-artifact.json` and authenticates with `GLIRASTES_API_KEY`
+(the app's CI key, set by the developer). It never runs the suite. See
+`docs/eval-attestation.md`.
+
 ## Commands
 
 ```bash
