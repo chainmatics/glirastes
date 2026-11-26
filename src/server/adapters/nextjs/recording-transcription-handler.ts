@@ -1,5 +1,7 @@
 import { trimTrailingSlashes } from '../../../contracts/url.js';
+import type { ManagedTurnControl } from '../../../runtime/turn-control.js';
 import { decodeRecordingWav } from './recording-wav.js';
+import { controlRefusal } from './request-guards.js';
 /** The languages a recording may be transcribed in, unless the app sets its own list. */
 export const DEFAULT_RECORDING_LANGUAGES = ['de', 'en', 'de-DE', 'en-US', 'en-GB', 'fr', 'es', 'it', 'nl', 'pt'] as const;
 
@@ -44,6 +46,8 @@ export interface RecordingTranscriptionHandlerConfig {
   maxBytes?: number;
   /** Default 45 seconds. */
   timeoutMs?: number;
+  /** The environment control, e.g. `(await glirastes.chatTurn(…)).managedRuntime.loadControl`; while halted it answers 503. */
+  loadControl?: (ctx: { request: Request }) => ManagedTurnControl | Promise<ManagedTurnControl>;
   /** Receives the failure for the server log; the browser only learns that it failed. */
   onError?: (error: unknown) => void;
   fetch?: typeof globalThis.fetch;
@@ -63,6 +67,8 @@ export interface LocalRecordingTranscriptionHandlerConfig {
   maxBytes?: number;
   /** Default 120 seconds. */
   timeoutMs?: number;
+  /** The environment control, e.g. `(await glirastes.chatTurn(…)).managedRuntime.loadControl`; while halted it answers 503. */
+  loadControl?: (ctx: { request: Request }) => ManagedTurnControl | Promise<ManagedTurnControl>;
   /** Receives the failure for the server log; the browser only learns that it failed. */
   onError?: (error: unknown) => void;
   /** Receives PCM16 mono 16 kHz recordings as samples; any other WAV answers 415. A `TranscriptionUnavailableError` answers 503. */
@@ -97,6 +103,8 @@ export function createRecordingTranscriptionHandler(
     ?? ((error: unknown) => console.error('[speech] Recording transcription failed:', error instanceof Error ? error.message : 'unknown error'));
 
   return async function POST(request: Request): Promise<Response> {
+    const control = await config.loadControl?.({ request });
+    if (control?.assistant === 'halted') return controlRefusal(503, control.code);
     if (!(await config.authorize(request))) return failed(401, 'Authentication required');
     if (!transcribe && !config.url) return failed(503, 'Speech service not configured');
     if (!request.headers.get('content-type')?.startsWith('audio/wav')) return failed(415, 'Unsupported audio format');

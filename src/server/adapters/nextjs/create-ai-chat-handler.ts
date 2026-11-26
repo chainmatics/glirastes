@@ -1738,6 +1738,9 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           messages,
           model,
           abortSignal: req.signal,
+          ...(managedRuntime?.loadControl
+            ? { halted: async () => (await managedRuntime.loadControl!({ request: req })).assistant === 'halted' }
+            : {}),
           ...(piiShield
             ? {
                 anonymize: (text: string) => piiShield.outbound(text, shieldSessionId),

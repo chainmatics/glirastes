@@ -111,6 +111,8 @@ export interface ChatMemoryTurn {
     /** PII shield hooks: the summary model sees pseudonyms, the stored summary real values. */
     anonymize?: (text: string) => Promise<string>;
     restore?: (text: string) => Promise<string>;
+    /** True once the environment control halted the assistant; compaction stops and stores nothing. */
+    halted?: () => Promise<boolean>;
   }): PreparedChatMemory;
 }
 
@@ -591,7 +593,7 @@ export function createChatMemory(
 
       return {
         tools,
-        prepare({ messages, model, abortSignal, anonymize, restore }) {
+        prepare({ messages, model, abortSignal, anonymize, restore, halted }) {
           const all = messages as UiMessageLike[];
           const found = compaction ? latestSummary(all) : null;
           const live = found ? all.slice(found.index + 1) : all;
@@ -614,10 +616,15 @@ export function createChatMemory(
               const signal = AbortSignal.timeout(SUMMARY_TIMEOUT_MS);
               // What the finished steps cover; a failure keeps it and loses only the rest.
               let done: MemorySummary | undefined;
+              let stopped = false;
               compacting = (async () => {
                 let summary = found?.summary.summary ?? '';
                 for (const step of steps) {
                   for (const piece of step.pieces) {
+                    if (await halted?.()) {
+                      stopped = true;
+                      return;
+                    }
                     const input = [
                       `Summary so far:\n${summary || '(none)'}`,
                       `Next part of the conversation:\n${piece}`,
@@ -638,8 +645,8 @@ export function createChatMemory(
                 }
               })().catch((error: unknown) => {
                 if (!abortSignal?.aborted) onError?.(error);
-              }).then(() => {
-                if (done && !abortSignal?.aborted) emit({ type: MEMORY_SUMMARY_PART, data: done });
+              }).then(async () => {
+                if (done && !stopped && !abortSignal?.aborted && !(await halted?.().catch(() => true))) emit({ type: MEMORY_SUMMARY_PART, data: done });
               });
             }
           }
