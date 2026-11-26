@@ -106,9 +106,16 @@ is sent and a stored view renders as plain text.
      component.
    - `children`: `'none'` (default), `'any'` or a list of allowed component
      ids. `itemScope: { rowsProp, cellsProp }` makes it a table-like
-     component whose cell elements read rows with `$item`.
+     component whose cell elements read rows with `$item`. Each entry of the
+     cells prop names its cell element in a `chatElementId()` field, e.g.
+     `fields: z.array(z.object({ title: z.string(), element: chatElementId() }))`;
+     without one `defineChatComponent` throws.
    - `text` (`ChatComponentTextRule`: `label`, `value`, `rows`, `columns`)
-     names the props the text fallback prints.
+     names the props the text fallback prints: an item-scope component prints
+     a table (header = the column's `header`, else its first other text
+     field), `rows` alone one line per entry, a container with only `label`
+     a title, otherwise `label: value`. An element whose type the client's
+     manifest does not know prints its children's text, else nothing.
    - A breaking prop change gets a new `schemaVersion`; keep the old
      definition bound as long as stored chats may hold it.
 
@@ -169,18 +176,23 @@ props, children? } }, caption? }` (`ChatViewSpec`):
   `Stat.value`; a `$said` value is marked "computed by the assistant".
 - References reach results of the current turn and the tool parts the
   browser sent back. The model also gets a content-free memo of up to 10
-  earlier results (call id, tool, row count, field names).
+  earlier results (call id, tool, row count, field names). It lists only
+  field names `read_result` would echo (identifiers without three digits in
+  a row); a result without a list is just `value`, since its keys may be
+  data.
 
 The server validates (`validateChatViewSpec`), resolves
 (`resolveChatView`) and returns `{ shown: true, elements, view }`; the model
-sees only `{ shown, elements }`, never `view`, now or in later turns. A bad
+sees only `{ shown, elements }`, never `view`, now or in later turns (the
+handler strips `view` from history on every request, also after `chatViews`
+is switched off, unless the app registers its own `render_view` tool). A bad
 spec returns `success: false` with a precise message, so the model corrects
 itself. Limits (`CHAT_VIEW_LIMITS`): 60 elements, depth 6, 8 KB spec, 200-char
 literals, 50 table rows ("+n more" below), 8 table columns (3 when narrow),
 64 KB resolved view.
 
 Starter catalog (`starterChatComponents`, manifest
-`starterChatComponentManifest`): `Group`, `Card`, `Text` (literal only),
+`starterChatComponentManifest`): `Group`, `Card`, `Text` (literal `text` only),
 `KeyValue`, `Table`, `StatusBadge`, `EntityLink`, `Money`, `DateTime`, `Stat`,
 `Action`.
 
@@ -296,6 +308,7 @@ props that do not fit. `validateChatViewSpec(spec, manifest)` and
 | `render_view` fails with a reference error | the path is not in the result (typo, or only in the cut form: see limits); `Text` takes no reference, use `StatusBadge`, `KeyValue` or an own bindable prop |
 | An element shows text instead of the component | not bound in the browser, bound in another `schemaVersion` than the element's, or its props do not fit the bound schema (a server catalog newer than the browser bundle) |
 | The whole view shows text | the React `chatViews` option is missing, or the root element failed |
+| `defineChatComponent` throws "must be a list of objects with a chatElementId() field" | the cells prop of an `itemScope` component needs a `chatElementId()` field naming each column's cell element |
 | Pseudonyms instead of names | by design with `piiShield`: views show the shielded form |
 | A button does nothing | the `uiAction` id is not registered on this page (`onUiActionOutcome` gets the code, the console warns) |
 | `.glirastes/chat-components.json` missing | no exported `defineChatComponent` imported from `glirastes`, or a `chat-component-invalid` finding in `glirastes tools refresh` |

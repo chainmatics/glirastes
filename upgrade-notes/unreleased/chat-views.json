@@ -2,7 +2,7 @@
   "id": "chat-views",
   "kind": "optional",
   "summary": "Optional chat views (generative UI in chat): the model composes one view per answer from the app's components via the built-in render_view tool; every value is a reference to a real tool result. Off unless chatViews is set.",
-  "howTo": "Nothing changes unless you opt in. Server: set `chatViews: {}` (starter catalog) or `chatViews: { catalog }` on createAiChatHandler. Browser: set `chatViews={{}}` on VercelAiChat or AiChatProvider (starter bindings), or `chatViews={{ components }}` with `bindChatComponent(definition, Component)` per app component (memoize the array). Own components: export `defineChatComponent(...)` from a module without React or side effects, mark data props with `bindable()`/`refOnly()`, run `glirastes tools refresh` (writes .glirastes/chat-components.json) and pass `chatComponentManifestSchema.parse(json)` as `chatViews.catalog` (a Node server may pass the definitions). Values show in the PII-shielded form, a view is a snapshot, buttons only send a prompt or run a client action (its outcome goes to onUiActionOutcome, not to the model). The runtime container has no chat.chatViews option yet. Full setup, test recipe and troubleshooting: skills/building-glirastes-chat-ui/references/chat-views.md.",
+  "howTo": "Nothing changes unless you opt in. Server: set `chatViews: {}` (starter catalog) or `chatViews: { catalog }` on createAiChatHandler. Browser: set `chatViews={{}}` on VercelAiChat or AiChatProvider (starter bindings), or `chatViews={{ components }}` with `bindChatComponent(definition, Component)` per app component (memoize the array). Own components: export `defineChatComponent(...)` from a module without React or side effects, mark data props with `bindable()`/`refOnly()` (a table-like component names its cell elements with `chatElementId()`), run `glirastes tools refresh` (writes .glirastes/chat-components.json) and pass `chatComponentManifestSchema.parse(json)` as `chatViews.catalog` (a Node server may pass the definitions). Values show in the PII-shielded form, a view is a snapshot, buttons only send a prompt or run a client action (its outcome goes to onUiActionOutcome, not to the model). The runtime container has no chat.chatViews option yet. Full setup, test recipe and troubleshooting: skills/building-glirastes-chat-ui/references/chat-views.md.",
   "skill": "building-glirastes-chat-ui",
   "adoptedWhen": {
     "patterns": [
@@ -32,6 +32,7 @@
     "glirastes/contracts#ChatViewSpec",
     "glirastes/contracts#ResolvedChatView",
     "glirastes#bindable",
+    "glirastes#chatElementId",
     "glirastes#defineChatComponent",
     "glirastes#describeChatCatalog",
     "glirastes#mergeChatManifests",

@@ -82,6 +82,11 @@ merged over it (`mergeChatManifests`); an entry with the same `id` and
 colors, sizes, URLs or HTML; formatting of money and dates happens in the
 binding with the page language.
 
+A table-like app component declares `itemScope: { rowsProp, cellsProp }`;
+each entry of the cells prop names its cell element in a `chatElementId()`
+field (`defineChatComponent` throws without one). The text fallback follows
+the entry's `itemScope` and `text` rule, so an app table prints as a table.
+
 ## References and the model
 
 - `{ "$ref": "<toolCallId>", "path": "data[].customer" }`: same path grammar
@@ -94,7 +99,12 @@ binding with the page language.
   when the model saw an overview, read under the same guard as `read_result`)
   and the tool parts the browser sends back for earlier turns. The model gets
   a content-free memo of up to ten earlier results (call id, tool, row count,
-  field names) next to the seen-objects memo.
+  field names) next to the seen-objects memo. Field names pass the same
+  filter as `read_result` echoes (identifiers without a run of three digits);
+  a result without a list is listed as `value`, as its keys may be data.
+- The resolved `view` never reaches the model: the handler strips it from
+  the history on every request, also after `chatViews` was switched off,
+  unless the app registers its own tool named `render_view`.
 - An invalid spec or a path that does not resolve returns `success: false`
   with a precise message, so the model corrects itself; loop detection applies
   as for any tool.
@@ -106,7 +116,9 @@ binding with the page language.
   accepts the props; an element newer than every binding may therefore render
   through an older one when its props fit. Otherwise the element renders as
   its text and its siblings still render. A failing root, or a binding that
-  throws at the root, renders the whole view as text.
+  throws at the root, renders the whole view as text. An element whose type
+  the client's manifest does not know renders its children's text, else
+  nothing.
 - Every text fallback is plain text in React text nodes, never Markdown or
   HTML. `chatViewToText` used elsewhere escapes every value in its default
   Markdown form; its `plain` form must not be fed to a Markdown renderer.
