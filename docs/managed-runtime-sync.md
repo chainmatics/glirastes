@@ -294,28 +294,43 @@ selected by a deterministic subject cohort or an explicit approved pin.
 The runner asks for the signed per-environment control with
 `controlVersion=1` on every sync and reports `capabilities.environmentControl: 1`
 at registration. A Platform without it answers as before and nothing changes.
-`EnvironmentControl` v1 (`glirastes/contracts`) carries `assistant`
-(`enabled` | `halted`), an optional `budgetCeiling` and `rateLimit`, and a
-`sequence` that grows strictly per environment. It is signed like revisions,
-over `canonicalRuntimeJson` without `signature`, and checked against the same
-JWKS.
+`EnvironmentControl` v1 (`glirastes/contracts`, `kind: 'environment-control'`)
+carries `assistant` (`enabled` | `halted`), an optional `budgetCeiling` and
+`rateLimit`, and a `sequence` that grows strictly per environment. It is signed
+like revisions, over `canonicalRuntimeJson` without `signature`, and checked
+against the same JWKS.
 
 - A verified control of this tenant, app and environment with a higher
   `sequence` is accepted and kept in the state store.
-- An equal or lower `sequence` is ignored, so an old `enabled` cannot be
-  replayed. `control: null` keeps the accepted control.
-- A control of another tenant, app or environment is rejected and reported as
-  `control_scope_mismatch`.
-- A control that fails its schema or signature halts the runner locally with
-  `control_unverifiable` until a valid control with a higher `sequence`
-  arrives. This is fail closed on purpose: a Platform signing fault stops
-  every assistant with this SDK. A JWKS request that fails is no verdict; the
-  sync fails and is retried.
+- A lower `sequence`, or the same control again, is ignored, so an old
+  `enabled` cannot be replayed. `control: null` keeps the accepted control.
+- A control that fails its schema or signature, names another tenant, app or
+  environment, or changes content without a new `sequence` halts the runner
+  locally with `control_unverifiable`. The halt lasts until a valid control
+  with a higher `sequence` arrives. If only verifying the accepted control
+  failed (for example its key was briefly missing from the JWKS), a verified
+  copy of that same control lifts the halt.
+- This is fail closed on purpose: a Platform signing fault stops every
+  assistant with this SDK. A JWKS request that fails is no verdict; the sync
+  fails and is retried.
+- Overlapping syncs (poll and push) are applied one after the other.
+- When the Platform withdraws the environment's place, the runner keeps the
+  control of that environment. A halt stays in force until a newer verified
+  control arrives for it, or until another environment completes its first
+  sync.
 
 `glirastes.control()` returns the control in force, or the local halt.
-Rejections reach `onError` as a content-free `RuntimeEnvironmentControlError`.
+Rejections reach `onError` as a content-free `RuntimeEnvironmentControlError`
+(`control_unverifiable`, `control_scope_mismatch`, `control_sequence_conflict`).
 Turns enforce the control from the next SDK step on (halt, budget ceiling,
 rate limit); this release only verifies and stores it.
+
+`createGlirastes` keeps the control in process memory only. After a restart
+a halt applies again only once the first sync succeeds; until then turns run
+on the local code. Production deployments that must stay stopped across
+restarts should use the `required` control freshness mode once it ships.
+A runner built with `createManagedRuntimeSync` and a `FileRuntimeStateStore`
+persists the control with the rest of the state.
 
 Use `MemoryRuntimeStateStore` for the zero-setup embedded development path.
 Long-lived and unattended runners should use `FileRuntimeStateStore` or provide
