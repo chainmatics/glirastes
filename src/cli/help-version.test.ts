@@ -80,6 +80,14 @@ describe('glirastes <command> --help', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('prints the evals attest usage for glirastes evals --help', async () => {
+    const stdout = captureStdout();
+    await runCli(['evals', '--help']);
+    expect(stdout()).toContain('glirastes evals attest --suite <file|dir> --total <n> --failed <n>');
+    expect(stdout()).not.toContain('glirastes tools');
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it.each(['scan', 'setup', 'connect', 'sync', 'doctor', 'install', 'validate', 'build', 'tools'])(
     'prints only the %s usage for --help',
     async (command) => {

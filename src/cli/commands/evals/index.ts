@@ -1,0 +1,234 @@
+import { createHash } from 'node:crypto';
+import { lstat, readdir, readFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
+import {
+  EVAL_ATTESTATION_MAX_TOTAL,
+  EVAL_ATTESTATION_SCHEMA_VERSION,
+  EvalAttestationRequestSchema,
+  EvalAttestationResponseSchema,
+  RUNTIME_METRIC_LABEL_PATTERN,
+  type EvalAttestationRequest,
+} from '../../../contracts/index.js';
+import { DEFAULT_CONTROL_PLANE_URL, RUNTIME_API_KEY_PATTERN } from '../../../runtime/runtime-mode.js';
+import { errorCode } from '../../../sync/control-plane-client.js';
+import { canonicalRuntimeJson } from '../../../sync/signature-verifier.js';
+import { parseToolArgs, ToolsUsageError, type ToolArgsSpec } from '../tools/args.js';
+
+/** Every `glirastes evals` subcommand with its flags and values; the shipped skills are linted against it. */
+export const EVALS_SUBCOMMANDS: Readonly<Record<string, ToolArgsSpec>> = {
+  attest: { flags: ['--json'], values: ['--suite', '--total', '--failed', '--run-ref', '--root'] },
+};
+
+export const EVALS_USAGE = [
+  'Usage: glirastes evals attest --suite <file|dir> --total <n> --failed <n> [--run-ref <label>] [--root <dir>] [--json]',
+  '         report the result of your own eval suite to the Platform: digests and counts only, never cases or outputs;',
+  '         pass when --failed is 0 (exit 0), otherwise fail (exit 1); needs GLIRASTES_API_KEY and .glirastes/setup-artifact.json',
+].join('\n');
+
+const SETUP_ARTIFACT_PATH = '.glirastes/setup-artifact.json';
+const REQUEST_TIMEOUT_MS = 30_000;
+const DIGEST_PATTERN = /^sha256:(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9+/]{43}=)$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface EvalsCommandDependencies {
+  cwd?: string;
+  env?: Record<string, string | undefined>;
+  fetch?: typeof fetch;
+  now?: () => Date;
+  log?: (line: string) => void;
+  error?: (line: string) => void;
+}
+
+class EvalsStop extends Error {
+  constructor(message: string, readonly exitCode: 1 | 2) {
+    super(message);
+    this.name = 'EvalsStop';
+  }
+}
+
+function sha256(value: string | Buffer): string {
+  return `sha256:${createHash('sha256').update(value).digest('base64url')}`;
+}
+
+async function suiteFiles(dir: string, prefix: string): Promise<Array<{ path: string; full: string }>> {
+  const files: Array<{ path: string; full: string }> = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...await suiteFiles(full, path));
+    else if (entry.isFile()) files.push({ path, full });
+    else throw new EvalsStop(`The suite contains ${path}, which is neither a file nor a directory; links are not followed.`, 2);
+  }
+  return files;
+}
+
+/**
+ * `sha256:` over the sorted list of relative POSIX path and file digest; a
+ * single file is listed under its base name. Contents never leave this function.
+ */
+export async function computeSuiteDigest(suitePath: string): Promise<string> {
+  const stat = await lstat(suitePath);
+  let listed: Array<{ path: string; full: string }>;
+  if (stat.isFile()) listed = [{ path: basename(suitePath), full: suitePath }];
+  else if (stat.isDirectory()) listed = await suiteFiles(suitePath, '');
+  else throw new EvalsStop('--suite must name a file or a directory; links are not followed.', 2);
+  if (listed.length === 0) throw new EvalsStop('The suite contains no files.', 2);
+  const files = await Promise.all(listed.map(async ({ path, full }) => ({ path, sha256: sha256(await readFile(full)) })));
+  files.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+  return sha256(canonicalRuntimeJson({ schemaVersion: EVAL_ATTESTATION_SCHEMA_VERSION, files }));
+}
+
+function count(values: Map<string, string>, flag: string): number {
+  const raw = values.get(flag);
+  if (raw === undefined) throw new EvalsStop(`${flag} is required.`, 2);
+  if (!/^\d+$/.test(raw) || Number(raw) > EVAL_ATTESTATION_MAX_TOTAL) {
+    throw new EvalsStop(`${flag} must be a whole number from 0 to ${EVAL_ATTESTATION_MAX_TOTAL}.`, 2);
+  }
+  return Number(raw);
+}
+
+async function readSetupDigests(root: string): Promise<{ appId: string; setupArtifactDigest: string; promptDigest: string }> {
+  let artifact: { appId?: unknown; discoveryDigest?: unknown; prompts?: { bundleDigest?: unknown } };
+  try {
+    artifact = JSON.parse(await readFile(join(root, SETUP_ARTIFACT_PATH), 'utf8')) as typeof artifact;
+  } catch {
+    throw new EvalsStop(`${SETUP_ARTIFACT_PATH} is missing or not JSON. Run glirastes tools refresh and commit .glirastes first.`, 2);
+  }
+  const { appId, discoveryDigest } = artifact;
+  const bundleDigest = artifact.prompts?.bundleDigest;
+  if (typeof appId !== 'string' || !UUID_PATTERN.test(appId)) {
+    throw new EvalsStop(`${SETUP_ARTIFACT_PATH} names no appId.`, 2);
+  }
+  if (typeof discoveryDigest !== 'string' || !DIGEST_PATTERN.test(discoveryDigest)) {
+    throw new EvalsStop(`${SETUP_ARTIFACT_PATH} has no discoveryDigest.`, 2);
+  }
+  if (typeof bundleDigest !== 'string' || !DIGEST_PATTERN.test(bundleDigest)) {
+    throw new EvalsStop(`${SETUP_ARTIFACT_PATH} has no prompts.bundleDigest.`, 2);
+  }
+  return { appId, setupArtifactDigest: discoveryDigest, promptDigest: bundleDigest };
+}
+
+function connection(env: Record<string, string | undefined>): { baseUrl: string; apiKey: string } {
+  const apiKey = env.GLIRASTES_API_KEY?.trim();
+  if (!apiKey) throw new EvalsStop('GLIRASTES_API_KEY is not set. Use the app\'s CI API key; nothing was sent.', 2);
+  if (!RUNTIME_API_KEY_PATTERN.test(apiKey)) throw new EvalsStop('GLIRASTES_API_KEY is malformed; nothing was sent.', 2);
+  const configured = env.GLIRASTES_CONTROL_PLANE_URL?.trim();
+  let baseUrl = DEFAULT_CONTROL_PLANE_URL;
+  if (configured) {
+    let protocol: string | undefined;
+    try { protocol = new URL(configured).protocol; } catch { protocol = undefined; }
+    if (protocol !== 'https:' && protocol !== 'http:') {
+      throw new EvalsStop('GLIRASTES_CONTROL_PLANE_URL must be an http(s) URL; nothing was sent.', 2);
+    }
+    baseUrl = configured;
+  }
+  return { baseUrl: baseUrl.replace(/\/+$/, ''), apiKey };
+}
+
+async function attest(argv: readonly string[], deps: Required<EvalsCommandDependencies>, json: boolean): Promise<number> {
+  const args = parseToolArgs(argv, EVALS_SUBCOMMANDS.attest!);
+  const suite = args.values.get('--suite');
+  if (suite === undefined) throw new EvalsStop('--suite is required.', 2);
+  const total = count(args.values, '--total');
+  const failed = count(args.values, '--failed');
+  if (total < 1) throw new EvalsStop('--total must be at least 1.', 2);
+  if (failed > total) throw new EvalsStop('--failed must not exceed --total.', 2);
+  const runRef = args.values.get('--run-ref');
+  if (runRef !== undefined && !RUNTIME_METRIC_LABEL_PATTERN.test(runRef)) {
+    throw new EvalsStop('--run-ref takes a technical label (no whitespace or quotes, at most 200 characters).', 2);
+  }
+
+  const root = resolve(deps.cwd, args.values.get('--root') ?? '.');
+  const digests = await readSetupDigests(root);
+  const { baseUrl, apiKey } = connection(deps.env);
+  let suiteDigest: string;
+  try {
+    suiteDigest = await computeSuiteDigest(resolve(deps.cwd, suite));
+  } catch (caught) {
+    if (caught instanceof EvalsStop) throw caught;
+    throw new EvalsStop('--suite names nothing readable.', 2);
+  }
+
+  const body: EvalAttestationRequest = EvalAttestationRequestSchema.parse({
+    schemaVersion: EVAL_ATTESTATION_SCHEMA_VERSION,
+    setupArtifactDigest: digests.setupArtifactDigest,
+    promptDigest: digests.promptDigest,
+    suiteDigest,
+    result: failed === 0 ? 'pass' : 'fail',
+    total,
+    failed,
+    ranAt: deps.now().toISOString(),
+    ...(runRef !== undefined ? { ciRunRef: runRef } : {}),
+  });
+
+  let response: Response;
+  try {
+    response = await deps.fetch(`${baseUrl}/v1/apps/${encodeURIComponent(digests.appId)}/eval-attestations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new EvalsStop('The Platform could not be reached; no attest was recorded.', 1);
+  }
+  if (!response.ok) {
+    const code = await errorCode(response);
+    throw new EvalsStop(`The Platform refused the attest (HTTP ${response.status}${code ? `, ${code}` : ''}).`, 1);
+  }
+  let recorded;
+  try {
+    recorded = EvalAttestationResponseSchema.parse(await response.json());
+  } catch {
+    throw new EvalsStop(`The Platform answered HTTP ${response.status} without an attestation id.`, 1);
+  }
+
+  const summary = {
+    attestationId: recorded.attestationId,
+    recordedAt: recorded.recordedAt,
+    result: body.result,
+    total,
+    failed,
+    setupArtifactDigest: body.setupArtifactDigest,
+    promptDigest: body.promptDigest,
+    suiteDigest,
+  };
+  if (json) deps.log(JSON.stringify(summary));
+  else {
+    deps.log(`Eval attest recorded: ${body.result} (${failed} of ${total} failed), attestation ${recorded.attestationId}`);
+    deps.log(`setup ${body.setupArtifactDigest}  prompt ${body.promptDigest}  suite ${suiteDigest}`);
+  }
+  return body.result === 'pass' ? 0 : 1;
+}
+
+/** `glirastes evals`: reports results of the customer's own eval suite; never runs evals or calls a model. */
+export async function runEvalsCommand(argv: readonly string[], d: EvalsCommandDependencies = {}): Promise<number> {
+  const deps: Required<EvalsCommandDependencies> = {
+    cwd: d.cwd ?? process.cwd(),
+    env: d.env ?? process.env,
+    fetch: d.fetch ?? fetch,
+    now: d.now ?? (() => new Date()),
+    log: d.log ?? ((line) => { console.log(line); }),
+    error: d.error ?? ((line) => { console.error(line); }),
+  };
+  const [subcommand, ...rest] = argv;
+  if (subcommand !== 'attest') {
+    deps.error(EVALS_USAGE);
+    return 2;
+  }
+  const json = rest.includes('--json');
+  try {
+    return await attest(rest, deps, json);
+  } catch (caught) {
+    if (caught instanceof ToolsUsageError) {
+      deps.error(`${caught.message}\n${EVALS_USAGE}`);
+      return 2;
+    }
+    if (caught instanceof EvalsStop) {
+      if (json) deps.log(JSON.stringify({ error: caught.message, exitCode: caught.exitCode }));
+      else deps.error(caught.message);
+      return caught.exitCode;
+    }
+    throw caught;
+  }
+}

@@ -51,6 +51,7 @@ import { writeCiWorkflow } from './commands/ci-workflow.js';
 import { runUpgradeCommand } from './commands/upgrade/index.js';
 import { runToolsCommand, type ToolsCommandDependencies } from './commands/tools/index.js';
 import { runSttCommand, type SttPullDependencies } from './commands/stt/index.js';
+import { runEvalsCommand, type EvalsCommandDependencies } from './commands/evals/index.js';
 
 type CommandName =
   | 'init'
@@ -64,6 +65,7 @@ type CommandName =
   | 'build'
   | 'tools'
   | 'stt'
+  | 'evals'
   | 'upgrade';
 
 export interface CliDependencies {
@@ -73,6 +75,7 @@ export interface CliDependencies {
   sync?: SyncCommandDependencies;
   tools?: ToolsCommandDependencies;
   stt?: SttPullDependencies;
+  evals?: EvalsCommandDependencies;
 }
 
 /** `--flag value` or `--flag=value`. */
@@ -171,7 +174,9 @@ export const CLI_USAGE =
   + '       glirastes stt pull [--dir <path>] [--mirror <url>] [--json]\n'
   + '         download the sha256-pinned local speech models for glirastes/server/stt-local\n'
   + '       glirastes stt worklet [--out <dir>] [--root <path>] [--json]\n'
-  + '         copy the audio worklet voice input needs into public/ (served at /audio-worklet-processor.js)\n';
+  + '         copy the audio worklet voice input needs into public/ (served at /audio-worklet-processor.js)\n'
+  + '       glirastes evals attest --suite <file|dir> --total <n> --failed <n> [--run-ref <label>] [--root <dir>] [--json]\n'
+  + '         report your own eval suite result to the Platform (digests and counts only; exit 1 when cases failed)\n';
 
 const HELP_FLAGS = new Set(['--help', '-h', 'help']);
 
@@ -214,6 +219,7 @@ function parseCommand(args: string[]): {
     && command !== 'build'
     && command !== 'tools'
     && command !== 'stt'
+    && command !== 'evals'
     && command !== 'upgrade'
   ) {
     throw new FoundationDiagnosticError({
@@ -812,6 +818,11 @@ export async function runCli(
   }
   if (command === 'stt') {
     const exitCode = await runSttCommand(rest, dependencies.stt);
+    if (exitCode !== 0) process.exitCode = exitCode;
+    return;
+  }
+  if (command === 'evals') {
+    const exitCode = await runEvalsCommand(rest, dependencies.evals);
     if (exitCode !== 0) process.exitCode = exitCode;
     return;
   }
