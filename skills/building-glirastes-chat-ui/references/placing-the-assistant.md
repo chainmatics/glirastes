@@ -7,6 +7,7 @@
 - History column
 - Replacing shell parts
 - Width
+- Cascade layers
 - Shortcuts and look
 - Own layout
 
@@ -239,6 +240,25 @@ page: the widest sidebar is then `min(maxWidth, row − minPageWidth)`, never
 below `minWidth`, and the user's width comes back on wider windows. Below
 `narrowWidth` the assistant still takes the whole row. The width handle
 announces and stops at the widest width that can render.
+
+## Cascade layers
+
+`glirastes/react/styles.css` and `pills.css` are wrapped in `@layer glirastes`,
+so app utilities win without `!important`. Tailwind v4: declare the order
+first in the app's global CSS, then import (an `@import` order alone does not
+fix it):
+
+```css
+@layer theme, base, glirastes, components, utilities;
+@import "tailwindcss";
+@import "glirastes/react/styles.css";
+```
+
+`max-w-[8.5rem]` then overrides the SDK's `max-width` on
+`[data-element="display-name"]`. Layered CSS always loses to unlayered CSS: with
+Tailwind v3 or global unlayered resets (`button { ... }`, preflight), import
+`glirastes/react/styles.unlayered.css` (and `pills.unlayered.css`) instead, or
+put the resets in a layer before `glirastes`. Same rules, no layer.
 
 ## Shortcuts and look
 

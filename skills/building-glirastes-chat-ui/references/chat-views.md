@@ -224,6 +224,10 @@ runs a tool, asks for approval or grants anything the typed request would not.
   whole-view text), `[data-element="<kebab id>"]` on starter elements,
   `text-fallback`, `said-marker`, `caption`, `table-note` (`data-note="more"
   | "partial"`). `unstyled` is honoured.
+- A bubble that renders a view carries `data-has-chat-view` (set in React, no
+  `:has` needed). The default style gives it `width: 100%` under the bubble's
+  `max-width`, so container queries inside the view have a size; tables scroll
+  inside the view (`[data-element="table"]`). Target the attribute to change it.
 - Texts: locale keys `chatViewSaidMarker`, `chatViewPartialNote`,
   `chatViewMoreRows` (`{count}`); English and German ship.
 - `ChatView` renders a `ResolvedChatView` outside the chat (`view`,

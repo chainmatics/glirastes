@@ -124,6 +124,15 @@ the entry's `itemScope` and `text` rule, so an app table prints as a table.
   Markdown form; its `plain` form must not be fed to a Markdown renderer.
 - Styling hooks: `[data-component="chat-view"]`, `[data-element="…"]`,
   `text-fallback`, `said-marker`, `table-note`; `unstyled` is honoured.
+- A message bubble that renders a view carries `data-has-chat-view` and, by
+  default, a definite `width: 100%` (capped by the bubble's `max-width`) so
+  container queries inside the view work in a narrow sidebar; wide tables
+  scroll inside the view.
+- The shipped CSS is in `@layer glirastes`. With Tailwind v4, declare
+  `@layer theme, base, glirastes, components, utilities;` before
+  `@import "tailwindcss";` so utilities override SDK styles without `!`. For
+  Tailwind v3 or global unlayered resets import
+  `glirastes/react/styles.unlayered.css` instead.
 
 ## Security and privacy
 

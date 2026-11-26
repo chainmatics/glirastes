@@ -792,6 +792,9 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const { classNames, components, approvalDisplay } = useMessageChat();
   const { visible, parts, logsAt, turnOutcome, ...nodes } = useMessagePartsWithLogs(message);
   if (!visible) return null;
+  // A rendered chat view needs a definite bubble width so its container
+  // queries have a size; the attribute is the styling hook for that.
+  const hasChatView = message.parts.some((part) => readChatViewPart(part)?.view !== undefined);
   // With `approvalDisplay` placing approvals at their tool part, a message that
   // has one renders its text and tool parts in message order, so the approval
   // sits between the texts around it. Otherwise the default order, unchanged:
@@ -833,6 +836,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
       className={className ?? classNames.messageBubble}
       data-component="message-bubble"
       data-role={message.role}
+      {...(hasChatView ? { 'data-has-chat-view': '' } : {})}
     >
       {Arrange ? <Arrange message={message} parts={parts} turnOutcome={turnOutcome} {...nodes}>{ordered}</Arrange> : ordered}
     </div>

@@ -28,7 +28,7 @@ chat route uses the app's own model access.
 
 1. Choose React or the browser-only custom element (see Non-React hosts).
    For React, mount one `VercelAiChat endpoint="/api/chat"` (the app's real chat route)
-   and import `glirastes/react/styles.css`; theme it before forking anything.
+   and import `glirastes/react/styles.css` (cascade layers: placing-the-assistant.md); theme it first.
    Place the assistant as in "Placing the assistant" below: a toggle where the
    app wants it, the chat docked on the right or detached as a window. The
    bare floating bubble is only for apps without a layout of their own.

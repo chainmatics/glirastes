@@ -313,6 +313,20 @@ describe('chat views in the message list', () => {
     expect(document.querySelector('[data-component="chat-view"]')).toBeNull();
     expect(document.querySelector('[data-component="tool-result"]')).toBeNull();
   });
+
+  it('marks only a bubble that renders a chat view with data-has-chat-view', () => {
+    const plain = { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Hello' }] } as unknown as ChatMessage;
+    renderChat(invoices, { chatViews: {} }, transport([plain, viewMessage(invoices)]));
+    const bubbles = [...document.querySelectorAll('[data-component="message-bubble"]')];
+    expect(bubbles).toHaveLength(2);
+    expect(bubbles[0]?.hasAttribute('data-has-chat-view')).toBe(false);
+    expect(bubbles[1]?.hasAttribute('data-has-chat-view')).toBe(true);
+  });
+
+  it('does not mark a bubble whose render_view call failed', () => {
+    renderChat(invoices, { chatViews: {} }, transport([viewMessage(invoices, { success: false, error: 'x', retryable: false })]));
+    expect(document.querySelector('[data-has-chat-view]')).toBeNull();
+  });
 });
 
 describe('createChatViewRegistry', () => {

@@ -466,7 +466,7 @@ and a connected app; **Pro** adds the managed CI tool agent. Details:
 | `glirastes/react` | Chat UI, provider, hooks, client actions, navigation bridge, STT |
 | `glirastes/react/audio-worklet-processor.js` | Audio worklet file voice input loads (serve it at `/audio-worklet-processor.js`) |
 | `glirastes/react/vercel` | AI SDK transport and `VercelAiChat` |
-| `glirastes/react/styles.css` | Shipped chat styles |
+| `glirastes/react/styles.css` | Shipped chat styles, in `@layer glirastes` (also `styles.unlayered.css`; `pills.css` / `pills.unlayered.css`) |
 | `glirastes/stt` | Provider-neutral STT controller and adapters |
 | `glirastes/ai-sdk` | Vercel AI SDK reference engine (alias `glirastes/runtime/ai-sdk`) |
 | `glirastes/contracts` | Principals, budgets, manifests, revisions, deployments |
