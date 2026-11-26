@@ -18,3 +18,5 @@ export { effectiveChatManifest, validateChatViewSpec } from './validate.js';
 export type { ChatViewSpecValidation, ValidateChatViewSpecOptions } from './validate.js';
 export { resolveChatView } from './resolve.js';
 export type { ChatViewResolution, ChatViewSource, ChatViewSourceLookup } from './resolve.js';
+export { chatElementToText, chatViewToText } from './text.js';
+export type { ChatViewTextOptions } from './text.js';
