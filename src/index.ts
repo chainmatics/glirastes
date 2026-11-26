@@ -6,3 +6,4 @@
 // primary API surface for runtime functionality.
 export * from './types.js';
 export * from './diagnostics/index.js';
+export * from './chat-views/index.js';
