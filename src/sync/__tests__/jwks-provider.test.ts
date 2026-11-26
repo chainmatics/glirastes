@@ -43,4 +43,15 @@ describe('HttpRuntimePublicKeyProvider', () => {
     });
     await expect(provider.getKey('runtime-key')).rejects.toThrow(/private/i);
   });
+
+  it('aborts a JWKS request that hangs past timeoutMs', async () => {
+    const fetchImpl = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+    }));
+    const provider = new HttpRuntimePublicKeyProvider({
+      baseUrl: 'https://control.example', apiKey: 'runtime-secret', fetchImpl: fetchImpl as never, timeoutMs: 5,
+    });
+    await expect(provider.getKey('runtime-key')).rejects.toThrow();
+    expect(fetchImpl.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal);
+  });
 });

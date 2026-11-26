@@ -221,4 +221,16 @@ describe('RuntimeControlPlaneClient', () => {
     await expect(client.register({ capabilities: { environmentControl: 2 } }))
       .rejects.toThrow(/environmentControl/);
   });
+
+  it('aborts a request that hangs past requestTimeoutMs', async () => {
+    const fetchImpl = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+    }));
+    const client = new RuntimeControlPlaneClient({
+      ...baseOptions, fetchImpl: fetchImpl as never, requestTimeoutMs: 5,
+      manager: { apply: vi.fn() } as never,
+    });
+    await expect(client.heartbeat({ health: 'healthy' })).rejects.toThrow();
+    expect(fetchImpl.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal);
+  });
 });

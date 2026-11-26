@@ -89,6 +89,8 @@ export class RuntimeControlPlaneClient {
     fetchImpl?: typeof fetch;
     push?: RuntimePushConnector;
     pollIntervalMs?: number;
+    /** Abort a hung request after this many milliseconds (default 10 s); syncs run one at a time behind it. */
+    requestTimeoutMs?: number;
     onError?: (error: unknown) => void;
   }) {
     if (
@@ -265,6 +267,7 @@ export class RuntimeControlPlaneClient {
       `${this.runnerBaseUrl()}/${path}`,
       {
         ...init,
+        signal: AbortSignal.timeout(this.options.requestTimeoutMs ?? 10_000),
         headers: {
           authorization: `Bearer ${this.options.apiKey}`,
           'content-type': 'application/json',

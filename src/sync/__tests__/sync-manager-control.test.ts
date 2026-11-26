@@ -260,4 +260,26 @@ describe('RuntimeSyncManager environment control', () => {
     expect(error.code).toBe('control_unverifiable');
     expect(error.message).not.toMatch(/operator|halt-/);
   });
+
+  it('never uses a stored control of another environment as baseline', async () => {
+    const store = new MemoryRuntimeStateStore();
+    const foreign = control(7, 'enabled', { environmentId: otherEnvironmentId });
+    const empty = {
+      cursor: null, stable: null, canary: null, pending: [], revocations: [],
+      updatedAt: '2026-11-26T08:00:00.000Z',
+    };
+    await store.saveAtomic({ ...empty, control: { accepted: foreign, localHalt: null } });
+    const { manager, onControlRejected } = setup({ store });
+
+    expect((await manager.apply(bundle())).control).toBe('absent');
+    expect((await store.load())?.control).toEqual({
+      accepted: null,
+      localHalt: expect.objectContaining({ reasonCode: 'control_unverifiable', sequence: 0 }),
+    });
+    expect(onControlRejected).toHaveBeenCalledWith('control_scope_mismatch');
+
+    const halt = control(2, 'halted');
+    expect((await manager.apply(bundle({ control: halt }))).control).toBe('accepted');
+    expect((await store.load())?.control).toEqual({ accepted: halt, localHalt: null });
+  });
 });

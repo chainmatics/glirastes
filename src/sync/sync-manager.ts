@@ -113,6 +113,25 @@ export class RuntimeSyncManager {
   private async applyExclusive(rawBundle: unknown): Promise<RuntimeSyncApplyResult> {
     const wire = WireSyncBundleSchema.parse(rawBundle);
     let state = await this.options.store.load() ?? this.emptyState();
+    const foreign = state.control?.accepted;
+    if (foreign && foreign.environmentId !== this.options.environmentId) {
+      // Never a baseline for this environment, and never silently dropped.
+      this.options.onControlRejected?.('control_scope_mismatch');
+      state = {
+        ...state,
+        control: {
+          accepted: null,
+          localHalt: {
+            kind: 'local',
+            assistant: 'halted',
+            reasonCode: 'control_unverifiable',
+            sequence: 0,
+            detectedAt: new Date().toISOString(),
+          },
+        },
+      };
+      await this.options.store.saveAtomic(state);
+    }
     // First, so a failed key lookup aborts the sync before anything else applies.
     let controlResult = await this.applyControl(wire, state);
     if (controlResult.next) {
