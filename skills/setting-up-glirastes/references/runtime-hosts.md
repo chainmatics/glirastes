@@ -157,8 +157,9 @@ stable and canary must be bound; an older binding is never applied again.
 Stickiness is per process. Without a metrics sink (`metrics: false`) the
 runner negotiates no canary selection and stays on stable. Once the last
 successful sync is older than `canaryMaxStalenessMs` (default 5 minutes, at
-least three poll intervals) turns run on stable until a sync succeeds again
-(`canaryState: 'unbound'`). Prompts stay in the code, so prompt changes cannot
+least three poll intervals), or its active set failed verification, turns run
+on stable until a sync succeeds again (`canaryState: 'unbound'`); canary
+conversations return to the canary then. Prompts stay in the code, so prompt changes cannot
 be canaried: a canary with another prompt digest than stable is never selected
 (heartbeat `canaryState: 'prompt-unavailable'`).
 Heartbeats report the `CanaryState` (`selectable`, `unbound`, `revoked`,

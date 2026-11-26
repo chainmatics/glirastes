@@ -450,8 +450,13 @@ The runner fails closed when it loses the Platform. Once its last successful
 sync is older than `canaryMaxStalenessMs` (default 5 minutes, at least three
 poll intervals), turns stop selecting the canary and run on stable, so a
 rollback the Platform decided meanwhile cannot be missed; the next successful
-sync makes it selectable again. While stale, `canaryState` reports `unbound`.
-The signed binding carries no validity period: the limit is local.
+sync makes it selectable again. A sync whose active set fails verification
+(`RuntimeSyncApplyResult.rejectedActive`) keeps the previous set and does not
+count as successful. While stale, `canaryState` reports `unbound`. The signed
+binding carries no validity period: the limit is local. A canary conversation
+runs on stable while stale but stays remembered on the canary, so it returns to
+it after the next successful sync while the canary is still delivered; a
+conversation that starts while stale stays on stable.
 
 Once the stable deployment carries a verified binding, turn metrics are
 `TechnicalRuntimeEvent` v3 (`turn.finished` and `turn.continued`): v2 plus
