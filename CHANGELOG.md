@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Completion list: only the active row (keyboard or pointer) renders its entity actions (`[data-element="entity-actions"]` with the `mention-action` buttons). Other rows stay one line high, and the listbox holds no unreachable options. → still enters the actions of the active row. An app that styles the actions itself now styles them for that one row.
+
 ## [0.32.0] - 2026-11-27
 
 ### Added

@@ -230,8 +230,11 @@ describe('completion list: the active entry follows real pointer movement', () =
 
   it('activates an entity action button under the moving pointer', async () => {
     const { editor, onEntityAction } = await open();
-    const mail = screen.getByRole('option', { name: 'Mail: Dora' });
     move(option('Anna'), 1, 1);
+    expect(screen.queryByRole('option', { name: 'Mail: Dora' })).toBeNull();
+    // The row becomes active first; only then are its actions there.
+    move(option('Dora'), 50, 89);
+    const mail = screen.getByRole('option', { name: 'Mail: Dora' });
     move(mail, 200, 90);
     expect(activeId()).toBe(mail.id);
     expect(mail.getAttribute('aria-selected')).toBe('true');
@@ -247,9 +250,9 @@ describe('completion list: the active entry follows real pointer movement', () =
 
   it('arrow keys left/right continue from a pointer-activated action', async () => {
     const { editor } = await open();
-    const open_ = screen.getByRole('option', { name: 'Open: Dora' });
     move(option('Anna'), 1, 1);
-    move(open_, 150, 90);
+    move(option('Dora'), 50, 89);
+    move(screen.getByRole('option', { name: 'Open: Dora' }), 150, 90);
     fireEvent.keyDown(editor, { key: 'ArrowRight' });
     expect(activeId()).toBe(screen.getByRole('option', { name: 'Mail: Dora' }).id);
     fireEvent.keyDown(editor, { key: 'ArrowLeft' });
@@ -332,10 +335,13 @@ describe('pointerActivation: false keeps the keyboard-only list', () => {
   });
 
   it('ignores the action buttons under the pointer', async () => {
-    await open({ pointerActivation: false });
-    move(option('Anna'), 1, 1);
+    const { editor } = await open({ pointerActivation: false });
+    move(option('Dora'), 50, 89);
+    expect(screen.queryByRole('option', { name: 'Mail: Dora' })).toBeNull();
+    for (let step = 0; step < 3; step++) fireEvent.keyDown(editor, { key: 'ArrowDown' });
     move(screen.getByRole('option', { name: 'Mail: Dora' }), 200, 90);
-    expect(activeId()).toBe(option('Anna').id);
+    move(screen.getByRole('option', { name: 'Mail: Dora' }), 201, 91);
+    expect(activeId()).toBe(option('Dora').id);
   });
 
   it('makes onActivate a no-op', async () => {
