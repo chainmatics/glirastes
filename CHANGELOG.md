@@ -1428,6 +1428,7 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.32.0]: https://github.com/chainmatics/glirastes/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/chainmatics/glirastes/compare/v0.30.1...v0.31.0
 [0.30.1]: https://github.com/chainmatics/glirastes/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/chainmatics/glirastes/compare/v0.29.1...v0.30.0

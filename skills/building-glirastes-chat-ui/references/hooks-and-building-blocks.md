@@ -386,6 +386,14 @@ Defaults keep today's markup; everything below is opt-in.
 
 ## UI action outcomes
 
+Use `UiActionHandoffOptions` through `AiChatProvider`'s `uiActionHandoff`
+option to keep an overlay open until the user opens the destination.
+In `manual` mode, a batch containing navigation or a page-bound action
+waits for one click. The assistant message shows that batch's button. Use
+`isPageAction` for app actions, `openLabel` and `labelForAction` for the
+button, and `beforeOpen` to restore the previous layout. Switching chats
+or reloading clears pending buttons. See [UI action outcomes](../../../docs/ui-action-outcomes.md).
+
 `onUiActionOutcome(event)` (type `OnUiActionOutcome`) on the provider fires
 once per tool result with generated UI actions (`glirastes.*`), after they
 ran. The `UiActionOutcomeEvent` is `{ toolName, toolCallId, code, actions:
