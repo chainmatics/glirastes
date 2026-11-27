@@ -139,6 +139,20 @@ describe('composer keyboard and ARIA for chat interactions', () => {
     expect(selection.anchorOffset).toBe(offset);
   });
 
+  it('shows entity actions only for the active row', async () => {
+    const { editor } = await open('@');
+    const options = (name: string) => [...screen.getByRole('group', { name }).querySelectorAll('[role="option"]')];
+    expect(options('Release prüfen')).toHaveLength(3);
+    expect(options('Report schreiben')).toHaveLength(1);
+    fireEvent.keyDown(editor, { key: 'ArrowDown' });
+    expect(options('Release prüfen')).toHaveLength(1);
+    expect(options('Report schreiben')).toHaveLength(3);
+    fireEvent.keyDown(editor, { key: 'ArrowRight' });
+    expect(editor.getAttribute('aria-activedescendant'))
+      .toBe(screen.getByRole('option', { name: 'Complete: Report schreiben' }).id);
+    expect(screen.queryByRole('option', { name: 'Complete: Release prüfen' })).toBeNull();
+  });
+
   it('runs an entity action by mouse and leaves the caret keys alone where there is no action', async () => {
     const { chat, editor } = await open('@rep');
     expect(screen.queryByRole('group')).toBeTruthy();

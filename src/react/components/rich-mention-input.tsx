@@ -1797,10 +1797,11 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
         />
       );
       if (!onEntityAction || !result.actions?.length) return item;
+      // Only the active row lists its actions; → and the pointer reach no other row's actions anyway.
       return (
         <div key={key} role="group" aria-label={result.label} data-element="result-row">
           {item}
-          <span data-element="entity-actions">
+          {index === selectedIndex && <span data-element="entity-actions">
             {result.actions.map((action, actionIndex) => (
               <button
                 key={action.id}
@@ -1814,7 +1815,7 @@ export const RichMentionInput = forwardRef<RichMentionInputHandle, RichMentionIn
                 {action.label}
               </button>
             ))}
-          </span>
+          </span>}
         </div>
       );
     };
