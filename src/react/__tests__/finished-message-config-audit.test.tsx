@@ -344,6 +344,7 @@ const ROWS: Row[] = [
   { prop: 'onUiActionOutcome', sample: () => ({ onUiActionOutcome: () => {} }), expected: { inline: 'none', read: 'no' } },
   { prop: 'onTurnEnd', sample: () => ({ onTurnEnd: () => {} }), expected: { inline: 'none', read: 'no' } },
   { prop: 'uiActionOutcomeTimeoutMs', sample: () => ({ uiActionOutcomeTimeoutMs: 1000 }), other: () => ({ uiActionOutcomeTimeoutMs: 2000 }), expected: { inline: 'none', read: 'no' } },
+  { prop: 'uiActionHandoff', sample: () => ({ uiActionHandoff: { mode: 'manual' } }), other: () => ({ uiActionHandoff: { mode: 'auto' } }), expected: { inline: 'none', read: 'no' } },
   { prop: 'uiActionOutcomes', sample: () => ({ uiActionOutcomes: true }), other: () => ({ uiActionOutcomes: false }), expected: { inline: 'none', read: 'no' } },
   { prop: 'onBeforeSend', sample: () => ({ onBeforeSend: (text: string) => text }), expected: { inline: 'none', read: 'no' } },
   { prop: 'continueMessage', sample: () => ({ continueMessage: 'Please continue.' }), other: () => ({ continueMessage: 'Weiter.' }), expected: { inline: 'none', read: 'no' } },
@@ -367,7 +368,7 @@ const GROUPS: Record<'A' | 'B' | 'C' | 'D', ReadonlyArray<keyof AiChatProviderPr
   D: [
     'transport', 'mentions', 'completionProviders', 'completionContext', 'onCompletionProviderError', 'onCompletionSelect', 'mentionContext',
     'onOpenRequest', 'attachments', 'voice', 'session', 'languageSource', 'sendLanguage', 'theme', 'themeScope', 'unstyled', 'onToolResult',
-    'uiActionBus', 'onUiActionOutcome', 'onTurnEnd', 'uiActionOutcomeTimeoutMs', 'uiActionOutcomes', 'onBeforeSend', 'continueMessage',
+    'uiActionBus', 'onUiActionOutcome', 'onTurnEnd', 'uiActionOutcomeTimeoutMs', 'uiActionHandoff', 'uiActionOutcomes', 'onBeforeSend', 'continueMessage',
     'queue', 'pipelineMessageTranslator', 'stepSummaryFormatter',
   ],
 };
@@ -432,6 +433,7 @@ const COVERED: Record<Exclude<keyof AiChatProviderProps, 'children'>, true> = {
   onUiActionOutcome: true,
   onTurnEnd: true,
   uiActionOutcomeTimeoutMs: true,
+  uiActionHandoff: true,
   uiActionOutcomes: true,
   onBeforeSend: true,
   continueMessage: true,

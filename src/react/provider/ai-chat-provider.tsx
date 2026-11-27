@@ -81,9 +81,10 @@ import {
   type UiActionPageLoadResult,
 } from '../../browser/ui-action-signals.js';
 import type { UiAction } from '../../browser/ui-action-bus.js';
+import { findPageAction, pageActionDestination } from '../utils/ui-action-handoff.js';
 import { viewContextSnapshot } from '../../browser/view-context-store.js';
 import type { ViewContextEntry } from '../../contracts/view-context.js';
-import type { UiOutcome } from '../../contracts/ui-outcome.js';
+import { UI_ACTION_DEFERRED_FIELD, type UiOutcome } from '../../contracts/ui-outcome.js';
 import { continuesAfterPageLoad, shouldContinueChat, waitingToolCallIds } from '../utils/ui-outcome-continuation.js';
 import { getDefaultUiActionBus } from '../../browser/ui-action-bus.js';
 import { resolveTextTable } from '../../contracts/localized-text.js';
@@ -760,6 +761,7 @@ export function AiChatProvider({
   themeScope = 'inline',
   unstyled = false,
   onToolResult,
+  uiActionHandoff,
   uiActionBus,
   onUiActionOutcome,
   onTurnEnd,
@@ -1227,7 +1229,11 @@ export function AiChatProvider({
   const requestBaseRef = useRef<Array<{ id: string; role: string }>>([]);
   // Bumped by clear(), a session switch and unmount: queued actions of the left chat never start.
   const uiActionGenerationRef = useRef(0);
+  const [pendingUiHandoffs, setPendingUiHandoffs] = useState<NonNullable<ChatContextValue['pendingUiHandoffs']>>([]);
+  const handoffIdsRef = useRef(new Set<string>());
   const resetUiActions = useCallback(() => {
+    handoffIdsRef.current.clear();
+    setPendingUiHandoffs(previous => previous.length ? [] : previous);
     uiActionGenerationRef.current += 1;
     uiActionAbortRef.current.abort();
     uiActionAbortRef.current = new AbortController();
@@ -1257,6 +1263,8 @@ export function AiChatProvider({
   // Stable refs for callbacks to avoid re-creating transport
   const onToolResultRef = useRef(onToolResult);
   onToolResultRef.current = onToolResult;
+  const uiActionHandoffRef = useRef(uiActionHandoff);
+  uiActionHandoffRef.current = uiActionHandoff;
   const uiActionBusRef = useRef(uiActionBus);
   uiActionBusRef.current = uiActionBus;
   const onUiActionOutcomeRef = useRef(onUiActionOutcome);
@@ -1414,6 +1422,7 @@ export function AiChatProvider({
     toolCallId: string,
     output: Record<string, unknown>,
     code: UiActionRunCode,
+    deferred = false,
   ): Promise<UiOutcome | undefined> => {
     if (typeof output.awaitsOutcome !== 'boolean' || !reportsUiOutcomesRef.current) return undefined;
     const write = transportRef.current.addToolOutput;
@@ -1429,7 +1438,7 @@ export function AiChatProvider({
     if (!inLast) return undefined;
     reportedOutcomesRef.current.set(toolCallId, outcome);
     try {
-      await write.call(transportRef.current, { tool: toolName, toolCallId, output: { ...output, outcome } });
+      await write.call(transportRef.current, { tool: toolName, toolCallId, output: { ...output, outcome, ...(deferred ? { [UI_ACTION_DEFERRED_FIELD]: true } : {}) } });
       return outcome;
     } catch {
       if (reportedOutcomesRef.current.get(toolCallId) === outcome) {
@@ -1750,25 +1759,35 @@ export function AiChatProvider({
   }, [rawMessages, heldMessages, turnOutcomes, isInitialized, activeSessionId, loadedSessionId]);
 
 
-  const runUiActions = useCallback((toolName: string, toolCallId: string, output: unknown) => {
+  const runUiActions = useCallback((toolName: string, toolCallId: string, output: unknown, report = true, orderedHandoff = false) => {
     const actions = toolResultUiActions(output);
-    if (actions.length === 0) return;
+    if (!orderedHandoff && actions.length === 0) return;
     const generation = uiActionGenerationRef.current;
     const { signal } = uiActionAbortRef.current;
     const record = output as Record<string, unknown>;
     // The model answers once this outcome is written: keep the composer locked until then.
-    const awaited = reportsUiOutcomesRef.current && record.awaitsOutcome === true;
+    const awaited = report && reportsUiOutcomesRef.current && record.awaitsOutcome === true;
     if (awaited) setAwaitedOutcomes((count) => count + 1);
     const untrack = queueEnabledRef.current ? trackUiWork() : undefined;
     uiActionQueueRef.current = uiActionQueueRef.current.then(async () => {
       try {
         if (!mountedRef.current || pageLeavingRef.current || uiActionGenerationRef.current !== generation) return;
+        if (orderedHandoff && actions.length === 0) {
+          onToolResultRef.current?.(toolName, output);
+          return;
+        }
+        const allActions = Array.isArray(record.uiAction) ? record.uiAction : [record.uiAction];
+        const mixed = orderedHandoff && allActions.some(action => !actions.some(owned => owned === action));
+        if (orderedHandoff && !mixed) onToolResultRef.current?.(toolName, output);
         currentUiRunRef.current = { toolName, toolCallId, output: record };
         const run = await runToolResultUiActions(
           output,
           uiActionBusRef.current ?? getDefaultUiActionBus(),
           {
             signal,
+            ...(mixed ? { runLegacyAction: (action: unknown) => {
+              onToolResultRef.current?.(toolName, { ...record, uiAction: action });
+            } } : {}),
             ...(uiActionOutcomeTimeoutRef.current !== undefined ? { timeoutMs: uiActionOutcomeTimeoutRef.current } : {}),
           },
         ).catch((error: unknown) => ({ code: 'failed' as const, dispatched: 0, durationMs: 0, error }))
@@ -1801,7 +1820,7 @@ export function AiChatProvider({
         if (run.code !== 'ok' && run.code !== 'initiated') {
           console.warn('[glirastes] A generated UI action was not carried out');
         }
-        const reported = (await reportUiOutcome(toolName, toolCallId, record, run.code)) !== undefined;
+        const reported = report && (await reportUiOutcome(toolName, toolCallId, record, run.code)) !== undefined;
         try {
           onUiActionOutcomeRef.current?.({
             toolName,
@@ -1824,6 +1843,41 @@ export function AiChatProvider({
       }
     });
   }, [reportUiOutcome, trackUiWork]);
+
+  const dispatchToolResult = useCallback((
+    toolName: string, toolCallId: string, output: Record<string, unknown>, messageId: string,
+  ) => {
+    const handoff = uiActionHandoffRef.current;
+    const page = handoff?.mode === 'manual' ? findPageAction(output, toolName, handoff.isPageAction) : undefined;
+    if (!handoff || !page) {
+      onToolResultRef.current?.(toolName, output);
+      runUiActions(toolName, toolCallId, output);
+      return;
+    }
+    const destination = handoff.labelForAction?.(page, toolName) ?? pageActionDestination(page);
+    const label = handoff.openLabel ?? 'Open in app';
+    handoffIdsRef.current.add(toolCallId);
+    setPendingUiHandoffs(previous => [...previous, {
+      id: toolCallId,
+      messageId,
+      label: destination ? `${label} · ${destination}` : label,
+      open: () => {
+        if (!handoffIdsRef.current.delete(toolCallId)) return;
+        setPendingUiHandoffs(previous => previous.filter(entry => entry.id !== toolCallId));
+        uiActionHandoffRef.current?.beforeOpen?.();
+        runUiActions(toolName, toolCallId, output, false, true);
+      },
+    }]);
+
+    // Let a confirming turn finish without waiting for a click. Opening later is a separate action.
+    if (reportsUiOutcomesRef.current && typeof output.awaitsOutcome === 'boolean') {
+      const awaited = output.awaitsOutcome;
+      if (awaited) setAwaitedOutcomes(count => count + 1);
+      void reportUiOutcome(toolName, toolCallId, output, 'rejected-handler', true).finally(() => {
+        if (awaited) setTimeout(() => { if (mountedRef.current) setAwaitedOutcomes(count => Math.max(0, count - 1)); }, 0);
+      });
+    }
+  }, [reportUiOutcome, runUiActions]);
 
   // A chat view's button runs a client action as a generated client action of the view's call, classified
   // like any UI action; there is no tool result to write the outcome into, so it is only reported to the app.
@@ -1905,8 +1959,7 @@ export function AiChatProvider({
         if (processedToolCallsRef.current.has(result.toolCallId)) continue;
         processedToolCallsRef.current.add(result.toolCallId);
         if (carriesUiOutcome(result.output)) continue;
-        onToolResultRef.current?.(result.toolName, result.output);
-        runUiActions(result.toolName, result.toolCallId, result.output);
+        dispatchToolResult(result.toolName, result.toolCallId, result.output, messageId);
       }
     }
 
@@ -1979,14 +2032,12 @@ export function AiChatProvider({
             }
             deferredResultsRef.current.delete(toolCallId);
             processedToolCallsRef.current.add(toolCallId);
-            onToolResultRef.current?.(toolName, toolPart.output);
-            // Generated UI tools run in the browser through the app's bridge.
-            runUiActions(toolName, toolCallId, toolPart.output);
+            dispatchToolResult(toolName, toolCallId, toolPart.output, lastMessage.id);
           }
         }
       }
     }
-  }, [rawMessages, isLoading, runUiActions, resetUiActions]);
+  }, [rawMessages, isLoading, dispatchToolResult, resetUiActions]);
 
   // Extract suggestions from suggest_followups tool, with a strict text
   // fallback for models that append a trailing Markdown suggestion section.
@@ -3085,6 +3136,7 @@ export function AiChatProvider({
       toolRendererRegistry,
       ...(chatViewRegistry ? { chatViewRegistry } : {}),
       runChatViewAction,
+      pendingUiHandoffs,
       attachments: attachmentOptions,
       voice: voiceConfig,
       mentionConfig: mentions,
@@ -3197,6 +3249,7 @@ export function AiChatProvider({
       toolRendererRegistry,
       chatViewRegistry,
       runChatViewAction,
+      pendingUiHandoffs,
       attachmentOptions,
       voiceConfig,
       mentions,

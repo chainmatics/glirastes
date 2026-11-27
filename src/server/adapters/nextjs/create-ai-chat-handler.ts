@@ -293,6 +293,7 @@ export interface StreamHandlerContext {
    * re-authorization, budget).
    */
   handlerBuiltinToolNames?: ReadonlyArray<string>;
+  currentChatViewSources?: () => string | undefined;
   /**
    * Content-free metrics of this turn when the handler has `metrics`. The
    * built-in stream handler reports every step and the outcome; a custom
@@ -923,8 +924,10 @@ async function defaultStreamHandler(
     const step = await prepare(options);
     const hook = ctx.onModelInput;
     if (hook && breakdown) {
-      const messages = (step as { messages?: unknown[] } | undefined)?.messages ?? options.messages;
-      const system = promptCaching ? undefined : systemPrompt;
+      const prepared = step as { messages?: unknown[]; system?: string | Array<{ content: string }> } | undefined;
+      const messages = prepared?.messages ?? options.messages;
+      const system = Array.isArray(prepared?.system) ? prepared.system.map(message => message.content).join('\n\n')
+        : prepared?.system ?? (promptCaching ? undefined : systemPrompt);
       try {
         hook({
           stepNumber: options.stepNumber,
@@ -1027,8 +1030,18 @@ async function defaultStreamHandler(
           const active = ctx.toolDiscovery
             ? [...ctx.toolDiscovery.activeToolNames()]
             : permitted ? Object.keys(orderedTools) : undefined;
-          if (!active) return {};
-          return { activeTools: permitted ? active.filter((name) => permitted.has(name)) : active };
+          const activeTools = active && permitted ? active.filter((name) => permitted.has(name)) : active;
+          const sources = (!activeTools || activeTools.includes(RENDER_VIEW_TOOL_NAME))
+            ? ctx.currentChatViewSources?.() : undefined;
+          const toolSelection = activeTools ? { activeTools } : {};
+          if (!sources) return toolSelection;
+          const memo = { role: 'system' as const, content: sources };
+          const [first, ...conversation] = messages;
+          // Keep the original cache breakpoint and pass the memo through the provider's system channel.
+          if (promptCaching && first?.role === 'system') {
+            return { ...toolSelection, system: [first, memo], messages: conversation };
+          }
+          return { ...toolSelection, system: systemPrompt ? `${systemPrompt}\n\n${sources}` : sources };
         }),
         maxOutputTokens: ctx.maxOutputTokens,
         ...(ctx.temperature === undefined ? {} : { temperature: ctx.temperature }),
@@ -2542,6 +2555,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
           handlerBuiltinToolNames: discoveryController
             ? [...handlerBuiltinNames, 'find_tools']
             : handlerBuiltinNames,
+          ...(chatViews ? { currentChatViewSources: chatViews.sourceMemo } : {}),
           bindApprovalRequests: (stream) => bindApprovalRequests(stream, pipelineApprovals.binder, pipelineSubjects),
           ...(pipelineSubjects ? { approvalSubjects: pipelineSubjects } : {}),
         }), turnResults?.store);
@@ -2764,6 +2778,7 @@ export function createAiChatHandler(config: AiChatHandlerFullConfig) {
         handlerBuiltinToolNames: discoveryController
           ? [...handlerBuiltinNames, 'find_tools']
           : handlerBuiltinNames,
+        ...(chatViews ? { currentChatViewSources: chatViews.sourceMemo } : {}),
         bindApprovalRequests: (stream) => bindApprovalRequests(stream, legacyApprovals.binder, legacySubjects),
         ...(legacySubjects ? { approvalSubjects: legacySubjects } : {}),
       }), turnResults?.store);

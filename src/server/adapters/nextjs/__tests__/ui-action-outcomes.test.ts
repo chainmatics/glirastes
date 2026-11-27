@@ -406,6 +406,20 @@ describe('the continuation after a reported outcome', () => {
     expect(events[0]).toMatchObject({ continuation: 'ui-outcome', status: 'completed' });
   });
 
+  it('describes the handoff without claiming it opened or a button is still available', async () => {
+    const { model } = await run({ model: scriptedModel() }, FLAG, reportedHistory({
+      ...handedOff,
+      awaitsOutcome: true,
+      uiActionDeferred: true,
+      outcome: { v: 1, code: 'rejected-handler' },
+    }));
+    const sent = prompt(model);
+    expect(sent).toContain('The destination did not open automatically. The chat offered a separate action');
+    expect(sent).not.toContain(UI_OUTCOME_MODEL_TEXTS['rejected-handler']);
+    expect(sent).toContain('Whether the user opened it afterward is unknown');
+    expect(sent).not.toContain('uiActionDeferred');
+  });
+
   it.each([
     ['rejected-contract', UI_OUTCOME_MODEL_TEXTS['rejected-contract'], false],
     ['rejected-handler', UI_OUTCOME_MODEL_TEXTS['rejected-handler'], false],

@@ -233,6 +233,13 @@ describe('render_view (chat views)', () => {
     expect(model.doStreamCalls[0]!.tools?.map((tool) => tool.name)).toContain('render_view');
     const renderTool = model.doStreamCalls[0]!.tools!.find((tool) => tool.name === 'render_view') as { description?: string };
     expect(renderTool.description).toContain('Table(');
+    expect(JSON.stringify(model.doStreamCalls[0]!.prompt)).not.toContain('Tool results of this turn');
+    const secondStep = model.doStreamCalls[1]!.prompt;
+    const systemPrefix = secondStep.slice(0, secondStep.findIndex(message => message.role !== 'system'));
+    expect(JSON.stringify(systemPrefix)).toContain('Tool results of this turn');
+    const followUpPrompt = JSON.stringify(secondStep);
+    expect(followUpPrompt).toContain('Assistant');
+    expect(followUpPrompt).toContain(`call-1 · ${name} · data[] (5)`);
 
     const output = chunksOf(wire).find((chunk) => chunk.type === 'tool-output-available' && chunk.toolCallId === 'call-2')
       ?.output as { shown: boolean; elements: number; view: { v: number; root: string; elements: Record<string, { rows?: unknown[] }> } };

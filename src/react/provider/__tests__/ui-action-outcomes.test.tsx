@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React, { useMemo, useState } from 'react';
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MessageList } from '../../components/message-list.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
@@ -40,7 +41,7 @@ afterEach(() => {
 function ClearButton() {
   const { clear } = useChatContext();
   control.clear = clear;
-  return null;
+  return <MessageList />;
 }
 
 function Host({ initial = [], initialStatus = 'ready', config }: {
@@ -145,6 +146,103 @@ describe('AiChatProvider UI action outcomes', () => {
       durationMs: expect.any(Number),
     });
     expect(Object.keys(outcomes[0]!)).not.toContain('payload');
+  });
+
+  it('defers the whole batch and executes SDK and legacy actions in order on one click', async () => {
+    const order: string[] = [];
+    const beforeOpen = vi.fn();
+    const onToolResult = vi.fn((_tool, output) => {
+      if (output.uiAction.type === 'legacy-filter') order.push('filter');
+    });
+    const { bus } = setup({
+      onToolResult,
+      uiActionHandoff: { mode: 'manual', beforeOpen, openLabel: 'Open page' },
+    });
+    cleanups.push(registerNavigationBridge({ bus, push: () => { order.push('navigate'); } }));
+    cleanups.push(bus.subscribeById('toast.show', () => { order.push('toast'); }));
+    const batch = [navigate('/reports'), { type: 'legacy-filter' }, action('toast.show')];
+    await stream([user, assistant(toolPart('c1', batch))]);
+    expect(order).toEqual([]);
+    expect(beforeOpen).not.toHaveBeenCalled();
+    expect(onToolResult).not.toHaveBeenCalled();
+
+    const open = screen.getByRole('button', { name: 'Open page · /reports' });
+    fireEvent.click(open);
+    fireEvent.click(open);
+    await waitFor(() => expect(order).toEqual(['navigate', 'filter', 'toast']));
+    expect(beforeOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('places each destination after its own response and leaves the other destination pending', async () => {
+    const { bus } = setup({ uiActionHandoff: { mode: 'manual' } });
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    const firstReply = assistant(toolPart('c1', navigate('/reports?token=hidden')));
+    await stream([user, firstReply]);
+    const nextUser = { ...user, id: 'u2' };
+    const secondReply = { ...assistant(toolPart('c2', navigate('/tasks'))), id: 'a2' };
+    await act(async () => { control.set([user, firstReply, nextUser], 'submitted'); });
+    await act(async () => { control.set([user, firstReply, nextUser, secondReply], 'streaming'); });
+    await act(async () => { control.status('ready'); });
+    const first = screen.getByRole('button', { name: 'Open in app · /reports' });
+    const second = screen.getByRole('button', { name: 'Open in app · /tasks' });
+    const bubbles = document.querySelectorAll('[data-component=message-bubble][data-role=assistant]');
+    expect(bubbles[0]?.nextElementSibling).toBe(first);
+    expect(bubbles[1]?.nextElementSibling).toBe(second);
+    fireEvent.click(second);
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/tasks'));
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(first.isConnected).toBe(true);
+  });
+
+  it('keeps two independent destinations in the same answer independently actionable', async () => {
+    const { bus } = setup({ uiActionHandoff: { mode: 'manual' } });
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    await stream([user, assistant(toolPart('a', navigate('/reports')), toolPart('b', navigate('/tasks')))]);
+    fireEvent.click(screen.getByRole('button', { name: 'Open in app · /tasks' }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/tasks'));
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Open in app · /reports' })).toBeTruthy();
+  });
+
+  it('defers nested legacy actions using the same result shape as onToolResult', async () => {
+    const { onToolResult } = setup({
+      uiActionHandoff: { mode: 'manual', isPageAction: candidate => candidate.type === 'my-dialog' },
+    });
+    const part = { ...toolPart('c1', undefined), output: { data: { uiAction: { type: 'my-dialog' } } } };
+    await stream([user, assistant(part)]);
+    expect(onToolResult).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Open in app' }));
+    await waitFor(() => expect(onToolResult).toHaveBeenCalledWith('ui_navigate', part.output));
+  });
+
+  it('never recreates or runs a historic handoff loaded after a reload', async () => {
+    const { bus, onToolResult } = setup({ uiActionHandoff: { mode: 'manual' } }, [
+      user, assistant(toolPart('c1', navigate(), 'output-available', {
+        awaitsOutcome: true, uiActionDeferred: true, outcome: { v: 1, code: 'rejected-handler' },
+      })),
+    ]);
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    await settle();
+    expect(screen.queryByRole('button', { name: /Open in app/ })).toBeNull();
+    expect(push).not.toHaveBeenCalled();
+    expect(onToolResult).not.toHaveBeenCalled();
+  });
+
+  it('defers app-classified legacy actions and discards their buttons when clearing the chat', async () => {
+    const { onToolResult } = setup({
+      uiActionHandoff: {
+        mode: 'manual',
+        isPageAction: value => value.type === 'my-dialog',
+      },
+    });
+    await stream([user, assistant(toolPart('c1', { type: 'my-dialog' }))]);
+    expect(await screen.findByRole('button', { name: 'Open in app' })).toBeTruthy();
+    expect(onToolResult).not.toHaveBeenCalled();
+    await act(async () => control.clear());
+    expect(screen.queryByRole('button', { name: 'Open in app' })).toBeNull();
   });
 
   it('keeps the running request and its results under StrictMode', async () => {

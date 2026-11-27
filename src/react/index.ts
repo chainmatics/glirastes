@@ -118,6 +118,7 @@ export type {
   StepSummaryFormatter,
   // Provider
   AiChatProviderConfig,
+  UiActionHandoffOptions,
   ChatViewsOptions,
   // Hook returns
   UseAiChatReturn,

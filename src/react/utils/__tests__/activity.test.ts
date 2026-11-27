@@ -68,6 +68,7 @@ describe('readActivitySteps for UI actions of the outcome protocol', () => {
       ui('c6', { awaitsOutcome: true, outcome: { v: 1 } }),
       ui('c7', { awaitsOutcome: false }),
       ui('c8', {}),
+      ui('c9', { awaitsOutcome: true, uiActionDeferred: true, outcome: { v: 1, code: 'rejected-handler' } }),
     ], () => true)).toEqual([
       { id: 'c1', toolName: 'ui_navigate', status: 'waiting', uiOutcome: 'pending' },
       { id: 'c2', toolName: 'ui_navigate', status: 'done' },
@@ -78,6 +79,7 @@ describe('readActivitySteps for UI actions of the outcome protocol', () => {
       { id: 'c7', toolName: 'ui_navigate', status: 'done' },
       // Without the protocol (old server, fallback): done, with the app's message.
       { id: 'c8', toolName: 'ui_navigate', status: 'done', detail: 'Opened the list.' },
+      { id: 'c9', toolName: 'ui_navigate', status: 'done' },
     ]);
   });
 });

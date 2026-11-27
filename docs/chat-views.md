@@ -98,8 +98,9 @@ the entry's `itemScope` and `text` rule, so an app table prints as a table.
 - A reference reaches the results of the current turn (the full stored result
   when the model saw an overview, read under the same guard as `read_result`)
   and the tool parts the browser sends back for earlier turns. The model gets
-  a content-free memo of up to ten earlier results (call id, tool, row count,
-  field names) next to the seen-objects memo. Field names pass the same
+  content-free source memos for earlier results and the current request
+  (up to ten each). Each entry lists the call ID, tool, row count and field
+  names. Field names pass the same
   filter as `read_result` echoes (identifiers without a run of three digits);
   a result without a list is listed as `value`, as its keys may be data.
 - The resolved `view` never reaches the model: the handler strips it from

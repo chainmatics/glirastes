@@ -13,6 +13,8 @@ import {
   MAX_UI_OUTCOME_CONTINUATIONS,
   UI_OUTCOMES_REQUEST_FIELD,
   uiOutcomeModelResult,
+  isDeferredUiActionOutcome,
+  UI_ACTION_DEFERRED_MODEL_TEXT,
 } from '../../../contracts/ui-outcome.js';
 import type { TurnContinuation } from '../../../contracts/events.js';
 
@@ -237,7 +239,10 @@ export function withModelFacingUiOutcomes<T>(messages: ReadonlyArray<T>): T[] {
     const next = parts.map((part) => {
       if (!isRecord(part) || !isToolPart(part) || part.state !== 'output-available' || !isOutcomeResult(part.output)) return part;
       changed = true;
-      return { ...part, output: uiOutcomeModelResult(part.output.outcome) };
+      const output = isDeferredUiActionOutcome(part.output)
+        ? { message: UI_ACTION_DEFERRED_MODEL_TEXT }
+        : uiOutcomeModelResult(part.output.outcome);
+      return { ...part, output };
     });
     return changed ? { ...message, parts: next } : message;
   });

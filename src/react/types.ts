@@ -1,7 +1,7 @@
 import type { EntityDeclarationsByTool } from '../contracts/entity-declaration.js';
 import type { ApprovalPreviewFormat, ApprovalSubjectUncheckedReason } from '../contracts/approval-subject.js';
 import type { ReactNode, ReactElement, ComponentType, MouseEvent as ReactMouseEvent, RefObject } from 'react';
-import type { UiActionBus } from '../browser/ui-action-bus.js';
+import type { UiAction, UiActionBus } from '../browser/ui-action-bus.js';
 import type { UiActionRunCode } from '../browser/client-actions.js';
 import type { ClarificationRequest } from '../contracts/clarification.js';
 import type { ViewContextEntry } from '../contracts/view-context.js';
@@ -1664,6 +1664,19 @@ export type OnBeforeSend = (text: string, mentions: MentionData[]) => string;
  */
 export type OnToolResult = (toolName: string, result: unknown) => void;
 
+/** Controls whether a tool result may leave the currently visible chat surface. */
+export interface UiActionHandoffOptions {
+  mode: 'auto' | 'manual';
+  /** Also defer app-specific actions that open or change an app view. */
+  isPageAction?: (action: Readonly<UiAction>, toolName: string) => boolean;
+  /** Localized label shown for each deferred result. */
+  openLabel?: string;
+  /** Describe the destination for the button, using the first page action in the result. */
+  labelForAction?: (action: Readonly<UiAction>, toolName: string) => string | undefined;
+  /** Run before a user opens a deferred result, e.g. to exit a full-screen overlay. */
+  beforeOpen?: () => void;
+}
+
 /**
  * What became of the generated UI actions (`glirastes.*`) of one tool
  * result. No payload: only the tool, the action ids and the outcome.
@@ -2056,6 +2069,8 @@ export interface AiChatProviderConfig {
    */
   unstyled?: boolean;
   onToolResult?: OnToolResult;
+  /** Auto by default. In manual mode the panel offers a button for page actions. */
+  uiActionHandoff?: UiActionHandoffOptions;
   /**
    * Bus that receives the UI actions of generated tools (`ui.navigate`,
    * `ui.filter.<view>`, `ui.<actionId>`) after `onToolResult`. Defaults to

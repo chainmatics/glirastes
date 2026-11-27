@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-27
+
+### Added
+
+- React chat hosts can defer page actions with `uiActionHandoff`. Each button is placed with its answer and can name its destination. A mixed batch waits for a single click and runs in order.
+
 ### Changed
 
 - Voice input: `data-state` of the mic button (`[data-component="voice-input-addon"]`, also `voice-input-button`) is `transcribing` after stop until the text arrives, matching its label and busy icon; it used to stay `recording`. The stock styles keep the red recording look for both states; an own selector on `[data-state="recording"]` should add `[data-state="transcribing"]`.
 - Voice input: the recording bar's stop button has its own accessible name, "Stop and insert text" / "Beenden und Text übernehmen" (new locale key `voiceStopAndInsertAriaLabel`), so it no longer shares "Stop recording" / "Aufnahme beenden" with the mic button while recording. Both stay operable.
 
 ### Fixed
+
+- Chat views can refer to tool results from the current request. The server sends source metadata through the model's system input, and the catalog allows structured views for short lists.
 
 - Budget stop notice: after "Continue" (or a later message), the chat no longer shows the notice's last paragraph "Use the button below …" / "Nutze den Button unten …", since the button is gone. Only the view changes; the stored message keeps the text.
 
@@ -1420,6 +1428,7 @@ No code changes — patch-level docs release.
 [0.24.0]: https://github.com/chainmatics/glirastes/compare/v0.23.0...v0.24.0
 [0.24.1]: https://github.com/chainmatics/glirastes/compare/v0.24.0...v0.24.1
 [0.24.2]: https://github.com/chainmatics/glirastes/compare/v0.24.1...v0.24.2
+[0.32.0]: https://github.com/chainmatics/glirastes/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/chainmatics/glirastes/compare/v0.30.1...v0.31.0
 [0.30.1]: https://github.com/chainmatics/glirastes/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/chainmatics/glirastes/compare/v0.29.1...v0.30.0

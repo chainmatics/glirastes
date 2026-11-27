@@ -353,6 +353,8 @@ export interface ChatViewTurn {
   tool: Tool;
   /** Records every call's output (wrap the request's AI tools after the PII shield). */
   recordOutputs<T extends Record<string, unknown>>(tools: T): T;
+  /** Model-only references for successful outputs already produced in this request. */
+  sourceMemo(): string | undefined;
 }
 
 /**
@@ -391,7 +393,15 @@ export function beginChatViewTurn(options: {
         }
       : {}),
   });
-  return { tool, recordOutputs: (tools) => recordToolOutputs(tools, records, store) };
+  return {
+    tool,
+    recordOutputs: (tools) => recordToolOutputs(tools, records, store),
+    sourceMemo: () => formatSourceMemo(
+      [...records].flatMap(([callId, { toolName, output }]) =>
+        isReferenceableTool(toolName) && isSuccessfulOutput(output) ? [sourceLine(callId, toolName, output)] : []),
+      'this turn',
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -474,13 +484,21 @@ export function chatViewSourceMemo(messages: ReadonlyArray<unknown>): string | u
       const part = toolPartOf(raw);
       if (!part || part.state !== 'output-available' || !isReferenceableTool(part.toolName)
         || !isSuccessfulOutput(part.output)) continue;
-      const partial = isCutOutput(part.toolName, part.output) ? ' · partial' : '';
-      lines.push(`${part.toolCallId} · ${part.toolName} · ${shapeOf(part.output)}${partial}`);
+      lines.push(sourceLine(part.toolCallId, part.toolName, part.output));
     }
   }
+  return formatSourceMemo(lines, 'earlier turns');
+}
+
+function sourceLine(callId: string, toolName: string, output: unknown): string {
+  const partial = isCutOutput(toolName, output) ? ' · partial' : '';
+  return `${callId} · ${toolName} · ${shapeOf(output)}${partial}`;
+}
+
+function formatSourceMemo(lines: string[], period: 'this turn' | 'earlier turns'): string | undefined {
   if (lines.length === 0) return undefined;
   return [
-    'Tool results of earlier turns that render_view can reference ({"$ref": "<call id>", "path": …}):',
+    `Tool results of ${period} that render_view can reference ({"$ref": "<call id>", "path": …}):`,
     ...lines.slice(-CHAT_VIEW_LIMITS.maxSourceMemoEntries),
   ].join('\n');
 }
