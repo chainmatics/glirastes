@@ -23,7 +23,7 @@ type JsonSchema = {
 };
 
 const RULES = [
-  'Renders one view in the chat. Default is text. A view only for ≥ 4 like records, a comparison or a status overview; never for single values, confirmations or questions; never just to wrap a single result that already has its own tool-result renderer. One view per turn.',
+  "Renders one view in the chat. Follow the app's presentation instructions and the requested output format. Otherwise, use views for lists, comparisons or status overviews and text for single values, confirmations or questions. Avoid wrapping a result that already has a renderer. One view per turn.",
   'Spec: {root, elements:{<id>:{type, props, children?:[<id>]}}, caption?}. Each component lists its props; "?" optional, ":ref" only a reference, "|ref" a literal or a reference.',
 ];
 

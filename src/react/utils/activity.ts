@@ -3,7 +3,7 @@ import { CLARIFICATION_TOOL_NAME } from '../../contracts/clarification.js';
 import { PLAN_TOOL_NAME, readPlanItems, type PlanItem } from '../../contracts/plan.js';
 import { READ_RESULT_TOOL_NAME } from '../../contracts/result-handle.js';
 import { isUiActionHandoffMessage } from '../../browser/ui-action-handoff.js';
-import { readUiOutcomeCode, type UiOutcomeCode } from '../../contracts/ui-outcome.js';
+import { isDeferredUiActionOutcome, readUiOutcomeCode, type UiOutcomeCode } from '../../contracts/ui-outcome.js';
 import {
   ENDPOINT_PATH_NOT_ALLOWED_ERROR,
   ENDPOINT_PATH_NOT_RELATIVE_ERROR,
@@ -62,7 +62,7 @@ function uiOutcomeStep(output: unknown): { status: ActivityStepStatus; uiOutcome
   if (!isRecord(output) || typeof output.awaitsOutcome !== 'boolean') return undefined;
   if (output.outcome === undefined) return output.awaitsOutcome ? { status: 'waiting', uiOutcome: 'pending' } : { status: 'done' };
   const code = readUiOutcomeCode(output.outcome);
-  if (code === 'ok') return { status: 'done' };
+  if (code === 'ok' || isDeferredUiActionOutcome(output)) return { status: 'done' };
   if (code === undefined) return { status: 'done', uiOutcome: 'unconfirmed' };
   return { status: code === 'initiated' ? 'done' : 'error', uiOutcome: code };
 }

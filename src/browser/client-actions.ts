@@ -193,6 +193,8 @@ export interface RunToolResultUiActionsOptions extends DispatchToolResultOptions
    * that waited for its page); the outcome is then `unconfirmed`.
    */
   signal?: AbortSignal;
+  /** Run legacy actions between SDK actions in an explicitly opened batch. */
+  runLegacyAction?: (action: unknown) => void | Promise<void>;
 }
 
 /**
@@ -286,18 +288,25 @@ export async function runToolResultUiActions(
   const routeTimeoutMs = options.routeTimeoutMs ?? CLIENT_ACTION_ROUTE_TIMEOUT_MS;
   const budgetMs = (options.timeoutMs ?? UI_ACTION_OUTCOME_TIMEOUT_MS)
     + (actions.some(isRoutedAction) ? routeTimeoutMs : 0);
+  const ownedActions = new Set<unknown>(actions);
+  const raw = options.runLegacyAction && handsOffUiActions(result) ? result.uiAction : actions;
+  const batch = Array.isArray(raw) ? raw : [raw];
   let timedOut = false;
   let dispatched = 0;
 
   const run = async (): Promise<Pick<UiActionRunResult, 'code' | 'error'>> => {
     let unconfirmed = false;
     const stopped = () => timedOut || options.signal?.aborted === true;
-    for (const action of actions) {
+    for (const action of batch) {
       if (timedOut) break;
       if (stopped()) return { code: 'unconfirmed' };
       let step: StepCode | 'cancelled';
       try {
-        step = await runAction(bus, action, routeTimeoutMs, stopped);
+        if (options.runLegacyAction && !ownedActions.has(action)) {
+          await options.runLegacyAction(action);
+          continue;
+        }
+        step = await runAction(bus, action as UiAction, routeTimeoutMs, stopped);
       } catch (error) {
         return { code: failureCode(error), error };
       }

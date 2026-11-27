@@ -142,6 +142,16 @@ describe('AiChatProvider reports UI outcomes into marked results', () => {
     expect(reporting.at(-1)).toBe(false);
   });
 
+  it('completes the outcome protocol without claiming a deferred page was opened', async () => {
+    const { bus } = setup({ uiActionHandoff: { mode: 'manual' } });
+    const push = vi.fn();
+    cleanups.push(registerNavigationBridge({ bus, push }));
+    await stream([user, assistant(uiPart('c1'))]);
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0]?.output).toMatchObject({ uiActionDeferred: true, outcome: { v: 1, code: 'rejected-handler' } });
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it('writes the outcome of a marked result and reports it in the event', async () => {
     const { bus, outcomes } = setup();
     const push = vi.fn();

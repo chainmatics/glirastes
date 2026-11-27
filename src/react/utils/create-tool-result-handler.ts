@@ -9,7 +9,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function extractUiAction(result: Record<string, unknown>): unknown {
+export function extractUiAction(result: Record<string, unknown>): unknown {
   if (result.uiAction !== undefined) return result.uiAction;
   if (isRecord(result.data) && result.data.uiAction !== undefined) {
     return result.data.uiAction;

@@ -23,8 +23,8 @@ no new prompt text and no new request field.
 
 ## Decide first
 
-Ask the developer before enabling it; nothing needs it. It fits answers with
-four or more like records, comparisons and status overviews. Both sides must
+Ask the developer before enabling it; nothing needs it. Views fit lists, comparisons and status overviews. The app’s presentation
+instructions and the requested output format guide when the model calls the tool. Both sides must
 be on: the server option offers the tool to the model, the React option renders
 the views. A server without the React option still works (views show as plain
 text); the React option without the server option sends a field the server
@@ -175,8 +175,9 @@ props, children? } }, caption? }` (`ChatViewSpec`):
   `{ "$said": "12.400 €", "basis": <ref> }` (`ChatSaid`), only on the starter
   `Stat.value`; a `$said` value is marked "computed by the assistant".
 - References reach results of the current turn and the tool parts the
-  browser sent back. The model also gets a content-free memo of up to 10
-  earlier results (call id, tool, row count, field names). It lists only
+  browser sent back. The model gets content-free source memos for earlier
+  results and the current request (up to ten each), with the call ID, tool,
+  row count and field names. A memo lists only
   field names `read_result` would echo (identifiers without three digits in
   a row); a result without a list is just `value`, since its keys may be
   data.
@@ -304,7 +305,7 @@ props that do not fit. `validateChatViewSpec(spec, manifest)` and
 
 | Symptom | Check |
 | --- | --- |
-| The model never shows a view | `chatViews` set on `createAiChatHandler`? The rules allow a view only for ≥ 4 like records, a comparison or a status overview, never for single values, confirmations or questions; ask for one explicitly to test. No app tool named `render_view`? The browser's `chatViews.components` does not exclude the component? |
+| The model never shows a view | `chatViews` set on `createAiChatHandler`? Check the app’s presentation instructions and component usage hints; ask for a view explicitly to test. No app tool named `render_view`? The browser's `chatViews.components` does not exclude the component? |
 | `render_view` fails with a reference error | the path is not in the result (typo, or only in the cut form: see limits); `Text` takes no reference, use `StatusBadge`, `KeyValue` or an own bindable prop |
 | An element shows text instead of the component | not bound in the browser, bound in another `schemaVersion` than the element's, or its props do not fit the bound schema (a server catalog newer than the browser bundle) |
 | The whole view shows text | the React `chatViews` option is missing, or the root element failed |

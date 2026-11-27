@@ -91,6 +91,17 @@ export const UI_OUTCOME_MODEL_TEXTS: Readonly<Record<UiOutcomeCode | 'unconfirme
     + NOT_QUOTED,
 });
 
+/** A declined automatic handoff can still be opened by the user's own click. */
+export const UI_ACTION_DEFERRED_FIELD = 'uiActionDeferred';
+
+export function isDeferredUiActionOutcome(result: Record<string, unknown>): boolean {
+  return result[UI_ACTION_DEFERRED_FIELD] === true && readUiOutcomeCode(result.outcome) === 'rejected-handler';
+}
+
+export const UI_ACTION_DEFERRED_MODEL_TEXT =
+  'The destination did not open automatically. The chat offered a separate action to open it. '
+  + 'Whether the user opened it afterward is unknown. Describe the destination without instructing the user to click. Do not repeat the call or assume the action is still available. ' + NOT_QUOTED;
+
 /**
  * The code of an `outcome` value, or undefined ("not confirmed") for a
  * missing outcome, another version, an unknown code or extra fields.

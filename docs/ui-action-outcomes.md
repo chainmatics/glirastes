@@ -126,6 +126,26 @@ that stream and its timeout end. A result that already has an `outcome`, or
 comes from a stored history, never runs. A page-load continuation is a model
 call only.
 
+## Wait for the user before opening a page
+
+`AiChatProvider` uses automatic handoffs by default. To keep an overlay open, pass
+`uiActionHandoff={{ mode: 'manual' }}`. The SDK holds navigation and
+page-bound client actions. The app can classify additional page actions with
+`isPageAction`, localize the button with `openLabel` and `labelForAction`, and
+release an overlay with `beforeOpen`.
+
+If a result contains a page action, the full batch waits for a single
+explicit click and runs in its original order. The button appears below
+the assistant message that owns the result. Separate results remain
+independently actionable. Actions in results without a page action run
+immediately.
+
+When the server awaits an outcome, the browser reports the automatic
+handoff as deferred so the model can finish the turn. The report describes
+what the chat offered at that moment. The button belongs to the open chat
+and is discarded when the chat is reset, switched or reloaded. Hosts can use their own instructions to prefer inline views while
+this option is active.
+
 ## Hand-written UI tools
 
 `defineUiTool({ …, outcome: 'confirm' })` opts in: the chat runs its own

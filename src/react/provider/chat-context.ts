@@ -78,6 +78,8 @@ export interface ChatContextValue {
   toolRendererRegistry?: ToolResultRendererRegistry;
   /** Bound chat view components (`chatViews`); absent when the option is not set. */
   chatViewRegistry?: ChatViewRegistry;
+  /** Page actions waiting for a user click; scoped to the open chat. */
+  pendingUiHandoffs?: ReadonlyArray<{ id: string; messageId: string; label: string; open: () => void }>;
   /**
    * Runs a client action a chat view's button names through the UI action
    * bus and reports its outcome (`onUiActionOutcome`, tool `render_view`).

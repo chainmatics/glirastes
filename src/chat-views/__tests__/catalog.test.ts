@@ -157,6 +157,12 @@ describe('mergeChatManifests', () => {
 });
 
 describe('describeChatCatalog', () => {
+  it('defers to app presentation instructions and the requested output format', () => {
+    const text = describeChatCatalog(starterChatComponentManifest);
+    expect(text).toContain("Follow the app's presentation instructions");
+    expect(text).not.toMatch(/≥\s*4|at least four/i);
+  });
+
   it('describeChatCatalog(starter) stays under 2400 characters', () => {
     expect(describeChatCatalog(starterChatComponentManifest).length).toBeLessThan(2400);
   });
@@ -171,7 +177,6 @@ describe('describeChatCatalog', () => {
 
   it('states the usage rules, the reference grammar and typed signatures', () => {
     const text = describeChatCatalog(starterChatComponentManifest);
-    expect(text).toMatch(/Default is text/);
     expect(text).toMatch(/One view per turn/);
     expect(text).toMatch(/\$ref/);
     expect(text).toMatch(/\$item/);

@@ -34,7 +34,7 @@ const MessageSlot = memo(function MessageSlot({ chat, Bubble, message, outcome }
 export function MessageList({ className }: MessageListProps) {
   const chat = useChatContext();
   const {
-    messages, isLoading, hasMore, loadMore, classNames, components, locale, turnOutcomes, activityLog,
+    messages, isLoading, hasMore, loadMore, classNames, components, locale, turnOutcomes, activityLog, pendingUiHandoffs,
   } = chat;
   const [messageChats] = useState(createMessageChats);
   const chatOf = messageChats(chat as typeof chat & ComposerContextValue, messages);
@@ -98,6 +98,11 @@ export function MessageList({ className }: MessageListProps) {
         return (
           <Fragment key={message.id}>
             <MessageSlot chat={chatOf(message, index)} Bubble={BubbleComponent} message={message} outcome={outcome} />
+            {pendingUiHandoffs?.filter(handoff => handoff.messageId === message.id).map(handoff => (
+              <button type="button" key={handoff.id} data-component="ui-action-handoff" onClick={handoff.open}>
+                {handoff.label}
+              </button>
+            ))}
             {standalone && (
               <TurnNoticeComponent text={standalone.text} status={standalone.status} placement="message" outcome={outcome!} />
             )}

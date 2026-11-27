@@ -97,6 +97,18 @@
   cursor: pointer;
 }
 
+[data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="ui-action-handoff"] {
+  align-self: flex-start;
+  margin: 0.25rem 1rem;
+  padding: 0.375rem 0.75rem;
+  font: inherit;
+  color: var(--cm-text);
+  background: var(--cm-bg);
+  border: 1px solid var(--cm-border);
+  border-radius: var(--cm-radius-sm);
+  cursor: pointer;
+}
+
 /* ---------- Message bubble ---------- */
 [data-component="ai-chat-panel"]:where(:not([data-unstyled], [data-unstyled] *)) [data-component="message-bubble"] {
   max-width: 85%;
