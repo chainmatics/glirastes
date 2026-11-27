@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-27
+
+### Added
+
+- React chat hosts can defer page actions with `uiActionHandoff`. Each button is placed with its answer and can name its destination. A mixed batch waits for a single click and runs in order.
+
+### Fixed
+
+- Chat views can refer to tool results from the current request. The server sends source metadata through the model's system input, and the catalog allows structured views for short lists.
+
 ### Changed
 
 - Voice input: `data-state` of the mic button (`[data-component="voice-input-addon"]`, also `voice-input-button`) is `transcribing` after stop until the text arrives, matching its label and busy icon; it used to stay `recording`. The stock styles keep the red recording look for both states; an own selector on `[data-state="recording"]` should add `[data-state="transcribing"]`.

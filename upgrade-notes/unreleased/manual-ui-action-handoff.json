@@ -1,9 +1,0 @@
-{
-  "id": "manual-ui-action-handoff",
-  "kind": "optional",
-  "summary": "A React chat can hold page actions until the user explicitly opens the destination from the relevant answer.",
-  "howTo": "Set uiActionHandoff mode to manual while an overlay should stay open. Use isPageAction for custom page actions, openLabel and labelForAction for destination labels, and beforeOpen to close the overlay. A batch with navigation runs in its original order on click. Buttons are tied to the open chat and are cleared on reload. See docs/ui-action-outcomes.md.",
-  "skill": "building-glirastes-chat-ui",
-  "adoptedWhen": { "patterns": ["uiActionHandoff"] },
-  "surface": ["*#AiChatProviderConfig.uiActionHandoff", "*#UiActionHandoffOptions.*"]
-}
