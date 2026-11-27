@@ -119,10 +119,10 @@ maintains a Node server or imports a generated TypeScript module.
    frontend behavior in the target app; no successful build alone proves them.
 
 The official public image starts at
-`ghcr.io/chainmatics/glirastes-runtime:0.26.0` (Linux amd64). Pin an approved
+`ghcr.io/chainmatics/glirastes-runtime:0.27.0` (Linux amd64). Pin an approved
 release digest. The packaged `integrating-glirastes-web` runtime reference covers
 identity/configuration when installed; otherwise use the matching SDK's
-[runtime guide](https://github.com/chainmatics/glirastes/blob/v0.26.0/docs/runtime-container.md).
+[runtime guide](https://github.com/chainmatics/glirastes/blob/v0.27.0/docs/runtime-container.md).
 
 ## Findings and what resolves them
 
